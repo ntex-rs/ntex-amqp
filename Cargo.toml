@@ -1,0 +1,2 @@
+[workspace]
+members = ["amqp1/", "tokio-amqp1/"]
