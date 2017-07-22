@@ -1,13 +1,13 @@
 use bytes::{BufMut, BytesMut, BigEndian};
 use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64, be_f32, be_f64};
-use std::{i8, u8};
+use std::{char, i8, u8};
 use types::Type;
 
 pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -45,6 +45,8 @@ named!(long<Type>, alt!(
 named!(float<Type>, do_parse!(tag!([0x72u8]) >> float: be_f32 >> (Type::Float(float))));
 named!(double<Type>, do_parse!(tag!([0x82u8]) >> double: be_f64 >> (Type::Double(double))));
 
+named!(char<Type>, map_opt!(do_parse!(tag!([0x73u8]) >> int: be_u32 >> (int)), |c| char::from_u32(c).map(|c2| Type::Char(c2))));
+
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
         Type::Null => encode_null(buf),
@@ -59,6 +61,7 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Long(l) => encode_long(l, buf),
         Type::Float(f) => encode_float(f, buf),
         Type::Double(d) => encode_double(d, buf),
+        Type::Char(c) => encode_char(c, buf),
         _ => (),
     }
 }
@@ -185,6 +188,15 @@ fn encode_double(f: f64, buf: &mut BytesMut) {
 
     buf.put_u8(0x82);
     buf.put_f64::<BigEndian>(f);
+}
+
+fn encode_char(c: char, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 5 {
+        buf.reserve(5);
+    }
+
+    buf.put_u8(0x73);
+    buf.put_u32::<BigEndian>(c as u32);
 }
 
 #[cfg(test)]
@@ -323,5 +335,12 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Double(1.234), b1);
         assert_eq!(Ok(Type::Double(1.234)), decode(b1));
+    }
+
+    #[test]
+    fn char() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        encode(Type::Char('💯'), b1);
+        assert_eq!(Ok(Type::Char('💯')), decode(b1));
     }
 }
