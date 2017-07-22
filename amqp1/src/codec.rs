@@ -1,5 +1,5 @@
 use bytes::{BufMut, BytesMut, BigEndian};
-use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64};
+use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64, be_f32, be_f64};
 use std::{i8, u8};
 use types::Type;
 
@@ -7,7 +7,7 @@ pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -42,6 +42,9 @@ named!(long<Type>, alt!(
     do_parse!(tag!([0x55u8]) >> long: be_i8 >> (Type::Long(long as i64)))
 ));
 
+named!(float<Type>, do_parse!(tag!([0x72u8]) >> float: be_f32 >> (Type::Float(float))));
+named!(double<Type>, do_parse!(tag!([0x82u8]) >> double: be_f64 >> (Type::Double(double))));
+
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
         Type::Null => encode_null(buf),
@@ -54,6 +57,8 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Short(s) => encode_short(s, buf),
         Type::Int(i) => encode_int(i, buf),
         Type::Long(l) => encode_long(l, buf),
+        Type::Float(f) => encode_float(f, buf),
+        Type::Double(d) => encode_double(d, buf),
         _ => (),
     }
 }
@@ -164,6 +169,24 @@ fn encode_long(i: i64, buf: &mut BytesMut) {
     }
 }
 
+fn encode_float(f: f32, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 5 {
+        buf.reserve(5);
+    }
+
+    buf.put_u8(0x72);
+    buf.put_f32::<BigEndian>(f);
+}
+
+fn encode_double(f: f64, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 9 {
+        buf.reserve(9);
+    }
+
+    buf.put_u8(0x82);
+    buf.put_f64::<BigEndian>(f);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,11 +201,11 @@ mod tests {
 
     #[test]
     fn bool_true() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         b1.put_u8(0x41);
         assert_eq!(Ok(Type::Boolean(true)), decode(b1));
 
-        let b2 = &mut BytesMut::with_capacity(2);
+        let b2 = &mut BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x01);
         assert_eq!(Ok(Type::Boolean(true)), decode(b2));
@@ -190,11 +213,11 @@ mod tests {
 
     #[test]
     fn bool_false() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         b1.put_u8(0x42u8);
         assert_eq!(Ok(Type::Boolean(false)), decode(b1));
 
-        let b2 = &mut BytesMut::with_capacity(2);
+        let b2 = &mut BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x00);
         assert_eq!(Ok(Type::Boolean(false)), decode(b2));
@@ -202,89 +225,103 @@ mod tests {
 
     #[test]
     fn ubyte() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Ubyte(255), b1);
         assert_eq!(Ok(Type::Ubyte(255)), decode(b1));
     }
 
     #[test]
     fn ushort() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Ushort(350), b1);
         assert_eq!(Ok(Type::Ushort(350)), decode(b1));
     }
 
     #[test]
     fn uint() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Uint(0), b1);
         assert_eq!(Ok(Type::Uint(0)), decode(b1));
 
-        let b2 = &mut BytesMut::with_capacity(2);
+        let b2 = &mut BytesMut::with_capacity(0);
         encode(Type::Uint(128), b2);
         assert_eq!(Ok(Type::Uint(128)), decode(b2));
 
-        let b3 = &mut BytesMut::with_capacity(2);
+        let b3 = &mut BytesMut::with_capacity(0);
         encode(Type::Uint(2147483647), b3);
         assert_eq!(Ok(Type::Uint(2147483647)), decode(b3));
     }
 
     #[test]
     fn ulong() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Ulong(0), b1);
         assert_eq!(Ok(Type::Ulong(0)), decode(b1));
 
-        let b2 = &mut BytesMut::with_capacity(2);
+        let b2 = &mut BytesMut::with_capacity(0);
         encode(Type::Ulong(128), b2);
         assert_eq!(Ok(Type::Ulong(128)), decode(b2));
 
-        let b3 = &mut BytesMut::with_capacity(2);
+        let b3 = &mut BytesMut::with_capacity(0);
         encode(Type::Ulong(2147483649), b3);
         assert_eq!(Ok(Type::Ulong(2147483649)), decode(b3));
     }
 
     #[test]
     fn byte() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Byte(-128), b1);
         assert_eq!(Ok(Type::Byte(-128)), decode(b1));
     }
 
     #[test]
     fn short() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Short(-255), b1);
         assert_eq!(Ok(Type::Short(-255)), decode(b1));
     }
 
     #[test]
     fn int() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Int(0), b1);
         assert_eq!(Ok(Type::Int(0)), decode(b1));
 
-        let b2 = &mut BytesMut::with_capacity(2);
+        let b2 = &mut BytesMut::with_capacity(0);
         encode(Type::Int(-50000), b2);
         assert_eq!(Ok(Type::Int(-50000)), decode(b2));
 
-        let b3 = &mut BytesMut::with_capacity(2);
+        let b3 = &mut BytesMut::with_capacity(0);
         encode(Type::Int(-128), b3);
         assert_eq!(Ok(Type::Int(-128)), decode(b3));
     }
 
     #[test]
     fn long() {
-        let b1 = &mut BytesMut::with_capacity(2);
+        let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Ulong(0), b1);
         assert_eq!(Ok(Type::Ulong(0)), decode(b1));
 
-        let b2 = &mut BytesMut::with_capacity(2);
+        let b2 = &mut BytesMut::with_capacity(0);
         encode(Type::Long(-2147483647), b2);
         assert_eq!(Ok(Type::Long(-2147483647)), decode(b2));
 
-        let b3 = &mut BytesMut::with_capacity(2);
+        let b3 = &mut BytesMut::with_capacity(0);
         encode(Type::Long(-128), b3);
         assert_eq!(Ok(Type::Long(-128)), decode(b3));
+    }
+
+    #[test]
+    fn float() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        encode(Type::Float(1.234), b1);
+        assert_eq!(Ok(Type::Float(1.234)), decode(b1));
+    }
+
+    #[test]
+    fn double() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        encode(Type::Double(1.234), b1);
+        assert_eq!(Ok(Type::Double(1.234)), decode(b1));
     }
 }
