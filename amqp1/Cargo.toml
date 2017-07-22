@@ -4,3 +4,6 @@ version = "0.1.0"
 authors = ["Mike Yagley <myagley@gmail.com>"]
 
 [dependencies]
+bytes = "0.4"
+nom = "^3.1"
+uuid = "0.4"

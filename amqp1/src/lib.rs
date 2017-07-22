@@ -1,5 +1,7 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {}
-}
+extern crate bytes;
+#[macro_use]
+extern crate nom;
+extern crate uuid;
+
+pub mod codec;
+pub mod types;
