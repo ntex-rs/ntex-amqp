@@ -2,12 +2,13 @@ use bytes::{BufMut, BytesMut, BigEndian};
 use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64, be_f32, be_f64};
 use std::{char, i8, u8};
 use types::Type;
+use uuid::Uuid;
 
 pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | uuid));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -47,6 +48,8 @@ named!(double<Type>, do_parse!(tag!([0x82u8]) >> double: be_f64 >> (Type::Double
 
 named!(char<Type>, map_opt!(do_parse!(tag!([0x73u8]) >> int: be_u32 >> (int)), |c| char::from_u32(c).map(|c2| Type::Char(c2))));
 
+named!(uuid<Type>, do_parse!(tag!([0x98u8]) >> uuid: map_res!(take!(16), Uuid::from_bytes) >> (Type::Uuid(uuid))));
+
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
         Type::Null => encode_null(buf),
@@ -62,6 +65,8 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Float(f) => encode_float(f, buf),
         Type::Double(d) => encode_double(d, buf),
         Type::Char(c) => encode_char(c, buf),
+        // Type::Timestamp(t) => encode_timestamp(t, buf),
+        Type::Uuid(u) => encode_uuid(u, buf),
         _ => (),
     }
 }
@@ -197,6 +202,15 @@ fn encode_char(c: char, buf: &mut BytesMut) {
 
     buf.put_u8(0x73);
     buf.put_u32::<BigEndian>(c as u32);
+}
+
+fn encode_uuid(u: Uuid, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 17 {
+        buf.reserve(17);
+    }
+
+    buf.put_u8(0x98);
+    buf.put_slice(u.as_bytes());
 }
 
 #[cfg(test)]
@@ -342,5 +356,16 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Char('💯'), b1);
         assert_eq!(Ok(Type::Char('💯')), decode(b1));
+    }
+
+    #[test]
+    fn uuid() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        let bytes = [4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
+        let u1 = Uuid::from_bytes(&bytes).expect("parse error");
+        encode(Type::Uuid(u1), b1);
+
+        let expected = Type::Uuid(Uuid::parse_str("0436430c2b02624c2032570501212b57").expect("parse error"));
+        assert_eq!(Ok(expected), decode(b1));
     }
 }
