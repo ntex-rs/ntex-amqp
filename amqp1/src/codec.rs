@@ -8,7 +8,7 @@ pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid | binary));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid | binary | string));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -57,6 +57,11 @@ named!(binary<Type>, alt!(
     do_parse!(tag!([0xB0u8]) >> bytes: length_bytes!(be_u32) >> (Type::Binary(Bytes::from(bytes))))
 ));
 
+named!(string<Type>, alt!(
+    do_parse!(tag!([0xA1u8]) >> string: map_res!(length_bytes!(be_u8), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::String(string))) |
+    do_parse!(tag!([0xB1u8]) >> string: map_res!(length_bytes!(be_u32), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::String(string)))
+));
+
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
         Type::Null => encode_null(buf),
@@ -75,6 +80,7 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Timestamp(t) => encode_timestamp(t, buf),
         Type::Uuid(u) => encode_uuid(u, buf),
         Type::Binary(b) => encode_binary(b, buf),
+        Type::String(s) => encode_string(s, buf),
         _ => (),
     }
 }
@@ -243,6 +249,22 @@ fn encode_binary(b: Bytes, buf: &mut BytesMut) {
         buf.put_u8(length as u8);
     }
     buf.extend(b);
+}
+
+fn encode_string(s: String, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 5 {
+        buf.reserve(5);
+    }
+
+    let length = s.len();
+    if length > u8::MAX as usize || length < u8::MIN as usize {
+        buf.put_u8(0xB1);
+        buf.put_u32::<BigEndian>(length as u32);
+    } else {
+        buf.put_u8(0xA1);
+        buf.put_u8(length as u8);
+    }
+    buf.extend(s.as_bytes());
 }
 
 #[cfg(test)]
@@ -426,5 +448,23 @@ mod tests {
 
         let expected = [4u8; 500];
         assert_eq!(Ok(Type::Binary(Bytes::from(&expected[..]))), decode(b1));
+    }
+
+    #[test]
+    fn string_short() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        encode(Type::String(String::from("Hello there")), b1);
+
+        assert_eq!(Ok(Type::String(String::from("Hello there"))), decode(b1));
+    }
+
+    #[test]
+    fn string_long() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        let s1 = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        encode(Type::String(s1), b1);
+
+        let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        assert_eq!(Ok(Type::String(expected)), decode(b1));
     }
 }
