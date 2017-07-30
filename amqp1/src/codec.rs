@@ -8,7 +8,7 @@ pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | uuid));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -48,6 +48,8 @@ named!(double<Type>, do_parse!(tag!([0x82u8]) >> double: be_f64 >> (Type::Double
 
 named!(char<Type>, map_opt!(do_parse!(tag!([0x73u8]) >> int: be_u32 >> (int)), |c| char::from_u32(c).map(|c2| Type::Char(c2))));
 
+named!(timestamp<Type>, do_parse!(tag!([0x83u8]) >> timestamp: be_i64 >> (Type::Timestamp(timestamp))));
+
 named!(uuid<Type>, do_parse!(tag!([0x98u8]) >> uuid: map_res!(take!(16), Uuid::from_bytes) >> (Type::Uuid(uuid))));
 
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
@@ -65,7 +67,7 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Float(f) => encode_float(f, buf),
         Type::Double(d) => encode_double(d, buf),
         Type::Char(c) => encode_char(c, buf),
-        // Type::Timestamp(t) => encode_timestamp(t, buf),
+        Type::Timestamp(t) => encode_timestamp(t, buf),
         Type::Uuid(u) => encode_uuid(u, buf),
         _ => (),
     }
@@ -202,6 +204,14 @@ fn encode_char(c: char, buf: &mut BytesMut) {
 
     buf.put_u8(0x73);
     buf.put_u32::<BigEndian>(c as u32);
+}
+
+fn encode_timestamp(timestamp: i64, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 9 {
+        buf.reserve(9);
+    }
+    buf.put_u8(0x83);
+    buf.put_i64::<BigEndian>(timestamp);
 }
 
 fn encode_uuid(u: Uuid, buf: &mut BytesMut) {
@@ -356,6 +366,13 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         encode(Type::Char('💯'), b1);
         assert_eq!(Ok(Type::Char('💯')), decode(b1));
+    }
+
+    #[test]
+    fn timestamp() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        encode(Type::Timestamp(1311704463521), b1);
+        assert_eq!(Ok(Type::Timestamp(1311704463521)), decode(b1));
     }
 
     #[test]
