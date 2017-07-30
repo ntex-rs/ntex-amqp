@@ -56,7 +56,7 @@ pub enum Type {
     Uuid(Uuid),
 
     /// A sequence of octets.
-    Bytes(Bytes),
+    Binary(Bytes),
 
     /// A sequence of Unicode characters
     String(String),
@@ -71,9 +71,9 @@ mod tests {
 
     #[test]
     fn bytes_eq() {
-        let bytes1 = Type::Bytes(Bytes::from(&b"hello"[..]));
-        let bytes2 = Type::Bytes(Bytes::from(&b"hello"[..]));
-        let bytes3 = Type::Bytes(Bytes::from(&b"world"[..]));
+        let bytes1 = Type::Binary(Bytes::from(&b"hello"[..]));
+        let bytes2 = Type::Binary(Bytes::from(&b"hello"[..]));
+        let bytes3 = Type::Binary(Bytes::from(&b"world"[..]));
 
         assert_eq!(bytes1, bytes2);
         assert!(bytes1 != bytes3);

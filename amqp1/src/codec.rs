@@ -1,4 +1,4 @@
-use bytes::{BufMut, BytesMut, BigEndian};
+use bytes::{BufMut, Bytes, BytesMut, BigEndian};
 use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64, be_f32, be_f64};
 use std::{char, i8, u8};
 use types::Type;
@@ -8,7 +8,7 @@ pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid | binary));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -52,6 +52,11 @@ named!(timestamp<Type>, do_parse!(tag!([0x83u8]) >> timestamp: be_i64 >> (Type::
 
 named!(uuid<Type>, do_parse!(tag!([0x98u8]) >> uuid: map_res!(take!(16), Uuid::from_bytes) >> (Type::Uuid(uuid))));
 
+named!(binary<Type>, alt!(
+    do_parse!(tag!([0xA0u8]) >> bytes: length_bytes!(be_u8) >> (Type::Binary(Bytes::from(bytes)))) |
+    do_parse!(tag!([0xB0u8]) >> bytes: length_bytes!(be_u32) >> (Type::Binary(Bytes::from(bytes))))
+));
+
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
         Type::Null => encode_null(buf),
@@ -69,6 +74,7 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Char(c) => encode_char(c, buf),
         Type::Timestamp(t) => encode_timestamp(t, buf),
         Type::Uuid(u) => encode_uuid(u, buf),
+        Type::Binary(b) => encode_binary(b, buf),
         _ => (),
     }
 }
@@ -221,6 +227,22 @@ fn encode_uuid(u: Uuid, buf: &mut BytesMut) {
 
     buf.put_u8(0x98);
     buf.put_slice(u.as_bytes());
+}
+
+fn encode_binary(b: Bytes, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 5 {
+        buf.reserve(5);
+    }
+
+    let length = b.len();
+    if length > u8::MAX as usize || length < u8::MIN as usize {
+        buf.put_u8(0xB0);
+        buf.put_u32::<BigEndian>(length as u32);
+    } else {
+        buf.put_u8(0xA0);
+        buf.put_u8(length as u8);
+    }
+    buf.extend(b);
 }
 
 #[cfg(test)]
@@ -384,5 +406,25 @@ mod tests {
 
         let expected = Type::Uuid(Uuid::parse_str("0436430c2b02624c2032570501212b57").expect("parse error"));
         assert_eq!(Ok(expected), decode(b1));
+    }
+
+    #[test]
+    fn binary_short() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        let bytes = [4u8, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
+        encode(Type::Binary(Bytes::from(&bytes[..])), b1);
+
+        let expected = [4u8, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
+        assert_eq!(Ok(Type::Binary(Bytes::from(&expected[..]))), decode(b1));
+    }
+
+    #[test]
+    fn binary_long() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        let bytes = [4u8; 500];
+        encode(Type::Binary(Bytes::from(&bytes[..])), b1);
+
+        let expected = [4u8; 500];
+        assert_eq!(Ok(Type::Binary(Bytes::from(&expected[..]))), decode(b1));
     }
 }
