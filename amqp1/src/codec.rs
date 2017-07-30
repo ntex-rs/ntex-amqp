@@ -8,7 +8,7 @@ pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
     value(buf).to_full_result().map_err(|_| ())
 }
 
-named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid | binary | string));
+named!(value<Type>, alt!(null | bool | ubyte | ushort | uint | ulong | byte | short | int | long | float | double | char | timestamp | uuid | binary | string | symbol));
 
 named!(null<Type>, map_res!(tag!([0x40u8]), |_| Ok::<Type, ()>(Type::Null)));
 
@@ -62,6 +62,11 @@ named!(string<Type>, alt!(
     do_parse!(tag!([0xB1u8]) >> string: map_res!(length_bytes!(be_u32), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::String(string)))
 ));
 
+named!(symbol<Type>, alt!(
+    do_parse!(tag!([0xA3u8]) >> string: map_res!(length_bytes!(be_u8), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::Symbol(string))) |
+    do_parse!(tag!([0xB3u8]) >> string: map_res!(length_bytes!(be_u32), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::Symbol(string)))
+));
+
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
         Type::Null => encode_null(buf),
@@ -81,7 +86,7 @@ pub fn encode(t: Type, buf: &mut BytesMut) -> () {
         Type::Uuid(u) => encode_uuid(u, buf),
         Type::Binary(b) => encode_binary(b, buf),
         Type::String(s) => encode_string(s, buf),
-        _ => (),
+        Type::Symbol(s) => encode_symbol(s, buf),
     }
 }
 
@@ -262,6 +267,22 @@ fn encode_string(s: String, buf: &mut BytesMut) {
         buf.put_u32::<BigEndian>(length as u32);
     } else {
         buf.put_u8(0xA1);
+        buf.put_u8(length as u8);
+    }
+    buf.extend(s.as_bytes());
+}
+
+fn encode_symbol(s: String, buf: &mut BytesMut) {
+    if buf.remaining_mut() < 5 {
+        buf.reserve(5);
+    }
+
+    let length = s.len();
+    if length > u8::MAX as usize || length < u8::MIN as usize {
+        buf.put_u8(0xB3);
+        buf.put_u32::<BigEndian>(length as u32);
+    } else {
+        buf.put_u8(0xA3);
         buf.put_u8(length as u8);
     }
     buf.extend(s.as_bytes());
@@ -466,5 +487,23 @@ mod tests {
 
         let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         assert_eq!(Ok(Type::String(expected)), decode(b1));
+    }
+
+    #[test]
+    fn symbol_short() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        encode(Type::Symbol(String::from("Hello there")), b1);
+
+        assert_eq!(Ok(Type::Symbol(String::from("Hello there"))), decode(b1));
+    }
+
+    #[test]
+    fn symbol_long() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        let s1 = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        encode(Type::Symbol(s1), b1);
+
+        let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        assert_eq!(Ok(Type::Symbol(expected)), decode(b1));
     }
 }
