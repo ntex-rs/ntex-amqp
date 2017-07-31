@@ -82,26 +82,29 @@ fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
     }
 }
 
-pub fn encode(t: Type, buf: &mut BytesMut) -> () {
-    match t {
-        Type::Null => encode_null(buf),
-        Type::Boolean(b) => encode_boolean(b, buf),
-        Type::Ubyte(b) => encode_ubyte(b, buf),
-        Type::Ushort(s) => encode_ushort(s, buf),
-        Type::Uint(i) => encode_uint(i, buf),
-        Type::Ulong(l) => encode_ulong(l, buf),
-        Type::Byte(b) => encode_byte(b, buf),
-        Type::Short(s) => encode_short(s, buf),
-        Type::Int(i) => encode_int(i, buf),
-        Type::Long(l) => encode_long(l, buf),
-        Type::Float(f) => encode_float(f, buf),
-        Type::Double(d) => encode_double(d, buf),
-        Type::Char(c) => encode_char(c, buf),
-        Type::Timestamp(t) => encode_timestamp(t, buf),
-        Type::Uuid(u) => encode_uuid(u, buf),
-        Type::Binary(b) => encode_binary(b, buf),
-        Type::String(s) => encode_string(s, buf),
-        Type::Symbol(s) => encode_symbol(s, buf),
+impl Type {
+    /// Encodes `Type` into provided `BytesMut`
+    pub fn encode(self: &Type, buf: &mut BytesMut) -> () {
+        match *self {
+            Type::Null => encode_null(buf),
+            Type::Boolean(b) => encode_boolean(b, buf),
+            Type::Ubyte(b) => encode_ubyte(b, buf),
+            Type::Ushort(s) => encode_ushort(s, buf),
+            Type::Uint(i) => encode_uint(i, buf),
+            Type::Ulong(l) => encode_ulong(l, buf),
+            Type::Byte(b) => encode_byte(b, buf),
+            Type::Short(s) => encode_short(s, buf),
+            Type::Int(i) => encode_int(i, buf),
+            Type::Long(l) => encode_long(l, buf),
+            Type::Float(f) => encode_float(f, buf),
+            Type::Double(d) => encode_double(d, buf),
+            Type::Char(c) => encode_char(c, buf),
+            Type::Timestamp(ref t) => encode_timestamp(t, buf),
+            Type::Uuid(ref u) => encode_uuid(u, buf),
+            Type::Binary(ref b) => encode_binary(b, buf),
+            Type::String(ref s) => encode_string(s, buf),
+            Type::Symbol(ref s) => encode_symbol(s, buf),
+        }
     }
 }
 
@@ -238,7 +241,7 @@ fn encode_char(c: char, buf: &mut BytesMut) {
     buf.put_u32::<BigEndian>(c as u32);
 }
 
-fn encode_timestamp(datetime: DateTime<Utc>, buf: &mut BytesMut) {
+fn encode_timestamp(datetime: &DateTime<Utc>, buf: &mut BytesMut) {
     if buf.remaining_mut() < 9 {
         buf.reserve(9);
     }
@@ -247,7 +250,7 @@ fn encode_timestamp(datetime: DateTime<Utc>, buf: &mut BytesMut) {
     buf.put_i64::<BigEndian>(timestamp);
 }
 
-fn encode_uuid(u: Uuid, buf: &mut BytesMut) {
+fn encode_uuid(u: &Uuid, buf: &mut BytesMut) {
     if buf.remaining_mut() < 17 {
         buf.reserve(17);
     }
@@ -256,7 +259,7 @@ fn encode_uuid(u: Uuid, buf: &mut BytesMut) {
     buf.put_slice(u.as_bytes());
 }
 
-fn encode_binary(b: Bytes, buf: &mut BytesMut) {
+fn encode_binary(b: &Bytes, buf: &mut BytesMut) {
     if buf.remaining_mut() < 5 {
         buf.reserve(5);
     }
@@ -272,7 +275,7 @@ fn encode_binary(b: Bytes, buf: &mut BytesMut) {
     buf.extend(b);
 }
 
-fn encode_string(s: String, buf: &mut BytesMut) {
+fn encode_string(s: &String, buf: &mut BytesMut) {
     if buf.remaining_mut() < 5 {
         buf.reserve(5);
     }
@@ -288,7 +291,7 @@ fn encode_string(s: String, buf: &mut BytesMut) {
     buf.extend(s.as_bytes());
 }
 
-fn encode_symbol(s: String, buf: &mut BytesMut) {
+fn encode_symbol(s: &String, buf: &mut BytesMut) {
     if buf.remaining_mut() < 5 {
         buf.reserve(5);
     }
@@ -311,7 +314,7 @@ mod tests {
     #[test]
     fn null() {
         let mut b = BytesMut::with_capacity(0);
-        encode(Type::Null, &mut b);
+        Type::Null.encode(&mut b);
         let t = decode(&mut b);
         assert_eq!(Ok(Type::Null), t);
     }
@@ -343,109 +346,109 @@ mod tests {
     #[test]
     fn ubyte() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Ubyte(255), b1);
+        Type::Ubyte(255).encode(b1);
         assert_eq!(Ok(Type::Ubyte(255)), decode(b1));
     }
 
     #[test]
     fn ushort() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Ushort(350), b1);
+        Type::Ushort(350).encode(b1);
         assert_eq!(Ok(Type::Ushort(350)), decode(b1));
     }
 
     #[test]
     fn uint() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Uint(0), b1);
+        Type::Uint(0).encode(b1);
         assert_eq!(Ok(Type::Uint(0)), decode(b1));
 
         let b2 = &mut BytesMut::with_capacity(0);
-        encode(Type::Uint(128), b2);
+        Type::Uint(128).encode(b2);
         assert_eq!(Ok(Type::Uint(128)), decode(b2));
 
         let b3 = &mut BytesMut::with_capacity(0);
-        encode(Type::Uint(2147483647), b3);
+        Type::Uint(2147483647).encode(b3);
         assert_eq!(Ok(Type::Uint(2147483647)), decode(b3));
     }
 
     #[test]
     fn ulong() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Ulong(0), b1);
+        Type::Ulong(0).encode(b1);
         assert_eq!(Ok(Type::Ulong(0)), decode(b1));
 
         let b2 = &mut BytesMut::with_capacity(0);
-        encode(Type::Ulong(128), b2);
+        Type::Ulong(128).encode(b2);
         assert_eq!(Ok(Type::Ulong(128)), decode(b2));
 
         let b3 = &mut BytesMut::with_capacity(0);
-        encode(Type::Ulong(2147483649), b3);
+        Type::Ulong(2147483649).encode(b3);
         assert_eq!(Ok(Type::Ulong(2147483649)), decode(b3));
     }
 
     #[test]
     fn byte() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Byte(-128), b1);
+        Type::Byte(-128).encode(b1);
         assert_eq!(Ok(Type::Byte(-128)), decode(b1));
     }
 
     #[test]
     fn short() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Short(-255), b1);
+        Type::Short(-255).encode(b1);
         assert_eq!(Ok(Type::Short(-255)), decode(b1));
     }
 
     #[test]
     fn int() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Int(0), b1);
+        Type::Int(0).encode(b1);
         assert_eq!(Ok(Type::Int(0)), decode(b1));
 
         let b2 = &mut BytesMut::with_capacity(0);
-        encode(Type::Int(-50000), b2);
+        Type::Int(-50000).encode(b2);
         assert_eq!(Ok(Type::Int(-50000)), decode(b2));
 
         let b3 = &mut BytesMut::with_capacity(0);
-        encode(Type::Int(-128), b3);
+        Type::Int(-128).encode(b3);
         assert_eq!(Ok(Type::Int(-128)), decode(b3));
     }
 
     #[test]
     fn long() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Ulong(0), b1);
+        Type::Ulong(0).encode(b1);
         assert_eq!(Ok(Type::Ulong(0)), decode(b1));
 
         let b2 = &mut BytesMut::with_capacity(0);
-        encode(Type::Long(-2147483647), b2);
+        Type::Long(-2147483647).encode(b2);
         assert_eq!(Ok(Type::Long(-2147483647)), decode(b2));
 
         let b3 = &mut BytesMut::with_capacity(0);
-        encode(Type::Long(-128), b3);
+        Type::Long(-128).encode(b3);
         assert_eq!(Ok(Type::Long(-128)), decode(b3));
     }
 
     #[test]
     fn float() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Float(1.234), b1);
+        Type::Float(1.234).encode(b1);
         assert_eq!(Ok(Type::Float(1.234)), decode(b1));
     }
 
     #[test]
     fn double() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Double(1.234), b1);
+        Type::Double(1.234).encode(b1);
         assert_eq!(Ok(Type::Double(1.234)), decode(b1));
     }
 
     #[test]
     fn char() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Char('💯'), b1);
+        Type::Char('💯').encode(b1);
         assert_eq!(Ok(Type::Char('💯')), decode(b1));
     }
 
@@ -455,7 +458,7 @@ mod tests {
     fn timestamp() {
         let b1 = &mut BytesMut::with_capacity(0);
         let datetime = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
-        encode(Type::Timestamp(datetime), b1);
+        Type::Timestamp(datetime).encode(b1);
 
         let expected = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
         assert_eq!(Ok(Type::Timestamp(expected)), decode(b1));
@@ -465,7 +468,7 @@ mod tests {
     fn timestamp_pre_unix() {
         let b1 = &mut BytesMut::with_capacity(0);
         let datetime = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
-        encode(Type::Timestamp(datetime), b1);
+        Type::Timestamp(datetime).encode(b1);
 
         let expected = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
         assert_eq!(Ok(Type::Timestamp(expected)), decode(b1));
@@ -476,7 +479,7 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         let bytes = [4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
         let u1 = Uuid::from_bytes(&bytes).expect("parse error");
-        encode(Type::Uuid(u1), b1);
+        Type::Uuid(u1).encode(b1);
 
         let expected = Type::Uuid(Uuid::parse_str("0436430c2b02624c2032570501212b57").expect("parse error"));
         assert_eq!(Ok(expected), decode(b1));
@@ -486,7 +489,7 @@ mod tests {
     fn binary_short() {
         let b1 = &mut BytesMut::with_capacity(0);
         let bytes = [4u8, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
-        encode(Type::Binary(Bytes::from(&bytes[..])), b1);
+        Type::Binary(Bytes::from(&bytes[..])).encode(b1);
 
         let expected = [4u8, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
         assert_eq!(Ok(Type::Binary(Bytes::from(&expected[..]))), decode(b1));
@@ -496,7 +499,7 @@ mod tests {
     fn binary_long() {
         let b1 = &mut BytesMut::with_capacity(0);
         let bytes = [4u8; 500];
-        encode(Type::Binary(Bytes::from(&bytes[..])), b1);
+        Type::Binary(Bytes::from(&bytes[..])).encode(b1);
 
         let expected = [4u8; 500];
         assert_eq!(Ok(Type::Binary(Bytes::from(&expected[..]))), decode(b1));
@@ -505,7 +508,7 @@ mod tests {
     #[test]
     fn string_short() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::String(String::from("Hello there")), b1);
+        Type::String(String::from("Hello there")).encode(b1);
 
         assert_eq!(Ok(Type::String(String::from("Hello there"))), decode(b1));
     }
@@ -514,7 +517,7 @@ mod tests {
     fn string_long() {
         let b1 = &mut BytesMut::with_capacity(0);
         let s1 = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
-        encode(Type::String(s1), b1);
+        Type::String(s1).encode(b1);
 
         let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         assert_eq!(Ok(Type::String(expected)), decode(b1));
@@ -523,7 +526,7 @@ mod tests {
     #[test]
     fn symbol_short() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Symbol(String::from("Hello there")), b1);
+        Type::Symbol(String::from("Hello there")).encode(b1);
 
         assert_eq!(Ok(Type::Symbol(String::from("Hello there"))), decode(b1));
     }
@@ -532,7 +535,7 @@ mod tests {
     fn symbol_long() {
         let b1 = &mut BytesMut::with_capacity(0);
         let s1 = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
-        encode(Type::Symbol(s1), b1);
+        Type::Symbol(s1).encode(b1);
 
         let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         assert_eq!(Ok(Type::Symbol(expected)), decode(b1));
