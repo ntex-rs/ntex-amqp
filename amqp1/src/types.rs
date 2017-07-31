@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// Represents an AMQP type
@@ -50,7 +51,7 @@ pub enum Type {
     /// Represents an approximate point in time using the Unix time encoding of
     /// UTC with a precision of milliseconds. For example, 1311704463521
     /// represents the moment 2011-07-26T18:21:03.521Z.
-    Timestamp(i64),
+    Timestamp(DateTime<Utc>),
 
     /// A universally unique identifier as defined by RFC-4122 section 4.1.2
     Uuid(Uuid),

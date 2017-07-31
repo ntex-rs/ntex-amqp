@@ -1,4 +1,5 @@
 use bytes::{BufMut, Bytes, BytesMut, BigEndian};
+use chrono::{DateTime, TimeZone, Utc};
 use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64, be_f32, be_f64};
 use std::{char, i8, u8};
 use types::Type;
@@ -48,7 +49,7 @@ named!(double<Type>, do_parse!(tag!([0x82u8]) >> double: be_f64 >> (Type::Double
 
 named!(char<Type>, map_opt!(do_parse!(tag!([0x73u8]) >> int: be_u32 >> (int)), |c| char::from_u32(c).map(|c2| Type::Char(c2))));
 
-named!(timestamp<Type>, do_parse!(tag!([0x83u8]) >> timestamp: be_i64 >> (Type::Timestamp(timestamp))));
+named!(timestamp<Type>, do_parse!(tag!([0x83u8]) >> timestamp: be_i64 >> (Type::Timestamp(datetime_from_millis(timestamp)))));
 
 named!(uuid<Type>, do_parse!(tag!([0x98u8]) >> uuid: map_res!(take!(16), Uuid::from_bytes) >> (Type::Uuid(uuid))));
 
@@ -66,6 +67,20 @@ named!(symbol<Type>, alt!(
     do_parse!(tag!([0xA3u8]) >> string: map_res!(length_bytes!(be_u8), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::Symbol(string))) |
     do_parse!(tag!([0xB3u8]) >> string: map_res!(length_bytes!(be_u32), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::Symbol(string)))
 ));
+
+fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
+    let seconds = millis / 1000;
+    if seconds < 0 {
+        // In order to handle time before 1970 correctly, we need to subtract a second
+        // and use the nanoseconds field to add it back. This is a result of the nanoseconds
+        // parameter being u32
+        let nanoseconds = ((1000 + (millis - (seconds * 1000))) * 1_000_000).abs() as u32;
+        Utc.timestamp(seconds - 1, nanoseconds)
+    } else {
+        let nanoseconds = ((millis - (seconds * 1000)) * 1_000_000).abs() as u32;
+        Utc.timestamp(seconds, nanoseconds)
+    }
+}
 
 pub fn encode(t: Type, buf: &mut BytesMut) -> () {
     match t {
@@ -223,10 +238,11 @@ fn encode_char(c: char, buf: &mut BytesMut) {
     buf.put_u32::<BigEndian>(c as u32);
 }
 
-fn encode_timestamp(timestamp: i64, buf: &mut BytesMut) {
+fn encode_timestamp(datetime: DateTime<Utc>, buf: &mut BytesMut) {
     if buf.remaining_mut() < 9 {
         buf.reserve(9);
     }
+    let timestamp = datetime.timestamp() * 1000 + (datetime.timestamp_subsec_millis() as i64);
     buf.put_u8(0x83);
     buf.put_i64::<BigEndian>(timestamp);
 }
@@ -433,11 +449,26 @@ mod tests {
         assert_eq!(Ok(Type::Char('💯')), decode(b1));
     }
 
+    /// UTC with a precision of milliseconds. For example, 1311704463521
+    /// represents the moment 2011-07-26T18:21:03.521Z.
     #[test]
     fn timestamp() {
         let b1 = &mut BytesMut::with_capacity(0);
-        encode(Type::Timestamp(1311704463521), b1);
-        assert_eq!(Ok(Type::Timestamp(1311704463521)), decode(b1));
+        let datetime = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
+        encode(Type::Timestamp(datetime), b1);
+
+        let expected = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
+        assert_eq!(Ok(Type::Timestamp(expected)), decode(b1));
+    }
+
+    #[test]
+    fn timestamp_pre_unix() {
+        let b1 = &mut BytesMut::with_capacity(0);
+        let datetime = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
+        encode(Type::Timestamp(datetime), b1);
+
+        let expected = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
+        assert_eq!(Ok(Type::Timestamp(expected)), decode(b1));
     }
 
     #[test]
