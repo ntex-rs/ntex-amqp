@@ -272,7 +272,7 @@ fn encode_binary(b: &Bytes, buf: &mut BytesMut) {
         buf.put_u8(0xA0);
         buf.put_u8(length as u8);
     }
-    buf.extend(b);
+    buf.extend_from_slice(b);
 }
 
 fn encode_string(s: &ByteStr, buf: &mut BytesMut) {
@@ -288,7 +288,7 @@ fn encode_string(s: &ByteStr, buf: &mut BytesMut) {
         buf.put_u8(0xA1);
         buf.put_u8(length as u8);
     }
-    buf.extend(s.as_bytes());
+    buf.extend_from_slice(s.as_bytes());
 }
 
 fn encode_symbol(s: &ByteStr, buf: &mut BytesMut) {
@@ -304,7 +304,7 @@ fn encode_symbol(s: &ByteStr, buf: &mut BytesMut) {
         buf.put_u8(0xA3);
         buf.put_u8(length as u8);
     }
-    buf.extend(s.as_bytes());
+    buf.extend_from_slice(s.as_bytes());
 }
 
 #[cfg(test)]
