@@ -1,8 +1,8 @@
 use bytes::{BufMut, Bytes, BytesMut, BigEndian};
 use chrono::{DateTime, TimeZone, Utc};
 use nom::{be_i8, be_i16, be_i32, be_i64, be_u8, be_u16, be_u32, be_u64, be_f32, be_f64};
-use std::{char, i8, u8};
-use types::Type;
+use std::{char, i8, str, u8};
+use types::{ByteStr, Type};
 use uuid::Uuid;
 
 pub fn decode(buf: &mut BytesMut) -> Result<Type, ()> {
@@ -59,13 +59,13 @@ named!(binary<Type>, alt!(
 ));
 
 named!(string<Type>, alt!(
-    do_parse!(tag!([0xA1u8]) >> string: map_res!(length_bytes!(be_u8), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::String(string))) |
-    do_parse!(tag!([0xB1u8]) >> string: map_res!(length_bytes!(be_u32), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::String(string)))
+    do_parse!(tag!([0xA1u8]) >> string: map_res!(length_bytes!(be_u8), str::from_utf8) >> (Type::String(ByteStr::from(string)))) |
+    do_parse!(tag!([0xB1u8]) >> string: map_res!(length_bytes!(be_u32), str::from_utf8) >> (Type::String(ByteStr::from(string))))
 ));
 
 named!(symbol<Type>, alt!(
-    do_parse!(tag!([0xA3u8]) >> string: map_res!(length_bytes!(be_u8), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::Symbol(string))) |
-    do_parse!(tag!([0xB3u8]) >> string: map_res!(length_bytes!(be_u32), |bytes: &[u8]| String::from_utf8(bytes.to_vec())) >> (Type::Symbol(string)))
+    do_parse!(tag!([0xA3u8]) >> string: map_res!(length_bytes!(be_u8), str::from_utf8) >> (Type::Symbol(ByteStr::from(string)))) |
+    do_parse!(tag!([0xB3u8]) >> string: map_res!(length_bytes!(be_u32), str::from_utf8) >> (Type::Symbol(ByteStr::from(string))))
 ));
 
 fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
@@ -275,7 +275,7 @@ fn encode_binary(b: &Bytes, buf: &mut BytesMut) {
     buf.extend(b);
 }
 
-fn encode_string(s: &String, buf: &mut BytesMut) {
+fn encode_string(s: &ByteStr, buf: &mut BytesMut) {
     if buf.remaining_mut() < 5 {
         buf.reserve(5);
     }
@@ -291,7 +291,7 @@ fn encode_string(s: &String, buf: &mut BytesMut) {
     buf.extend(s.as_bytes());
 }
 
-fn encode_symbol(s: &String, buf: &mut BytesMut) {
+fn encode_symbol(s: &ByteStr, buf: &mut BytesMut) {
     if buf.remaining_mut() < 5 {
         buf.reserve(5);
     }
@@ -508,36 +508,36 @@ mod tests {
     #[test]
     fn string_short() {
         let b1 = &mut BytesMut::with_capacity(0);
-        Type::String(String::from("Hello there")).encode(b1);
+        Type::String(ByteStr::from("Hello there")).encode(b1);
 
-        assert_eq!(Ok(Type::String(String::from("Hello there"))), decode(b1));
+        assert_eq!(Ok(Type::String(ByteStr::from("Hello there"))), decode(b1));
     }
 
     #[test]
     fn string_long() {
         let b1 = &mut BytesMut::with_capacity(0);
-        let s1 = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        let s1 = ByteStr::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         Type::String(s1).encode(b1);
 
-        let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        let expected = ByteStr::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         assert_eq!(Ok(Type::String(expected)), decode(b1));
     }
 
     #[test]
     fn symbol_short() {
         let b1 = &mut BytesMut::with_capacity(0);
-        Type::Symbol(String::from("Hello there")).encode(b1);
+        Type::Symbol(ByteStr::from("Hello there")).encode(b1);
 
-        assert_eq!(Ok(Type::Symbol(String::from("Hello there"))), decode(b1));
+        assert_eq!(Ok(Type::Symbol(ByteStr::from("Hello there"))), decode(b1));
     }
 
     #[test]
     fn symbol_long() {
         let b1 = &mut BytesMut::with_capacity(0);
-        let s1 = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        let s1 = ByteStr::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         Type::Symbol(s1).encode(b1);
 
-        let expected = String::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
+        let expected = ByteStr::from("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec accumsan iaculis ipsum sed convallis. Phasellus consectetur justo et odio maximus, vel vehicula sapien venenatis. Nunc ac viverra risus. Pellentesque elementum, mauris et viverra ultricies, lacus erat varius nulla, eget maximus nisl sed.",);
         assert_eq!(Ok(Type::Symbol(expected)), decode(b1));
     }
 }

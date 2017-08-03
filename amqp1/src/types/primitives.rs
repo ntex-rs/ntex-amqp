@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use types::ByteStr;
 use uuid::Uuid;
 
 /// Represents an AMQP type
@@ -60,10 +61,10 @@ pub enum Type {
     Binary(Bytes),
 
     /// A sequence of Unicode characters
-    String(String),
+    String(ByteStr),
 
     /// Symbolic values from a constrained domain.
-    Symbol(String),
+    Symbol(ByteStr),
 }
 
 #[cfg(test)]
@@ -82,19 +83,19 @@ mod tests {
 
     #[test]
     fn string_eq() {
-        let a = Type::String("hello".to_string());
-        let b = Type::String("world!".to_string());
+        let a = Type::String(ByteStr::from("hello"));
+        let b = Type::String(ByteStr::from("world!"));
 
-        assert_eq!(Type::String("hello".to_string()), a);
+        assert_eq!(Type::String(ByteStr::from("hello")), a);
         assert!(a != b);
     }
 
     #[test]
     fn symbol_eq() {
-        let a = Type::Symbol("hello".to_string());
-        let b = Type::Symbol("world!".to_string());
+        let a = Type::Symbol(ByteStr::from("hello"));
+        let b = Type::Symbol(ByteStr::from("world!"));
 
-        assert_eq!(Type::Symbol("hello".to_string()), a);
+        assert_eq!(Type::Symbol(ByteStr::from("hello")), a);
         assert!(a != b);
     }
 }
