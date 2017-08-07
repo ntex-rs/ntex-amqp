@@ -1,11 +1,11 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use types::ByteStr;
+use types::{ByteStr, Symbol};
 use uuid::Uuid;
 
-/// Represents an AMQP type
+/// Represents an AMQP type for use in polymorphic collections
 #[derive(Debug, PartialEq)]
-pub enum Type {
+pub enum Variant {
     /// Indicates an empty value.
     Null,
 
@@ -64,7 +64,7 @@ pub enum Type {
     String(ByteStr),
 
     /// Symbolic values from a constrained domain.
-    Symbol(ByteStr),
+    Symbol(Symbol),
 }
 
 #[cfg(test)]
@@ -73,9 +73,9 @@ mod tests {
 
     #[test]
     fn bytes_eq() {
-        let bytes1 = Type::Binary(Bytes::from(&b"hello"[..]));
-        let bytes2 = Type::Binary(Bytes::from(&b"hello"[..]));
-        let bytes3 = Type::Binary(Bytes::from(&b"world"[..]));
+        let bytes1 = Variant::Binary(Bytes::from(&b"hello"[..]));
+        let bytes2 = Variant::Binary(Bytes::from(&b"hello"[..]));
+        let bytes3 = Variant::Binary(Bytes::from(&b"world"[..]));
 
         assert_eq!(bytes1, bytes2);
         assert!(bytes1 != bytes3);
@@ -83,19 +83,19 @@ mod tests {
 
     #[test]
     fn string_eq() {
-        let a = Type::String(ByteStr::from("hello"));
-        let b = Type::String(ByteStr::from("world!"));
+        let a = Variant::String(ByteStr::from("hello"));
+        let b = Variant::String(ByteStr::from("world!"));
 
-        assert_eq!(Type::String(ByteStr::from("hello")), a);
+        assert_eq!(Variant::String(ByteStr::from("hello")), a);
         assert!(a != b);
     }
 
     #[test]
     fn symbol_eq() {
-        let a = Type::Symbol(ByteStr::from("hello"));
-        let b = Type::Symbol(ByteStr::from("world!"));
+        let a = Variant::Symbol(Symbol::from("hello"));
+        let b = Variant::Symbol(Symbol::from("world!"));
 
-        assert_eq!(Type::Symbol(ByteStr::from("hello")), a);
+        assert_eq!(Variant::Symbol(Symbol::from("hello")), a);
         assert!(a != b);
     }
 }
