@@ -3,7 +3,7 @@ use std::{i8, u8};
 use bytes::{BigEndian, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use codec::Encodable;
-use types::{ByteStr, Symbol, Variant};
+use types::{ByteStr, Null, Symbol, Variant};
 use uuid::Uuid;
 
 impl Encodable for bool {
@@ -214,6 +214,15 @@ impl Encodable for ByteStr {
     }
 }
 
+impl Encodable for Null {
+    fn encode(&self, buf: &mut BytesMut) {
+        if buf.remaining_mut() < 1 {
+            buf.reserve(1);
+        }
+        buf.put_u8(0x40);
+    }
+}
+
 impl Encodable for str {
     fn encode(&self, buf: &mut BytesMut) {
         if buf.remaining_mut() < 5 {
@@ -254,12 +263,7 @@ impl Encodable for Variant {
     /// Encodes `Variant` into provided `BytesMut`
     fn encode(&self, buf: &mut BytesMut) -> () {
         match *self {
-            Variant::Null => {
-                if buf.remaining_mut() < 1 {
-                    buf.reserve(1);
-                }
-                buf.put_u8(0x40);
-            }
+            Variant::Null => Null.encode(buf),
             Variant::Boolean(b) => b.encode(buf),
             Variant::Ubyte(b) => b.encode(buf),
             Variant::Ushort(s) => s.encode(buf),

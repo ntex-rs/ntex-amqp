@@ -1,13 +1,7 @@
-use bytes::BytesMut;
+mod primitive;
+mod variant;
 
-mod decode;
-mod encode;
-
-pub trait Encodable {
-    fn encode(&self, buf: &mut BytesMut) -> ();
-}
-
-pub use self::decode::{
+pub use self::primitive::{
     null,
     ubyte,
     ushort,
@@ -25,5 +19,4 @@ pub use self::decode::{
     string,
     symbol,
 };
-
-pub use self::decode::variant;
+pub use self::variant::variant;
