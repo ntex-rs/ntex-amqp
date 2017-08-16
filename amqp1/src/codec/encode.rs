@@ -11,7 +11,11 @@ impl Encodable for bool {
         if buf.remaining_mut() < 1 {
             buf.reserve(1);
         }
-        if *self { buf.put_u8(0x40) } else { buf.put_u8(0x41) }
+        if *self {
+            buf.put_u8(0x40)
+        } else {
+            buf.put_u8(0x41)
+        }
     }
 }
 
