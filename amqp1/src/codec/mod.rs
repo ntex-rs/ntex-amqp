@@ -4,6 +4,7 @@ mod decode;
 mod encode;
 
 pub trait Encodable {
+    fn encoded_size(&self) -> usize;
     fn encode(&self, buf: &mut BytesMut) -> ();
 }
 
@@ -24,6 +25,8 @@ pub use self::decode::{
     binary,
     string,
     symbol,
+
+    frame,
 };
 
 pub use self::decode::variant;

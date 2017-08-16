@@ -5,4 +5,5 @@ extern crate nom;
 extern crate uuid;
 
 pub mod codec;
+pub mod framing;
 pub mod types;

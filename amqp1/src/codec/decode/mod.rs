@@ -1,6 +1,8 @@
+mod framing;
 mod primitive;
 mod variant;
 
+pub use self::framing::frame;
 pub use self::primitive::{
     null,
     ubyte,
