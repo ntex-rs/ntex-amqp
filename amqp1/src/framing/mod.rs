@@ -6,6 +6,12 @@ pub const HEADER_LEN: usize = 8;
 /// AMQP Frame type marker (0)
 pub const AMQP_TYPE: u8 = 0;
 
+/// Represents a frame. There are two common variants: AMQP and SASL frames
+#[derive(Debug, PartialEq, Eq)]
+pub enum Frame {
+    Amqp(AmqpFrame),
+}
+
 /// Represents an AMQP Frame
 #[derive(Debug, PartialEq, Eq)]
 pub struct AmqpFrame {

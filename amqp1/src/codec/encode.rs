@@ -4,7 +4,7 @@ use bytes::{BigEndian, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use codec::Encodable;
 use framing;
-use framing::AmqpFrame;
+use framing::{Frame, AmqpFrame};
 use types::{ByteStr, Null, Symbol, Variant};
 use uuid::Uuid;
 
@@ -385,6 +385,20 @@ impl Encodable for Variant {
             Variant::Binary(ref b) => b.encode(buf),
             Variant::String(ref s) => s.encode(buf),
             Variant::Symbol(ref s) => s.encode(buf),
+        }
+    }
+}
+
+impl Encodable for Frame {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Frame::Amqp(ref a) => a.encoded_size(),
+        }
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Frame::Amqp(ref a) => a.encode(buf),
         }
     }
 }
