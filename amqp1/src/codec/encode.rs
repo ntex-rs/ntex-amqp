@@ -8,7 +8,7 @@ use framing::{Frame, AmqpFrame};
 use types::{ByteStr, Null, Symbol, Variant};
 use uuid::Uuid;
 
-fn ensure_capacity(encodable: &Encodable, buf: &mut BytesMut) {
+fn ensure_capacity<T: Encodable>(encodable: &T, buf: &mut BytesMut) {
     if buf.remaining_mut() < encodable.encoded_size() {
         buf.reserve(encodable.encoded_size());
     }
