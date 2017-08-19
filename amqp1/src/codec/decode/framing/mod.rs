@@ -19,7 +19,7 @@ macro_rules! error_if (
   );
 );
 
-named!(pub frame<Frame>,
+named!(pub decode_frame<Frame>,
     do_parse!(
         size: be_u32 >>
         error_if!(size < HEADER_LEN as u32, INVALID_FRAME) >>
@@ -46,14 +46,14 @@ named!(pub frame<Frame>,
 mod tests {
     use super::*;
     use bytes::BytesMut;
-    use codec::Encodable;
+    use codec::Encode;
 
     #[test]
     fn round_trip() {
         let b1 = &mut BytesMut::with_capacity(0);
         let f = AmqpFrame::new(21, Bytes::from("the body"));
         f.encode(b1);
-        let result = frame(b1).to_full_result();
+        let result = decode_frame(b1).to_full_result();
 
         assert_eq!(Ok(Frame::Amqp(f)), result);
     }
@@ -63,7 +63,7 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         let f = AmqpFrame::new(21, Bytes::new());
         f.encode(b1);
-        let result = frame(b1).to_full_result();
+        let result = decode_frame(b1).to_full_result();
 
         assert_eq!(Ok(Frame::Amqp(f)), result);
     }
