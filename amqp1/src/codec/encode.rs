@@ -15,21 +15,21 @@ fn ensure_capacity<T: Encode>(encodable: &T, buf: &mut BytesMut) {
 }
 
 impl Encode for bool {
-    fn encoded_size(&self) -> usize { 1 }
+    fn encoded_size(&self) -> usize {
+        1
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
 
-        if *self {
-            buf.put_u8(0x40)
-        } else {
-            buf.put_u8(0x41)
-        }
+        if *self { buf.put_u8(0x40) } else { buf.put_u8(0x41) }
     }
 }
 
 impl Encode for u8 {
-    fn encoded_size(&self) -> usize { 2 }
+    fn encoded_size(&self) -> usize {
+        2
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -40,7 +40,9 @@ impl Encode for u8 {
 }
 
 impl Encode for u16 {
-    fn encoded_size(&self) -> usize { 3 }
+    fn encoded_size(&self) -> usize {
+        3
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -104,7 +106,9 @@ impl Encode for u64 {
 }
 
 impl Encode for i8 {
-    fn encoded_size(&self) -> usize { 2 }
+    fn encoded_size(&self) -> usize {
+        2
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -115,7 +119,9 @@ impl Encode for i8 {
 }
 
 impl Encode for i16 {
-    fn encoded_size(&self) -> usize { 3 }
+    fn encoded_size(&self) -> usize {
+        3
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -127,11 +133,7 @@ impl Encode for i16 {
 
 impl Encode for i32 {
     fn encoded_size(&self) -> usize {
-        if *self > i8::MAX as i32 || *self < i8::MIN as i32 {
-            5
-        } else {
-            2
-        }
+        if *self > i8::MAX as i32 || *self < i8::MIN as i32 { 5 } else { 2 }
     }
 
     fn encode(&self, buf: &mut BytesMut) {
@@ -149,11 +151,7 @@ impl Encode for i32 {
 
 impl Encode for i64 {
     fn encoded_size(&self) -> usize {
-        if *self > i8::MAX as i64 || *self < i8::MIN as i64 {
-            9
-        } else {
-            2
-        }
+        if *self > i8::MAX as i64 || *self < i8::MIN as i64 { 9 } else { 2 }
     }
 
     fn encode(&self, buf: &mut BytesMut) {
@@ -170,7 +168,9 @@ impl Encode for i64 {
 }
 
 impl Encode for f32 {
-    fn encoded_size(&self) -> usize { 5 }
+    fn encoded_size(&self) -> usize {
+        5
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -181,7 +181,9 @@ impl Encode for f32 {
 }
 
 impl Encode for f64 {
-    fn encoded_size(&self) -> usize { 9 }
+    fn encoded_size(&self) -> usize {
+        9
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -192,7 +194,9 @@ impl Encode for f64 {
 }
 
 impl Encode for char {
-    fn encoded_size(&self) -> usize { 5 }
+    fn encoded_size(&self) -> usize {
+        5
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -203,7 +207,9 @@ impl Encode for char {
 }
 
 impl Encode for DateTime<Utc> {
-    fn encoded_size(&self) -> usize { 9 }
+    fn encoded_size(&self) -> usize {
+        9
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -215,7 +221,9 @@ impl Encode for DateTime<Utc> {
 }
 
 impl Encode for Uuid {
-    fn encoded_size(&self) -> usize { 17 }
+    fn encoded_size(&self) -> usize {
+        17
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -228,11 +236,7 @@ impl Encode for Uuid {
 impl Encode for Bytes {
     fn encoded_size(&self) -> usize {
         let length = self.len();
-        let size = if length > u8::MAX as usize || length < u8::MIN as usize {
-            5
-        } else {
-            2
-        };
+        let size = if length > u8::MAX as usize || length < u8::MIN as usize { 5 } else { 2 };
         size + length
     }
 
@@ -254,11 +258,7 @@ impl Encode for Bytes {
 impl Encode for ByteStr {
     fn encoded_size(&self) -> usize {
         let length = self.len();
-        let size = if length > u8::MAX as usize || length < u8::MIN as usize {
-            5
-        } else {
-            2
-        };
+        let size = if length > u8::MAX as usize || length < u8::MIN as usize { 5 } else { 2 };
         size + length
     }
 
@@ -278,7 +278,9 @@ impl Encode for ByteStr {
 }
 
 impl Encode for Null {
-    fn encoded_size(&self) -> usize { 1 }
+    fn encoded_size(&self) -> usize {
+        1
+    }
 
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
@@ -289,11 +291,7 @@ impl Encode for Null {
 impl Encode for str {
     fn encoded_size(&self) -> usize {
         let length = self.len();
-        let size = if length > u8::MAX as usize || length < u8::MIN as usize {
-            5
-        } else {
-            2
-        };
+        let size = if length > u8::MAX as usize || length < u8::MIN as usize { 5 } else { 2 };
         size + length
     }
 
@@ -317,11 +315,7 @@ impl Encode for str {
 impl Encode for Symbol {
     fn encoded_size(&self) -> usize {
         let length = self.as_str().len();
-        let size = if length > u8::MAX as usize || length < u8::MIN as usize {
-            5
-        } else {
-            2
-        };
+        let size = if length > u8::MAX as usize || length < u8::MIN as usize { 5 } else { 2 };
         size + length
     }
 

@@ -266,8 +266,9 @@ mod tests {
         Bytes::from(&bytes[..]).encode(b1);
 
         let expected = [4u8, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87];
-        assert_eq!(Ok(Bytes::from(&expected[..])), decode_binary(b1).to_full_result());
-   }
+        assert_eq!(Ok(Bytes::from(&expected[..])),
+                   decode_binary(b1).to_full_result());
+    }
 
     #[test]
     fn test_binary_long() {
@@ -276,7 +277,8 @@ mod tests {
         Bytes::from(&bytes[..]).encode(b1);
 
         let expected = [4u8; 500];
-        assert_eq!(Ok(Bytes::from(&expected[..])), decode_binary(b1).to_full_result());
+        assert_eq!(Ok(Bytes::from(&expected[..])),
+                   decode_binary(b1).to_full_result());
     }
 
     #[test]
@@ -284,7 +286,8 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         ByteStr::from("Hello there").encode(b1);
 
-        assert_eq!(Ok(ByteStr::from("Hello there")), decode_string(b1).to_full_result());
+        assert_eq!(Ok(ByteStr::from("Hello there")),
+                   decode_string(b1).to_full_result());
     }
 
     #[test]
@@ -302,7 +305,8 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         Symbol::from("Hello there").encode(b1);
 
-        assert_eq!(Ok(Symbol::from("Hello there")), decode_symbol(b1).to_full_result());
+        assert_eq!(Ok(Symbol::from("Hello there")),
+                   decode_symbol(b1).to_full_result());
     }
 
     #[test]

@@ -21,10 +21,7 @@ pub struct AmqpFrame {
 
 impl AmqpFrame {
     pub fn new(channel_id: u16, body: Bytes) -> AmqpFrame {
-        AmqpFrame {
-            channel_id,
-            body,
-        }
+        AmqpFrame { channel_id, body }
     }
 
     #[inline]

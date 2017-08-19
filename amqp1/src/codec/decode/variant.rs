@@ -48,24 +48,28 @@ mod tests {
     fn bool_true() {
         let b1 = &mut BytesMut::with_capacity(0);
         b1.put_u8(0x41);
-        assert_eq!(Ok(Variant::Boolean(true)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Boolean(true)),
+                   decode_variant(b1).to_full_result());
 
         let b2 = &mut BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x01);
-        assert_eq!(Ok(Variant::Boolean(true)), decode_variant(b2).to_full_result());
+        assert_eq!(Ok(Variant::Boolean(true)),
+                   decode_variant(b2).to_full_result());
     }
 
     #[test]
     fn bool_false() {
         let b1 = &mut BytesMut::with_capacity(0);
         b1.put_u8(0x42u8);
-        assert_eq!(Ok(Variant::Boolean(false)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Boolean(false)),
+                   decode_variant(b1).to_full_result());
 
         let b2 = &mut BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x00);
-        assert_eq!(Ok(Variant::Boolean(false)), decode_variant(b2).to_full_result());
+        assert_eq!(Ok(Variant::Boolean(false)),
+                   decode_variant(b2).to_full_result());
     }
 
     #[test]
@@ -79,7 +83,8 @@ mod tests {
     fn ushort() {
         let b1 = &mut BytesMut::with_capacity(0);
         Variant::Ushort(350).encode(b1);
-        assert_eq!(Ok(Variant::Ushort(350)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Ushort(350)),
+                   decode_variant(b1).to_full_result());
     }
 
     #[test]
@@ -94,7 +99,8 @@ mod tests {
 
         let b3 = &mut BytesMut::with_capacity(0);
         Variant::Uint(2147483647).encode(b3);
-        assert_eq!(Ok(Variant::Uint(2147483647)), decode_variant(b3).to_full_result());
+        assert_eq!(Ok(Variant::Uint(2147483647)),
+                   decode_variant(b3).to_full_result());
     }
 
     #[test]
@@ -109,7 +115,8 @@ mod tests {
 
         let b3 = &mut BytesMut::with_capacity(0);
         Variant::Ulong(2147483649).encode(b3);
-        assert_eq!(Ok(Variant::Ulong(2147483649)), decode_variant(b3).to_full_result());
+        assert_eq!(Ok(Variant::Ulong(2147483649)),
+                   decode_variant(b3).to_full_result());
     }
 
     #[test]
@@ -123,7 +130,8 @@ mod tests {
     fn short() {
         let b1 = &mut BytesMut::with_capacity(0);
         Variant::Short(-255).encode(b1);
-        assert_eq!(Ok(Variant::Short(-255)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Short(-255)),
+                   decode_variant(b1).to_full_result());
     }
 
     #[test]
@@ -134,7 +142,8 @@ mod tests {
 
         let b2 = &mut BytesMut::with_capacity(0);
         Variant::Int(-50000).encode(b2);
-        assert_eq!(Ok(Variant::Int(-50000)), decode_variant(b2).to_full_result());
+        assert_eq!(Ok(Variant::Int(-50000)),
+                   decode_variant(b2).to_full_result());
 
         let b3 = &mut BytesMut::with_capacity(0);
         Variant::Int(-128).encode(b3);
@@ -149,7 +158,8 @@ mod tests {
 
         let b2 = &mut BytesMut::with_capacity(0);
         Variant::Long(-2147483647).encode(b2);
-        assert_eq!(Ok(Variant::Long(-2147483647)), decode_variant(b2).to_full_result());
+        assert_eq!(Ok(Variant::Long(-2147483647)),
+                   decode_variant(b2).to_full_result());
 
         let b3 = &mut BytesMut::with_capacity(0);
         Variant::Long(-128).encode(b3);
@@ -160,21 +170,24 @@ mod tests {
     fn float() {
         let b1 = &mut BytesMut::with_capacity(0);
         Variant::Float(1.234).encode(b1);
-        assert_eq!(Ok(Variant::Float(1.234)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Float(1.234)),
+                   decode_variant(b1).to_full_result());
     }
 
     #[test]
     fn double() {
         let b1 = &mut BytesMut::with_capacity(0);
         Variant::Double(1.234).encode(b1);
-        assert_eq!(Ok(Variant::Double(1.234)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Double(1.234)),
+                   decode_variant(b1).to_full_result());
     }
 
     #[test]
     fn char() {
         let b1 = &mut BytesMut::with_capacity(0);
         Variant::Char('💯').encode(b1);
-        assert_eq!(Ok(Variant::Char('💯')), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Char('💯')),
+                   decode_variant(b1).to_full_result());
     }
 
     /// UTC with a precision of milliseconds. For example, 1311704463521
@@ -250,7 +263,8 @@ mod tests {
         Variant::String(s1).encode(b1);
 
         let expected = ByteStr::from(LOREM);
-        assert_eq!(Ok(Variant::String(expected)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::String(expected)),
+                   decode_variant(b1).to_full_result());
     }
 
     #[test]
@@ -269,6 +283,7 @@ mod tests {
         Variant::Symbol(s1).encode(b1);
 
         let expected = Symbol::from(LOREM);
-        assert_eq!(Ok(Variant::Symbol(expected)), decode_variant(b1).to_full_result());
+        assert_eq!(Ok(Variant::Symbol(expected)),
+                   decode_variant(b1).to_full_result());
     }
 }
