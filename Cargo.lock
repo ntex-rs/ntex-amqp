@@ -1,8 +1,4 @@
 [root]
-name = "tokio-amqp1"
-version = "0.1.0"
-
-[[package]]
 name = "amqp1"
 version = "0.1.0"
 dependencies = [

@@ -1,6 +1,0 @@
-[package]
-name = "tokio-amqp1"
-version = "0.1.0"
-authors = ["Mike Yagley <myagley@gmail.com>"]
-
-[dependencies]
