@@ -21,6 +21,10 @@ impl Symbol {
     pub fn as_str(&self) -> &str {
         unsafe { str::from_utf8_unchecked(self.0.as_ref()) }
     }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl<'a> From<&'a str> for Symbol {

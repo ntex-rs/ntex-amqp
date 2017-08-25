@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::str;
 
 use bytes::Bytes;
@@ -33,13 +32,9 @@ impl ByteStr {
     pub fn as_str(&self) -> &str {
         unsafe { str::from_utf8_unchecked(self.0.as_ref()) }
     }
-}
 
-impl Deref for ByteStr {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        self.as_str()
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 

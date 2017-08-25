@@ -383,6 +383,19 @@ impl Encode for Variant {
     }
 }
 
+impl<T: Encode> Encode for Option<T> {
+    fn encoded_size(&self) -> usize {
+        self.as_ref().map_or(1, |v| v.encoded_size())
+    }
+
+    fn encode(&self, buf: &mut BytesMut) -> () {
+        match *self {
+            Some(ref e) => e.encode(buf),
+            None => Null.encode(buf),
+        }
+    }
+}
+
 impl Encode for Frame {
     fn encoded_size(&self) -> usize {
         match *self {
