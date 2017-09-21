@@ -1,10 +1,13 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use types::{ByteStr, Symbol};
+use types::{ByteStr, List, Symbol, Descriptor};
 use uuid::Uuid;
+use ordered_float::OrderedFloat;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 /// Represents an AMQP type for use in polymorphic collections
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum Variant {
     /// Indicates an empty value.
     Null,
@@ -37,10 +40,10 @@ pub enum Variant {
     Long(i64),
 
     /// 32-bit floating point number (IEEE 754-2008 binary32).
-    Float(f32),
+    Float(OrderedFloat<f32>),
 
     /// 64-bit floating point number (IEEE 754-2008 binary64).
-    Double(f64),
+    Double(OrderedFloat<f64>),
 
     // Decimal32(d32),
     // Decimal64(d64),
@@ -65,6 +68,30 @@ pub enum Variant {
 
     /// Symbolic values from a constrained domain.
     Symbol(Symbol),
+
+    /// List
+    List(List),
+
+    /// Map
+    Map(VariantMap),
+
+    /// Described value
+    Described((Descriptor, Box<Variant>)),
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct VariantMap { pub map: HashMap<Variant, Variant> }
+
+impl VariantMap {
+    pub fn new(map: HashMap<Variant, Variant>) -> VariantMap {
+        VariantMap { map }
+    }
+}
+
+impl Hash for VariantMap {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
