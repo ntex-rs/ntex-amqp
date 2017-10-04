@@ -30,13 +30,9 @@ pub enum ProtocolId {
 }
 
 pub fn decode_protocol_header(src: &[u8]) -> Result<ProtocolId> {
-    if &src[0..4] != PROTOCOL_HEADER_PREFIX {
-        return Err(format!("Protocol header is invalid. {:?}", src).into());
-    }
+    ensure!(&src[0..4] == PROTOCOL_HEADER_PREFIX, "Protocol header is invalid. {:?}", src);
     let protocol_id = src[4];
-    if &src[5..8] != PROTOCOL_VERSION {
-        return Err(format!("Protocol version is incompatible. {:?}", &src[5..8]).into());
-    }
+    ensure!(&src[5..8] == PROTOCOL_VERSION, "Protocol version is incompatible. {:?}", &src[5..8]);
     match protocol_id {
         0 => Ok(ProtocolId::Amqp),
         2 => Ok(ProtocolId::AmqpTls),

@@ -71,9 +71,7 @@ impl<T: Clone> HandleVec<T> {
     pub fn push(&mut self, item: T) -> Handle {
         if self.empty_count == 0 {
             let len = self.items.len();
-            // if len > self.max_handle {
-            //     return Err("Handle pool is exhausted".into());
-            // }
+            // ensure!(len <= self.max_handle, "Handle pool is exhausted");
             self.items.push(Some(item));
             return len as Handle;
         }
@@ -117,15 +115,11 @@ fn negotiate_protocol<T: AsyncRead + AsyncWrite + 'static>(protocol_id: Protocol
     let header_buf = [0; 8];
     let (io, header_buf) = await!(read_exact(io, header_buf))?;
     let recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
-    if recv_protocol_id != protocol_id {
-        return Err(
-            format!(
-                "Expected `{:?}` protocol id, seen `{:?} instead.`",
-                protocol_id,
-                recv_protocol_id
-            ).into(),
-        );
-    }
+    ensure!(
+        recv_protocol_id == protocol_id,
+        "Expected `{:?}` protocol id, seen `{:?} instead.`",
+        protocol_id,
+        recv_protocol_id);
     Ok(io)
 }
 
@@ -145,10 +139,10 @@ pub fn sasl_auth<T: AsyncRead + AsyncWrite + 'static>(authz_id: String, authn_id
             .iter()
             .any(|m| *m == plain_symbol)
         {
-            return Err(format!("only PLAIN SASL mechanism is supported. server supports: {:?}", mechs.sasl_server_mechanisms()).into());
+            bail!("only PLAIN SASL mechanism is supported. server supports: {:?}", mechs.sasl_server_mechanisms());
         }
     } else {
-        return Err(format!("expected SASL Mechanisms frame to arrive, seen `{:?}` instead.", sasl_frame).into());
+        bail!("expected SASL Mechanisms frame to arrive, seen `{:?}` instead.", sasl_frame);
     }
     // sending sasl-init
     let initial_response = SaslInit::prepare_response(&authz_id, &authn_id, &password);
@@ -164,22 +158,12 @@ pub fn sasl_auth<T: AsyncRead + AsyncWrite + 'static>(authz_id: String, authn_id
         body: SaslFrameBody::SaslOutcome(outcome),
     }) = sasl_frame
     {
-        if outcome.code() != SaslCode::Ok {
-            return Err(
-                format!(
-                    "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
-                    outcome.code(),
-                    outcome.additional_data()
-                ).into(),
-            );
-        }
+        ensure!(outcome.code() == SaslCode::Ok,
+            "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
+            outcome.code(),
+            outcome.additional_data());
     } else {
-        return Err(
-            format!(
-                "expected SASL Outcome frame to arrive, seen `{:?}` instead.",
-                sasl_frame
-            ).into(),
-        );
+        bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
     }
 
     let io = sasl_io.into_inner();

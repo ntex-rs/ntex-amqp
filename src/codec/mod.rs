@@ -5,9 +5,7 @@ use super::errors::Result;
 
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
-        if $buf.len() < $size {
-            return Err(::errors::Error::from_kind(::errors::ErrorKind::Incomplete(Some($size))));
-        }
+        ensure!($buf.len() >= $size, ::errors::ErrorKind::Incomplete(Some($size)));
     };
 }
 

@@ -52,15 +52,11 @@ fn read_bytes_u32(input: &[u8]) -> Result<(&[u8], &[u8])> {
 }
 
 #[macro_export]
-macro_rules! validate_code (
-  ($fmt:ident, $code:expr) => (
-    {
-      if $fmt != $code {
-        return Err(ErrorKind::InvalidFormatCode($fmt).into());
-      }
-    }
-  );
-);
+macro_rules! validate_code {
+    ($fmt:ident, $code:expr) => {
+        ensure!($fmt == $code, ErrorKind::InvalidFormatCode($fmt));
+    };
+}
 
 impl DecodeFormatted for bool {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
@@ -378,9 +374,8 @@ fn decode_frame_header(input: &[u8], expected_frame_type: u8) -> Result<(&[u8], 
     decode_check_len!(input, 4);
     let doff = input[0];
     let frame_type = input[1];
-    if frame_type != expected_frame_type {
-        return Err(format!("Unexpected frame type: {:?}", frame_type).into());
-    }
+    ensure!(frame_type == expected_frame_type, "Unexpected frame type: {:?}", frame_type);
+
     let channel_id = BigEndian::read_u16(&input[2..]);
     let ext_header_len = doff as usize * 4 - HEADER_LEN;
     decode_check_len!(input, ext_header_len + 4);

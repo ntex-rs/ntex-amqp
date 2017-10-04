@@ -231,7 +231,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
         {{#if field.default}}
         {{field.name}} = {{field.default}};
         {{else}}
-        return Err("Required field {{field.name}} was omitted.".into());
+        bail!("Required field {{field.name}} was omitted.");
         {{/if}}
     }
     {{/if}}
@@ -277,7 +277,7 @@ impl DecodeFormatted for {{list.name}} {
         if descriptor != Descriptor::Ulong({{list.descriptor.code}})
             && descriptor != Descriptor::Symbol(Symbol::from_static("{{list.descriptor.name}}"))
         {
-            return Err("Invalid descriptor.".into());
+            bail!("Invalid descriptor.");
         }
         decode_{{snake list.name}}_inner(input)
     }

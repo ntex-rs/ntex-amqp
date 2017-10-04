@@ -111,7 +111,7 @@ impl<T: Sink<SinkItem = AmqpFrame, SinkError = Error> + 'static> Future for Conn
                             continue;
                         }
                         Err(e) => {
-                            return Err(e.into());
+                            bail!(e);
                             // let _ = tx.send(Err(err));
                         }
                     }
@@ -131,7 +131,7 @@ impl<T: Sink<SinkItem = AmqpFrame, SinkError = Error> + 'static> Future for Conn
                         conn.set_write_task(task::current());
                     }
                     Ok(Async::NotReady) => (),
-                    Err(e) => return Err(e.into()),
+                    Err(e) => bail!(e),
                 };
             }
 
