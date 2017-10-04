@@ -5,12 +5,8 @@ use super::framing::{HEADER_LEN};
 use codec::{Decode, Encode};
 use std::marker::PhantomData;
 
-pub struct AmqpDecoder<T: Decode> {
+pub struct AmqpCodec<T: Decode + Encode> {
     state: DecodeState,
-    phantom: PhantomData<T>
-}
-
-pub struct AmqpEncoder<T: Encode> {
     phantom: PhantomData<T>
 }
 
@@ -20,19 +16,13 @@ enum DecodeState {
     Frame(usize),
 }
 
-impl<T: Decode> AmqpDecoder<T> {
-    pub fn new() -> AmqpDecoder<T> {
-        AmqpDecoder { state: DecodeState::FrameHeader, phantom: PhantomData }
+impl<T: Decode + Encode> AmqpCodec<T> {
+    pub fn new() -> AmqpCodec<T> {
+        AmqpCodec { state: DecodeState::FrameHeader, phantom: PhantomData }
     }
 }
 
-impl<T: Encode> AmqpEncoder<T> {
-    pub fn new() -> AmqpEncoder<T> {
-        AmqpEncoder { phantom: PhantomData }
-    }
-}
-
-impl<T: Decode> Decoder for AmqpDecoder<T> {
+impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
     type Item = T;
     type Error = Error;
 
@@ -63,6 +53,7 @@ impl<T: Decode> Decoder for AmqpDecoder<T> {
                     if remainder.len() > 0 { // todo: could it really happen?
                         return Err("bytes left unparsed at the frame trail".into());
                     }
+                    //println!("decoded: {:?}", frame);
                     src.reserve(HEADER_LEN);
                     self.state = DecodeState::FrameHeader;
                     return Ok(Some(frame));
@@ -72,17 +63,19 @@ impl<T: Decode> Decoder for AmqpDecoder<T> {
     }
 }
 
-impl<T: Encode> Encoder for AmqpEncoder<T> {
+impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Encoder for AmqpCodec<T> {
     type Item = T;
     type Error = Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<()> {
+        //println!("encoding: {:?}", item);
         let size = item.encoded_size();
         if dst.remaining_mut() < size {
             dst.reserve(size);
         }
 
         item.encode(dst);
+        //println!("encoded: {:?}", dst);
         Ok(())
     }
 }

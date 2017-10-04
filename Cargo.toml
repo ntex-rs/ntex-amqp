@@ -10,6 +10,7 @@ uuid = { version = "0.4", features = ["use_std", "v4"] }
 ordered-float = "0.5"
 error-chain = "0.10"
 tokio-io = "0.1"
+tokio-core = "0.1"
 futures-await = { git = 'https://github.com/alexcrichton/futures-await' }
 
 [build-dependencies]
@@ -20,9 +21,9 @@ serde_json   = "1.0"
 lazy_static  = "0.2"
 
 [dev-dependencies]
-tokio-core = "0.1"
 native-tls = "0.1"
 tokio-tls = "0.1"
+chrono = "0.4"
 hex-slice = { git = 'https://github.com/g2p/hex-slice', branch = 'flags' }
 
 [features]

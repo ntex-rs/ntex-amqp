@@ -17,6 +17,7 @@ error_chain!{
     }
     foreign_links{
         Io(::std::io::Error);
+        Canceled(::futures::Canceled);
         UuidParseError(::uuid::ParseError);
         Utf8Error(::std::str::Utf8Error);
     }
