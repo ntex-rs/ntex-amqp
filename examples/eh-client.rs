@@ -19,7 +19,7 @@ use futures::{future, Future};
 
 use amqp::{transport, Error, ErrorKind, Result};
 use amqp::protocol::ProtocolId;
-use bytes::{Bytes};
+use bytes::Bytes;
 use native_tls::TlsConnector;
 use tokio_tls::TlsConnectorExt;
 use std::net::ToSocketAddrs;
@@ -56,7 +56,7 @@ fn send(handle: reactor::Handle) -> Result<()> {
 
     let start_time = Instant::now();
 
-    let deliveries: Vec<_> = (0..10000).map(|_| partition_link.send(Bytes::from(vec![1,2,3,4,5,6]))).collect();
+    let deliveries: Vec<_> = (0..10).map(|_| partition_link.send(Bytes::from(vec![1,2,3,4,5,6]))).collect();
     await!(future::join_all(deliveries))?;
 
     println!("transfers completed in {}.", chrono::Duration::from_std(start_time.elapsed()).unwrap());

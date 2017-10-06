@@ -5,6 +5,7 @@ use protocol::*;
 use super::*;
 use std::collections::VecDeque;
 
+#[derive(Clone)]
 pub struct SenderLink {
     inner: Rc<RefCell<SenderLinkInner>>,
 }

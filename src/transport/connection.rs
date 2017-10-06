@@ -17,6 +17,7 @@ use std::collections::VecDeque;
 use super::session::*;
 use super::*;
 
+#[derive(Clone)]
 pub struct Connection {
     inner: Rc<RefCell<ConnectionInner>>,
 }

@@ -13,6 +13,7 @@ use framing::AmqpFrame;
 use codec::Encode;
 use super::*;
 
+#[derive(Clone)]
 pub struct Session {
     inner: Rc<RefCell<SessionInner>>,
 }
