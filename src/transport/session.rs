@@ -237,8 +237,9 @@ impl SessionInner {
             aborted: false,
             batchable: false,
         };
-        let mut payload_section = BytesMut::with_capacity(payload.encoded_size());
-        Section::Data(payload).encode(&mut payload_section);
+        let data = Section::Data(payload);
+        let mut payload_section = BytesMut::with_capacity(data.encoded_size());
+        data.encode(&mut payload_section);
         self.unsettled_deliveries.insert(delivery_id, promise);
         (Frame::Transfer(transfer), payload_section.freeze())
     }
