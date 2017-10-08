@@ -120,11 +120,11 @@ impl SessionInner {
         {
             link.borrow_mut().apply_flow(flow, self, conn);
         } else if flow.echo() {
-            self.send_flow();
+            self.send_flow(conn);
         }
     }
 
-    fn send_flow(&mut self) {
+    fn send_flow(&mut self, conn: &mut ConnectionInner) {
         let flow = Flow {
             next_incoming_id: Some(self.next_incoming_id), // todo: derive from begin/flow
             incoming_window: self.incoming_window,
@@ -138,7 +138,7 @@ impl SessionInner {
             echo: false,
             properties: None,
         };
-        self.post_frame(Frame::Flow(flow), Bytes::new());
+        self.post_frame_conn(conn, Frame::Flow(flow), Bytes::new());
     }
 
     fn post_frame(&mut self, frame: Frame, payload: Bytes) {
