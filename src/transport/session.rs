@@ -39,7 +39,7 @@ pub(crate) struct SessionInner {
     outgoing_window: u32,
     next_incoming_id: DeliveryNumber,
     incoming_window: u32,
-    unsettled_deliveries: BTreeMap<DeliveryNumber, oneshot::Sender<Result<()>>>,
+    unsettled_deliveries: BTreeMap<DeliveryNumber, DeliveryPromise>,
     links: HandleVec<Weak<RefCell<SenderLinkInner>>>,
     handles: HandleVec<()>,
     pending_links: Vec<LinkRequest>,
@@ -102,8 +102,18 @@ impl SessionInner {
             .range(from..to + 1)
             .map(|(k, _)| k.clone())
             .collect::<Vec<_>>();
+        let outcome: Outcome;
+        match disposition.state().map(|s| s.clone()) {
+            Some(DeliveryState::Received(v)) => { return; } // todo: apply more thinking
+            Some(DeliveryState::Accepted(v)) => outcome = Outcome::Accepted(v.clone()),
+            Some(DeliveryState::Rejected(v)) => outcome = Outcome::Rejected(v.clone()),
+            Some(DeliveryState::Released(v)) => outcome = Outcome::Released(v.clone()),
+            Some(DeliveryState::Modified(v)) => outcome = Outcome::Modified(v.clone()),
+            None => outcome = Outcome::Accepted(Accepted {})
+        }
+        // let state = disposition.state().map(|s| s.clone()).unwrap_or(DeliveryState::Accepted(Accepted {})).clone(); // todo: honor Source.default_outcome()
         for k in actionable {
-            self.unsettled_deliveries.remove(&k).unwrap().send(Ok(()));
+            self.unsettled_deliveries.remove(&k).unwrap().send(Ok(outcome.clone()));
         }
     }
 

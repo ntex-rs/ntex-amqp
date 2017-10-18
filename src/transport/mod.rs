@@ -25,20 +25,20 @@ pub use self::session::*;
 pub use self::connection::*;
 
 pub enum Delivery {
-    Resolved(Result<()>),
-    Pending(oneshot::Receiver<Result<()>>),
+    Resolved(Result<Outcome>),
+    Pending(oneshot::Receiver<Result<Outcome>>),
     Gone
 }
 
-type DeliveryPromise = oneshot::Sender<Result<()>>;
+type DeliveryPromise = oneshot::Sender<Result<Outcome>>;
 
 impl Future for Delivery {
-    type Item = ();
+    type Item = Outcome;
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         if let Delivery::Pending(ref mut receiver) = *self {
             return match receiver.poll() {
-                Ok(Async::Ready(t)) => Ok(Async::Ready(())),
+                Ok(Async::Ready(r)) => r.map(|state| Async::Ready(state)),
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Err(e) => Err(e.into())
             };
@@ -47,7 +47,7 @@ impl Future for Delivery {
         let old_v = ::std::mem::replace(self, Delivery::Gone);
         if let Delivery::Resolved(r) = old_v {
             return match r {
-                Ok(_) => Ok(Async::Ready(())),
+                Ok(state) => Ok(Async::Ready(state)),
                 Err(e) => Err(e)
             };
         }
@@ -58,7 +58,7 @@ impl Future for Delivery {
 struct HandleVec<T>{
     items: Vec<Option<T>>,
     empty_count: u32,
-    //max_handle: u32 todo: do we need max_handle checks in HandleTable?
+    //max_handle: u32 todo: do we need max_handle checks in HandleVec?
 }
 
 impl<T: Clone> HandleVec<T> {
