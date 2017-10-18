@@ -49,24 +49,17 @@ pub fn encode_protocol_header(protocol_id: ProtocolId) -> BytesMut {
     buf
 }
 
-pub type List = Vec<Variant>;
 pub type Map = HashMap<Variant, Variant>;
+pub type StringVariantMap = HashMap<ByteStr, Variant>;
 pub type Fields = HashMap<Symbol, Variant>;
 pub type FilterSet = HashMap<Symbol, Option<ByteStr>>;
 pub type Timestamp = DateTime<Utc>;
 pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
+pub type Annotations = HashMap<Symbol, Variant>;
 
 mod definitions;
 pub use self::definitions::*;
-
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub enum AnnotationKey {
-    Ulong(u64),
-    Symbol(Symbol),
-}
-
-pub type Annotations = HashMap<Symbol, Variant>;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum MessageId {

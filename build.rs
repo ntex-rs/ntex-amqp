@@ -95,7 +95,11 @@ fn reformat_file(path: &std::path::Path) {
         .expect("failed to open file");
     let mut data = String::new();
     f.read_to_string(&mut data).expect("failed to read file.");
-    data = data.replace("\n\n", "\n")
+    data = data
+        .replace("\r\n\r\n", "\r\n")
+        .replace("\r\n\r\n", "\r\n")
+        .replace("\r\n\r\n", "\r\n")
+        .replace("\n\n", "\n")
         .replace("\n\n", "\n")
         .replace("\n\n", "\n");
     f.seek(std::io::SeekFrom::Start(0)).unwrap();

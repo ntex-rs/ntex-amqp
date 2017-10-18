@@ -53,7 +53,7 @@ impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
                     if remainder.len() > 0 { // todo: could it really happen?
                         return Err("bytes left unparsed at the frame trail".into());
                     }
-                    //println!("decoded: {:?}", frame);
+                    // println!("decoded: {:?}", frame);
                     src.reserve(HEADER_LEN);
                     self.state = DecodeState::FrameHeader;
                     return Ok(Some(frame));
@@ -68,7 +68,7 @@ impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Encoder for AmqpCodec<T> {
     type Error = Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<()> {
-        //println!("encoding: {:?}", item);
+        // println!("encoding: {:?}", item);
         let size = item.encoded_size();
         if dst.remaining_mut() < size {
             dst.reserve(size);

@@ -2,14 +2,14 @@
 
 extern crate amqp1 as amqp;
 extern crate bytes;
+extern crate chrono;
 extern crate futures_await as futures;
 extern crate hex_slice;
+extern crate native_tls;
 extern crate tokio_core;
 extern crate tokio_io;
-extern crate native_tls;
 extern crate tokio_tls;
 extern crate uuid;
-extern crate chrono;
 
 use futures::prelude::*;
 use tokio_core::net::TcpStream;
@@ -42,24 +42,50 @@ fn send(handle: reactor::Handle) -> Result<()> {
     let mut input = String::new();
     //std::io::stdin().read_line(&mut input);
 
-    let addr = format!("{}:5671", HOST_NAME).to_socket_addrs().unwrap().next().unwrap();
+    let addr = format!("{}:5671", HOST_NAME)
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap();
     let socket = await!(TcpStream::connect(&addr, &handle))?;
     let tls_context = TlsConnector::builder().unwrap().build().unwrap();
-    let io = await!(tls_context.connect_async(HOST_NAME, socket).map_err(|e| Error::with_chain(e, ErrorKind::Msg("TLS handshake failed".into()))))?;
+    let io = await!(tls_context.connect_async(HOST_NAME, socket).map_err(|e| {
+        Error::with_chain(e, ErrorKind::Msg("TLS handshake failed".into()))
+    }))?;
 
-    let io = await!(transport::sasl_auth("".into(), SASL_ID.into(), SASL_KEY.into(), io))?;
+    let io = await!(transport::sasl_auth(
+        "".into(),
+        SASL_ID.into(),
+        SASL_KEY.into(),
+        io
+    ))?;
 
     let conn = await!(transport::Connection::open(HOST_NAME.into(), handle, io))?;
     let session = await!(conn.open_session())?;
 
     let partition_link = await!(session.open_sender_link(format!("{}/Partitions/00", EVENT_HUB_NAME), "00".into()))?;
+    let partition_link = await!(session.open_sender_link(format!("{}/Partitions/01", EVENT_HUB_NAME), "01".into()))?;
+    let partition_link = await!(session.open_sender_link(format!("{}/Partitions/02", EVENT_HUB_NAME), "02".into()))?;
+    let partition_link = await!(session.open_sender_link(format!("{}/Partitions/03", EVENT_HUB_NAME), "03".into()))?;
+    let partition_link = await!(session.open_sender_link(format!("{}/Partitions/04", EVENT_HUB_NAME), "04".into()))?;
+    let partition_link = await!(session.open_sender_link(format!("{}/Partitions/05", EVENT_HUB_NAME), "05".into()))?;
 
     let start_time = Instant::now();
 
-    let deliveries: Vec<_> = (0..10).map(|_| partition_link.send(Bytes::from(vec![1,2,3,4,5,6]))).collect();
+    let deliveries: Vec<_> = (0..10)
+        .map(|_| {
+            partition_link.send(transport::Message {
+                application_data: transport::MessageBody::Data(Bytes::from(vec![1, 2, 3, 4, 5, 6])),
+                ..Default::default()
+            })
+        })
+        .collect();
     await!(future::join_all(deliveries))?;
 
-    println!("transfers completed in {}.", chrono::Duration::from_std(start_time.elapsed()).unwrap());
+    println!(
+        "transfers completed in {}.",
+        chrono::Duration::from_std(start_time.elapsed()).unwrap()
+    );
 
     std::io::stdin().read_line(&mut input);
 

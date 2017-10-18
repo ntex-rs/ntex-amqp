@@ -48,7 +48,7 @@ pub(crate) struct SessionInner {
 
 struct PendingTransfer {
     link_handle: Handle,
-    payload: Bytes,
+    message: Message,
     promise: DeliveryPromise,
 }
 
@@ -109,7 +109,7 @@ impl SessionInner {
     fn apply_flow(&mut self, conn: &mut ConnectionInner, flow: &Flow) {
         self.outgoing_window = flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
         while let Some(t) = self.pending_transfers.pop_front() {
-            self.send_transfer_conn(conn, t.link_handle, t.payload, t.promise);
+            self.send_transfer_conn(conn, t.link_handle, t.message, t.promise);
             if self.outgoing_window == 0 {
                 break;
             }
@@ -189,37 +189,37 @@ impl SessionInner {
         rx.map_err(|e| "Canceled".into())
     }
 
-    pub fn send_transfer(&mut self, link_handle: Handle, payload: Bytes, promise: DeliveryPromise) {
+    pub fn send_transfer(&mut self, link_handle: Handle, message: Message, promise: DeliveryPromise) {
         // todo: DRY
         if self.outgoing_window == 0 {
             // todo: queue up instead
             self.pending_transfers.push_back(PendingTransfer {
                 link_handle,
-                payload,
+                message,
                 promise,
             });
             return;
         }
-        let (frame, body) = self.prepare_transfer(link_handle, payload, promise);
+        let (frame, body) = self.prepare_transfer(link_handle, message, promise);
         self.post_frame(frame, body);
     }
 
-    pub fn send_transfer_conn(&mut self, conn: &mut ConnectionInner, link_handle: Handle, payload: Bytes, promise: DeliveryPromise) {
+    pub fn send_transfer_conn(&mut self, conn: &mut ConnectionInner, link_handle: Handle, message: Message, promise: DeliveryPromise) {
         // todo: DRY
         if self.outgoing_window == 0 {
             // todo: queue up instead
             self.pending_transfers.push_back(PendingTransfer {
                 link_handle,
-                payload,
+                message,
                 promise,
             });
             return;
         }
-        let (frame, body) = self.prepare_transfer(link_handle, payload, promise);
+        let (frame, body) = self.prepare_transfer(link_handle, message, promise);
         self.post_frame_conn(conn, frame, body);
     }
 
-    pub fn prepare_transfer(&mut self, link_handle: Handle, payload: Bytes, promise: DeliveryPromise) -> (Frame, Bytes) {
+    pub fn prepare_transfer(&mut self, link_handle: Handle, message: Message, promise: DeliveryPromise) -> (Frame, Bytes) {
         self.outgoing_window -= 1;
         let delivery_id = self.next_outgoing_id;
         self.next_outgoing_id += 1;
@@ -237,11 +237,8 @@ impl SessionInner {
             aborted: false,
             batchable: false,
         };
-        let data = Section::Data(payload);
-        let mut payload_section = BytesMut::with_capacity(data.encoded_size());
-        data.encode(&mut payload_section);
         self.unsettled_deliveries.insert(delivery_id, promise);
-        (Frame::Transfer(transfer), payload_section.freeze())
+        (Frame::Transfer(transfer), message.serialize())
     }
 }
 

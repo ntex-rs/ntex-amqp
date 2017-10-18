@@ -14,10 +14,12 @@ use types::{Symbol, ByteStr};
 use errors::*;
 use protocol::*;
 
+mod message;
 mod link;
 mod session;
 mod connection;
 
+pub use self::message::*;
 pub use self::link::*;
 pub use self::session::*;
 pub use self::connection::*;

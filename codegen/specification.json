@@ -1036,7 +1036,7 @@
   {
     "name": "application-properties",
     "class": "restricted",
-    "source": "map",
+    "source": "string-variant-map",
     "provides": "section",
     "descriptor": {
       "name": "amqp:application-properties:map",

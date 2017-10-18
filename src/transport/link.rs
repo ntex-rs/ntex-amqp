@@ -19,7 +19,7 @@ pub(crate) struct SenderLinkInner {
 }
 
 struct PendingTransfer {
-    payload: Bytes,
+    message: Message,
     promise: DeliveryPromise,
 }
 
@@ -28,8 +28,8 @@ impl SenderLink {
         SenderLink { inner }
     }
 
-    pub fn send(&self, payload: Bytes) -> Delivery {
-        self.inner.borrow_mut().send(payload)
+    pub fn send(&self, message: Message) -> Delivery {
+        self.inner.borrow_mut().send(message)
     }
 }
 
@@ -56,7 +56,7 @@ impl SenderLinkInner {
                         // can't move to a fn because of self colliding with session
                         self.link_credit -= 1;
                         self.delivery_count += 1;
-                        session.send_transfer_conn(conn, self.remote_handle, transfer.payload, transfer.promise);
+                        session.send_transfer_conn(conn, self.remote_handle, transfer.message, transfer.promise);
                         if self.link_credit == 0 {
                             break;
                         }
@@ -72,11 +72,11 @@ impl SenderLinkInner {
         }
     }
 
-    pub fn send(&mut self, payload: Bytes) -> Delivery {
+    pub fn send(&mut self, message: Message) -> Delivery {
         let (delivery_tx, delivery_rx) = oneshot::channel();
         if self.link_credit == 0 {
             self.pending_transfers.push_back(PendingTransfer {
-                payload,
+                message,
                 promise: delivery_tx,
             });
         } else {
@@ -84,7 +84,7 @@ impl SenderLinkInner {
             // can't move to a fn because of self colliding with session
             self.link_credit -= 1;
             self.delivery_count += 1;
-            session.send_transfer(self.remote_handle, payload, delivery_tx);
+            session.send_transfer(self.remote_handle, message, delivery_tx);
         }
         Delivery::Pending(delivery_rx)
     }

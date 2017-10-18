@@ -195,7 +195,7 @@ impl Definitions {
                     Definitions::register_provides(&mut provide_map, &en.name, None, &en.provides);
                     enums.push(en);
                 }
-                _Type::Described(ref d) if d.source == "list" => {
+                _Type::Described(ref d) if d.source == "list" && d.class != "restricted" => {
                     let ls = Described::list(d.clone());
                     Definitions::register_provides(&mut provide_map, &ls.name, Some(ls.descriptor.clone()), &ls.provides);
                     lists.push(ls);
