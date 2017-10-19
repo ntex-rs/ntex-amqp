@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use fnv::FnvHashMap;
 use bytes::{Bytes, BytesMut};
 use protocol::*;
 use types::*;
@@ -10,7 +10,7 @@ pub struct Message {
     pub delivery_annotations: Option<Annotations>,
     pub message_annotations: Option<Annotations>,
     pub properties: Option<Properties>,
-    pub application_properties: Option<HashMap<ByteStr, Variant>>,
+    pub application_properties: Option<FnvHashMap<ByteStr, Variant>>,
     pub application_data: MessageBody,
     pub footer: Option<Annotations>
 }

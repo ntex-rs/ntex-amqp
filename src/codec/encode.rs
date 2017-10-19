@@ -7,7 +7,7 @@ use framing::{self, AmqpFrame, SaslFrame};
 use types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant};
 use uuid::Uuid;
 use std::collections::HashMap;
-use std::hash::Hash;
+use std::hash::{Hash, BuildHasher};
 
 fn ensure_capacity<T: Encode>(encodable: &T, buf: &mut BytesMut) {
     if buf.remaining_mut() < encodable.encoded_size() {
@@ -411,11 +411,11 @@ impl ArrayEncode for Symbol {
     }
 }
 
-fn map_encoded_size<K: Hash + Eq + Encode, V: Encode>(map: &HashMap<K, V>) -> usize {
+fn map_encoded_size<K: Hash + Eq + Encode, V: Encode, S: BuildHasher>(map: &HashMap<K, V, S>) -> usize {
     map.iter()
         .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
 }
-impl<K: Eq + Hash + Encode, V: Encode> Encode for HashMap<K, V> {
+impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, S> {
     fn encoded_size(&self) -> usize {
         let size = map_encoded_size(self);
         // f:1 + s:4 + c:4 vs f:1 + s:1 + c:1

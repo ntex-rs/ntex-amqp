@@ -2,6 +2,7 @@
 #![feature(trace_macros)]
 
 extern crate bytes;
+extern crate fnv;
 extern crate chrono;
 extern crate uuid;
 extern crate ordered_float;

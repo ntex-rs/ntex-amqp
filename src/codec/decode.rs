@@ -10,7 +10,7 @@ use ordered_float::OrderedFloat;
 use protocol::{self, CompoundHeader};
 use std::collections::HashMap;
 use errors::{ErrorKind, Result};
-use std::hash::Hash;
+use std::hash::{Hash, BuildHasher};
 
 pub const INVALID_DESCRIPTOR: u32 = 0x0003;
 
@@ -220,12 +220,12 @@ impl DecodeFormatted for Symbol {
     }
 }
 
-impl<K: Decode + Eq + Hash, V: Decode> DecodeFormatted for HashMap<K, V> {
+impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted for HashMap<K, V, S> {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         let (input, header) = decode_map_header(input, fmt)?;
         let mut map_input = &input[..header.size as usize];
         let count = header.count / 2;
-        let mut map: HashMap<K, V> = HashMap::with_capacity(count as usize);
+        let mut map: HashMap<K, V, S> = HashMap::with_capacity_and_hasher(count as usize, Default::default());
         for _ in 0..count {
             let (input1, key) = K::decode(map_input)?;
             let (input2, value) = V::decode(input1)?;

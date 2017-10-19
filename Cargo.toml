@@ -5,6 +5,7 @@ authors = ["Mike Yagley <myagley@gmail.com>"]
 
 [dependencies]
 bytes = "0.4"
+fnv = "1.0"
 chrono = "0.4"
 uuid = { version = "0.5", features = ["use_std", "v4"] }
 ordered-float = "0.5"
