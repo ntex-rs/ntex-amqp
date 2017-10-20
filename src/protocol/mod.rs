@@ -2,7 +2,6 @@ use bytes::{Bytes, BytesMut, BufMut};
 use super::errors::*;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use fnv::FnvHashMap;
 use uuid::Uuid;
 use super::codec::{self, DecodeFormatted, Encode};
 use super::types::*;
@@ -50,14 +49,14 @@ pub fn encode_protocol_header(protocol_id: ProtocolId) -> BytesMut {
     buf
 }
 
-pub type Map = FnvHashMap<Variant, Variant>;
-pub type StringVariantMap = FnvHashMap<ByteStr, Variant>;
-pub type Fields = FnvHashMap<Symbol, Variant>;
-pub type FilterSet = FnvHashMap<Symbol, Option<ByteStr>>;
+pub type Map = HashMap<Variant, Variant>;
+pub type StringVariantMap = HashMap<ByteStr, Variant>;
+pub type Fields = HashMap<Symbol, Variant>;
+pub type FilterSet = HashMap<Symbol, Option<ByteStr>>;
 pub type Timestamp = DateTime<Utc>;
 pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
-pub type Annotations = FnvHashMap<Symbol, Variant>;
+pub type Annotations = HashMap<Symbol, Variant>;
 
 mod definitions;
 pub use self::definitions::*;
