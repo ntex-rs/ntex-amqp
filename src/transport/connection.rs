@@ -180,7 +180,10 @@ impl ConnectionInner {
                 return;
             }
             // todo: handle Close, End?
-            _ => {} // todo: handle unexpected frames
+            Frame::End(_) | Frame::Close(_) => {
+                println!("todo: unexpected frame: {:#?}", frame);
+            },
+            _ => () // todo: handle unexpected frames
         }
 
         if let Some(session) = self.sessions
@@ -192,6 +195,7 @@ impl ConnectionInner {
                 .handle_frame(frame, session.clone(), self);
         } else {
             // todo: missing session
+            println!("todo: missing session: {}", frame.channel_id());
         }
     }
 
