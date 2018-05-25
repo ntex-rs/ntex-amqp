@@ -119,7 +119,7 @@ impl SessionInner {
 
     fn apply_flow(&mut self, conn: &mut ConnectionInner, flow: &Flow) {
         self.outgoing_window = flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
-        println!("session received credit. window: {}, pending: {}", self.outgoing_window, self.pending_transfers.len());
+        // println!("session received credit. window: {}, pending: {}", self.outgoing_window, self.pending_transfers.len());
         while let Some(t) = self.pending_transfers.pop_front() {
             self.send_transfer_conn(conn, t.link_handle, t.message, t.promise);
             if self.outgoing_window == 0 {

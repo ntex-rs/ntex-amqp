@@ -48,7 +48,7 @@ impl SenderLinkInner {
         if let Some(credit) = flow.link_credit() {
             let delta = (flow.delivery_count.unwrap_or(0) + credit) - (self.delivery_count + self.link_credit);
             if delta > 0 {
-                println!("link received credit. delta: {}, pending: {}", delta, self.pending_transfers.len());
+                // println!("link received credit. delta: {}, pending: {}", delta, self.pending_transfers.len());
                 let old_credit = self.link_credit;
                 self.link_credit += delta;
                 if old_credit == 0 {
