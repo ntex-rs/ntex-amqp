@@ -2,7 +2,6 @@ use serde::{Deserialize, Deserializer};
 use std::str::{FromStr, ParseBoolError};
 use std::collections::{HashMap, HashSet};
 use serde_json::from_str;
-use std::ascii::AsciiExt;
 use std::sync::Mutex;
 
 lazy_static! {

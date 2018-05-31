@@ -1,16 +1,14 @@
 use futures::{future, Future};
 use futures::unsync::oneshot;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use uuid::Uuid;
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 
-use errors::*;
 use types::ByteStr;
 use protocol::*;
 use framing::AmqpFrame;
-use codec::Encode;
 use super::*;
 
 #[derive(Clone)]

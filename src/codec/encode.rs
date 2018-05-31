@@ -1,6 +1,6 @@
 use std::{i8, u8};
 
-use bytes::{BigEndian, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use codec::{self, ArrayEncode, Encode};
 use framing::{self, AmqpFrame, SaslFrame};
@@ -71,7 +71,7 @@ impl ArrayEncode for u16 {
         2
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u16::<BigEndian>(*self);
+        buf.put_u16_be(*self);
     }
 }
 
@@ -92,7 +92,7 @@ impl Encode for u32 {
             buf.put_u8(codec::FORMATCODE_UINT_0)
         } else if *self > u8::MAX as u32 {
             buf.put_u8(codec::FORMATCODE_UINT);
-            buf.put_u32::<BigEndian>(*self);
+            buf.put_u32_be(*self);
         } else {
             buf.put_u8(codec::FORMATCODE_SMALLUINT);
             buf.put_u8(*self as u8);
@@ -105,7 +105,7 @@ impl ArrayEncode for u32 {
         4
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u32::<BigEndian>(*self);
+        buf.put_u32_be(*self);
     }
 }
 
@@ -127,7 +127,7 @@ impl Encode for u64 {
             buf.put_u8(codec::FORMATCODE_ULONG_0)
         } else if *self > u8::MAX as u64 {
             buf.put_u8(codec::FORMATCODE_ULONG);
-            buf.put_u64::<BigEndian>(*self);
+            buf.put_u64_be(*self);
         } else {
             buf.put_u8(codec::FORMATCODE_SMALLULONG);
             buf.put_u8(*self as u8);
@@ -140,7 +140,7 @@ impl ArrayEncode for u64 {
         8
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u64::<BigEndian>(*self);
+        buf.put_u64_be(*self);
     }
 }
 
@@ -162,7 +162,7 @@ impl ArrayEncode for i16 {
         2
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_i16::<BigEndian>(*self);
+        buf.put_i16_be(*self);
     }
 }
 
@@ -179,7 +179,7 @@ impl Encode for i32 {
 
         if *self > i8::MAX as i32 || *self < i8::MIN as i32 {
             buf.put_u8(codec::FORMATCODE_INT);
-            buf.put_i32::<BigEndian>(*self);
+            buf.put_i32_be(*self);
         } else {
             buf.put_u8(codec::FORMATCODE_SMALLINT);
             buf.put_i8(*self as i8);
@@ -192,7 +192,7 @@ impl ArrayEncode for i32 {
         4
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_i32::<BigEndian>(*self);
+        buf.put_i32_be(*self);
     }
 }
 
@@ -210,7 +210,7 @@ impl Encode for i64 {
 
         if *self > i8::MAX as i64 || *self < i8::MIN as i64 {
             buf.put_u8(codec::FORMATCODE_LONG);
-            buf.put_i64::<BigEndian>(*self);
+            buf.put_i64_be(*self);
         } else {
             buf.put_u8(codec::FORMATCODE_SMALLLONG);
             buf.put_i8(*self as i8);
@@ -223,7 +223,7 @@ impl ArrayEncode for i64 {
         8
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_i64::<BigEndian>(*self);
+        buf.put_i64_be(*self);
     }
 }
 
@@ -234,7 +234,7 @@ impl ArrayEncode for f32 {
         4
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_f32::<BigEndian>(*self);
+        buf.put_f32_be(*self);
     }
 }
 
@@ -245,7 +245,7 @@ impl ArrayEncode for f64 {
         8
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_f64::<BigEndian>(*self);
+        buf.put_f64_be(*self);
     }
 }
 
@@ -256,7 +256,7 @@ impl ArrayEncode for char {
         4
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u32::<BigEndian>(*self as u32);
+        buf.put_u32_be(*self as u32);
     }
 }
 
@@ -268,7 +268,7 @@ impl ArrayEncode for DateTime<Utc> {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         let timestamp = self.timestamp() * 1000 + (self.timestamp_subsec_millis() as i64);
-        buf.put_i64::<BigEndian>(timestamp);
+        buf.put_i64_be(timestamp);
     }
 }
 
@@ -294,7 +294,7 @@ impl Encode for Bytes {
         let length = self.len();
         if length > u8::MAX as usize as usize {
             buf.put_u8(codec::FORMATCODE_BINARY32);
-            buf.put_u32::<BigEndian>(length as u32);
+            buf.put_u32_be(length as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_BINARY8);
             buf.put_u8(length as u8);
@@ -308,7 +308,7 @@ impl ArrayEncode for Bytes {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u32::<BigEndian>(self.len() as u32);
+        buf.put_u32_be(self.len() as u32);
         buf.put(self);
     }
 }
@@ -326,7 +326,7 @@ impl Encode for ByteStr {
         let length = self.len();
         if length > u8::MAX as usize as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
-            buf.put_u32::<BigEndian>(length as u32);
+            buf.put_u32_be(length as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
@@ -340,7 +340,7 @@ impl ArrayEncode for ByteStr {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u32::<BigEndian>(self.len() as u32);
+        buf.put_u32_be(self.len() as u32);
         buf.put(self.as_bytes());
     }
 }
@@ -360,7 +360,7 @@ impl Encode for str {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
-            buf.put_u32::<BigEndian>(length as u32);
+            buf.put_u32_be(length as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
@@ -374,7 +374,7 @@ impl ArrayEncode for str {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u32::<BigEndian>(self.len() as u32);
+        buf.put_u32_be(self.len() as u32);
         buf.put(self.as_bytes());
     }
 }
@@ -392,7 +392,7 @@ impl Encode for Symbol {
         let length = self.as_str().len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_SYMBOL32);
-            buf.put_u32::<BigEndian>(length as u32);
+            buf.put_u32_be(length as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_SYMBOL8);
             buf.put_u8(length as u8);
@@ -406,7 +406,7 @@ impl ArrayEncode for Symbol {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u32::<BigEndian>(self.len() as u32);
+        buf.put_u32_be(self.len() as u32);
         buf.put(self.as_bytes());
     }
 }
@@ -428,8 +428,8 @@ impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, 
         let size = map_encoded_size(self);
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_MAP32);
-            buf.put_u32::<BigEndian>((size + 4) as u32); // +4 for 4 byte count that follows
-            buf.put_u32::<BigEndian>(count as u32);
+            buf.put_u32_be((size + 4) as u32); // +4 for 4 byte count that follows
+            buf.put_u32_be(count as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_MAP8);
             buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
@@ -450,8 +450,8 @@ impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
     fn array_encode(&self, buf: &mut BytesMut) {
         let count = self.len() * 2;
         let size = map_encoded_size(self) + 4;
-        buf.put_u32::<BigEndian>(size as u32);
-        buf.put_u32::<BigEndian>(count as u32);
+        buf.put_u32_be(size as u32);
+        buf.put_u32_be(count as u32);
 
         for (k, v) in self {
             k.encode(buf);
@@ -475,8 +475,8 @@ impl<T: ArrayEncode> Encode for Vec<T> {
         let size = array_encoded_size(self);
         if size + 2 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32::<BigEndian>((size + 5) as u32); // +5 for 4 byte count and 1 byte item ctor that follow
-            buf.put_u32::<BigEndian>(self.len() as u32);
+            buf.put_u32_be((size + 5) as u32); // +5 for 4 byte count and 1 byte item ctor that follow
+            buf.put_u32_be(self.len() as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
             buf.put_u8((size + 2) as u8); // +2 for 1 byte count and 1 byte item ctor that follow
@@ -525,8 +525,8 @@ impl Encode for List {
         let size = list_encoded_size(self);
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32::<BigEndian>((size + 4) as u32); // +4 for 4 byte count that follow
-            buf.put_u32::<BigEndian>(self.len() as u32);
+            buf.put_u32_be((size + 4) as u32); // +4 for 4 byte count that follow
+            buf.put_u32_be(self.len() as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
             buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follow
@@ -634,10 +634,10 @@ impl Encode for AmqpFrame {
 
     fn encode(&self, buf: &mut BytesMut) {
         let doff: u8 = (framing::HEADER_LEN / WORD_LEN) as u8;
-        buf.put_u32::<BigEndian>(self.encoded_size() as u32);
+        buf.put_u32_be(self.encoded_size() as u32);
         buf.put_u8(doff);
         buf.put_u8(framing::FRAME_TYPE_AMQP);
-        buf.put_u16::<BigEndian>(self.channel_id());
+        buf.put_u16_be(self.channel_id());
         self.performative().encode(buf);
         buf.put(self.body());
     }
@@ -650,10 +650,10 @@ impl Encode for SaslFrame {
 
     fn encode(&self, buf: &mut BytesMut) {
         let doff: u8 = (framing::HEADER_LEN / WORD_LEN) as u8;
-        buf.put_u32::<BigEndian>(self.encoded_size() as u32);
+        buf.put_u32_be(self.encoded_size() as u32);
         buf.put_u8(doff);
         buf.put_u8(framing::FRAME_TYPE_SASL);
-        buf.put_u16::<BigEndian>(0);
+        buf.put_u16_be(0);
         self.body.encode(buf);
     }
 }

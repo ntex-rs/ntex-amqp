@@ -1,6 +1,6 @@
 #![allow(unused_variables, unused_assignments, unused_mut, unreachable_patterns)]
 
-use bytes::{BigEndian, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use ::errors::Result;
 use uuid::Uuid;
 use ::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
@@ -257,8 +257,8 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32::<BigEndian>((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32::<BigEndian>({{list.name}}::FIELD_COUNT as u32);
+        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32_be({{list.name}}::FIELD_COUNT as u32);
     }
     else {
         buf.put_u8(codec::FORMATCODE_LIST8);

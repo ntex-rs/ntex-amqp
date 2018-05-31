@@ -1,4 +1,4 @@
-#![feature(proc_macro, conservative_impl_trait, generators, vec_resize_default)]
+#![feature(proc_macro, generators, vec_resize_default)]
 #![feature(trace_macros)]
 
 extern crate bytes;

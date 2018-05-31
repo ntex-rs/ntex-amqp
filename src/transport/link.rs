@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use futures::unsync::oneshot;
 
 use protocol::*;
