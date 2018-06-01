@@ -54,7 +54,7 @@ impl Message {
         dst.freeze()
     }
 
-    fn encoded_size(&self) -> usize {
+    pub fn encoded_size(&self) -> usize {
         let mut size = self.application_data.encoded_size();
         if let Some(ref h) = self.header {
             size += h.encoded_size() + SECTION_PREFIX_LENGTH;
