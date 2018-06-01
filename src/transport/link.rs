@@ -2,7 +2,7 @@ use futures::unsync::oneshot;
 
 use protocol::*;
 use super::*;
-use std::{iter::IntoIterator, collections::VecDeque};
+use std::collections::VecDeque;
 
 #[derive(Clone)]
 pub struct SenderLink {
