@@ -27,7 +27,7 @@ pub enum MessageBody {
 const SECTION_PREFIX_LENGTH: usize = 3;
 
 impl Message {
-    pub(crate) fn serialize(self) -> Bytes {
+    pub fn serialize(self) -> Bytes {
         let mut dst = BytesMut::with_capacity(self.encoded_size());
         if let Some(h) = self.header {
             Section::Header(h).encode(&mut dst);
