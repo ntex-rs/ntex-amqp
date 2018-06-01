@@ -6,6 +6,7 @@ use codec::Encode;
 
 #[derive(Debug, Clone)]
 pub struct Message {
+    pub message_format: Option<MessageFormat>,
     pub header: Option<Header>,
     pub delivery_annotations: Option<Annotations>,
     pub message_annotations: Option<Annotations>,
@@ -82,6 +83,7 @@ impl Message {
 impl Default for Message {
     fn default() -> Message {
         Message {
+            message_format: None,
             header: None,
             delivery_annotations: None,
             message_annotations: None,
