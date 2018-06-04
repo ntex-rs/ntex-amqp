@@ -108,7 +108,7 @@ impl MessageBody {
     pub(crate) fn encode(self, dst: &mut BytesMut) {
         match self {
             MessageBody::Data(d) => Section::Data(d).encode(dst),
-            MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| d.encode(dst)),
+            MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| Section::Data(d).encode(dst)),
             MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| seq.encode(dst)),
             MessageBody::Value(val) => val.encode(dst)
         }
