@@ -100,7 +100,7 @@ impl MessageBody {
         match *self {
             MessageBody::Data(ref d) => d.encoded_size() + SECTION_PREFIX_LENGTH,
             MessageBody::DataVec(ref ds) => ds.iter().fold(0, |a, d| a + d.encoded_size() + SECTION_PREFIX_LENGTH),
-            MessageBody::SequenceVec(ref seqs) => seqs.iter().fold(0, |a, seq| seq.encoded_size() + SECTION_PREFIX_LENGTH),
+            MessageBody::SequenceVec(ref seqs) => seqs.iter().fold(0, |a, seq| a + seq.encoded_size() + SECTION_PREFIX_LENGTH),
             MessageBody::Value(ref val) => val.encoded_size() + SECTION_PREFIX_LENGTH
         }
     }
@@ -109,8 +109,8 @@ impl MessageBody {
         match self {
             MessageBody::Data(d) => Section::Data(d).encode(dst),
             MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| Section::Data(d).encode(dst)),
-            MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| seq.encode(dst)),
-            MessageBody::Value(val) => val.encode(dst)
+            MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| Section::AmqpSequence(seq).encode(dst)),
+            MessageBody::Value(val) => Section::AmqpValue(val).encode(dst)
         }
     }
 }
