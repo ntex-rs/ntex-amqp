@@ -238,7 +238,7 @@ impl SessionInner {
             handle: link_handle,
             delivery_id: Some(delivery_id),
             delivery_tag: Some(delivery_tag.clone()),
-            message_format: None,
+            message_format: message.message_format,
             settled: Some(false),
             more: false,
             rcv_settle_mode: None,
