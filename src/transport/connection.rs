@@ -68,11 +68,11 @@ impl Connection {
         });
         handle.spawn(read_handling.map_err(|e| {
             // todo: handle error while reading
-            println!("Error reading: {:?}", e);
+            println!("AMQP: Error reading: {:?}", e);
         }));
         handle.spawn(conn_transport.map_err(|e| {
             // todo: handle error while writing
-            println!("Error writing: {:?}", e);
+            println!("AMQP: Error writing: {:?}", e);
         }));
         Connection { inner: connection }
     }
