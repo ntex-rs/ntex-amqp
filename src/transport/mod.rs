@@ -1,7 +1,8 @@
 use futures::prelude::*;
-use futures::{Sink, Stream, Async};
+use futures::{Sink, Stream, Async, Future};
 use futures::task::{self, Task};
 use futures::unsync::oneshot;
+use tokio_codec::Framed;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::io::{read_exact, write_all};
 use uuid::Uuid;
@@ -95,7 +96,9 @@ impl<T: Clone> HandleVec<T> {
         let len = self.items.len();
         if handle >= len {
             self.empty_count += (handle + 1 - len) as u32;
-            self.items.resize_default(handle + 1);
+            while self.items.len() < handle {
+                self.items.push(None); // resize_default(handle + 1);
+            }
         }
         if self.items[handle as usize].is_some() {
             panic!("handle is set while it must not be");
@@ -110,64 +113,88 @@ impl<T: Clone> HandleVec<T> {
     }
 }
 
-#[async]
-fn negotiate_protocol<T: AsyncRead + AsyncWrite + 'static>(protocol_id: ProtocolId, io: T) -> Result<T> {
+fn negotiate_protocol<T>(protocol_id: ProtocolId, io: T) -> impl Future<Item=T, Error=Error>
+where
+    T: AsyncRead + AsyncWrite,
+{
     let header_buf = encode_protocol_header(protocol_id);
-    let (io, _) = await!(write_all(io, header_buf))?;
-    let header_buf = [0; 8];
-    let (io, header_buf) = await!(read_exact(io, header_buf))?;
-    let recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
-    ensure!(
-        recv_protocol_id == protocol_id,
-        "Expected `{:?}` protocol id, seen `{:?} instead.`",
-        protocol_id,
-        recv_protocol_id);
-    Ok(io)
+    write_all(io, header_buf)
+        .map_err(Error::from)
+        .and_then(|(io, _)| {
+            let header_buf = [0; 8];
+            read_exact(io, header_buf)
+                .map_err(Error::from)
+                .and_then(|(io, header_buf)| {
+                    let recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
+                    // ensure!(
+                    //     recv_protocol_id == protocol_id,
+                    //     "Expected `{:?}` protocol id, seen `{:?} instead.`",
+                    //     protocol_id,
+                    //     recv_protocol_id);
+                    Ok(io)
+                })
+        })
 }
 
 /// negotiating SASL authentication
-#[async]
-pub fn sasl_auth<T: AsyncRead + AsyncWrite + 'static>(authz_id: String, authn_id: String, password: String, io: T) -> Result<T> {
-    let io = await!(negotiate_protocol(ProtocolId::AmqpSasl, io))?;
+pub fn sasl_auth<T>(authz_id: String, authn_id: String, password: String, io: T) -> impl Future<Item=T, Error=Error>
+where
+    T: AsyncRead + AsyncWrite,
+{
+    negotiate_protocol(ProtocolId::AmqpSasl, io)
+        .and_then(move |io| {
+            let sasl_io = Framed::new(io, AmqpCodec::<SaslFrame>::new());
 
-    let sasl_io = io.framed(AmqpCodec::<SaslFrame>::new());
+            // processing sasl-mechanisms
+            sasl_io.into_future()
+                .map_err(|e| e.0)
+                .and_then(move |(sasl_frame, sasl_io)| {
+                    let plain_symbol = Symbol::from_static("PLAIN");
+                    // if let Some(SaslFrame { body: SaslFrameBody::SaslMechanisms(mechs) }) = sasl_frame {
+                    //     if !mechs
+                    //         .sasl_server_mechanisms()
+                    //         .iter()
+                    //         .any(|m| *m == plain_symbol)
+                    //     {
+                    //         bail!("only PLAIN SASL mechanism is supported. server supports: {:?}", mechs.sasl_server_mechanisms());
+                    //     }
+                    // } else {
+                    //     bail!("expected SASL Mechanisms frame to arrive, seen `{:?}` instead.", sasl_frame);
+                    // }
 
-    // processing sasl-mechanisms
-    let (sasl_frame, sasl_io) = await!(sasl_io.into_future()).map_err(|e| e.0)?;
-    let plain_symbol = Symbol::from_static("PLAIN");
-    if let Some(SaslFrame { body: SaslFrameBody::SaslMechanisms(mechs) }) = sasl_frame {
-        if !mechs
-            .sasl_server_mechanisms()
-            .iter()
-            .any(|m| *m == plain_symbol)
-        {
-            bail!("only PLAIN SASL mechanism is supported. server supports: {:?}", mechs.sasl_server_mechanisms());
-        }
-    } else {
-        bail!("expected SASL Mechanisms frame to arrive, seen `{:?}` instead.", sasl_frame);
-    }
-    // sending sasl-init
-    let initial_response = SaslInit::prepare_response(&authz_id, &authn_id, &password);
-    let sasl_init = SaslInit {
-        mechanism: plain_symbol,
-        initial_response: Some(initial_response),
-        hostname: None,
-    };
-    let sasl_io = await!(sasl_io.send(SaslFrame::new(SaslFrameBody::SaslInit(sasl_init))))?;
-    // processing sasl-outcome
-    let (sasl_frame, sasl_io) = await!(sasl_io.into_future()).map_err(|e| e.0)?;
-    if let Some(SaslFrame {
-        body: SaslFrameBody::SaslOutcome(outcome),
-    }) = sasl_frame
-    {
-        ensure!(outcome.code() == SaslCode::Ok,
-            "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
-            outcome.code(),
-            outcome.additional_data());
-    } else {
-        bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
-    }
+                    // sending sasl-init
+                    let initial_response = SaslInit::prepare_response(&authz_id, &authn_id, &password);
+                    let sasl_init = SaslInit {
+                        mechanism: plain_symbol,
+                        initial_response: Some(initial_response),
+                        hostname: None,
+                    };
+                    sasl_io.send(SaslFrame::new(SaslFrameBody::SaslInit(sasl_init)))
+                        .map_err(Error::from)
+                        .and_then(|sasl_io| {
+                            // processing sasl-outcome
+                            sasl_io.into_future()
+                                .map_err(|e| Error::from(e.0))
+                                .and_then(|(sasl_frame, sasl_io)| {
+                                    sasl_io.into_future().map_err(|e| e.0)
+                                        .and_then(|(sasl_frame, sasl_io)| {
+                                            if let Some(SaslFrame {
+                                                body: SaslFrameBody::SaslOutcome(outcome),
+                                            }) = sasl_frame
+                                            {
+                                                // ensure!(outcome.code() == SaslCode::Ok,
+                                                //     "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
+                                                //     outcome.code(),
+                                                //     outcome.additional_data());
+                                            } else {
+                                                bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
+                                            }
 
-    let io = sasl_io.into_inner();
-    Ok(io)
+                                            let io = sasl_io.into_inner();
+                                            Ok(io)
+                                        })
+                                })
+                        })
+                })
+        })
 }

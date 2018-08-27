@@ -1,4 +1,4 @@
-#![allow(unused_doc_comment)]
+#![allow(unused_doc_comments)]
 
 error_chain!{
     errors {

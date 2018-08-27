@@ -1,16 +1,14 @@
-#![feature(proc_macro, generators, vec_resize_default)]
-#![feature(trace_macros)]
-
+extern crate actix_net;
 extern crate bytes;
 extern crate chrono;
 extern crate uuid;
 extern crate ordered_float;
+extern crate futures;
+extern crate tokio_io;
+extern crate tokio_codec;
+extern crate tokio_current_thread;
 #[macro_use]
 extern crate error_chain;
-extern crate tokio_io;
-extern crate tokio_core;
-#[macro_use]
-extern crate futures_await as futures;
 
 #[macro_use]
 pub mod codec;
