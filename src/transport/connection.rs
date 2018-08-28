@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use actix_net::{Service, NewService};
+use actix_net::{Service, NewService, ConnectionInfo};
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::{future, AsyncSink, Future, Sink, Stream, Poll};
@@ -57,7 +57,7 @@ impl<T, E> Service for ConnectionHandshake<T, E>
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
-    type Request = (String, T);
+    type Request = (ConnectionInfo, T);
     type Response = Connection;
     type Error = Error;
     type Future = Box<Future<Item=Connection, Error=Self::Error>>;
@@ -66,12 +66,12 @@ where
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, (host, stream): (String, T)) -> Self::Future {
+    fn call(&mut self, (info, stream): Self::Request) -> Self::Future {
         Box::new(
             negotiate_protocol(ProtocolId::Amqp, stream)
-                .and_then(|io| {
+                .and_then(move |io| {
                     let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
-                    open_connection(host, io)
+                    open_connection(&info.host, io)
                         .map(|io| Connection::new(io))
                 }))
     }
@@ -81,7 +81,7 @@ impl<T, E> NewService for ConnectionHandshake<T, E>
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
-    type Request = (String, T);
+    type Request = (ConnectionInfo, T);
     type Response = Connection;
     type Error = Error;
     type InitError = E;
@@ -312,7 +312,7 @@ impl ConnectionInner {
 }
 
 /// Performs connection opening.
-fn open_connection<T>(hostname: String, io: T) -> impl Future<Item=T, Error=Error>
+fn open_connection<T>(hostname: &str, io: T) -> impl Future<Item=T, Error=Error>
 where
     T: Stream<Item = AmqpFrame, Error = Error> + Sink<SinkItem = AmqpFrame, SinkError = Error> + 'static,
 {
@@ -335,7 +335,6 @@ where
                 .map_err(|e| e.0)
                 .and_then(|(frame_opt, io)| {
                     if let Some(frame) = frame_opt {
-                        //println!("rx: {:?}", frame);
                         if let Frame::Open(ref open) = *frame.performative() {
                             Ok(io)
                         } else {

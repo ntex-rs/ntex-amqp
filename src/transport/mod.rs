@@ -96,7 +96,7 @@ impl<T: Clone> HandleVec<T> {
         let len = self.items.len();
         if handle >= len {
             self.empty_count += (handle + 1 - len) as u32;
-            while self.items.len() < handle {
+            while self.items.len() <= handle {
                 self.items.push(None); // resize_default(handle + 1);
             }
         }
@@ -143,6 +143,7 @@ where
 {
     negotiate_protocol(ProtocolId::AmqpSasl, io)
         .and_then(move |io| {
+            println!("AMQP: proto negotiated");
             let sasl_io = Framed::new(io, AmqpCodec::<SaslFrame>::new());
 
             // processing sasl-mechanisms
@@ -176,23 +177,21 @@ where
                             sasl_io.into_future()
                                 .map_err(|e| Error::from(e.0))
                                 .and_then(|(sasl_frame, sasl_io)| {
-                                    sasl_io.into_future().map_err(|e| e.0)
-                                        .and_then(|(sasl_frame, sasl_io)| {
-                                            if let Some(SaslFrame {
-                                                body: SaslFrameBody::SaslOutcome(outcome),
-                                            }) = sasl_frame
-                                            {
-                                                // ensure!(outcome.code() == SaslCode::Ok,
-                                                //     "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
-                                                //     outcome.code(),
-                                                //     outcome.additional_data());
-                                            } else {
-                                                bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
-                                            }
+                                    println!("FRAME: {:?}", sasl_frame);
+                                    if let Some(SaslFrame {
+                                        body: SaslFrameBody::SaslOutcome(outcome),
+                                    }) = sasl_frame
+                                    {
+                                        ensure!(outcome.code() == SaslCode::Ok,
+                                            "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
+                                            outcome.code(),
+                                            outcome.additional_data());
+                                    } else {
+                                        bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
+                                    }
 
-                                            let io = sasl_io.into_inner();
-                                            Ok(io)
-                                        })
+                                    let io = sasl_io.into_inner();
+                                    Ok(io)
                                 })
                         })
                 })
