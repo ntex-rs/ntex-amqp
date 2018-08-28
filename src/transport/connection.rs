@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use actix_net::Service;
+use actix_net::{Service, NewService};
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::{future, AsyncSink, Future, Sink, Stream, Poll};
@@ -24,11 +24,36 @@ pub struct Connection {
     inner: Rc<RefCell<ConnectionInner>>,
 }
 
-struct ConnectionHandshake<T> {
+pub struct ConnectionHandshake<T, E> {
     t: PhantomData<T>,
+    e: PhantomData<E>,
 }
 
-impl<T> Service for ConnectionHandshake<T>
+impl<T, E> ConnectionHandshake<T, E>
+where
+    T: AsyncRead + AsyncWrite + 'static,
+{
+    pub fn new() -> Self {
+        ConnectionHandshake {
+            t: PhantomData,
+            e: PhantomData,
+        }
+    }
+}
+
+impl<T, E> Clone for ConnectionHandshake<T, E>
+where
+    T: AsyncRead + AsyncWrite + 'static,
+{
+    fn clone(&self) -> Self {
+        ConnectionHandshake {
+            t: PhantomData,
+            e: PhantomData,
+        }
+    }
+}
+
+impl<T, E> Service for ConnectionHandshake<T, E>
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
@@ -49,6 +74,22 @@ where
                     open_connection(host, io)
                         .map(|io| Connection::new(io))
                 }))
+    }
+}
+
+impl<T, E> NewService for ConnectionHandshake<T, E>
+where
+    T: AsyncRead + AsyncWrite + 'static,
+{
+    type Request = (String, T);
+    type Response = Connection;
+    type Error = Error;
+    type InitError = E;
+    type Service = ConnectionHandshake<T, E>;
+    type Future = future::FutureResult<ConnectionHandshake<T, E>, E>;
+
+    fn new_service(&self) -> Self::Future {
+        future::ok(ConnectionHandshake{ t: PhantomData, e: PhantomData })
     }
 }
 
