@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use actix_net::{Service, NewService, ConnectionInfo};
+use actix_net::{Service, NewService, connector::ConnectionInfo};
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::{future, AsyncSink, Future, Sink, Stream, Poll};
@@ -24,72 +24,79 @@ pub struct Connection {
     inner: Rc<RefCell<ConnectionInner>>,
 }
 
-pub struct ConnectionHandshake<T, E> {
+pub struct ConnectionHandshake<T, E, Io> {
     t: PhantomData<T>,
     e: PhantomData<E>,
+    io: PhantomData<Io>,
 }
 
-impl<T, E> ConnectionHandshake<T, E>
+impl<T, E, Io> ConnectionHandshake<T, E, Io>
 where
-    T: AsyncRead + AsyncWrite + 'static,
+    T: 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
 {
     pub fn new() -> Self {
         ConnectionHandshake {
             t: PhantomData,
             e: PhantomData,
+            io: PhantomData,
         }
     }
 }
 
-impl<T, E> Clone for ConnectionHandshake<T, E>
+impl<T, E, Io> Clone for ConnectionHandshake<T, E, Io>
 where
-    T: AsyncRead + AsyncWrite + 'static,
+    T: 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
 {
     fn clone(&self) -> Self {
         ConnectionHandshake {
             t: PhantomData,
             e: PhantomData,
+            io: PhantomData,
         }
     }
 }
 
-impl<T, E> Service for ConnectionHandshake<T, E>
+impl<T, E, Io> Service for ConnectionHandshake<T, E, Io>
 where
-    T: AsyncRead + AsyncWrite + 'static,
+    T: 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
 {
-    type Request = (ConnectionInfo, T);
-    type Response = Connection;
+    type Request = (T, ConnectionInfo, Io);
+    type Response = (T, Connection);
     type Error = Error;
-    type Future = Box<Future<Item=Connection, Error=Self::Error>>;
+    type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, (info, stream): Self::Request) -> Self::Future {
+    fn call(&mut self, (req, info, stream): Self::Request) -> Self::Future {
         Box::new(
             negotiate_protocol(ProtocolId::Amqp, stream)
                 .and_then(move |io| {
                     let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
                     open_connection(&info.host, io)
-                        .map(|io| Connection::new(io))
+                        .map(|io| (req, Connection::new(io)))
                 }))
     }
 }
 
-impl<T, E> NewService for ConnectionHandshake<T, E>
+impl<T, E, Io> NewService for ConnectionHandshake<T, E, Io>
 where
-    T: AsyncRead + AsyncWrite + 'static,
+    T: 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
 {
-    type Request = (ConnectionInfo, T);
-    type Response = Connection;
+    type Request = (T, ConnectionInfo, Io);
+    type Response = (T, Connection);
     type Error = Error;
     type InitError = E;
-    type Service = ConnectionHandshake<T, E>;
-    type Future = future::FutureResult<ConnectionHandshake<T, E>, E>;
+    type Service = ConnectionHandshake<T, E, Io>;
+    type Future = future::FutureResult<ConnectionHandshake<T, E, Io>, E>;
 
     fn new_service(&self) -> Self::Future {
-        future::ok(ConnectionHandshake{ t: PhantomData, e: PhantomData })
+        future::ok(ConnectionHandshake{ t: PhantomData, e: PhantomData, io: PhantomData })
     }
 }
 
