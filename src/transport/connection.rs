@@ -8,9 +8,9 @@ use bytes::Bytes;
 use futures::prelude::*;
 use futures::{future, AsyncSink, Future, Sink, Stream, Poll};
 use futures::unsync::oneshot;
+use futures::stream::{SplitStream, SplitSink};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_codec::Framed;
-use tokio_current_thread::spawn;
 
 use errors::Error;
 use io::AmqpCodec;
@@ -18,11 +18,6 @@ use framing::AmqpFrame;
 
 use super::session::*;
 use super::*;
-
-#[derive(Clone)]
-pub struct Connection {
-    inner: Rc<RefCell<ConnectionInner>>,
-}
 
 pub struct ConnectionHandshake<T, E, Io> {
     t: PhantomData<T>,
@@ -64,7 +59,7 @@ where
     Io: AsyncRead + AsyncWrite + 'static,
 {
     type Request = (T, ConnectionInfo, Io);
-    type Response = (T, Connection);
+    type Response = (T, Connection<Io>);
     type Error = Error;
     type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
 
@@ -89,7 +84,7 @@ where
     Io: AsyncRead + AsyncWrite + 'static,
 {
     type Request = (T, ConnectionInfo, Io);
-    type Response = (T, Connection);
+    type Response = (T, Connection<Io>);
     type Error = Error;
     type InitError = E;
     type Service = ConnectionHandshake<T, E, Io>;
@@ -98,6 +93,12 @@ where
     fn new_service(&self) -> Self::Future {
         future::ok(ConnectionHandshake{ t: PhantomData, e: PhantomData, io: PhantomData })
     }
+}
+
+pub struct Connection<T: AsyncRead + AsyncWrite + 'static> {
+    inner: Rc<RefCell<ConnectionInner>>,
+    reader: SplitStream<Framed<T, AmqpCodec<AmqpFrame>>>,
+    transport: ConnectionTransport<SplitSink<Framed<T, AmqpCodec<AmqpFrame>>>>,
 }
 
 pub(crate) struct ConnectionInner {
@@ -119,32 +120,17 @@ struct ConnectionTransport<T: Sink<SinkItem = AmqpFrame, SinkError = Error> + 's
     flushed: bool,
 }
 
-impl Connection {
+impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
-    fn new<T: AsyncRead + AsyncWrite + 'static>(io: Framed<T, AmqpCodec<AmqpFrame>>) -> Connection {
+    fn new(io: Framed<T, AmqpCodec<AmqpFrame>>) -> Connection<T> {
         let (writer, reader) = io.split();
-        let connection = Rc::new(RefCell::new(ConnectionInner::new()));
-        let conn_transport = ConnectionTransport {
+        let inner = Rc::new(RefCell::new(ConnectionInner::new()));
+        let transport = ConnectionTransport {
             sink: writer,
-            connection: connection.clone(),
+            connection: inner.clone(),
             flushed: true,
         };
-        let reader_conn = connection.clone();
-        let read_handling = reader.for_each(move |frame| {
-            reader_conn
-                .borrow_mut()
-                .handle_frame(frame, reader_conn.clone());
-            Ok(())
-        });
-        spawn(read_handling.map_err(|e| {
-            // todo: handle error while reading
-            println!("AMQP: Error reading: {:?}", e);
-        }));
-        spawn(conn_transport.map_err(|e| {
-            // todo: handle error while writing
-            println!("AMQP: Error writing: {:?}", e);
-        }));
-        Connection { inner: connection }
+        Connection { inner, reader, transport }
     }
 
     pub fn close() -> impl Future<Item = (), Error = Error> {
@@ -154,6 +140,40 @@ impl Connection {
     /// Opens the session
     pub fn open_session(&self) -> impl Future<Item = Session, Error = Error> {
         self.inner.borrow_mut().open_session()
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        loop {
+            match self.reader.poll() {
+                Ok(Async::Ready(Some(frame))) => {
+                    self.inner.borrow_mut()
+                        .handle_frame(frame, self.inner.clone());
+                },
+                Ok(Async::Ready(None)) => return Err(()),
+                Ok(Async::NotReady) => break,
+                Err(e) => {
+                    warn!("AMQP: Error reading: {:?}", e);
+                    return Err(())
+                }
+            }
+        }
+
+        match self.transport.poll() {
+            Ok(Async::Ready(_)) => return Err(()),
+            Ok(Async::NotReady) => (),
+            Err(e) => {
+                // todo: handle error while writing
+                warn!("AMQP: Error writing: {:?}", e);
+                return Err(())
+            }
+        }
+
+        Ok(Async::NotReady)
     }
 }
 

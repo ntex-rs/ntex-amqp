@@ -9,6 +9,8 @@ extern crate tokio_codec;
 extern crate tokio_current_thread;
 #[macro_use]
 extern crate error_chain;
+#[macro_use]
+extern crate log;
 
 #[macro_use]
 pub mod codec;

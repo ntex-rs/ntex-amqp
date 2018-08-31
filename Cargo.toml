@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Mike Yagley <myagley@gmail.com>"]
 
 [dependencies]
+log = "0.4"
 bytes = "0.4"
 chrono = "0.4"
 uuid = { version = "0.6", features = ["use_std", "v4"] }
