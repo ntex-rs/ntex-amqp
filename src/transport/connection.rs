@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 
-use actix_net::{Service, NewService, connector::ConnectionInfo};
+use actix_net::{Service, connector::ConnectionInfo};
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::{future, AsyncSink, Future, Sink, Stream, Poll};
@@ -19,13 +19,12 @@ use framing::AmqpFrame;
 use super::session::*;
 use super::*;
 
-pub struct ConnectionHandshake<T, E, Io> {
+pub struct ConnectionHandshake<T, Io> {
     t: PhantomData<T>,
-    e: PhantomData<E>,
     io: PhantomData<Io>,
 }
 
-impl<T, E, Io> ConnectionHandshake<T, E, Io>
+impl<T, Io> ConnectionHandshake<T, Io>
 where
     T: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
@@ -33,13 +32,12 @@ where
     pub fn new() -> Self {
         ConnectionHandshake {
             t: PhantomData,
-            e: PhantomData,
             io: PhantomData,
         }
     }
 }
 
-impl<T, E, Io> Clone for ConnectionHandshake<T, E, Io>
+impl<T, Io> Clone for ConnectionHandshake<T, Io>
 where
     T: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
@@ -47,13 +45,12 @@ where
     fn clone(&self) -> Self {
         ConnectionHandshake {
             t: PhantomData,
-            e: PhantomData,
             io: PhantomData,
         }
     }
 }
 
-impl<T, E, Io> Service for ConnectionHandshake<T, E, Io>
+impl<T, Io> Service for ConnectionHandshake<T, Io>
 where
     T: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
@@ -75,23 +72,6 @@ where
                     open_connection(&info.host, io)
                         .map(|io| (req, Connection::new(io)))
                 }))
-    }
-}
-
-impl<T, E, Io> NewService for ConnectionHandshake<T, E, Io>
-where
-    T: 'static,
-    Io: AsyncRead + AsyncWrite + 'static,
-{
-    type Request = (T, ConnectionInfo, Io);
-    type Response = (T, Connection<Io>);
-    type Error = Error;
-    type InitError = E;
-    type Service = ConnectionHandshake<T, E, Io>;
-    type Future = future::FutureResult<ConnectionHandshake<T, E, Io>, E>;
-
-    fn new_service(&self) -> Self::Future {
-        future::ok(ConnectionHandshake{ t: PhantomData, e: PhantomData, io: PhantomData })
     }
 }
 
