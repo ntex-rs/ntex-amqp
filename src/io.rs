@@ -1,13 +1,13 @@
-use tokio_io::codec::{Decoder, Encoder};
-use bytes::{BufMut, BytesMut, ByteOrder, BigEndian};
-use super::errors::{Result, Error};
-use super::framing::{HEADER_LEN};
+use super::errors::{Error, Result};
+use super::framing::HEADER_LEN;
+use bytes::{BigEndian, BufMut, ByteOrder, BytesMut};
 use codec::{Decode, Encode};
 use std::marker::PhantomData;
+use tokio_io::codec::{Decoder, Encoder};
 
 pub struct AmqpCodec<T: Decode + Encode> {
     state: DecodeState,
-    phantom: PhantomData<T>
+    phantom: PhantomData<T>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -18,11 +18,14 @@ enum DecodeState {
 
 impl<T: Decode + Encode> AmqpCodec<T> {
     pub fn new() -> AmqpCodec<T> {
-        AmqpCodec { state: DecodeState::FrameHeader, phantom: PhantomData }
+        AmqpCodec {
+            state: DecodeState::FrameHeader,
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
+impl<T: Decode + Encode /* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
     type Item = T;
     type Error = Error;
 
@@ -42,7 +45,7 @@ impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
                         src.reserve(size); // extend receiving buffer to fit the whole frame -- todo: too eager?
                         return Ok(None);
                     }
-                },
+                }
                 DecodeState::Frame(size) => {
                     if src.len() < size - 4 {
                         return Ok(None);
@@ -50,7 +53,8 @@ impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
 
                     let frame_buf = src.split_to(size - 4);
                     let (remainder, frame) = T::decode(frame_buf.as_ref())?;
-                    if remainder.len() > 0 { // todo: could it really happen?
+                    if remainder.len() > 0 {
+                        // todo: could it really happen?
                         return Err("bytes left unparsed at the frame trail".into());
                     }
                     // println!("decoded: {:?}", frame);
@@ -63,7 +67,7 @@ impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Decoder for AmqpCodec<T> {
     }
 }
 
-impl<T: Decode + Encode/* + ::std::fmt::Debug*/> Encoder for AmqpCodec<T> {
+impl<T: Decode + Encode /* + ::std::fmt::Debug*/> Encoder for AmqpCodec<T> {
     type Item = T;
     type Error = Error;
 

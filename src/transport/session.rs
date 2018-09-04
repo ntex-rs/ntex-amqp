@@ -1,15 +1,15 @@
-use futures::{future, Future};
-use futures::unsync::oneshot;
 use bytes::Bytes;
-use uuid::Uuid;
-use std::rc::{Rc, Weak};
+use futures::unsync::oneshot;
+use futures::{future, Future};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
+use std::rc::{Rc, Weak};
+use uuid::Uuid;
 
-use types::ByteStr;
-use protocol::*;
-use framing::AmqpFrame;
 use super::*;
+use framing::AmqpFrame;
+use protocol::*;
+use types::ByteStr;
 
 #[derive(Clone)]
 pub struct Session {
@@ -96,18 +96,17 @@ impl SessionInner {
         assert!(disposition.settled()); // we can only work with settled for now
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
-        let actionable = self.unsettled_deliveries
-            .range(from..to + 1)
-            .map(|(k, _)| k.clone())
-            .collect::<Vec<_>>();
+        let actionable = self.unsettled_deliveries.range(from..to + 1).map(|(k, _)| k.clone()).collect::<Vec<_>>();
         let outcome: Outcome;
         match disposition.state().map(|s| s.clone()) {
-            Some(DeliveryState::Received(v)) => { return; } // todo: apply more thinking
+            Some(DeliveryState::Received(v)) => {
+                return;
+            } // todo: apply more thinking
             Some(DeliveryState::Accepted(v)) => outcome = Outcome::Accepted(v.clone()),
             Some(DeliveryState::Rejected(v)) => outcome = Outcome::Rejected(v.clone()),
             Some(DeliveryState::Released(v)) => outcome = Outcome::Released(v.clone()),
             Some(DeliveryState::Modified(v)) => outcome = Outcome::Modified(v.clone()),
-            None => outcome = Outcome::Accepted(Accepted {})
+            None => outcome = Outcome::Accepted(Accepted {}),
         }
         // let state = disposition.state().map(|s| s.clone()).unwrap_or(DeliveryState::Accepted(Accepted {})).clone(); // todo: honor Source.default_outcome()
         for k in actionable {
@@ -124,10 +123,7 @@ impl SessionInner {
                 break;
             }
         }
-        if let Some(link) = flow.handle()
-            .and_then(|h| self.links.get(h))
-            .and_then(|lr| lr.upgrade())
-        {
+        if let Some(link) = flow.handle().and_then(|h| self.links.get(h)).and_then(|lr| lr.upgrade()) {
             link.borrow_mut().apply_flow(flow, self, conn);
         } else if flow.echo() {
             self.send_flow(conn);
@@ -203,11 +199,7 @@ impl SessionInner {
         // todo: DRY
         if self.outgoing_window == 0 {
             // todo: queue up instead
-            self.pending_transfers.push_back(PendingTransfer {
-                link_handle,
-                message,
-                promise,
-            });
+            self.pending_transfers.push_back(PendingTransfer { link_handle, message, promise });
             return;
         }
         let (frame, body) = self.prepare_transfer(link_handle, message, promise);
@@ -218,11 +210,7 @@ impl SessionInner {
         // todo: DRY
         if self.outgoing_window == 0 {
             // todo: queue up instead
-            self.pending_transfers.push_back(PendingTransfer {
-                link_handle,
-                message,
-                promise,
-            });
+            self.pending_transfers.push_back(PendingTransfer { link_handle, message, promise });
             return;
         }
         let (frame, body) = self.prepare_transfer(link_handle, message, promise);

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
-use std::str::{FromStr, ParseBoolError};
-use std::collections::{HashMap, HashSet};
 use serde_json::from_str;
+use std::collections::{HashMap, HashSet};
+use std::str::{FromStr, ParseBoolError};
 use std::sync::Mutex;
 
 lazy_static! {
@@ -17,14 +17,30 @@ lazy_static! {
         m.insert("boolean", "bool");
         m
     };
-
     static ref STRING_TYPES: HashSet<&'static str> = ["string", "symbol"].iter().cloned().collect();
-    static ref REF_TYPES: Mutex<HashSet<String>> = Mutex::new([
-        "Bytes", "ByteStr", "Symbol", "Fields", "Map",
-        "MessageId", "Address", "NodeProperties",
-        "Outcome", "DeliveryState", "FilterSet", "DeliveryTag",
-        "Symbols", "IetfLanguageTags", "ErrorCondition", "DistributionMode"]
-        .iter().map(|s| s.to_string()).collect());
+    static ref REF_TYPES: Mutex<HashSet<String>> = Mutex::new(
+        [
+            "Bytes",
+            "ByteStr",
+            "Symbol",
+            "Fields",
+            "Map",
+            "MessageId",
+            "Address",
+            "NodeProperties",
+            "Outcome",
+            "DeliveryState",
+            "FilterSet",
+            "DeliveryTag",
+            "Symbols",
+            "IetfLanguageTags",
+            "ErrorCondition",
+            "DistributionMode"
+        ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    );
     static ref ENUM_TYPES: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
 }
 
@@ -78,13 +94,15 @@ struct _Described {
     source: String,
     provides: Option<String>,
     descriptor: _Descriptor,
-    #[serde(default)] field: Vec<_Field>,
+    #[serde(default)]
+    field: Vec<_Field>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct _Field {
     name: String,
-    #[serde(rename = "type")] ty: String,
+    #[serde(rename = "type")]
+    ty: String,
     #[serde(default)]
     #[serde(deserialize_with = "string_as_bool")]
     mandatory: bool,
@@ -114,7 +132,7 @@ pub struct EnumItem {
     name: String,
     value: String,
     #[serde(default)]
-    value_len: usize
+    value_len: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,7 +163,7 @@ pub struct Enum {
     ty: String,
     provides: Vec<String>,
     items: Vec<EnumItem>,
-    is_symbol: bool
+    is_symbol: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,28 +216,29 @@ impl Definitions {
                     let ls = Described::list(d.clone());
                     Definitions::register_provides(&mut provide_map, &ls.name, Some(ls.descriptor.clone()), &ls.provides);
                     lists.push(ls);
-                },
+                }
                 _Type::Described(ref d) if d.class == "restricted" => {
                     let ls = Described::alias(d.clone());
                     Definitions::register_provides(&mut provide_map, &ls.name, Some(ls.descriptor.clone()), &ls.provides);
                     described_restricted.push(ls);
-                },
+                }
                 _ => {}
             }
         }
 
         let provides = provide_map
             .into_iter()
-            .filter_map(|(k, v)| if v.len() == 1 {
-                None
-            } else {
-                Some(ProvidesEnum {
-                    name: k,
-                    described: v.iter().any(|v| v.descriptor.code != 0),
-                    options: v,
-                })
-            })
-            .collect();
+            .filter_map(|(k, v)| {
+                if v.len() == 1 {
+                    None
+                } else {
+                    Some(ProvidesEnum {
+                        name: k,
+                        described: v.iter().any(|v| v.descriptor.code != 0),
+                        options: v,
+                    })
+                }
+            }).collect();
 
         Definitions {
             aliases,
@@ -232,12 +251,14 @@ impl Definitions {
 
     fn register_provides(map: &mut HashMap<String, Vec<ProvidesItem>>, name: &str, descriptor: Option<Descriptor>, provides: &Vec<String>) {
         for p in provides.iter() {
-            map.entry(p.clone())
-                .or_insert_with(|| vec![])
-                .push(ProvidesItem {
-                    ty: name.to_string(),
-                    descriptor: descriptor.clone().unwrap_or_else(|| Descriptor{ name: String::new(), domain: 0, code: 0 }),
-                });
+            map.entry(p.clone()).or_insert_with(|| vec![]).push(ProvidesItem {
+                ty: name.to_string(),
+                descriptor: descriptor.clone().unwrap_or_else(|| Descriptor {
+                    name: String::new(),
+                    domain: 0,
+                    code: 0,
+                }),
+            });
         }
     }
 }
@@ -261,16 +282,14 @@ impl Enum {
             ty: ty.clone(),
             provides: parse_provides(e.provides),
             is_symbol,
-            items: e.choice
+            items: e
+                .choice
                 .into_iter()
-                .map(|c| {
-                    EnumItem {
-                        name: camel_case(&*c.name),
-                        value_len: c.value.len(),
-                        value: c.value,
-                    }
-                })
-                .collect(),
+                .map(|c| EnumItem {
+                    name: camel_case(&*c.name),
+                    value_len: c.value.len(),
+                    value: c.value,
+                }).collect(),
         }
     }
 }
@@ -298,13 +317,13 @@ impl Described {
 
 impl Descriptor {
     fn from(d: _Descriptor) -> Descriptor {
-        let code_parts: Vec<u32> = d.code
+        let code_parts: Vec<u32> = d
+            .code
             .split(":")
             .map(|p| {
                 assert!(p.starts_with("0x"));
                 u32::from_str_radix(&p[2..], 16).expect("malformed descriptor code")
-            })
-            .collect();
+            }).collect();
         Descriptor {
             name: d.name,
             domain: code_parts[0],
@@ -347,12 +366,10 @@ impl Field {
 fn get_type_name(ty: &str, req: Option<String>) -> String {
     match req {
         Some(t) => camel_case(&*t),
-        None => {
-            match PRIMITIVE_TYPES.get(ty) {
-                Some(p) => p.to_string(),
-                None => camel_case(&*ty)
-            }
-        }
+        None => match PRIMITIVE_TYPES.get(ty) {
+            Some(p) => p.to_string(),
+            None => camel_case(&*ty),
+        },
     }
 }
 
@@ -366,8 +383,7 @@ fn parse_provides(p: Option<String>) -> Vec<String> {
                 } else {
                     Some(camel_case(&s))
                 }
-            })
-            .collect()
+            }).collect()
     }).unwrap_or(vec![])
 }
 
@@ -376,11 +392,7 @@ where
     T: FromStr<Err = ParseBoolError>,
     D: Deserializer<'de>,
 {
-    Ok(
-        String::deserialize(deserializer)?
-            .parse::<T>()
-            .expect("Error parsing bool from string"),
-    )
+    Ok(String::deserialize(deserializer)?.parse::<T>().expect("Error parsing bool from string"))
 }
 
 pub fn camel_case(name: &str) -> String {

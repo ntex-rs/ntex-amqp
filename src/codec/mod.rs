@@ -1,7 +1,7 @@
 use std::marker::Sized;
 
-use bytes::BytesMut;
 use super::errors::Result;
+use bytes::BytesMut;
 
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
@@ -13,8 +13,8 @@ macro_rules! decode_check_len {
 mod decode;
 mod encode;
 
-pub use self::decode::INVALID_DESCRIPTOR;
 pub(crate) use self::decode::decode_list_header;
+pub use self::decode::INVALID_DESCRIPTOR;
 
 pub trait Encode {
     fn encoded_size(&self) -> usize;
@@ -28,13 +28,15 @@ pub trait ArrayEncode {
 }
 
 pub trait Decode
-    where Self: Sized
+where
+    Self: Sized,
 {
     fn decode(input: &[u8]) -> Result<(&[u8], Self)>;
 }
 
 pub trait DecodeFormatted
-    where Self: Sized
+where
+    Self: Sized,
 {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)>;
 }

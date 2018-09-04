@@ -25,7 +25,6 @@ fn main() {
 
 #[cfg(feature = "from-spec")]
 fn generate_from_spec() {
-
     use handlebars::{Handlebars, Helper, RenderContext, RenderError};
     use std::env;
     use std::fs::File;

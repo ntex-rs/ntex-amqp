@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use bytes::{Bytes, BytesMut};
-use protocol::*;
-use types::*;
 use codec::Encode;
+use protocol::*;
+use std::collections::HashMap;
+use types::*;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -13,7 +13,7 @@ pub struct Message {
     pub properties: Option<Properties>,
     pub application_properties: Option<HashMap<ByteStr, Variant>>,
     pub application_data: MessageBody,
-    pub footer: Option<Annotations>
+    pub footer: Option<Annotations>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub enum MessageBody {
     Data(Bytes),
     DataVec(Vec<Bytes>),
     SequenceVec(Vec<List>),
-    Value(Variant)
+    Value(Variant),
 }
 
 const SECTION_PREFIX_LENGTH: usize = 3;
@@ -40,7 +40,7 @@ impl Message {
         }
         if let Some(p) = self.properties {
             Section::Properties(p).encode(&mut dst);
-       }
+        }
         if let Some(ap) = self.application_properties {
             Section::ApplicationProperties(ap).encode(&mut dst);
         }
@@ -101,7 +101,7 @@ impl MessageBody {
             MessageBody::Data(ref d) => d.encoded_size() + SECTION_PREFIX_LENGTH,
             MessageBody::DataVec(ref ds) => ds.iter().fold(0, |a, d| a + d.encoded_size() + SECTION_PREFIX_LENGTH),
             MessageBody::SequenceVec(ref seqs) => seqs.iter().fold(0, |a, seq| a + seq.encoded_size() + SECTION_PREFIX_LENGTH),
-            MessageBody::Value(ref val) => val.encoded_size() + SECTION_PREFIX_LENGTH
+            MessageBody::Value(ref val) => val.encoded_size() + SECTION_PREFIX_LENGTH,
         }
     }
 
@@ -110,7 +110,7 @@ impl MessageBody {
             MessageBody::Data(d) => Section::Data(d).encode(dst),
             MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| Section::Data(d).encode(dst)),
             MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| Section::AmqpSequence(seq).encode(dst)),
-            MessageBody::Value(val) => Section::AmqpValue(val).encode(dst)
+            MessageBody::Value(val) => Section::AmqpValue(val).encode(dst),
         }
     }
 }

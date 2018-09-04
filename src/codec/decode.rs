@@ -2,26 +2,24 @@ use std::{char, str, u8};
 
 use bytes::{BigEndian, ByteOrder, Bytes};
 use chrono::{DateTime, TimeZone, Utc};
-use codec::{self, DecodeFormatted, Decode};
+use codec::{self, Decode, DecodeFormatted};
+use errors::{ErrorKind, Result};
 use framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
-use types::{ByteStr, Descriptor, List, Symbol, Multiple, Variant, VariantMap};
-use uuid::Uuid;
 use ordered_float::OrderedFloat;
 use protocol::{self, CompoundHeader};
 use std::collections::HashMap;
-use errors::{ErrorKind, Result};
-use std::hash::{Hash, BuildHasher};
+use std::hash::{BuildHasher, Hash};
+use types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
+use uuid::Uuid;
 
 pub const INVALID_DESCRIPTOR: u32 = 0x0003;
 
 macro_rules! be_read {
-    ($input:ident, $fn:ident, $size:expr) => {
-        {
-            decode_check_len!($input, $size);
-            let x = BigEndian::$fn($input);
-            Ok((&$input[$size..], x))
-        }    
-    };
+    ($input:ident, $fn:ident, $size:expr) => {{
+        decode_check_len!($input, $size);
+        let x = BigEndian::$fn($input);
+        Ok((&$input[$size..], x))
+    }};
 }
 
 fn read_u8(input: &[u8]) -> Result<(&[u8], u8)> {
@@ -64,7 +62,7 @@ impl DecodeFormatted for bool {
             codec::FORMATCODE_BOOLEAN => read_u8(input).map(|(i, o)| (i, o != 0)),
             codec::FORMATCODE_BOOLEAN_TRUE => Ok((input, true)),
             codec::FORMATCODE_BOOLEAN_FALSE => Ok((input, false)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -89,7 +87,7 @@ impl DecodeFormatted for u32 {
             codec::FORMATCODE_UINT => be_read!(input, read_u32, 4),
             codec::FORMATCODE_SMALLUINT => read_u8(input).map(|(i, o)| (i, o as u32)),
             codec::FORMATCODE_UINT_0 => Ok((input, 0)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -100,7 +98,7 @@ impl DecodeFormatted for u64 {
             codec::FORMATCODE_ULONG => be_read!(input, read_u64, 8),
             codec::FORMATCODE_SMALLULONG => read_u8(input).map(|(i, o)| (i, o as u64)),
             codec::FORMATCODE_ULONG_0 => Ok((input, 0)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -124,7 +122,7 @@ impl DecodeFormatted for i32 {
         match fmt {
             codec::FORMATCODE_INT => be_read!(input, read_i32, 4),
             codec::FORMATCODE_SMALLINT => read_i8(input).map(|(i, o)| (i, o as i32)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -134,7 +132,7 @@ impl DecodeFormatted for i64 {
         match fmt {
             codec::FORMATCODE_LONG => be_read!(input, read_i64, 8),
             codec::FORMATCODE_SMALLLONG => read_i8(input).map(|(i, o)| (i, o as i64)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -158,7 +156,11 @@ impl DecodeFormatted for char {
         validate_code!(fmt, codec::FORMATCODE_CHAR);
         let result: Result<(&[u8], u32)> = be_read!(input, read_u32, 4);
         let (i, o) = result?;
-        if let Some(c) = char::from_u32(o) { Ok((i, c)) } else { Err(format!("Invalid value converting to char: {}", o).into()) } // todo: replace with CharTryFromError once try_from is stabilized 
+        if let Some(c) = char::from_u32(o) {
+            Ok((i, c))
+        } else {
+            Err(format!("Invalid value converting to char: {}", o).into())
+        } // todo: replace with CharTryFromError once try_from is stabilized
     }
 }
 
@@ -183,7 +185,7 @@ impl DecodeFormatted for Bytes {
         match fmt {
             codec::FORMATCODE_BINARY8 => read_bytes_u8(input).map(|(i, o)| (i, Bytes::from(o))),
             codec::FORMATCODE_BINARY32 => read_bytes_u32(input).map(|(i, o)| (i, Bytes::from(o))),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -194,12 +196,12 @@ impl DecodeFormatted for ByteStr {
             codec::FORMATCODE_STRING8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
                 Ok((input, ByteStr::from(str::from_utf8(bytes)?)))
-            },
+            }
             codec::FORMATCODE_STRING32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
                 Ok((input, ByteStr::from(str::from_utf8(bytes)?)))
-            },
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            }
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -210,12 +212,12 @@ impl DecodeFormatted for Symbol {
             codec::FORMATCODE_SYMBOL8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
                 Ok((input, Symbol::from(str::from_utf8(bytes)?)))
-            },
+            }
             codec::FORMATCODE_SYMBOL32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
                 Ok((input, Symbol::from(str::from_utf8(bytes)?)))
-            },
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            }
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -258,7 +260,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
             codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
                 let (input, items) = Vec::<T>::decode_with_format(input, fmt)?;
                 Ok((input, Multiple(items)))
-            },
+            }
             _ => {
                 let (input, item) = T::decode_with_format(input, fmt)?;
                 Ok((input, Multiple(vec![item])))
@@ -326,8 +328,8 @@ impl DecodeFormatted for Variant {
                 let (input, descriptor) = Descriptor::decode(input)?;
                 let (input, value) = Variant::decode(input)?;
                 Ok((input, Variant::Described((descriptor, Box::new(value)))))
-            },
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            }
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -336,7 +338,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Option<T> {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         match fmt {
             codec::FORMATCODE_NULL => Ok((input, None)),
-            _ => T::decode_with_format(input, fmt).map(|(i, o)| (i, Some(o)))
+            _ => T::decode_with_format(input, fmt).map(|(i, o)| (i, Some(o))),
         }
     }
 }
@@ -348,7 +350,7 @@ impl DecodeFormatted for Descriptor {
             codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Ulong(o))),
             codec::FORMATCODE_SYMBOL8 => Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o))),
             codec::FORMATCODE_SYMBOL32 => Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o))),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into())
+            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
 }
@@ -358,7 +360,7 @@ impl Decode for AmqpFrame {
         let (input, channel_id) = decode_frame_header(input, framing::FRAME_TYPE_AMQP)?;
         let (input, performative) = protocol::Frame::decode(input)?;
         let body = Bytes::from(input);
-        Ok((input, AmqpFrame::new(channel_id, performative, body))) 
+        Ok((input, AmqpFrame::new(channel_id, performative, body)))
     }
 }
 
@@ -412,14 +414,20 @@ fn decode_compound8(input: &[u8]) -> Result<(&[u8], CompoundHeader)> {
     decode_check_len!(input, 2);
     let size = input[0] - 1; // -1 for 1 byte count
     let count = input[1];
-    Ok((&input[2..], CompoundHeader {size: size as u32, count: count as u32}))
+    Ok((
+        &input[2..],
+        CompoundHeader {
+            size: size as u32,
+            count: count as u32,
+        },
+    ))
 }
 
 fn decode_compound32(input: &[u8]) -> Result<(&[u8], CompoundHeader)> {
     decode_check_len!(input, 8);
     let size = BigEndian::read_u32(input) - 4; // -4 for 4 byte count
     let count = BigEndian::read_u32(&input[4..]);
-    Ok((&input[8..], CompoundHeader {size: size, count: count}))
+    Ok((&input[8..], CompoundHeader { size: size, count: count }))
 }
 
 fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
@@ -601,36 +609,24 @@ mod tests {
     fn variant_bool_true() {
         let b1 = &mut BytesMut::with_capacity(0);
         b1.put_u8(0x41);
-        assert_eq!(
-            Variant::Boolean(true),
-            unwrap_value(Variant::decode(b1))
-        );
+        assert_eq!(Variant::Boolean(true), unwrap_value(Variant::decode(b1)));
 
         let b2 = &mut BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x01);
-        assert_eq!(
-            Variant::Boolean(true),
-            unwrap_value(Variant::decode(b2))
-        );
+        assert_eq!(Variant::Boolean(true), unwrap_value(Variant::decode(b2)));
     }
 
     #[test]
     fn variant_bool_false() {
         let b1 = &mut BytesMut::with_capacity(0);
         b1.put_u8(0x42u8);
-        assert_eq!(
-            Variant::Boolean(false),
-            unwrap_value(Variant::decode(b1))
-        );
+        assert_eq!(Variant::Boolean(false), unwrap_value(Variant::decode(b1)));
 
         let b2 = &mut BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x00);
-        assert_eq!(
-            Variant::Boolean(false),
-            unwrap_value(Variant::decode(b2))
-        );
+        assert_eq!(Variant::Boolean(false), unwrap_value(Variant::decode(b2)));
     }
 
     /// UTC with a precision of milliseconds. For example, 1311704463521
@@ -642,10 +638,7 @@ mod tests {
         Variant::Timestamp(datetime).encode(b1);
 
         let expected = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
-        assert_eq!(
-            Variant::Timestamp(expected),
-            unwrap_value(Variant::decode(b1))
-        );
+        assert_eq!(Variant::Timestamp(expected), unwrap_value(Variant::decode(b1)));
     }
 
     #[test]
@@ -655,10 +648,7 @@ mod tests {
         Variant::Timestamp(datetime).encode(b1);
 
         let expected = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
-        assert_eq!(
-            Variant::Timestamp(expected),
-            unwrap_value(Variant::decode(b1))
-        );
+        assert_eq!(Variant::Timestamp(expected), unwrap_value(Variant::decode(b1)));
     }
 
     #[test]
@@ -666,19 +656,13 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         Some(42i8).encode(b1);
 
-        assert_eq!(
-            Some(42),
-            unwrap_value(Option::<i8>::decode(b1))
-        );
+        assert_eq!(Some(42), unwrap_value(Option::<i8>::decode(b1)));
 
         let b2 = &mut BytesMut::with_capacity(0);
         let o1: Option<i8> = None;
         o1.encode(b2);
 
-        assert_eq!(
-            None,
-            unwrap_value(Option::<i8>::decode(b2))
-        );
+        assert_eq!(None, unwrap_value(Option::<i8>::decode(b2)));
     }
 
     #[test]
@@ -686,18 +670,12 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         Some(ByteStr::from("hello")).encode(b1);
 
-        assert_eq!(
-            Some(ByteStr::from("hello")),
-            unwrap_value(Option::<ByteStr>::decode(b1))
-        );
+        assert_eq!(Some(ByteStr::from("hello")), unwrap_value(Option::<ByteStr>::decode(b1)));
 
         let b2 = &mut BytesMut::with_capacity(0);
         let o1: Option<ByteStr> = None;
         o1.encode(b2);
 
-        assert_eq!(
-            None,
-            unwrap_value(Option::<ByteStr>::decode(b2))
-        );
+        assert_eq!(None, unwrap_value(Option::<ByteStr>::decode(b2)));
     }
 }

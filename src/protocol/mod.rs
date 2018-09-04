@@ -1,11 +1,11 @@
-use bytes::{Bytes, BytesMut, BufMut};
+use super::codec::{self, DecodeFormatted, Encode};
 use super::errors::*;
+use super::types::*;
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use uuid::Uuid;
-use super::codec::{self, DecodeFormatted, Encode};
-use super::types::*;
 use std::u8;
+use uuid::Uuid;
 
 pub(crate) struct CompoundHeader {
     pub size: u32,
@@ -135,7 +135,7 @@ impl Encode for ErrorCondition {
             ErrorCondition::ConnectionError(ref v) => v.encoded_size(),
             ErrorCondition::SessionError(ref v) => v.encoded_size(),
             ErrorCondition::LinkError(ref v) => v.encoded_size(),
-            ErrorCondition::Custom(ref v) => v.encoded_size()
+            ErrorCondition::Custom(ref v) => v.encoded_size(),
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
@@ -144,7 +144,7 @@ impl Encode for ErrorCondition {
             ErrorCondition::ConnectionError(ref v) => v.encode(buf),
             ErrorCondition::SessionError(ref v) => v.encode(buf),
             ErrorCondition::LinkError(ref v) => v.encode(buf),
-            ErrorCondition::Custom(ref v) => v.encode(buf)
+            ErrorCondition::Custom(ref v) => v.encode(buf),
         }
     }
 }

@@ -1,34 +1,34 @@
 use futures::prelude::*;
-use futures::{Sink, Stream, Async, Future};
 use futures::task::{self, Task};
 use futures::unsync::oneshot;
-use tokio_codec::Framed;
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_io::io::{read_exact, write_all};
-use uuid::Uuid;
-use std::rc::Rc;
+use futures::{Async, Future, Sink, Stream};
 use std::cell::RefCell;
+use std::rc::Rc;
+use tokio_codec::Framed;
+use tokio_io::io::{read_exact, write_all};
+use tokio_io::{AsyncRead, AsyncWrite};
+use uuid::Uuid;
 
-use io::AmqpCodec;
-use framing::SaslFrame;
-use types::{Symbol, ByteStr};
 use errors::*;
+use framing::SaslFrame;
+use io::AmqpCodec;
 use protocol::*;
+use types::{ByteStr, Symbol};
 
-mod message;
-mod link;
-mod session;
 mod connection;
+mod link;
+mod message;
+mod session;
 
-pub use self::message::*;
-pub use self::link::*;
-pub use self::session::*;
 pub use self::connection::*;
+pub use self::link::*;
+pub use self::message::*;
+pub use self::session::*;
 
 pub enum Delivery {
     Resolved(Result<Outcome>),
     Pending(oneshot::Receiver<Result<Outcome>>),
-    Gone
+    Gone,
 }
 
 type DeliveryPromise = oneshot::Sender<Result<Outcome>>;
@@ -41,7 +41,7 @@ impl Future for Delivery {
             return match receiver.poll() {
                 Ok(Async::Ready(r)) => r.map(|state| Async::Ready(state)),
                 Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => Err(e.into())
+                Err(e) => Err(e.into()),
             };
         }
 
@@ -49,21 +49,21 @@ impl Future for Delivery {
         if let Delivery::Resolved(r) = old_v {
             return match r {
                 Ok(state) => Ok(Async::Ready(state)),
-                Err(e) => Err(e)
+                Err(e) => Err(e),
             };
         }
         panic!("Polling Delivery after it was polled as ready is an error.");
     }
 }
 
-struct HandleVec<T>{
+struct HandleVec<T> {
     items: Vec<Option<T>>,
     empty_count: u32,
     //max_handle: u32 todo: do we need max_handle checks in HandleVec?
 }
 
 impl<T: Clone> HandleVec<T> {
-    pub fn new(/*max_handle: Handle*/) -> HandleVec<T> {
+    pub fn new() -> HandleVec<T> {
         HandleVec {
             items: Vec::<Option<T>>::with_capacity(4),
             empty_count: 0,
@@ -86,7 +86,7 @@ impl<T: Clone> HandleVec<T> {
 
     pub fn get(&self, handle: Handle) -> Option<T> {
         if let Some(ref r) = self.items[handle as usize] {
-            return Some(r.clone())
+            return Some(r.clone());
         }
         None
     }
@@ -113,87 +113,78 @@ impl<T: Clone> HandleVec<T> {
     }
 }
 
-fn negotiate_protocol<T>(protocol_id: ProtocolId, io: T) -> impl Future<Item=T, Error=Error>
+fn negotiate_protocol<T>(protocol_id: ProtocolId, io: T) -> impl Future<Item = T, Error = Error>
 where
     T: AsyncRead + AsyncWrite,
 {
     let header_buf = encode_protocol_header(protocol_id);
-    write_all(io, header_buf)
-        .map_err(Error::from)
-        .and_then(|(io, _)| {
-            let header_buf = [0; 8];
-            read_exact(io, header_buf)
-                .map_err(Error::from)
-                .and_then(|(io, header_buf)| {
-                    let recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
-                    // ensure!(
-                    //     recv_protocol_id == protocol_id,
-                    //     "Expected `{:?}` protocol id, seen `{:?} instead.`",
-                    //     protocol_id,
-                    //     recv_protocol_id);
-                    Ok(io)
-                })
+    write_all(io, header_buf).map_err(Error::from).and_then(|(io, _)| {
+        let header_buf = [0; 8];
+        read_exact(io, header_buf).map_err(Error::from).and_then(|(io, header_buf)| {
+            let recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
+                                                                         // ensure!(
+                                                                         //     recv_protocol_id == protocol_id,
+                                                                         //     "Expected `{:?}` protocol id, seen `{:?} instead.`",
+                                                                         //     protocol_id,
+                                                                         //     recv_protocol_id);
+            Ok(io)
         })
+    })
 }
 
 /// negotiating SASL authentication
-pub fn sasl_auth<T>(authz_id: String, authn_id: String, password: String, io: T) -> impl Future<Item=T, Error=Error>
+pub fn sasl_auth<T>(authz_id: String, authn_id: String, password: String, io: T) -> impl Future<Item = T, Error = Error>
 where
     T: AsyncRead + AsyncWrite,
 {
-    negotiate_protocol(ProtocolId::AmqpSasl, io)
-        .and_then(move |io| {
-            println!("AMQP: proto negotiated");
-            let sasl_io = Framed::new(io, AmqpCodec::<SaslFrame>::new());
+    negotiate_protocol(ProtocolId::AmqpSasl, io).and_then(move |io| {
+        println!("AMQP: proto negotiated");
+        let sasl_io = Framed::new(io, AmqpCodec::<SaslFrame>::new());
 
-            // processing sasl-mechanisms
-            sasl_io.into_future()
-                .map_err(|e| e.0)
-                .and_then(move |(sasl_frame, sasl_io)| {
-                    let plain_symbol = Symbol::from_static("PLAIN");
-                    // if let Some(SaslFrame { body: SaslFrameBody::SaslMechanisms(mechs) }) = sasl_frame {
-                    //     if !mechs
-                    //         .sasl_server_mechanisms()
-                    //         .iter()
-                    //         .any(|m| *m == plain_symbol)
-                    //     {
-                    //         bail!("only PLAIN SASL mechanism is supported. server supports: {:?}", mechs.sasl_server_mechanisms());
-                    //     }
-                    // } else {
-                    //     bail!("expected SASL Mechanisms frame to arrive, seen `{:?}` instead.", sasl_frame);
-                    // }
+        // processing sasl-mechanisms
+        sasl_io.into_future().map_err(|e| e.0).and_then(move |(sasl_frame, sasl_io)| {
+            let plain_symbol = Symbol::from_static("PLAIN");
+            // if let Some(SaslFrame { body: SaslFrameBody::SaslMechanisms(mechs) }) = sasl_frame {
+            //     if !mechs
+            //         .sasl_server_mechanisms()
+            //         .iter()
+            //         .any(|m| *m == plain_symbol)
+            //     {
+            //         bail!("only PLAIN SASL mechanism is supported. server supports: {:?}", mechs.sasl_server_mechanisms());
+            //     }
+            // } else {
+            //     bail!("expected SASL Mechanisms frame to arrive, seen `{:?}` instead.", sasl_frame);
+            // }
 
-                    // sending sasl-init
-                    let initial_response = SaslInit::prepare_response(&authz_id, &authn_id, &password);
-                    let sasl_init = SaslInit {
-                        mechanism: plain_symbol,
-                        initial_response: Some(initial_response),
-                        hostname: None,
-                    };
-                    sasl_io.send(SaslFrame::new(SaslFrameBody::SaslInit(sasl_init)))
-                        .map_err(Error::from)
-                        .and_then(|sasl_io| {
-                            // processing sasl-outcome
-                            sasl_io.into_future()
-                                .map_err(|e| Error::from(e.0))
-                                .and_then(|(sasl_frame, sasl_io)| {
-                                    println!("FRAME: {:?}", sasl_frame);
-                                    if let Some(SaslFrame {
-                                        body: SaslFrameBody::SaslOutcome(outcome),
-                                    }) = sasl_frame
-                                    {
-                                        ensure!(outcome.code() == SaslCode::Ok,
-                                            "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
-                                            outcome.code(),
-                                            outcome.additional_data());
-                                    } else {
-                                        bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
-                                    }
+            // sending sasl-init
+            let initial_response = SaslInit::prepare_response(&authz_id, &authn_id, &password);
+            let sasl_init = SaslInit {
+                mechanism: plain_symbol,
+                initial_response: Some(initial_response),
+                hostname: None,
+            };
+            sasl_io.send(SaslFrame::new(SaslFrameBody::SaslInit(sasl_init))).map_err(Error::from).and_then(|sasl_io| {
+                // processing sasl-outcome
+                sasl_io.into_future().map_err(|e| Error::from(e.0)).and_then(|(sasl_frame, sasl_io)| {
+                    println!("FRAME: {:?}", sasl_frame);
+                    if let Some(SaslFrame {
+                        body: SaslFrameBody::SaslOutcome(outcome),
+                    }) = sasl_frame
+                    {
+                        ensure!(
+                            outcome.code() == SaslCode::Ok,
+                            "SASL auth did not result in Ok outcome, seen `{:?}` instead. More info: {:?}",
+                            outcome.code(),
+                            outcome.additional_data()
+                        );
+                    } else {
+                        bail!("expected SASL Outcome frame to arrive, seen `{:?}` instead.", sasl_frame);
+                    }
 
-                                    let io = sasl_io.into_inner();
-                                    Ok(io)
-                                })
-                        })
+                    let io = sasl_io.into_inner();
+                    Ok(io)
                 })
+            })
         })
+    })
 }

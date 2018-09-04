@@ -12,18 +12,18 @@ extern crate tokio_tls;
 extern crate uuid;
 
 use futures::prelude::*;
+use futures::{future, Future};
+use std::net::SocketAddr;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor;
-use std::net::SocketAddr;
-use futures::{future, Future};
 
-use amqp::{transport, Error, ErrorKind, Result};
 use amqp::protocol::ProtocolId;
+use amqp::{transport, Error, ErrorKind, Result};
 use bytes::Bytes;
 use native_tls::TlsConnector;
-use tokio_tls::TlsConnectorExt;
 use std::net::ToSocketAddrs;
 use std::time::Instant;
+use tokio_tls::TlsConnectorExt;
 
 const SASL_ID: &str = "";
 const SASL_KEY: &str = "";
@@ -42,23 +42,16 @@ fn send(handle: reactor::Handle) -> Result<()> {
     let mut input = String::new();
     //std::io::stdin().read_line(&mut input);
 
-    let addr = format!("{}:5671", HOST_NAME)
-        .to_socket_addrs()
-        .unwrap()
-        .next()
-        .unwrap();
+    let addr = format!("{}:5671", HOST_NAME).to_socket_addrs().unwrap().next().unwrap();
     let socket = await!(TcpStream::connect(&addr, &handle))?;
     let tls_context = TlsConnector::builder().unwrap().build().unwrap();
-    let io = await!(tls_context.connect_async(HOST_NAME, socket).map_err(|e| {
-        Error::with_chain(e, ErrorKind::Msg("TLS handshake failed".into()))
-    }))?;
+    let io = await!(
+        tls_context
+            .connect_async(HOST_NAME, socket)
+            .map_err(|e| Error::with_chain(e, ErrorKind::Msg("TLS handshake failed".into())))
+    )?;
 
-    let io = await!(transport::sasl_auth(
-        "".into(),
-        SASL_ID.into(),
-        SASL_KEY.into(),
-        io
-    ))?;
+    let io = await!(transport::sasl_auth("".into(), SASL_ID.into(), SASL_KEY.into(), io))?;
 
     let conn = await!(transport::Connection::open(HOST_NAME.into(), handle, io))?;
     let session = await!(conn.open_session())?;
@@ -78,14 +71,10 @@ fn send(handle: reactor::Handle) -> Result<()> {
                 application_data: transport::MessageBody::Data(Bytes::from(vec![1, 2, 3, 4, 5, 6])),
                 ..Default::default()
             })
-        })
-        .collect();
+        }).collect();
     await!(future::join_all(deliveries))?;
 
-    println!(
-        "transfers completed in {}.",
-        chrono::Duration::from_std(start_time.elapsed()).unwrap()
-    );
+    println!("transfers completed in {}.", chrono::Duration::from_std(start_time.elapsed()).unwrap());
 
     std::io::stdin().read_line(&mut input);
 

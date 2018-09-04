@@ -1,7 +1,7 @@
 use futures::unsync::oneshot;
 
-use protocol::*;
 use super::*;
+use protocol::*;
 use std::collections::VecDeque;
 
 #[derive(Clone)]
@@ -75,10 +75,7 @@ impl SenderLinkInner {
     pub fn send(&mut self, message: Message) -> Delivery {
         let (delivery_tx, delivery_rx) = oneshot::channel();
         if self.link_credit == 0 {
-            self.pending_transfers.push_back(PendingTransfer {
-                message,
-                promise: delivery_tx,
-            });
+            self.pending_transfers.push_back(PendingTransfer { message, promise: delivery_tx });
         } else {
             let mut session = self.session.borrow_mut();
             // can't move to a fn because of self colliding with session

@@ -1,10 +1,10 @@
 #![allow(unused_variables, unused_assignments, unused_mut, unreachable_patterns)]
-use bytes::{BufMut, Bytes, BytesMut};
-use ::errors::Result;
-use uuid::Uuid;
-use ::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
-use std::u8;
 use super::*;
+use bytes::{BufMut, Bytes, BytesMut};
+use codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
+use errors::Result;
+use std::u8;
+use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Section {
     Header(Header),
@@ -32,15 +32,19 @@ impl DecodeFormatted for Section {
             Descriptor::Ulong(120) => decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r))),
             Descriptor::Ulong(115) => decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => decode_header_inner(input).map(|(i, r)| (i, Section::Header(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => decode_delivery_annotations_inner(input).map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
+                decode_delivery_annotations_inner(input).map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
+            }
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => decode_message_annotations_inner(input).map(|(i, r)| (i, Section::MessageAnnotations(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => decode_application_properties_inner(input).map(|(i, r)| (i, Section::ApplicationProperties(r))),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
+                decode_application_properties_inner(input).map(|(i, r)| (i, Section::ApplicationProperties(r)))
+            }
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r))),
-            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into())
+            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
 }
@@ -95,7 +99,7 @@ impl DecodeFormatted for DeliveryState {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r))),
-            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into())
+            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
 }
@@ -139,7 +143,7 @@ impl DecodeFormatted for Outcome {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r))),
-            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into())
+            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
 }
@@ -196,7 +200,7 @@ impl DecodeFormatted for Frame {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:detach:list" => decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:end:list" => decode_end_inner(input).map(|(i, r)| (i, Frame::End(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r))),
-            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into())
+            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
 }
@@ -251,7 +255,7 @@ impl DecodeFormatted for SaslFrameBody {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => decode_sasl_challenge_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r))),
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r))),
-            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into())
+            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
 }
@@ -300,7 +304,7 @@ impl Role {
         match v {
             false => Ok(Role::Sender),
             true => Ok(Role::Receiver),
-            _ => Err("unknown Role option.".into())
+            _ => Err("unknown Role option.".into()),
         }
     }
 }
@@ -314,25 +318,25 @@ impl Encode for Role {
     fn encoded_size(&self) -> usize {
         match *self {
             Role::Sender => {
-                let v : bool = false;
+                let v: bool = false;
                 v.encoded_size()
-            },
+            }
             Role::Receiver => {
-                let v : bool = true;
+                let v: bool = true;
                 v.encoded_size()
-            },
+            }
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             Role::Sender => {
-                let v : bool = false;
+                let v: bool = false;
                 v.encode(buf);
-            },
+            }
             Role::Receiver => {
-                let v : bool = true;
+                let v: bool = true;
                 v.encode(buf);
-            },
+            }
         }
     }
 }
@@ -348,7 +352,7 @@ impl SenderSettleMode {
             0 => Ok(SenderSettleMode::Unsettled),
             1 => Ok(SenderSettleMode::Settled),
             2 => Ok(SenderSettleMode::Mixed),
-            _ => Err("unknown SenderSettleMode option.".into())
+            _ => Err("unknown SenderSettleMode option.".into()),
         }
     }
 }
@@ -362,33 +366,33 @@ impl Encode for SenderSettleMode {
     fn encoded_size(&self) -> usize {
         match *self {
             SenderSettleMode::Unsettled => {
-                let v : u8 = 0;
+                let v: u8 = 0;
                 v.encoded_size()
-            },
+            }
             SenderSettleMode::Settled => {
-                let v : u8 = 1;
+                let v: u8 = 1;
                 v.encoded_size()
-            },
+            }
             SenderSettleMode::Mixed => {
-                let v : u8 = 2;
+                let v: u8 = 2;
                 v.encoded_size()
-            },
+            }
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             SenderSettleMode::Unsettled => {
-                let v : u8 = 0;
+                let v: u8 = 0;
                 v.encode(buf);
-            },
+            }
             SenderSettleMode::Settled => {
-                let v : u8 = 1;
+                let v: u8 = 1;
                 v.encode(buf);
-            },
+            }
             SenderSettleMode::Mixed => {
-                let v : u8 = 2;
+                let v: u8 = 2;
                 v.encode(buf);
-            },
+            }
         }
     }
 }
@@ -402,7 +406,7 @@ impl ReceiverSettleMode {
         match v {
             0 => Ok(ReceiverSettleMode::First),
             1 => Ok(ReceiverSettleMode::Second),
-            _ => Err("unknown ReceiverSettleMode option.".into())
+            _ => Err("unknown ReceiverSettleMode option.".into()),
         }
     }
 }
@@ -416,25 +420,25 @@ impl Encode for ReceiverSettleMode {
     fn encoded_size(&self) -> usize {
         match *self {
             ReceiverSettleMode::First => {
-                let v : u8 = 0;
+                let v: u8 = 0;
                 v.encoded_size()
-            },
+            }
             ReceiverSettleMode::Second => {
-                let v : u8 = 1;
+                let v: u8 = 1;
                 v.encoded_size()
-            },
+            }
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             ReceiverSettleMode::First => {
-                let v : u8 = 0;
+                let v: u8 = 0;
                 v.encode(buf);
-            },
+            }
             ReceiverSettleMode::Second => {
-                let v : u8 = 1;
+                let v: u8 = 1;
                 v.encode(buf);
-            },
+            }
         }
     }
 }
@@ -470,7 +474,7 @@ impl AmqpError {
             "amqp:resource-deleted" => Ok(AmqpError::ResourceDeleted),
             "amqp:illegal-state" => Ok(AmqpError::IllegalState),
             "amqp:frame-size-too-small" => Ok(AmqpError::FrameSizeTooSmall),
-            _ => Err("unknown AmqpError option.".into())
+            _ => Err("unknown AmqpError option.".into()),
         }
     }
 }
@@ -528,7 +532,7 @@ impl ConnectionError {
             "amqp:connection:forced" => Ok(ConnectionError::ConnectionForced),
             "amqp:connection:framing-error" => Ok(ConnectionError::FramingError),
             "amqp:connection:redirect" => Ok(ConnectionError::Redirect),
-            _ => Err("unknown ConnectionError option.".into())
+            _ => Err("unknown ConnectionError option.".into()),
         }
     }
 }
@@ -568,7 +572,7 @@ impl SessionError {
             "amqp:session:errant-link" => Ok(SessionError::ErrantLink),
             "amqp:session:handle-in-use" => Ok(SessionError::HandleInUse),
             "amqp:session:unattached-handle" => Ok(SessionError::UnattachedHandle),
-            _ => Err("unknown SessionError option.".into())
+            _ => Err("unknown SessionError option.".into()),
         }
     }
 }
@@ -612,7 +616,7 @@ impl LinkError {
             "amqp:link:message-size-exceeded" => Ok(LinkError::MessageSizeExceeded),
             "amqp:link:redirect" => Ok(LinkError::Redirect),
             "amqp:link:stolen" => Ok(LinkError::Stolen),
-            _ => Err("unknown LinkError option.".into())
+            _ => Err("unknown LinkError option.".into()),
         }
     }
 }
@@ -658,7 +662,7 @@ impl SaslCode {
             2 => Ok(SaslCode::Sys),
             3 => Ok(SaslCode::SysPerm),
             4 => Ok(SaslCode::SysTemp),
-            _ => Err("unknown SaslCode option.".into())
+            _ => Err("unknown SaslCode option.".into()),
         }
     }
 }
@@ -672,49 +676,49 @@ impl Encode for SaslCode {
     fn encoded_size(&self) -> usize {
         match *self {
             SaslCode::Ok => {
-                let v : u8 = 0;
+                let v: u8 = 0;
                 v.encoded_size()
-            },
+            }
             SaslCode::Auth => {
-                let v : u8 = 1;
+                let v: u8 = 1;
                 v.encoded_size()
-            },
+            }
             SaslCode::Sys => {
-                let v : u8 = 2;
+                let v: u8 = 2;
                 v.encoded_size()
-            },
+            }
             SaslCode::SysPerm => {
-                let v : u8 = 3;
+                let v: u8 = 3;
                 v.encoded_size()
-            },
+            }
             SaslCode::SysTemp => {
-                let v : u8 = 4;
+                let v: u8 = 4;
                 v.encoded_size()
-            },
+            }
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             SaslCode::Ok => {
-                let v : u8 = 0;
+                let v: u8 = 0;
                 v.encode(buf);
-            },
+            }
             SaslCode::Auth => {
-                let v : u8 = 1;
+                let v: u8 = 1;
                 v.encode(buf);
-            },
+            }
             SaslCode::Sys => {
-                let v : u8 = 2;
+                let v: u8 = 2;
                 v.encode(buf);
-            },
+            }
             SaslCode::SysPerm => {
-                let v : u8 = 3;
+                let v: u8 = 3;
                 v.encode(buf);
-            },
+            }
             SaslCode::SysTemp => {
-                let v : u8 = 4;
+                let v: u8 = 4;
                 v.encode(buf);
-            },
+            }
         }
     }
 }
@@ -730,7 +734,7 @@ impl TerminusDurability {
             0 => Ok(TerminusDurability::None),
             1 => Ok(TerminusDurability::Configuration),
             2 => Ok(TerminusDurability::UnsettledState),
-            _ => Err("unknown TerminusDurability option.".into())
+            _ => Err("unknown TerminusDurability option.".into()),
         }
     }
 }
@@ -744,33 +748,33 @@ impl Encode for TerminusDurability {
     fn encoded_size(&self) -> usize {
         match *self {
             TerminusDurability::None => {
-                let v : u32 = 0;
+                let v: u32 = 0;
                 v.encoded_size()
-            },
+            }
             TerminusDurability::Configuration => {
-                let v : u32 = 1;
+                let v: u32 = 1;
                 v.encoded_size()
-            },
+            }
             TerminusDurability::UnsettledState => {
-                let v : u32 = 2;
+                let v: u32 = 2;
                 v.encoded_size()
-            },
+            }
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             TerminusDurability::None => {
-                let v : u32 = 0;
+                let v: u32 = 0;
                 v.encode(buf);
-            },
+            }
             TerminusDurability::Configuration => {
-                let v : u32 = 1;
+                let v: u32 = 1;
                 v.encode(buf);
-            },
+            }
             TerminusDurability::UnsettledState => {
-                let v : u32 = 2;
+                let v: u32 = 2;
                 v.encode(buf);
-            },
+            }
         }
     }
 }
@@ -788,7 +792,7 @@ impl TerminusExpiryPolicy {
             "session-end" => Ok(TerminusExpiryPolicy::SessionEnd),
             "connection-close" => Ok(TerminusExpiryPolicy::ConnectionClose),
             "never" => Ok(TerminusExpiryPolicy::Never),
-            _ => Err("unknown TerminusExpiryPolicy option.".into())
+            _ => Err("unknown TerminusExpiryPolicy option.".into()),
         }
     }
 }
@@ -907,10 +911,16 @@ pub struct Error {
     pub info: Option<Fields>,
 }
 impl Error {
-                    pub fn condition(&self) -> &ErrorCondition { &self.condition }
-                    pub fn description(&self) -> Option<&ByteStr> { self.description.as_ref() }
-                    pub fn info(&self) -> Option<&Fields> { self.info.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1;
+    pub fn condition(&self) -> &ErrorCondition {
+        &self.condition
+    }
+    pub fn description(&self) -> Option<&ByteStr> {
+        self.description.as_ref()
+    }
+    pub fn info(&self) -> Option<&Fields> {
+        self.info.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
 fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error)> {
     let (input, format) = decode_format_code(input)?;
@@ -925,8 +935,7 @@ fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error)> {
         condition = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field condition was omitted.");
     }
     let description: Option<ByteStr>;
@@ -935,8 +944,7 @@ fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error)> {
         input = decoded.0;
         description = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         description = None;
     }
     let info: Option<Fields>;
@@ -945,31 +953,24 @@ fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error)> {
         input = decoded.0;
         info = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         info = None;
     }
-    Ok((remainder, Error {
-    condition,
-    description,
-    info,
-    }))
+    Ok((remainder, Error { condition, description, info }))
 }
 fn encoded_size_error_inner(list: &Error) -> usize {
-    let content_size = 0  + list.condition.encoded_size() + list.description.encoded_size() + list.info.encoded_size();
+    let content_size = 0 + list.condition.encoded_size() + list.description.encoded_size() + list.info.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_error_inner(list: &Error, buf: &mut BytesMut) {
     Descriptor::Ulong(29).encode(buf);
-    let content_size = 0  + list.condition.encoded_size() + list.description.encoded_size() + list.info.encoded_size();
+    let content_size = 0 + list.condition.encoded_size() + list.description.encoded_size() + list.info.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Error::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Error::FIELD_COUNT as u8);
@@ -982,17 +983,19 @@ impl DecodeFormatted for Error {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(29)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:error:list"))
-        {
+        if descriptor != Descriptor::Ulong(29) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:error:list")) {
             bail!("Invalid descriptor.");
         }
         decode_error_inner(input)
     }
 }
 impl Encode for Error {
-    fn encoded_size(&self) -> usize { encoded_size_error_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_error_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_error_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_error_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Open {
@@ -1008,17 +1011,37 @@ pub struct Open {
     pub properties: Option<Fields>,
 }
 impl Open {
-                    pub fn container_id(&self) -> &ByteStr { &self.container_id }
-                    pub fn hostname(&self) -> Option<&ByteStr> { self.hostname.as_ref() }
-                    pub fn max_frame_size(&self) -> u32 { self.max_frame_size }
-                    pub fn channel_max(&self) -> u16 { self.channel_max }
-                    pub fn idle_time_out(&self) -> Option<Milliseconds> { self.idle_time_out }
-                    pub fn outgoing_locales(&self) -> Option<&IetfLanguageTags> { self.outgoing_locales.as_ref() }
-                    pub fn incoming_locales(&self) -> Option<&IetfLanguageTags> { self.incoming_locales.as_ref() }
-                    pub fn offered_capabilities(&self) -> Option<&Symbols> { self.offered_capabilities.as_ref() }
-                    pub fn desired_capabilities(&self) -> Option<&Symbols> { self.desired_capabilities.as_ref() }
-                    pub fn properties(&self) -> Option<&Fields> { self.properties.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn container_id(&self) -> &ByteStr {
+        &self.container_id
+    }
+    pub fn hostname(&self) -> Option<&ByteStr> {
+        self.hostname.as_ref()
+    }
+    pub fn max_frame_size(&self) -> u32 {
+        self.max_frame_size
+    }
+    pub fn channel_max(&self) -> u16 {
+        self.channel_max
+    }
+    pub fn idle_time_out(&self) -> Option<Milliseconds> {
+        self.idle_time_out
+    }
+    pub fn outgoing_locales(&self) -> Option<&IetfLanguageTags> {
+        self.outgoing_locales.as_ref()
+    }
+    pub fn incoming_locales(&self) -> Option<&IetfLanguageTags> {
+        self.incoming_locales.as_ref()
+    }
+    pub fn offered_capabilities(&self) -> Option<&Symbols> {
+        self.offered_capabilities.as_ref()
+    }
+    pub fn desired_capabilities(&self) -> Option<&Symbols> {
+        self.desired_capabilities.as_ref()
+    }
+    pub fn properties(&self) -> Option<&Fields> {
+        self.properties.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
     let (input, format) = decode_format_code(input)?;
@@ -1033,8 +1056,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         container_id = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field container_id was omitted.");
     }
     let hostname: Option<ByteStr>;
@@ -1043,8 +1065,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         hostname = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         hostname = None;
     }
     let max_frame_size: u32;
@@ -1053,8 +1074,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         max_frame_size = decoded.unwrap_or(4294967295);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         max_frame_size = 4294967295;
     }
     let channel_max: u16;
@@ -1063,8 +1083,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         channel_max = decoded.unwrap_or(65535);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         channel_max = 65535;
     }
     let idle_time_out: Option<Milliseconds>;
@@ -1073,8 +1092,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         idle_time_out = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         idle_time_out = None;
     }
     let outgoing_locales: Option<IetfLanguageTags>;
@@ -1083,8 +1101,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         outgoing_locales = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         outgoing_locales = None;
     }
     let incoming_locales: Option<IetfLanguageTags>;
@@ -1093,8 +1110,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         incoming_locales = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         incoming_locales = None;
     }
     let offered_capabilities: Option<Symbols>;
@@ -1103,8 +1119,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         offered_capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         offered_capabilities = None;
     }
     let desired_capabilities: Option<Symbols>;
@@ -1113,8 +1128,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         desired_capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         desired_capabilities = None;
     }
     let properties: Option<Fields>;
@@ -1123,38 +1137,58 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open)> {
         input = decoded.0;
         properties = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         properties = None;
     }
-    Ok((remainder, Open {
-    container_id,
-    hostname,
-    max_frame_size,
-    channel_max,
-    idle_time_out,
-    outgoing_locales,
-    incoming_locales,
-    offered_capabilities,
-    desired_capabilities,
-    properties,
-    }))
+    Ok((
+        remainder,
+        Open {
+            container_id,
+            hostname,
+            max_frame_size,
+            channel_max,
+            idle_time_out,
+            outgoing_locales,
+            incoming_locales,
+            offered_capabilities,
+            desired_capabilities,
+            properties,
+        },
+    ))
 }
 fn encoded_size_open_inner(list: &Open) -> usize {
-    let content_size = 0  + list.container_id.encoded_size() + list.hostname.encoded_size() + list.max_frame_size.encoded_size() + list.channel_max.encoded_size() + list.idle_time_out.encoded_size() + list.outgoing_locales.encoded_size() + list.incoming_locales.encoded_size() + list.offered_capabilities.encoded_size() + list.desired_capabilities.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.container_id.encoded_size()
+        + list.hostname.encoded_size()
+        + list.max_frame_size.encoded_size()
+        + list.channel_max.encoded_size()
+        + list.idle_time_out.encoded_size()
+        + list.outgoing_locales.encoded_size()
+        + list.incoming_locales.encoded_size()
+        + list.offered_capabilities.encoded_size()
+        + list.desired_capabilities.encoded_size()
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
     Descriptor::Ulong(16).encode(buf);
-    let content_size = 0  + list.container_id.encoded_size() + list.hostname.encoded_size() + list.max_frame_size.encoded_size() + list.channel_max.encoded_size() + list.idle_time_out.encoded_size() + list.outgoing_locales.encoded_size() + list.incoming_locales.encoded_size() + list.offered_capabilities.encoded_size() + list.desired_capabilities.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.container_id.encoded_size()
+        + list.hostname.encoded_size()
+        + list.max_frame_size.encoded_size()
+        + list.channel_max.encoded_size()
+        + list.idle_time_out.encoded_size()
+        + list.outgoing_locales.encoded_size()
+        + list.incoming_locales.encoded_size()
+        + list.offered_capabilities.encoded_size()
+        + list.desired_capabilities.encoded_size()
+        + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Open::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Open::FIELD_COUNT as u8);
@@ -1174,17 +1208,19 @@ impl DecodeFormatted for Open {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(16)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:open:list"))
-        {
+        if descriptor != Descriptor::Ulong(16) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:open:list")) {
             bail!("Invalid descriptor.");
         }
         decode_open_inner(input)
     }
 }
 impl Encode for Open {
-    fn encoded_size(&self) -> usize { encoded_size_open_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_open_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_open_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_open_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Begin {
@@ -1198,15 +1234,31 @@ pub struct Begin {
     pub properties: Option<Fields>,
 }
 impl Begin {
-                    pub fn remote_channel(&self) -> Option<u16> { self.remote_channel }
-                    pub fn next_outgoing_id(&self) -> TransferNumber { self.next_outgoing_id }
-                    pub fn incoming_window(&self) -> u32 { self.incoming_window }
-                    pub fn outgoing_window(&self) -> u32 { self.outgoing_window }
-                    pub fn handle_max(&self) -> Handle { self.handle_max }
-                    pub fn offered_capabilities(&self) -> Option<&Symbols> { self.offered_capabilities.as_ref() }
-                    pub fn desired_capabilities(&self) -> Option<&Symbols> { self.desired_capabilities.as_ref() }
-                    pub fn properties(&self) -> Option<&Fields> { self.properties.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn remote_channel(&self) -> Option<u16> {
+        self.remote_channel
+    }
+    pub fn next_outgoing_id(&self) -> TransferNumber {
+        self.next_outgoing_id
+    }
+    pub fn incoming_window(&self) -> u32 {
+        self.incoming_window
+    }
+    pub fn outgoing_window(&self) -> u32 {
+        self.outgoing_window
+    }
+    pub fn handle_max(&self) -> Handle {
+        self.handle_max
+    }
+    pub fn offered_capabilities(&self) -> Option<&Symbols> {
+        self.offered_capabilities.as_ref()
+    }
+    pub fn desired_capabilities(&self) -> Option<&Symbols> {
+        self.desired_capabilities.as_ref()
+    }
+    pub fn properties(&self) -> Option<&Fields> {
+        self.properties.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
     let (input, format) = decode_format_code(input)?;
@@ -1221,8 +1273,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         input = decoded.0;
         remote_channel = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         remote_channel = None;
     }
     let next_outgoing_id: TransferNumber;
@@ -1231,8 +1282,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         next_outgoing_id = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field next_outgoing_id was omitted.");
     }
     let incoming_window: u32;
@@ -1241,8 +1291,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         incoming_window = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field incoming_window was omitted.");
     }
     let outgoing_window: u32;
@@ -1251,8 +1300,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         outgoing_window = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field outgoing_window was omitted.");
     }
     let handle_max: Handle;
@@ -1261,8 +1309,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         handle_max = decoded.unwrap_or(4294967295);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         handle_max = 4294967295;
     }
     let offered_capabilities: Option<Symbols>;
@@ -1271,8 +1318,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         input = decoded.0;
         offered_capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         offered_capabilities = None;
     }
     let desired_capabilities: Option<Symbols>;
@@ -1281,8 +1327,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         input = decoded.0;
         desired_capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         desired_capabilities = None;
     }
     let properties: Option<Fields>;
@@ -1291,36 +1336,52 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin)> {
         input = decoded.0;
         properties = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         properties = None;
     }
-    Ok((remainder, Begin {
-    remote_channel,
-    next_outgoing_id,
-    incoming_window,
-    outgoing_window,
-    handle_max,
-    offered_capabilities,
-    desired_capabilities,
-    properties,
-    }))
+    Ok((
+        remainder,
+        Begin {
+            remote_channel,
+            next_outgoing_id,
+            incoming_window,
+            outgoing_window,
+            handle_max,
+            offered_capabilities,
+            desired_capabilities,
+            properties,
+        },
+    ))
 }
 fn encoded_size_begin_inner(list: &Begin) -> usize {
-    let content_size = 0  + list.remote_channel.encoded_size() + list.next_outgoing_id.encoded_size() + list.incoming_window.encoded_size() + list.outgoing_window.encoded_size() + list.handle_max.encoded_size() + list.offered_capabilities.encoded_size() + list.desired_capabilities.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.remote_channel.encoded_size()
+        + list.next_outgoing_id.encoded_size()
+        + list.incoming_window.encoded_size()
+        + list.outgoing_window.encoded_size()
+        + list.handle_max.encoded_size()
+        + list.offered_capabilities.encoded_size()
+        + list.desired_capabilities.encoded_size()
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
     Descriptor::Ulong(17).encode(buf);
-    let content_size = 0  + list.remote_channel.encoded_size() + list.next_outgoing_id.encoded_size() + list.incoming_window.encoded_size() + list.outgoing_window.encoded_size() + list.handle_max.encoded_size() + list.offered_capabilities.encoded_size() + list.desired_capabilities.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.remote_channel.encoded_size()
+        + list.next_outgoing_id.encoded_size()
+        + list.incoming_window.encoded_size()
+        + list.outgoing_window.encoded_size()
+        + list.handle_max.encoded_size()
+        + list.offered_capabilities.encoded_size()
+        + list.desired_capabilities.encoded_size()
+        + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Begin::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Begin::FIELD_COUNT as u8);
@@ -1338,17 +1399,19 @@ impl DecodeFormatted for Begin {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(17)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:begin:list"))
-        {
+        if descriptor != Descriptor::Ulong(17) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:begin:list")) {
             bail!("Invalid descriptor.");
         }
         decode_begin_inner(input)
     }
 }
 impl Encode for Begin {
-    fn encoded_size(&self) -> usize { encoded_size_begin_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_begin_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_begin_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_begin_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attach {
@@ -1368,21 +1431,49 @@ pub struct Attach {
     pub properties: Option<Fields>,
 }
 impl Attach {
-                    pub fn name(&self) -> &ByteStr { &self.name }
-                    pub fn handle(&self) -> Handle { self.handle }
-                    pub fn role(&self) -> Role { self.role }
-                    pub fn snd_settle_mode(&self) -> SenderSettleMode { self.snd_settle_mode }
-                    pub fn rcv_settle_mode(&self) -> ReceiverSettleMode { self.rcv_settle_mode }
-                    pub fn source(&self) -> Option<&Source> { self.source.as_ref() }
-                    pub fn target(&self) -> Option<&Target> { self.target.as_ref() }
-                    pub fn unsettled(&self) -> Option<&Map> { self.unsettled.as_ref() }
-                    pub fn incomplete_unsettled(&self) -> bool { self.incomplete_unsettled }
-                    pub fn initial_delivery_count(&self) -> Option<SequenceNo> { self.initial_delivery_count }
-                    pub fn max_message_size(&self) -> Option<u64> { self.max_message_size }
-                    pub fn offered_capabilities(&self) -> Option<&Symbols> { self.offered_capabilities.as_ref() }
-                    pub fn desired_capabilities(&self) -> Option<&Symbols> { self.desired_capabilities.as_ref() }
-                    pub fn properties(&self) -> Option<&Fields> { self.properties.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn name(&self) -> &ByteStr {
+        &self.name
+    }
+    pub fn handle(&self) -> Handle {
+        self.handle
+    }
+    pub fn role(&self) -> Role {
+        self.role
+    }
+    pub fn snd_settle_mode(&self) -> SenderSettleMode {
+        self.snd_settle_mode
+    }
+    pub fn rcv_settle_mode(&self) -> ReceiverSettleMode {
+        self.rcv_settle_mode
+    }
+    pub fn source(&self) -> Option<&Source> {
+        self.source.as_ref()
+    }
+    pub fn target(&self) -> Option<&Target> {
+        self.target.as_ref()
+    }
+    pub fn unsettled(&self) -> Option<&Map> {
+        self.unsettled.as_ref()
+    }
+    pub fn incomplete_unsettled(&self) -> bool {
+        self.incomplete_unsettled
+    }
+    pub fn initial_delivery_count(&self) -> Option<SequenceNo> {
+        self.initial_delivery_count
+    }
+    pub fn max_message_size(&self) -> Option<u64> {
+        self.max_message_size
+    }
+    pub fn offered_capabilities(&self) -> Option<&Symbols> {
+        self.offered_capabilities.as_ref()
+    }
+    pub fn desired_capabilities(&self) -> Option<&Symbols> {
+        self.desired_capabilities.as_ref()
+    }
+    pub fn properties(&self) -> Option<&Fields> {
+        self.properties.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
     let (input, format) = decode_format_code(input)?;
@@ -1397,8 +1488,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         name = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field name was omitted.");
     }
     let handle: Handle;
@@ -1407,8 +1497,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         handle = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field handle was omitted.");
     }
     let role: Role;
@@ -1417,8 +1506,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         role = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field role was omitted.");
     }
     let snd_settle_mode: SenderSettleMode;
@@ -1427,8 +1515,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         snd_settle_mode = decoded.unwrap_or(SenderSettleMode::Mixed);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         snd_settle_mode = SenderSettleMode::Mixed;
     }
     let rcv_settle_mode: ReceiverSettleMode;
@@ -1437,8 +1524,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         rcv_settle_mode = decoded.unwrap_or(ReceiverSettleMode::First);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         rcv_settle_mode = ReceiverSettleMode::First;
     }
     let source: Option<Source>;
@@ -1447,8 +1533,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         source = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         source = None;
     }
     let target: Option<Target>;
@@ -1457,8 +1542,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         target = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         target = None;
     }
     let unsettled: Option<Map>;
@@ -1467,8 +1551,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         unsettled = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         unsettled = None;
     }
     let incomplete_unsettled: bool;
@@ -1477,8 +1560,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         incomplete_unsettled = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         incomplete_unsettled = false;
     }
     let initial_delivery_count: Option<SequenceNo>;
@@ -1487,8 +1569,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         initial_delivery_count = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         initial_delivery_count = None;
     }
     let max_message_size: Option<u64>;
@@ -1497,8 +1578,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         max_message_size = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         max_message_size = None;
     }
     let offered_capabilities: Option<Symbols>;
@@ -1507,8 +1587,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         offered_capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         offered_capabilities = None;
     }
     let desired_capabilities: Option<Symbols>;
@@ -1517,8 +1596,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         desired_capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         desired_capabilities = None;
     }
     let properties: Option<Fields>;
@@ -1527,42 +1605,70 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach)> {
         input = decoded.0;
         properties = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         properties = None;
     }
-    Ok((remainder, Attach {
-    name,
-    handle,
-    role,
-    snd_settle_mode,
-    rcv_settle_mode,
-    source,
-    target,
-    unsettled,
-    incomplete_unsettled,
-    initial_delivery_count,
-    max_message_size,
-    offered_capabilities,
-    desired_capabilities,
-    properties,
-    }))
+    Ok((
+        remainder,
+        Attach {
+            name,
+            handle,
+            role,
+            snd_settle_mode,
+            rcv_settle_mode,
+            source,
+            target,
+            unsettled,
+            incomplete_unsettled,
+            initial_delivery_count,
+            max_message_size,
+            offered_capabilities,
+            desired_capabilities,
+            properties,
+        },
+    ))
 }
 fn encoded_size_attach_inner(list: &Attach) -> usize {
-    let content_size = 0  + list.name.encoded_size() + list.handle.encoded_size() + list.role.encoded_size() + list.snd_settle_mode.encoded_size() + list.rcv_settle_mode.encoded_size() + list.source.encoded_size() + list.target.encoded_size() + list.unsettled.encoded_size() + list.incomplete_unsettled.encoded_size() + list.initial_delivery_count.encoded_size() + list.max_message_size.encoded_size() + list.offered_capabilities.encoded_size() + list.desired_capabilities.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.name.encoded_size()
+        + list.handle.encoded_size()
+        + list.role.encoded_size()
+        + list.snd_settle_mode.encoded_size()
+        + list.rcv_settle_mode.encoded_size()
+        + list.source.encoded_size()
+        + list.target.encoded_size()
+        + list.unsettled.encoded_size()
+        + list.incomplete_unsettled.encoded_size()
+        + list.initial_delivery_count.encoded_size()
+        + list.max_message_size.encoded_size()
+        + list.offered_capabilities.encoded_size()
+        + list.desired_capabilities.encoded_size()
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
     Descriptor::Ulong(18).encode(buf);
-    let content_size = 0  + list.name.encoded_size() + list.handle.encoded_size() + list.role.encoded_size() + list.snd_settle_mode.encoded_size() + list.rcv_settle_mode.encoded_size() + list.source.encoded_size() + list.target.encoded_size() + list.unsettled.encoded_size() + list.incomplete_unsettled.encoded_size() + list.initial_delivery_count.encoded_size() + list.max_message_size.encoded_size() + list.offered_capabilities.encoded_size() + list.desired_capabilities.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.name.encoded_size()
+        + list.handle.encoded_size()
+        + list.role.encoded_size()
+        + list.snd_settle_mode.encoded_size()
+        + list.rcv_settle_mode.encoded_size()
+        + list.source.encoded_size()
+        + list.target.encoded_size()
+        + list.unsettled.encoded_size()
+        + list.incomplete_unsettled.encoded_size()
+        + list.initial_delivery_count.encoded_size()
+        + list.max_message_size.encoded_size()
+        + list.offered_capabilities.encoded_size()
+        + list.desired_capabilities.encoded_size()
+        + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Attach::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Attach::FIELD_COUNT as u8);
@@ -1586,17 +1692,19 @@ impl DecodeFormatted for Attach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(18)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:attach:list"))
-        {
+        if descriptor != Descriptor::Ulong(18) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:attach:list")) {
             bail!("Invalid descriptor.");
         }
         decode_attach_inner(input)
     }
 }
 impl Encode for Attach {
-    fn encoded_size(&self) -> usize { encoded_size_attach_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_attach_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_attach_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_attach_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Flow {
@@ -1613,18 +1721,40 @@ pub struct Flow {
     pub properties: Option<Fields>,
 }
 impl Flow {
-                    pub fn next_incoming_id(&self) -> Option<TransferNumber> { self.next_incoming_id }
-                    pub fn incoming_window(&self) -> u32 { self.incoming_window }
-                    pub fn next_outgoing_id(&self) -> TransferNumber { self.next_outgoing_id }
-                    pub fn outgoing_window(&self) -> u32 { self.outgoing_window }
-                    pub fn handle(&self) -> Option<Handle> { self.handle }
-                    pub fn delivery_count(&self) -> Option<SequenceNo> { self.delivery_count }
-                    pub fn link_credit(&self) -> Option<u32> { self.link_credit }
-                    pub fn available(&self) -> Option<u32> { self.available }
-                    pub fn drain(&self) -> bool { self.drain }
-                    pub fn echo(&self) -> bool { self.echo }
-                    pub fn properties(&self) -> Option<&Fields> { self.properties.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn next_incoming_id(&self) -> Option<TransferNumber> {
+        self.next_incoming_id
+    }
+    pub fn incoming_window(&self) -> u32 {
+        self.incoming_window
+    }
+    pub fn next_outgoing_id(&self) -> TransferNumber {
+        self.next_outgoing_id
+    }
+    pub fn outgoing_window(&self) -> u32 {
+        self.outgoing_window
+    }
+    pub fn handle(&self) -> Option<Handle> {
+        self.handle
+    }
+    pub fn delivery_count(&self) -> Option<SequenceNo> {
+        self.delivery_count
+    }
+    pub fn link_credit(&self) -> Option<u32> {
+        self.link_credit
+    }
+    pub fn available(&self) -> Option<u32> {
+        self.available
+    }
+    pub fn drain(&self) -> bool {
+        self.drain
+    }
+    pub fn echo(&self) -> bool {
+        self.echo
+    }
+    pub fn properties(&self) -> Option<&Fields> {
+        self.properties.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
     let (input, format) = decode_format_code(input)?;
@@ -1639,8 +1769,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         input = decoded.0;
         next_incoming_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         next_incoming_id = None;
     }
     let incoming_window: u32;
@@ -1649,8 +1778,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         incoming_window = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field incoming_window was omitted.");
     }
     let next_outgoing_id: TransferNumber;
@@ -1659,8 +1787,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         next_outgoing_id = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field next_outgoing_id was omitted.");
     }
     let outgoing_window: u32;
@@ -1669,8 +1796,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         outgoing_window = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field outgoing_window was omitted.");
     }
     let handle: Option<Handle>;
@@ -1679,8 +1805,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         input = decoded.0;
         handle = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         handle = None;
     }
     let delivery_count: Option<SequenceNo>;
@@ -1689,8 +1814,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         input = decoded.0;
         delivery_count = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         delivery_count = None;
     }
     let link_credit: Option<u32>;
@@ -1699,8 +1823,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         input = decoded.0;
         link_credit = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         link_credit = None;
     }
     let available: Option<u32>;
@@ -1709,8 +1832,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         input = decoded.0;
         available = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         available = None;
     }
     let drain: bool;
@@ -1719,8 +1841,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         drain = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         drain = false;
     }
     let echo: bool;
@@ -1729,8 +1850,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         echo = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         echo = false;
     }
     let properties: Option<Fields>;
@@ -1739,39 +1859,61 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow)> {
         input = decoded.0;
         properties = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         properties = None;
     }
-    Ok((remainder, Flow {
-    next_incoming_id,
-    incoming_window,
-    next_outgoing_id,
-    outgoing_window,
-    handle,
-    delivery_count,
-    link_credit,
-    available,
-    drain,
-    echo,
-    properties,
-    }))
+    Ok((
+        remainder,
+        Flow {
+            next_incoming_id,
+            incoming_window,
+            next_outgoing_id,
+            outgoing_window,
+            handle,
+            delivery_count,
+            link_credit,
+            available,
+            drain,
+            echo,
+            properties,
+        },
+    ))
 }
 fn encoded_size_flow_inner(list: &Flow) -> usize {
-    let content_size = 0  + list.next_incoming_id.encoded_size() + list.incoming_window.encoded_size() + list.next_outgoing_id.encoded_size() + list.outgoing_window.encoded_size() + list.handle.encoded_size() + list.delivery_count.encoded_size() + list.link_credit.encoded_size() + list.available.encoded_size() + list.drain.encoded_size() + list.echo.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.next_incoming_id.encoded_size()
+        + list.incoming_window.encoded_size()
+        + list.next_outgoing_id.encoded_size()
+        + list.outgoing_window.encoded_size()
+        + list.handle.encoded_size()
+        + list.delivery_count.encoded_size()
+        + list.link_credit.encoded_size()
+        + list.available.encoded_size()
+        + list.drain.encoded_size()
+        + list.echo.encoded_size()
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
     Descriptor::Ulong(19).encode(buf);
-    let content_size = 0  + list.next_incoming_id.encoded_size() + list.incoming_window.encoded_size() + list.next_outgoing_id.encoded_size() + list.outgoing_window.encoded_size() + list.handle.encoded_size() + list.delivery_count.encoded_size() + list.link_credit.encoded_size() + list.available.encoded_size() + list.drain.encoded_size() + list.echo.encoded_size() + list.properties.encoded_size();
+    let content_size = 0
+        + list.next_incoming_id.encoded_size()
+        + list.incoming_window.encoded_size()
+        + list.next_outgoing_id.encoded_size()
+        + list.outgoing_window.encoded_size()
+        + list.handle.encoded_size()
+        + list.delivery_count.encoded_size()
+        + list.link_credit.encoded_size()
+        + list.available.encoded_size()
+        + list.drain.encoded_size()
+        + list.echo.encoded_size()
+        + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Flow::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Flow::FIELD_COUNT as u8);
@@ -1792,17 +1934,19 @@ impl DecodeFormatted for Flow {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(19)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:flow:list"))
-        {
+        if descriptor != Descriptor::Ulong(19) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:flow:list")) {
             bail!("Invalid descriptor.");
         }
         decode_flow_inner(input)
     }
 }
 impl Encode for Flow {
-    fn encoded_size(&self) -> usize { encoded_size_flow_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_flow_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_flow_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_flow_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transfer {
@@ -1819,18 +1963,40 @@ pub struct Transfer {
     pub batchable: bool,
 }
 impl Transfer {
-                    pub fn handle(&self) -> Handle { self.handle }
-                    pub fn delivery_id(&self) -> Option<DeliveryNumber> { self.delivery_id }
-                    pub fn delivery_tag(&self) -> Option<&DeliveryTag> { self.delivery_tag.as_ref() }
-                    pub fn message_format(&self) -> Option<MessageFormat> { self.message_format }
-                    pub fn settled(&self) -> Option<bool> { self.settled }
-                    pub fn more(&self) -> bool { self.more }
-                    pub fn rcv_settle_mode(&self) -> Option<ReceiverSettleMode> { self.rcv_settle_mode }
-                    pub fn state(&self) -> Option<&DeliveryState> { self.state.as_ref() }
-                    pub fn resume(&self) -> bool { self.resume }
-                    pub fn aborted(&self) -> bool { self.aborted }
-                    pub fn batchable(&self) -> bool { self.batchable }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn handle(&self) -> Handle {
+        self.handle
+    }
+    pub fn delivery_id(&self) -> Option<DeliveryNumber> {
+        self.delivery_id
+    }
+    pub fn delivery_tag(&self) -> Option<&DeliveryTag> {
+        self.delivery_tag.as_ref()
+    }
+    pub fn message_format(&self) -> Option<MessageFormat> {
+        self.message_format
+    }
+    pub fn settled(&self) -> Option<bool> {
+        self.settled
+    }
+    pub fn more(&self) -> bool {
+        self.more
+    }
+    pub fn rcv_settle_mode(&self) -> Option<ReceiverSettleMode> {
+        self.rcv_settle_mode
+    }
+    pub fn state(&self) -> Option<&DeliveryState> {
+        self.state.as_ref()
+    }
+    pub fn resume(&self) -> bool {
+        self.resume
+    }
+    pub fn aborted(&self) -> bool {
+        self.aborted
+    }
+    pub fn batchable(&self) -> bool {
+        self.batchable
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
     let (input, format) = decode_format_code(input)?;
@@ -1845,8 +2011,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         handle = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field handle was omitted.");
     }
     let delivery_id: Option<DeliveryNumber>;
@@ -1855,8 +2020,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         input = decoded.0;
         delivery_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         delivery_id = None;
     }
     let delivery_tag: Option<DeliveryTag>;
@@ -1865,8 +2029,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         input = decoded.0;
         delivery_tag = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         delivery_tag = None;
     }
     let message_format: Option<MessageFormat>;
@@ -1875,8 +2038,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         input = decoded.0;
         message_format = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         message_format = None;
     }
     let settled: Option<bool>;
@@ -1885,8 +2047,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         input = decoded.0;
         settled = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         settled = None;
     }
     let more: bool;
@@ -1895,8 +2056,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         more = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         more = false;
     }
     let rcv_settle_mode: Option<ReceiverSettleMode>;
@@ -1905,8 +2065,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         input = decoded.0;
         rcv_settle_mode = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         rcv_settle_mode = None;
     }
     let state: Option<DeliveryState>;
@@ -1915,8 +2074,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         input = decoded.0;
         state = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         state = None;
     }
     let resume: bool;
@@ -1925,8 +2083,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         resume = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         resume = false;
     }
     let aborted: bool;
@@ -1935,8 +2092,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         aborted = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         aborted = false;
     }
     let batchable: bool;
@@ -1945,39 +2101,61 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer)> {
         batchable = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         batchable = false;
     }
-    Ok((remainder, Transfer {
-    handle,
-    delivery_id,
-    delivery_tag,
-    message_format,
-    settled,
-    more,
-    rcv_settle_mode,
-    state,
-    resume,
-    aborted,
-    batchable,
-    }))
+    Ok((
+        remainder,
+        Transfer {
+            handle,
+            delivery_id,
+            delivery_tag,
+            message_format,
+            settled,
+            more,
+            rcv_settle_mode,
+            state,
+            resume,
+            aborted,
+            batchable,
+        },
+    ))
 }
 fn encoded_size_transfer_inner(list: &Transfer) -> usize {
-    let content_size = 0  + list.handle.encoded_size() + list.delivery_id.encoded_size() + list.delivery_tag.encoded_size() + list.message_format.encoded_size() + list.settled.encoded_size() + list.more.encoded_size() + list.rcv_settle_mode.encoded_size() + list.state.encoded_size() + list.resume.encoded_size() + list.aborted.encoded_size() + list.batchable.encoded_size();
+    let content_size = 0
+        + list.handle.encoded_size()
+        + list.delivery_id.encoded_size()
+        + list.delivery_tag.encoded_size()
+        + list.message_format.encoded_size()
+        + list.settled.encoded_size()
+        + list.more.encoded_size()
+        + list.rcv_settle_mode.encoded_size()
+        + list.state.encoded_size()
+        + list.resume.encoded_size()
+        + list.aborted.encoded_size()
+        + list.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
     Descriptor::Ulong(20).encode(buf);
-    let content_size = 0  + list.handle.encoded_size() + list.delivery_id.encoded_size() + list.delivery_tag.encoded_size() + list.message_format.encoded_size() + list.settled.encoded_size() + list.more.encoded_size() + list.rcv_settle_mode.encoded_size() + list.state.encoded_size() + list.resume.encoded_size() + list.aborted.encoded_size() + list.batchable.encoded_size();
+    let content_size = 0
+        + list.handle.encoded_size()
+        + list.delivery_id.encoded_size()
+        + list.delivery_tag.encoded_size()
+        + list.message_format.encoded_size()
+        + list.settled.encoded_size()
+        + list.more.encoded_size()
+        + list.rcv_settle_mode.encoded_size()
+        + list.state.encoded_size()
+        + list.resume.encoded_size()
+        + list.aborted.encoded_size()
+        + list.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Transfer::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Transfer::FIELD_COUNT as u8);
@@ -1998,17 +2176,19 @@ impl DecodeFormatted for Transfer {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(20)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:transfer:list"))
-        {
+        if descriptor != Descriptor::Ulong(20) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:transfer:list")) {
             bail!("Invalid descriptor.");
         }
         decode_transfer_inner(input)
     }
 }
 impl Encode for Transfer {
-    fn encoded_size(&self) -> usize { encoded_size_transfer_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_transfer_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_transfer_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_transfer_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Disposition {
@@ -2020,13 +2200,25 @@ pub struct Disposition {
     pub batchable: bool,
 }
 impl Disposition {
-                    pub fn role(&self) -> Role { self.role }
-                    pub fn first(&self) -> DeliveryNumber { self.first }
-                    pub fn last(&self) -> Option<DeliveryNumber> { self.last }
-                    pub fn settled(&self) -> bool { self.settled }
-                    pub fn state(&self) -> Option<&DeliveryState> { self.state.as_ref() }
-                    pub fn batchable(&self) -> bool { self.batchable }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn role(&self) -> Role {
+        self.role
+    }
+    pub fn first(&self) -> DeliveryNumber {
+        self.first
+    }
+    pub fn last(&self) -> Option<DeliveryNumber> {
+        self.last
+    }
+    pub fn settled(&self) -> bool {
+        self.settled
+    }
+    pub fn state(&self) -> Option<&DeliveryState> {
+        self.state.as_ref()
+    }
+    pub fn batchable(&self) -> bool {
+        self.batchable
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
     let (input, format) = decode_format_code(input)?;
@@ -2041,8 +2233,7 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
         role = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field role was omitted.");
     }
     let first: DeliveryNumber;
@@ -2051,8 +2242,7 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
         first = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field first was omitted.");
     }
     let last: Option<DeliveryNumber>;
@@ -2061,8 +2251,7 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
         input = decoded.0;
         last = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         last = None;
     }
     let settled: bool;
@@ -2071,8 +2260,7 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
         settled = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         settled = false;
     }
     let state: Option<DeliveryState>;
@@ -2081,8 +2269,7 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
         input = decoded.0;
         state = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         state = None;
     }
     let batchable: bool;
@@ -2091,34 +2278,46 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition)> {
         batchable = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         batchable = false;
     }
-    Ok((remainder, Disposition {
-    role,
-    first,
-    last,
-    settled,
-    state,
-    batchable,
-    }))
+    Ok((
+        remainder,
+        Disposition {
+            role,
+            first,
+            last,
+            settled,
+            state,
+            batchable,
+        },
+    ))
 }
 fn encoded_size_disposition_inner(list: &Disposition) -> usize {
-    let content_size = 0  + list.role.encoded_size() + list.first.encoded_size() + list.last.encoded_size() + list.settled.encoded_size() + list.state.encoded_size() + list.batchable.encoded_size();
+    let content_size = 0
+        + list.role.encoded_size()
+        + list.first.encoded_size()
+        + list.last.encoded_size()
+        + list.settled.encoded_size()
+        + list.state.encoded_size()
+        + list.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
     Descriptor::Ulong(21).encode(buf);
-    let content_size = 0  + list.role.encoded_size() + list.first.encoded_size() + list.last.encoded_size() + list.settled.encoded_size() + list.state.encoded_size() + list.batchable.encoded_size();
+    let content_size = 0
+        + list.role.encoded_size()
+        + list.first.encoded_size()
+        + list.last.encoded_size()
+        + list.settled.encoded_size()
+        + list.state.encoded_size()
+        + list.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Disposition::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Disposition::FIELD_COUNT as u8);
@@ -2134,17 +2333,19 @@ impl DecodeFormatted for Disposition {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(21)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:disposition:list"))
-        {
+        if descriptor != Descriptor::Ulong(21) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:disposition:list")) {
             bail!("Invalid descriptor.");
         }
         decode_disposition_inner(input)
     }
 }
 impl Encode for Disposition {
-    fn encoded_size(&self) -> usize { encoded_size_disposition_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_disposition_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_disposition_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_disposition_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Detach {
@@ -2153,10 +2354,16 @@ pub struct Detach {
     pub error: Option<Error>,
 }
 impl Detach {
-                    pub fn handle(&self) -> Handle { self.handle }
-                    pub fn closed(&self) -> bool { self.closed }
-                    pub fn error(&self) -> Option<&Error> { self.error.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1;
+    pub fn handle(&self) -> Handle {
+        self.handle
+    }
+    pub fn closed(&self) -> bool {
+        self.closed
+    }
+    pub fn error(&self) -> Option<&Error> {
+        self.error.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
 fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach)> {
     let (input, format) = decode_format_code(input)?;
@@ -2171,8 +2378,7 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach)> {
         handle = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field handle was omitted.");
     }
     let closed: bool;
@@ -2181,8 +2387,7 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach)> {
         closed = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         closed = false;
     }
     let error: Option<Error>;
@@ -2191,31 +2396,24 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach)> {
         input = decoded.0;
         error = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         error = None;
     }
-    Ok((remainder, Detach {
-    handle,
-    closed,
-    error,
-    }))
+    Ok((remainder, Detach { handle, closed, error }))
 }
 fn encoded_size_detach_inner(list: &Detach) -> usize {
-    let content_size = 0  + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size = 0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
     Descriptor::Ulong(22).encode(buf);
-    let content_size = 0  + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size = 0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Detach::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Detach::FIELD_COUNT as u8);
@@ -2228,25 +2426,29 @@ impl DecodeFormatted for Detach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(22)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:detach:list"))
-        {
+        if descriptor != Descriptor::Ulong(22) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:detach:list")) {
             bail!("Invalid descriptor.");
         }
         decode_detach_inner(input)
     }
 }
 impl Encode for Detach {
-    fn encoded_size(&self) -> usize { encoded_size_detach_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_detach_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_detach_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_detach_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct End {
     pub error: Option<Error>,
 }
 impl End {
-                    pub fn error(&self) -> Option<&Error> { self.error.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1;
+    pub fn error(&self) -> Option<&Error> {
+        self.error.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1;
 }
 fn decode_end_inner(input: &[u8]) -> Result<(&[u8], End)> {
     let (input, format) = decode_format_code(input)?;
@@ -2261,29 +2463,24 @@ fn decode_end_inner(input: &[u8]) -> Result<(&[u8], End)> {
         input = decoded.0;
         error = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         error = None;
     }
-    Ok((remainder, End {
-    error,
-    }))
+    Ok((remainder, End { error }))
 }
 fn encoded_size_end_inner(list: &End) -> usize {
-    let content_size = 0  + list.error.encoded_size();
+    let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_end_inner(list: &End, buf: &mut BytesMut) {
     Descriptor::Ulong(23).encode(buf);
-    let content_size = 0  + list.error.encoded_size();
+    let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(End::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(End::FIELD_COUNT as u8);
@@ -2294,25 +2491,29 @@ impl DecodeFormatted for End {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(23)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:end:list"))
-        {
+        if descriptor != Descriptor::Ulong(23) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:end:list")) {
             bail!("Invalid descriptor.");
         }
         decode_end_inner(input)
     }
 }
 impl Encode for End {
-    fn encoded_size(&self) -> usize { encoded_size_end_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_end_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_end_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_end_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Close {
     pub error: Option<Error>,
 }
 impl Close {
-                    pub fn error(&self) -> Option<&Error> { self.error.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1;
+    pub fn error(&self) -> Option<&Error> {
+        self.error.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1;
 }
 fn decode_close_inner(input: &[u8]) -> Result<(&[u8], Close)> {
     let (input, format) = decode_format_code(input)?;
@@ -2327,29 +2528,24 @@ fn decode_close_inner(input: &[u8]) -> Result<(&[u8], Close)> {
         input = decoded.0;
         error = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         error = None;
     }
-    Ok((remainder, Close {
-    error,
-    }))
+    Ok((remainder, Close { error }))
 }
 fn encoded_size_close_inner(list: &Close) -> usize {
-    let content_size = 0  + list.error.encoded_size();
+    let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_close_inner(list: &Close, buf: &mut BytesMut) {
     Descriptor::Ulong(24).encode(buf);
-    let content_size = 0  + list.error.encoded_size();
+    let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Close::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Close::FIELD_COUNT as u8);
@@ -2360,25 +2556,29 @@ impl DecodeFormatted for Close {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(24)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:close:list"))
-        {
+        if descriptor != Descriptor::Ulong(24) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:close:list")) {
             bail!("Invalid descriptor.");
         }
         decode_close_inner(input)
     }
 }
 impl Encode for Close {
-    fn encoded_size(&self) -> usize { encoded_size_close_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_close_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_close_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_close_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaslMechanisms {
     pub sasl_server_mechanisms: Symbols,
 }
 impl SaslMechanisms {
-                    pub fn sasl_server_mechanisms(&self) -> &Symbols { &self.sasl_server_mechanisms }
-    const FIELD_COUNT: usize = 0  + 1;
+    pub fn sasl_server_mechanisms(&self) -> &Symbols {
+        &self.sasl_server_mechanisms
+    }
+    const FIELD_COUNT: usize = 0 + 1;
 }
 fn decode_sasl_mechanisms_inner(input: &[u8]) -> Result<(&[u8], SaslMechanisms)> {
     let (input, format) = decode_format_code(input)?;
@@ -2393,29 +2593,24 @@ fn decode_sasl_mechanisms_inner(input: &[u8]) -> Result<(&[u8], SaslMechanisms)>
         sasl_server_mechanisms = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field sasl_server_mechanisms was omitted.");
     }
-    Ok((remainder, SaslMechanisms {
-    sasl_server_mechanisms,
-    }))
+    Ok((remainder, SaslMechanisms { sasl_server_mechanisms }))
 }
 fn encoded_size_sasl_mechanisms_inner(list: &SaslMechanisms) -> usize {
-    let content_size = 0  + list.sasl_server_mechanisms.encoded_size();
+    let content_size = 0 + list.sasl_server_mechanisms.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_sasl_mechanisms_inner(list: &SaslMechanisms, buf: &mut BytesMut) {
     Descriptor::Ulong(64).encode(buf);
-    let content_size = 0  + list.sasl_server_mechanisms.encoded_size();
+    let content_size = 0 + list.sasl_server_mechanisms.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(SaslMechanisms::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(SaslMechanisms::FIELD_COUNT as u8);
@@ -2426,17 +2621,19 @@ impl DecodeFormatted for SaslMechanisms {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(64)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-mechanisms:list"))
-        {
+        if descriptor != Descriptor::Ulong(64) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-mechanisms:list")) {
             bail!("Invalid descriptor.");
         }
         decode_sasl_mechanisms_inner(input)
     }
 }
 impl Encode for SaslMechanisms {
-    fn encoded_size(&self) -> usize { encoded_size_sasl_mechanisms_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_sasl_mechanisms_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_sasl_mechanisms_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_sasl_mechanisms_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaslInit {
@@ -2445,10 +2642,16 @@ pub struct SaslInit {
     pub hostname: Option<ByteStr>,
 }
 impl SaslInit {
-                    pub fn mechanism(&self) -> &Symbol { &self.mechanism }
-                    pub fn initial_response(&self) -> Option<&Bytes> { self.initial_response.as_ref() }
-                    pub fn hostname(&self) -> Option<&ByteStr> { self.hostname.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1;
+    pub fn mechanism(&self) -> &Symbol {
+        &self.mechanism
+    }
+    pub fn initial_response(&self) -> Option<&Bytes> {
+        self.initial_response.as_ref()
+    }
+    pub fn hostname(&self) -> Option<&ByteStr> {
+        self.hostname.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
 fn decode_sasl_init_inner(input: &[u8]) -> Result<(&[u8], SaslInit)> {
     let (input, format) = decode_format_code(input)?;
@@ -2463,8 +2666,7 @@ fn decode_sasl_init_inner(input: &[u8]) -> Result<(&[u8], SaslInit)> {
         mechanism = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field mechanism was omitted.");
     }
     let initial_response: Option<Bytes>;
@@ -2473,8 +2675,7 @@ fn decode_sasl_init_inner(input: &[u8]) -> Result<(&[u8], SaslInit)> {
         input = decoded.0;
         initial_response = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         initial_response = None;
     }
     let hostname: Option<ByteStr>;
@@ -2483,31 +2684,31 @@ fn decode_sasl_init_inner(input: &[u8]) -> Result<(&[u8], SaslInit)> {
         input = decoded.0;
         hostname = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         hostname = None;
     }
-    Ok((remainder, SaslInit {
-    mechanism,
-    initial_response,
-    hostname,
-    }))
+    Ok((
+        remainder,
+        SaslInit {
+            mechanism,
+            initial_response,
+            hostname,
+        },
+    ))
 }
 fn encoded_size_sasl_init_inner(list: &SaslInit) -> usize {
-    let content_size = 0  + list.mechanism.encoded_size() + list.initial_response.encoded_size() + list.hostname.encoded_size();
+    let content_size = 0 + list.mechanism.encoded_size() + list.initial_response.encoded_size() + list.hostname.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_sasl_init_inner(list: &SaslInit, buf: &mut BytesMut) {
     Descriptor::Ulong(65).encode(buf);
-    let content_size = 0  + list.mechanism.encoded_size() + list.initial_response.encoded_size() + list.hostname.encoded_size();
+    let content_size = 0 + list.mechanism.encoded_size() + list.initial_response.encoded_size() + list.hostname.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(SaslInit::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(SaslInit::FIELD_COUNT as u8);
@@ -2520,25 +2721,29 @@ impl DecodeFormatted for SaslInit {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(65)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-init:list"))
-        {
+        if descriptor != Descriptor::Ulong(65) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-init:list")) {
             bail!("Invalid descriptor.");
         }
         decode_sasl_init_inner(input)
     }
 }
 impl Encode for SaslInit {
-    fn encoded_size(&self) -> usize { encoded_size_sasl_init_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_sasl_init_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_sasl_init_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_sasl_init_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaslChallenge {
     pub challenge: Bytes,
 }
 impl SaslChallenge {
-                    pub fn challenge(&self) -> &Bytes { &self.challenge }
-    const FIELD_COUNT: usize = 0  + 1;
+    pub fn challenge(&self) -> &Bytes {
+        &self.challenge
+    }
+    const FIELD_COUNT: usize = 0 + 1;
 }
 fn decode_sasl_challenge_inner(input: &[u8]) -> Result<(&[u8], SaslChallenge)> {
     let (input, format) = decode_format_code(input)?;
@@ -2553,29 +2758,24 @@ fn decode_sasl_challenge_inner(input: &[u8]) -> Result<(&[u8], SaslChallenge)> {
         challenge = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field challenge was omitted.");
     }
-    Ok((remainder, SaslChallenge {
-    challenge,
-    }))
+    Ok((remainder, SaslChallenge { challenge }))
 }
 fn encoded_size_sasl_challenge_inner(list: &SaslChallenge) -> usize {
-    let content_size = 0  + list.challenge.encoded_size();
+    let content_size = 0 + list.challenge.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_sasl_challenge_inner(list: &SaslChallenge, buf: &mut BytesMut) {
     Descriptor::Ulong(66).encode(buf);
-    let content_size = 0  + list.challenge.encoded_size();
+    let content_size = 0 + list.challenge.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(SaslChallenge::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(SaslChallenge::FIELD_COUNT as u8);
@@ -2586,25 +2786,29 @@ impl DecodeFormatted for SaslChallenge {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(66)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-challenge:list"))
-        {
+        if descriptor != Descriptor::Ulong(66) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-challenge:list")) {
             bail!("Invalid descriptor.");
         }
         decode_sasl_challenge_inner(input)
     }
 }
 impl Encode for SaslChallenge {
-    fn encoded_size(&self) -> usize { encoded_size_sasl_challenge_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_sasl_challenge_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_sasl_challenge_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_sasl_challenge_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaslResponse {
     pub response: Bytes,
 }
 impl SaslResponse {
-                    pub fn response(&self) -> &Bytes { &self.response }
-    const FIELD_COUNT: usize = 0  + 1;
+    pub fn response(&self) -> &Bytes {
+        &self.response
+    }
+    const FIELD_COUNT: usize = 0 + 1;
 }
 fn decode_sasl_response_inner(input: &[u8]) -> Result<(&[u8], SaslResponse)> {
     let (input, format) = decode_format_code(input)?;
@@ -2619,29 +2823,24 @@ fn decode_sasl_response_inner(input: &[u8]) -> Result<(&[u8], SaslResponse)> {
         response = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field response was omitted.");
     }
-    Ok((remainder, SaslResponse {
-    response,
-    }))
+    Ok((remainder, SaslResponse { response }))
 }
 fn encoded_size_sasl_response_inner(list: &SaslResponse) -> usize {
-    let content_size = 0  + list.response.encoded_size();
+    let content_size = 0 + list.response.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_sasl_response_inner(list: &SaslResponse, buf: &mut BytesMut) {
     Descriptor::Ulong(67).encode(buf);
-    let content_size = 0  + list.response.encoded_size();
+    let content_size = 0 + list.response.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(SaslResponse::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(SaslResponse::FIELD_COUNT as u8);
@@ -2652,17 +2851,19 @@ impl DecodeFormatted for SaslResponse {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(67)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-response:list"))
-        {
+        if descriptor != Descriptor::Ulong(67) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-response:list")) {
             bail!("Invalid descriptor.");
         }
         decode_sasl_response_inner(input)
     }
 }
 impl Encode for SaslResponse {
-    fn encoded_size(&self) -> usize { encoded_size_sasl_response_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_sasl_response_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_sasl_response_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_sasl_response_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaslOutcome {
@@ -2670,9 +2871,13 @@ pub struct SaslOutcome {
     pub additional_data: Option<Bytes>,
 }
 impl SaslOutcome {
-                    pub fn code(&self) -> SaslCode { self.code }
-                    pub fn additional_data(&self) -> Option<&Bytes> { self.additional_data.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1;
+    pub fn code(&self) -> SaslCode {
+        self.code
+    }
+    pub fn additional_data(&self) -> Option<&Bytes> {
+        self.additional_data.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1;
 }
 fn decode_sasl_outcome_inner(input: &[u8]) -> Result<(&[u8], SaslOutcome)> {
     let (input, format) = decode_format_code(input)?;
@@ -2687,8 +2892,7 @@ fn decode_sasl_outcome_inner(input: &[u8]) -> Result<(&[u8], SaslOutcome)> {
         code = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field code was omitted.");
     }
     let additional_data: Option<Bytes>;
@@ -2697,30 +2901,24 @@ fn decode_sasl_outcome_inner(input: &[u8]) -> Result<(&[u8], SaslOutcome)> {
         input = decoded.0;
         additional_data = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         additional_data = None;
     }
-    Ok((remainder, SaslOutcome {
-    code,
-    additional_data,
-    }))
+    Ok((remainder, SaslOutcome { code, additional_data }))
 }
 fn encoded_size_sasl_outcome_inner(list: &SaslOutcome) -> usize {
-    let content_size = 0  + list.code.encoded_size() + list.additional_data.encoded_size();
+    let content_size = 0 + list.code.encoded_size() + list.additional_data.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_sasl_outcome_inner(list: &SaslOutcome, buf: &mut BytesMut) {
     Descriptor::Ulong(68).encode(buf);
-    let content_size = 0  + list.code.encoded_size() + list.additional_data.encoded_size();
+    let content_size = 0 + list.code.encoded_size() + list.additional_data.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(SaslOutcome::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(SaslOutcome::FIELD_COUNT as u8);
@@ -2732,17 +2930,19 @@ impl DecodeFormatted for SaslOutcome {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(68)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-outcome:list"))
-        {
+        if descriptor != Descriptor::Ulong(68) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-outcome:list")) {
             bail!("Invalid descriptor.");
         }
         decode_sasl_outcome_inner(input)
     }
 }
 impl Encode for SaslOutcome {
-    fn encoded_size(&self) -> usize { encoded_size_sasl_outcome_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_sasl_outcome_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_sasl_outcome_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_sasl_outcome_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Source {
@@ -2759,18 +2959,40 @@ pub struct Source {
     pub capabilities: Option<Symbols>,
 }
 impl Source {
-                    pub fn address(&self) -> Option<&Address> { self.address.as_ref() }
-                    pub fn durable(&self) -> TerminusDurability { self.durable }
-                    pub fn expiry_policy(&self) -> TerminusExpiryPolicy { self.expiry_policy }
-                    pub fn timeout(&self) -> Seconds { self.timeout }
-                    pub fn dynamic(&self) -> bool { self.dynamic }
-                    pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> { self.dynamic_node_properties.as_ref() }
-                    pub fn distribution_mode(&self) -> Option<&DistributionMode> { self.distribution_mode.as_ref() }
-                    pub fn filter(&self) -> Option<&FilterSet> { self.filter.as_ref() }
-                    pub fn default_outcome(&self) -> Option<&Outcome> { self.default_outcome.as_ref() }
-                    pub fn outcomes(&self) -> Option<&Symbols> { self.outcomes.as_ref() }
-                    pub fn capabilities(&self) -> Option<&Symbols> { self.capabilities.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn address(&self) -> Option<&Address> {
+        self.address.as_ref()
+    }
+    pub fn durable(&self) -> TerminusDurability {
+        self.durable
+    }
+    pub fn expiry_policy(&self) -> TerminusExpiryPolicy {
+        self.expiry_policy
+    }
+    pub fn timeout(&self) -> Seconds {
+        self.timeout
+    }
+    pub fn dynamic(&self) -> bool {
+        self.dynamic
+    }
+    pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> {
+        self.dynamic_node_properties.as_ref()
+    }
+    pub fn distribution_mode(&self) -> Option<&DistributionMode> {
+        self.distribution_mode.as_ref()
+    }
+    pub fn filter(&self) -> Option<&FilterSet> {
+        self.filter.as_ref()
+    }
+    pub fn default_outcome(&self) -> Option<&Outcome> {
+        self.default_outcome.as_ref()
+    }
+    pub fn outcomes(&self) -> Option<&Symbols> {
+        self.outcomes.as_ref()
+    }
+    pub fn capabilities(&self) -> Option<&Symbols> {
+        self.capabilities.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
     let (input, format) = decode_format_code(input)?;
@@ -2785,8 +3007,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         address = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         address = None;
     }
     let durable: TerminusDurability;
@@ -2795,8 +3016,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         durable = decoded.unwrap_or(TerminusDurability::None);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         durable = TerminusDurability::None;
     }
     let expiry_policy: TerminusExpiryPolicy;
@@ -2805,8 +3025,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         expiry_policy = decoded.unwrap_or(TerminusExpiryPolicy::SessionEnd);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         expiry_policy = TerminusExpiryPolicy::SessionEnd;
     }
     let timeout: Seconds;
@@ -2815,8 +3034,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         timeout = decoded.unwrap_or(0);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         timeout = 0;
     }
     let dynamic: bool;
@@ -2825,8 +3043,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         dynamic = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         dynamic = false;
     }
     let dynamic_node_properties: Option<NodeProperties>;
@@ -2835,8 +3052,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         dynamic_node_properties = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         dynamic_node_properties = None;
     }
     let distribution_mode: Option<DistributionMode>;
@@ -2845,8 +3061,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         distribution_mode = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         distribution_mode = None;
     }
     let filter: Option<FilterSet>;
@@ -2855,8 +3070,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         filter = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         filter = None;
     }
     let default_outcome: Option<Outcome>;
@@ -2865,8 +3079,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         default_outcome = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         default_outcome = None;
     }
     let outcomes: Option<Symbols>;
@@ -2875,8 +3088,7 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         outcomes = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         outcomes = None;
     }
     let capabilities: Option<Symbols>;
@@ -2885,39 +3097,61 @@ fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source)> {
         input = decoded.0;
         capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         capabilities = None;
     }
-    Ok((remainder, Source {
-    address,
-    durable,
-    expiry_policy,
-    timeout,
-    dynamic,
-    dynamic_node_properties,
-    distribution_mode,
-    filter,
-    default_outcome,
-    outcomes,
-    capabilities,
-    }))
+    Ok((
+        remainder,
+        Source {
+            address,
+            durable,
+            expiry_policy,
+            timeout,
+            dynamic,
+            dynamic_node_properties,
+            distribution_mode,
+            filter,
+            default_outcome,
+            outcomes,
+            capabilities,
+        },
+    ))
 }
 fn encoded_size_source_inner(list: &Source) -> usize {
-    let content_size = 0  + list.address.encoded_size() + list.durable.encoded_size() + list.expiry_policy.encoded_size() + list.timeout.encoded_size() + list.dynamic.encoded_size() + list.dynamic_node_properties.encoded_size() + list.distribution_mode.encoded_size() + list.filter.encoded_size() + list.default_outcome.encoded_size() + list.outcomes.encoded_size() + list.capabilities.encoded_size();
+    let content_size = 0
+        + list.address.encoded_size()
+        + list.durable.encoded_size()
+        + list.expiry_policy.encoded_size()
+        + list.timeout.encoded_size()
+        + list.dynamic.encoded_size()
+        + list.dynamic_node_properties.encoded_size()
+        + list.distribution_mode.encoded_size()
+        + list.filter.encoded_size()
+        + list.default_outcome.encoded_size()
+        + list.outcomes.encoded_size()
+        + list.capabilities.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_source_inner(list: &Source, buf: &mut BytesMut) {
     Descriptor::Ulong(40).encode(buf);
-    let content_size = 0  + list.address.encoded_size() + list.durable.encoded_size() + list.expiry_policy.encoded_size() + list.timeout.encoded_size() + list.dynamic.encoded_size() + list.dynamic_node_properties.encoded_size() + list.distribution_mode.encoded_size() + list.filter.encoded_size() + list.default_outcome.encoded_size() + list.outcomes.encoded_size() + list.capabilities.encoded_size();
+    let content_size = 0
+        + list.address.encoded_size()
+        + list.durable.encoded_size()
+        + list.expiry_policy.encoded_size()
+        + list.timeout.encoded_size()
+        + list.dynamic.encoded_size()
+        + list.dynamic_node_properties.encoded_size()
+        + list.distribution_mode.encoded_size()
+        + list.filter.encoded_size()
+        + list.default_outcome.encoded_size()
+        + list.outcomes.encoded_size()
+        + list.capabilities.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Source::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Source::FIELD_COUNT as u8);
@@ -2938,17 +3172,19 @@ impl DecodeFormatted for Source {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(40)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:source:list"))
-        {
+        if descriptor != Descriptor::Ulong(40) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:source:list")) {
             bail!("Invalid descriptor.");
         }
         decode_source_inner(input)
     }
 }
 impl Encode for Source {
-    fn encoded_size(&self) -> usize { encoded_size_source_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_source_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_source_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_source_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Target {
@@ -2961,14 +3197,28 @@ pub struct Target {
     pub capabilities: Option<Symbols>,
 }
 impl Target {
-                    pub fn address(&self) -> Option<&Address> { self.address.as_ref() }
-                    pub fn durable(&self) -> TerminusDurability { self.durable }
-                    pub fn expiry_policy(&self) -> TerminusExpiryPolicy { self.expiry_policy }
-                    pub fn timeout(&self) -> Seconds { self.timeout }
-                    pub fn dynamic(&self) -> bool { self.dynamic }
-                    pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> { self.dynamic_node_properties.as_ref() }
-                    pub fn capabilities(&self) -> Option<&Symbols> { self.capabilities.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn address(&self) -> Option<&Address> {
+        self.address.as_ref()
+    }
+    pub fn durable(&self) -> TerminusDurability {
+        self.durable
+    }
+    pub fn expiry_policy(&self) -> TerminusExpiryPolicy {
+        self.expiry_policy
+    }
+    pub fn timeout(&self) -> Seconds {
+        self.timeout
+    }
+    pub fn dynamic(&self) -> bool {
+        self.dynamic
+    }
+    pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> {
+        self.dynamic_node_properties.as_ref()
+    }
+    pub fn capabilities(&self) -> Option<&Symbols> {
+        self.capabilities.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
     let (input, format) = decode_format_code(input)?;
@@ -2983,8 +3233,7 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         input = decoded.0;
         address = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         address = None;
     }
     let durable: TerminusDurability;
@@ -2993,8 +3242,7 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         durable = decoded.unwrap_or(TerminusDurability::None);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         durable = TerminusDurability::None;
     }
     let expiry_policy: TerminusExpiryPolicy;
@@ -3003,8 +3251,7 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         expiry_policy = decoded.unwrap_or(TerminusExpiryPolicy::SessionEnd);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         expiry_policy = TerminusExpiryPolicy::SessionEnd;
     }
     let timeout: Seconds;
@@ -3013,8 +3260,7 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         timeout = decoded.unwrap_or(0);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         timeout = 0;
     }
     let dynamic: bool;
@@ -3023,8 +3269,7 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         dynamic = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         dynamic = false;
     }
     let dynamic_node_properties: Option<NodeProperties>;
@@ -3033,8 +3278,7 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         input = decoded.0;
         dynamic_node_properties = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         dynamic_node_properties = None;
     }
     let capabilities: Option<Symbols>;
@@ -3043,35 +3287,49 @@ fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target)> {
         input = decoded.0;
         capabilities = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         capabilities = None;
     }
-    Ok((remainder, Target {
-    address,
-    durable,
-    expiry_policy,
-    timeout,
-    dynamic,
-    dynamic_node_properties,
-    capabilities,
-    }))
+    Ok((
+        remainder,
+        Target {
+            address,
+            durable,
+            expiry_policy,
+            timeout,
+            dynamic,
+            dynamic_node_properties,
+            capabilities,
+        },
+    ))
 }
 fn encoded_size_target_inner(list: &Target) -> usize {
-    let content_size = 0  + list.address.encoded_size() + list.durable.encoded_size() + list.expiry_policy.encoded_size() + list.timeout.encoded_size() + list.dynamic.encoded_size() + list.dynamic_node_properties.encoded_size() + list.capabilities.encoded_size();
+    let content_size = 0
+        + list.address.encoded_size()
+        + list.durable.encoded_size()
+        + list.expiry_policy.encoded_size()
+        + list.timeout.encoded_size()
+        + list.dynamic.encoded_size()
+        + list.dynamic_node_properties.encoded_size()
+        + list.capabilities.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_target_inner(list: &Target, buf: &mut BytesMut) {
     Descriptor::Ulong(41).encode(buf);
-    let content_size = 0  + list.address.encoded_size() + list.durable.encoded_size() + list.expiry_policy.encoded_size() + list.timeout.encoded_size() + list.dynamic.encoded_size() + list.dynamic_node_properties.encoded_size() + list.capabilities.encoded_size();
+    let content_size = 0
+        + list.address.encoded_size()
+        + list.durable.encoded_size()
+        + list.expiry_policy.encoded_size()
+        + list.timeout.encoded_size()
+        + list.dynamic.encoded_size()
+        + list.dynamic_node_properties.encoded_size()
+        + list.capabilities.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Target::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Target::FIELD_COUNT as u8);
@@ -3088,17 +3346,19 @@ impl DecodeFormatted for Target {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(41)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:target:list"))
-        {
+        if descriptor != Descriptor::Ulong(41) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:target:list")) {
             bail!("Invalid descriptor.");
         }
         decode_target_inner(input)
     }
 }
 impl Encode for Target {
-    fn encoded_size(&self) -> usize { encoded_size_target_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_target_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_target_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_target_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
@@ -3109,12 +3369,22 @@ pub struct Header {
     pub delivery_count: u32,
 }
 impl Header {
-                    pub fn durable(&self) -> bool { self.durable }
-                    pub fn priority(&self) -> u8 { self.priority }
-                    pub fn ttl(&self) -> Option<Milliseconds> { self.ttl }
-                    pub fn first_acquirer(&self) -> bool { self.first_acquirer }
-                    pub fn delivery_count(&self) -> u32 { self.delivery_count }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1;
+    pub fn durable(&self) -> bool {
+        self.durable
+    }
+    pub fn priority(&self) -> u8 {
+        self.priority
+    }
+    pub fn ttl(&self) -> Option<Milliseconds> {
+        self.ttl
+    }
+    pub fn first_acquirer(&self) -> bool {
+        self.first_acquirer
+    }
+    pub fn delivery_count(&self) -> u32 {
+        self.delivery_count
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
     let (input, format) = decode_format_code(input)?;
@@ -3129,8 +3399,7 @@ fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
         durable = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         durable = false;
     }
     let priority: u8;
@@ -3139,8 +3408,7 @@ fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
         priority = decoded.unwrap_or(4);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         priority = 4;
     }
     let ttl: Option<Milliseconds>;
@@ -3149,8 +3417,7 @@ fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
         input = decoded.0;
         ttl = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         ttl = None;
     }
     let first_acquirer: bool;
@@ -3159,8 +3426,7 @@ fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
         first_acquirer = decoded.unwrap_or(false);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         first_acquirer = false;
     }
     let delivery_count: u32;
@@ -3169,33 +3435,35 @@ fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
         delivery_count = decoded.unwrap_or(0);
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         delivery_count = 0;
     }
-    Ok((remainder, Header {
-    durable,
-    priority,
-    ttl,
-    first_acquirer,
-    delivery_count,
-    }))
+    Ok((
+        remainder,
+        Header {
+            durable,
+            priority,
+            ttl,
+            first_acquirer,
+            delivery_count,
+        },
+    ))
 }
 fn encoded_size_header_inner(list: &Header) -> usize {
-    let content_size = 0  + list.durable.encoded_size() + list.priority.encoded_size() + list.ttl.encoded_size() + list.first_acquirer.encoded_size() + list.delivery_count.encoded_size();
+    let content_size =
+        0 + list.durable.encoded_size() + list.priority.encoded_size() + list.ttl.encoded_size() + list.first_acquirer.encoded_size() + list.delivery_count.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_header_inner(list: &Header, buf: &mut BytesMut) {
     Descriptor::Ulong(112).encode(buf);
-    let content_size = 0  + list.durable.encoded_size() + list.priority.encoded_size() + list.ttl.encoded_size() + list.first_acquirer.encoded_size() + list.delivery_count.encoded_size();
+    let content_size =
+        0 + list.durable.encoded_size() + list.priority.encoded_size() + list.ttl.encoded_size() + list.first_acquirer.encoded_size() + list.delivery_count.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Header::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Header::FIELD_COUNT as u8);
@@ -3210,17 +3478,19 @@ impl DecodeFormatted for Header {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(112)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:header:list"))
-        {
+        if descriptor != Descriptor::Ulong(112) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:header:list")) {
             bail!("Invalid descriptor.");
         }
         decode_header_inner(input)
     }
 }
 impl Encode for Header {
-    fn encoded_size(&self) -> usize { encoded_size_header_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_header_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_header_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_header_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Properties {
@@ -3239,20 +3509,46 @@ pub struct Properties {
     pub reply_to_group_id: Option<ByteStr>,
 }
 impl Properties {
-                    pub fn message_id(&self) -> Option<&MessageId> { self.message_id.as_ref() }
-                    pub fn user_id(&self) -> Option<&Bytes> { self.user_id.as_ref() }
-                    pub fn to(&self) -> Option<&Address> { self.to.as_ref() }
-                    pub fn subject(&self) -> Option<&ByteStr> { self.subject.as_ref() }
-                    pub fn reply_to(&self) -> Option<&Address> { self.reply_to.as_ref() }
-                    pub fn correlation_id(&self) -> Option<&MessageId> { self.correlation_id.as_ref() }
-                    pub fn content_type(&self) -> Option<&Symbol> { self.content_type.as_ref() }
-                    pub fn content_encoding(&self) -> Option<&Symbol> { self.content_encoding.as_ref() }
-                    pub fn absolute_expiry_time(&self) -> Option<Timestamp> { self.absolute_expiry_time }
-                    pub fn creation_time(&self) -> Option<Timestamp> { self.creation_time }
-                    pub fn group_id(&self) -> Option<&ByteStr> { self.group_id.as_ref() }
-                    pub fn group_sequence(&self) -> Option<SequenceNo> { self.group_sequence }
-                    pub fn reply_to_group_id(&self) -> Option<&ByteStr> { self.reply_to_group_id.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+    pub fn message_id(&self) -> Option<&MessageId> {
+        self.message_id.as_ref()
+    }
+    pub fn user_id(&self) -> Option<&Bytes> {
+        self.user_id.as_ref()
+    }
+    pub fn to(&self) -> Option<&Address> {
+        self.to.as_ref()
+    }
+    pub fn subject(&self) -> Option<&ByteStr> {
+        self.subject.as_ref()
+    }
+    pub fn reply_to(&self) -> Option<&Address> {
+        self.reply_to.as_ref()
+    }
+    pub fn correlation_id(&self) -> Option<&MessageId> {
+        self.correlation_id.as_ref()
+    }
+    pub fn content_type(&self) -> Option<&Symbol> {
+        self.content_type.as_ref()
+    }
+    pub fn content_encoding(&self) -> Option<&Symbol> {
+        self.content_encoding.as_ref()
+    }
+    pub fn absolute_expiry_time(&self) -> Option<Timestamp> {
+        self.absolute_expiry_time
+    }
+    pub fn creation_time(&self) -> Option<Timestamp> {
+        self.creation_time
+    }
+    pub fn group_id(&self) -> Option<&ByteStr> {
+        self.group_id.as_ref()
+    }
+    pub fn group_sequence(&self) -> Option<SequenceNo> {
+        self.group_sequence
+    }
+    pub fn reply_to_group_id(&self) -> Option<&ByteStr> {
+        self.reply_to_group_id.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
 fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
     let (input, format) = decode_format_code(input)?;
@@ -3267,8 +3563,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         message_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         message_id = None;
     }
     let user_id: Option<Bytes>;
@@ -3277,8 +3572,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         user_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         user_id = None;
     }
     let to: Option<Address>;
@@ -3287,8 +3581,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         to = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         to = None;
     }
     let subject: Option<ByteStr>;
@@ -3297,8 +3590,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         subject = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         subject = None;
     }
     let reply_to: Option<Address>;
@@ -3307,8 +3599,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         reply_to = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         reply_to = None;
     }
     let correlation_id: Option<MessageId>;
@@ -3317,8 +3608,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         correlation_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         correlation_id = None;
     }
     let content_type: Option<Symbol>;
@@ -3327,8 +3617,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         content_type = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         content_type = None;
     }
     let content_encoding: Option<Symbol>;
@@ -3337,8 +3626,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         content_encoding = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         content_encoding = None;
     }
     let absolute_expiry_time: Option<Timestamp>;
@@ -3347,8 +3635,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         absolute_expiry_time = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         absolute_expiry_time = None;
     }
     let creation_time: Option<Timestamp>;
@@ -3357,8 +3644,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         creation_time = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         creation_time = None;
     }
     let group_id: Option<ByteStr>;
@@ -3367,8 +3653,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         group_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         group_id = None;
     }
     let group_sequence: Option<SequenceNo>;
@@ -3377,8 +3662,7 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         group_sequence = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         group_sequence = None;
     }
     let reply_to_group_id: Option<ByteStr>;
@@ -3387,41 +3671,67 @@ fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties)> {
         input = decoded.0;
         reply_to_group_id = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         reply_to_group_id = None;
     }
-    Ok((remainder, Properties {
-    message_id,
-    user_id,
-    to,
-    subject,
-    reply_to,
-    correlation_id,
-    content_type,
-    content_encoding,
-    absolute_expiry_time,
-    creation_time,
-    group_id,
-    group_sequence,
-    reply_to_group_id,
-    }))
+    Ok((
+        remainder,
+        Properties {
+            message_id,
+            user_id,
+            to,
+            subject,
+            reply_to,
+            correlation_id,
+            content_type,
+            content_encoding,
+            absolute_expiry_time,
+            creation_time,
+            group_id,
+            group_sequence,
+            reply_to_group_id,
+        },
+    ))
 }
 fn encoded_size_properties_inner(list: &Properties) -> usize {
-    let content_size = 0  + list.message_id.encoded_size() + list.user_id.encoded_size() + list.to.encoded_size() + list.subject.encoded_size() + list.reply_to.encoded_size() + list.correlation_id.encoded_size() + list.content_type.encoded_size() + list.content_encoding.encoded_size() + list.absolute_expiry_time.encoded_size() + list.creation_time.encoded_size() + list.group_id.encoded_size() + list.group_sequence.encoded_size() + list.reply_to_group_id.encoded_size();
+    let content_size = 0
+        + list.message_id.encoded_size()
+        + list.user_id.encoded_size()
+        + list.to.encoded_size()
+        + list.subject.encoded_size()
+        + list.reply_to.encoded_size()
+        + list.correlation_id.encoded_size()
+        + list.content_type.encoded_size()
+        + list.content_encoding.encoded_size()
+        + list.absolute_expiry_time.encoded_size()
+        + list.creation_time.encoded_size()
+        + list.group_id.encoded_size()
+        + list.group_sequence.encoded_size()
+        + list.reply_to_group_id.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_properties_inner(list: &Properties, buf: &mut BytesMut) {
     Descriptor::Ulong(115).encode(buf);
-    let content_size = 0  + list.message_id.encoded_size() + list.user_id.encoded_size() + list.to.encoded_size() + list.subject.encoded_size() + list.reply_to.encoded_size() + list.correlation_id.encoded_size() + list.content_type.encoded_size() + list.content_encoding.encoded_size() + list.absolute_expiry_time.encoded_size() + list.creation_time.encoded_size() + list.group_id.encoded_size() + list.group_sequence.encoded_size() + list.reply_to_group_id.encoded_size();
+    let content_size = 0
+        + list.message_id.encoded_size()
+        + list.user_id.encoded_size()
+        + list.to.encoded_size()
+        + list.subject.encoded_size()
+        + list.reply_to.encoded_size()
+        + list.correlation_id.encoded_size()
+        + list.content_type.encoded_size()
+        + list.content_encoding.encoded_size()
+        + list.absolute_expiry_time.encoded_size()
+        + list.creation_time.encoded_size()
+        + list.group_id.encoded_size()
+        + list.group_sequence.encoded_size()
+        + list.reply_to_group_id.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Properties::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Properties::FIELD_COUNT as u8);
@@ -3444,17 +3754,19 @@ impl DecodeFormatted for Properties {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(115)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:properties:list"))
-        {
+        if descriptor != Descriptor::Ulong(115) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:properties:list")) {
             bail!("Invalid descriptor.");
         }
         decode_properties_inner(input)
     }
 }
 impl Encode for Properties {
-    fn encoded_size(&self) -> usize { encoded_size_properties_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_properties_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_properties_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_properties_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Received {
@@ -3462,9 +3774,13 @@ pub struct Received {
     pub section_offset: u64,
 }
 impl Received {
-                    pub fn section_number(&self) -> u32 { self.section_number }
-                    pub fn section_offset(&self) -> u64 { self.section_offset }
-    const FIELD_COUNT: usize = 0  + 1 + 1;
+    pub fn section_number(&self) -> u32 {
+        self.section_number
+    }
+    pub fn section_offset(&self) -> u64 {
+        self.section_offset
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1;
 }
 fn decode_received_inner(input: &[u8]) -> Result<(&[u8], Received)> {
     let (input, format) = decode_format_code(input)?;
@@ -3479,8 +3795,7 @@ fn decode_received_inner(input: &[u8]) -> Result<(&[u8], Received)> {
         section_number = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field section_number was omitted.");
     }
     let section_offset: u64;
@@ -3489,30 +3804,24 @@ fn decode_received_inner(input: &[u8]) -> Result<(&[u8], Received)> {
         section_offset = decoded;
         input = in1;
         count -= 1;
-    }
-    else {
+    } else {
         bail!("Required field section_offset was omitted.");
     }
-    Ok((remainder, Received {
-    section_number,
-    section_offset,
-    }))
+    Ok((remainder, Received { section_number, section_offset }))
 }
 fn encoded_size_received_inner(list: &Received) -> usize {
-    let content_size = 0  + list.section_number.encoded_size() + list.section_offset.encoded_size();
+    let content_size = 0 + list.section_number.encoded_size() + list.section_offset.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_received_inner(list: &Received, buf: &mut BytesMut) {
     Descriptor::Ulong(35).encode(buf);
-    let content_size = 0  + list.section_number.encoded_size() + list.section_offset.encoded_size();
+    let content_size = 0 + list.section_number.encoded_size() + list.section_offset.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Received::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Received::FIELD_COUNT as u8);
@@ -3524,23 +3833,24 @@ impl DecodeFormatted for Received {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(35)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:received:list"))
-        {
+        if descriptor != Descriptor::Ulong(35) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:received:list")) {
             bail!("Invalid descriptor.");
         }
         decode_received_inner(input)
     }
 }
 impl Encode for Received {
-    fn encoded_size(&self) -> usize { encoded_size_received_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_received_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_received_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_received_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Accepted {
-}
+pub struct Accepted {}
 impl Accepted {
-    const FIELD_COUNT: usize = 0 ;
+    const FIELD_COUNT: usize = 0;
 }
 fn decode_accepted_inner(input: &[u8]) -> Result<(&[u8], Accepted)> {
     let (input, format) = decode_format_code(input)?;
@@ -3548,24 +3858,21 @@ fn decode_accepted_inner(input: &[u8]) -> Result<(&[u8], Accepted)> {
     let size = header.size as usize;
     decode_check_len!(input, size);
     let remainder = &input[size..];
-    Ok((remainder, Accepted {
-    }))
+    Ok((remainder, Accepted {}))
 }
 fn encoded_size_accepted_inner(list: &Accepted) -> usize {
-    let content_size = 0 ;
+    let content_size = 0;
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_accepted_inner(list: &Accepted, buf: &mut BytesMut) {
     Descriptor::Ulong(36).encode(buf);
-    let content_size = 0 ;
+    let content_size = 0;
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Accepted::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Accepted::FIELD_COUNT as u8);
@@ -3575,25 +3882,29 @@ impl DecodeFormatted for Accepted {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(36)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:accepted:list"))
-        {
+        if descriptor != Descriptor::Ulong(36) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:accepted:list")) {
             bail!("Invalid descriptor.");
         }
         decode_accepted_inner(input)
     }
 }
 impl Encode for Accepted {
-    fn encoded_size(&self) -> usize { encoded_size_accepted_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_accepted_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_accepted_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_accepted_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rejected {
     pub error: Option<Error>,
 }
 impl Rejected {
-                    pub fn error(&self) -> Option<&Error> { self.error.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1;
+    pub fn error(&self) -> Option<&Error> {
+        self.error.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1;
 }
 fn decode_rejected_inner(input: &[u8]) -> Result<(&[u8], Rejected)> {
     let (input, format) = decode_format_code(input)?;
@@ -3608,29 +3919,24 @@ fn decode_rejected_inner(input: &[u8]) -> Result<(&[u8], Rejected)> {
         input = decoded.0;
         error = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         error = None;
     }
-    Ok((remainder, Rejected {
-    error,
-    }))
+    Ok((remainder, Rejected { error }))
 }
 fn encoded_size_rejected_inner(list: &Rejected) -> usize {
-    let content_size = 0  + list.error.encoded_size();
+    let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_rejected_inner(list: &Rejected, buf: &mut BytesMut) {
     Descriptor::Ulong(37).encode(buf);
-    let content_size = 0  + list.error.encoded_size();
+    let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Rejected::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Rejected::FIELD_COUNT as u8);
@@ -3641,23 +3947,24 @@ impl DecodeFormatted for Rejected {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(37)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:rejected:list"))
-        {
+        if descriptor != Descriptor::Ulong(37) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:rejected:list")) {
             bail!("Invalid descriptor.");
         }
         decode_rejected_inner(input)
     }
 }
 impl Encode for Rejected {
-    fn encoded_size(&self) -> usize { encoded_size_rejected_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_rejected_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_rejected_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_rejected_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Released {
-}
+pub struct Released {}
 impl Released {
-    const FIELD_COUNT: usize = 0 ;
+    const FIELD_COUNT: usize = 0;
 }
 fn decode_released_inner(input: &[u8]) -> Result<(&[u8], Released)> {
     let (input, format) = decode_format_code(input)?;
@@ -3665,24 +3972,21 @@ fn decode_released_inner(input: &[u8]) -> Result<(&[u8], Released)> {
     let size = header.size as usize;
     decode_check_len!(input, size);
     let remainder = &input[size..];
-    Ok((remainder, Released {
-    }))
+    Ok((remainder, Released {}))
 }
 fn encoded_size_released_inner(list: &Released) -> usize {
-    let content_size = 0 ;
+    let content_size = 0;
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_released_inner(list: &Released, buf: &mut BytesMut) {
     Descriptor::Ulong(38).encode(buf);
-    let content_size = 0 ;
+    let content_size = 0;
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Released::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Released::FIELD_COUNT as u8);
@@ -3692,17 +3996,19 @@ impl DecodeFormatted for Released {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(38)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:released:list"))
-        {
+        if descriptor != Descriptor::Ulong(38) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:released:list")) {
             bail!("Invalid descriptor.");
         }
         decode_released_inner(input)
     }
 }
 impl Encode for Released {
-    fn encoded_size(&self) -> usize { encoded_size_released_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_released_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_released_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_released_inner(self, buf)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Modified {
@@ -3711,10 +4017,16 @@ pub struct Modified {
     pub message_annotations: Option<Fields>,
 }
 impl Modified {
-                    pub fn delivery_failed(&self) -> Option<bool> { self.delivery_failed }
-                    pub fn undeliverable_here(&self) -> Option<bool> { self.undeliverable_here }
-                    pub fn message_annotations(&self) -> Option<&Fields> { self.message_annotations.as_ref() }
-    const FIELD_COUNT: usize = 0  + 1 + 1 + 1;
+    pub fn delivery_failed(&self) -> Option<bool> {
+        self.delivery_failed
+    }
+    pub fn undeliverable_here(&self) -> Option<bool> {
+        self.undeliverable_here
+    }
+    pub fn message_annotations(&self) -> Option<&Fields> {
+        self.message_annotations.as_ref()
+    }
+    const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
 fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified)> {
     let (input, format) = decode_format_code(input)?;
@@ -3729,8 +4041,7 @@ fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified)> {
         input = decoded.0;
         delivery_failed = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         delivery_failed = None;
     }
     let undeliverable_here: Option<bool>;
@@ -3739,8 +4050,7 @@ fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified)> {
         input = decoded.0;
         undeliverable_here = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         undeliverable_here = None;
     }
     let message_annotations: Option<Fields>;
@@ -3749,31 +4059,31 @@ fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified)> {
         input = decoded.0;
         message_annotations = decoded.1;
         count -= 1;
-    }
-    else {
+    } else {
         message_annotations = None;
     }
-    Ok((remainder, Modified {
-    delivery_failed,
-    undeliverable_here,
-    message_annotations,
-    }))
+    Ok((
+        remainder,
+        Modified {
+            delivery_failed,
+            undeliverable_here,
+            message_annotations,
+        },
+    ))
 }
 fn encoded_size_modified_inner(list: &Modified) -> usize {
-    let content_size = 0  + list.delivery_failed.encoded_size() + list.undeliverable_here.encoded_size() + list.message_annotations.encoded_size();
+    let content_size = 0 + list.delivery_failed.encoded_size() + list.undeliverable_here.encoded_size() + list.message_annotations.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
-        + content_size
+    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
 }
 fn encode_modified_inner(list: &Modified, buf: &mut BytesMut) {
     Descriptor::Ulong(39).encode(buf);
-    let content_size = 0  + list.delivery_failed.encoded_size() + list.undeliverable_here.encoded_size() + list.message_annotations.encoded_size();
+    let content_size = 0 + list.delivery_failed.encoded_size() + list.undeliverable_here.encoded_size() + list.message_annotations.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
         buf.put_u32_be(Modified::FIELD_COUNT as u32);
-    }
-    else {
+    } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Modified::FIELD_COUNT as u8);
@@ -3786,15 +4096,17 @@ impl DecodeFormatted for Modified {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(39)
-            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:modified:list"))
-        {
+        if descriptor != Descriptor::Ulong(39) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:modified:list")) {
             bail!("Invalid descriptor.");
         }
         decode_modified_inner(input)
     }
 }
 impl Encode for Modified {
-    fn encoded_size(&self) -> usize { encoded_size_modified_inner(self) }
-    fn encode(&self, buf: &mut BytesMut) { encode_modified_inner(self, buf) }
+    fn encoded_size(&self) -> usize {
+        encoded_size_modified_inner(self)
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        encode_modified_inner(self, buf)
+    }
 }

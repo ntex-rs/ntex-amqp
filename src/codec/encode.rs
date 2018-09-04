@@ -4,10 +4,10 @@ use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use codec::{self, ArrayEncode, Encode};
 use framing::{self, AmqpFrame, SaslFrame};
+use std::collections::HashMap;
+use std::hash::{BuildHasher, Hash};
 use types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant};
 use uuid::Uuid;
-use std::collections::HashMap;
-use std::hash::{Hash, BuildHasher};
 
 fn ensure_capacity<T: Encode>(encodable: &T, buf: &mut BytesMut) {
     if buf.remaining_mut() < encodable.encoded_size() {
@@ -36,11 +36,7 @@ impl Encode for bool {
         1
     }
     fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u8(if *self {
-            codec::FORMATCODE_BOOLEAN_TRUE
-        } else {
-            codec::FORMATCODE_BOOLEAN_FALSE
-        });
+        buf.put_u8(if *self { codec::FORMATCODE_BOOLEAN_TRUE } else { codec::FORMATCODE_BOOLEAN_FALSE });
     }
 }
 impl ArrayEncode for bool {
@@ -412,8 +408,7 @@ impl ArrayEncode for Symbol {
 }
 
 fn map_encoded_size<K: Hash + Eq + Encode, V: Encode, S: BuildHasher>(map: &HashMap<K, V, S>) -> usize {
-    map.iter()
-        .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
+    map.iter().fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
 }
 impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, S> {
     fn encoded_size(&self) -> usize {

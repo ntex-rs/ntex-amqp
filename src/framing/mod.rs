@@ -1,5 +1,5 @@
-use bytes::Bytes;
 use super::protocol;
+use bytes::Bytes;
 
 /// Length in bytes of the fixed frame header
 pub const HEADER_LEN: usize = 8;
@@ -18,11 +18,7 @@ pub struct AmqpFrame {
 
 impl AmqpFrame {
     pub fn new(channel_id: u16, performative: protocol::Frame, body: Bytes) -> AmqpFrame {
-        AmqpFrame {
-            channel_id,
-            performative,
-            body,
-        }
+        AmqpFrame { channel_id, performative, body }
     }
 
     #[inline]
@@ -40,7 +36,6 @@ impl AmqpFrame {
         &self.body
     }
 }
-
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaslFrame {
