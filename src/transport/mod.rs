@@ -138,7 +138,6 @@ where
     T: AsyncRead + AsyncWrite,
 {
     negotiate_protocol(ProtocolId::AmqpSasl, io).and_then(move |io| {
-        println!("AMQP: proto negotiated");
         let sasl_io = Framed::new(io, AmqpCodec::<SaslFrame>::new());
 
         // processing sasl-mechanisms
@@ -166,7 +165,6 @@ where
             sasl_io.send(SaslFrame::new(SaslFrameBody::SaslInit(sasl_init))).map_err(Error::from).and_then(|sasl_io| {
                 // processing sasl-outcome
                 sasl_io.into_future().map_err(|e| Error::from(e.0)).and_then(|(sasl_frame, sasl_io)| {
-                    println!("FRAME: {:?}", sasl_frame);
                     if let Some(SaslFrame {
                         body: SaslFrameBody::SaslOutcome(outcome),
                     }) = sasl_frame
