@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
-use actix_net::connector::ConnectionInfo;
+use actix_net::connector::Connect;
 use actix_net::service::Service;
 use bytes::Bytes;
 use futures::prelude::*;
@@ -20,38 +20,34 @@ use io::AmqpCodec;
 use super::session::*;
 use super::*;
 
-pub struct ConnectionHandshake<T, Io> {
-    t: PhantomData<T>,
+pub struct ConnectionHandshake<Io> {
     io: PhantomData<Io>,
 }
 
-impl<T, Io> ConnectionHandshake<T, Io>
+impl<Io> ConnectionHandshake<Io>
 where
-    T: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
     pub fn new() -> Self {
-        ConnectionHandshake { t: PhantomData, io: PhantomData }
+        ConnectionHandshake { io: PhantomData }
     }
 }
 
-impl<T, Io> Clone for ConnectionHandshake<T, Io>
+impl<Io> Clone for ConnectionHandshake<Io>
 where
-    T: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
     fn clone(&self) -> Self {
-        ConnectionHandshake { t: PhantomData, io: PhantomData }
+        ConnectionHandshake { io: PhantomData }
     }
 }
 
-impl<T, Io> Service for ConnectionHandshake<T, Io>
+impl<Io> Service for ConnectionHandshake<Io>
 where
-    T: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
-    type Request = (T, ConnectionInfo, Io);
-    type Response = (T, Connection<Io>);
+    type Request = (Connect, Io);
+    type Response = Connection<Io>;
     type Error = Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
@@ -59,10 +55,10 @@ where
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, (req, info, stream): Self::Request) -> Self::Future {
+    fn call(&mut self, (conn, stream): Self::Request) -> Self::Future {
         Box::new(negotiate_protocol(ProtocolId::Amqp, stream).and_then(move |io| {
             let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
-            open_connection(&info.host, io).map(|io| (req, Connection::new(io)))
+            open_connection(&conn.host, io).map(|io| Connection::new(io))
         }))
     }
 }
