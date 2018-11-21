@@ -5,6 +5,7 @@ use std::rc::{Rc, Weak};
 
 use actix_net::connector::Connect;
 use actix_net::service::Service;
+use actix_net::resolver::RequestHost;
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::stream::{SplitSink, SplitStream};
@@ -58,7 +59,7 @@ where
     fn call(&mut self, (conn, stream): Self::Request) -> Self::Future {
         Box::new(negotiate_protocol(ProtocolId::Amqp, stream).and_then(move |io| {
             let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
-            open_connection(&conn.host, io).map(|io| Connection::new(io))
+            open_connection(&conn.host(), io).map(|io| Connection::new(io))
         }))
     }
 }
