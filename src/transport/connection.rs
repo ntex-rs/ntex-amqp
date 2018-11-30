@@ -4,8 +4,8 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
 use actix_net::connector::Connect;
-use actix_net::service::Service;
 use actix_net::resolver::RequestHost;
+use actix_net::service::Service;
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::stream::{SplitSink, SplitStream};
@@ -43,11 +43,10 @@ where
     }
 }
 
-impl<Io> Service for ConnectionHandshake<Io>
+impl<Io> Service<(Connect, Io)> for ConnectionHandshake<Io>
 where
     Io: AsyncRead + AsyncWrite + 'static,
 {
-    type Request = (Connect, Io);
     type Response = Connection<Io>;
     type Error = Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
@@ -56,7 +55,7 @@ where
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, (conn, stream): Self::Request) -> Self::Future {
+    fn call(&mut self, (conn, stream): (Connect, Io)) -> Self::Future {
         Box::new(negotiate_protocol(ProtocolId::Amqp, stream).and_then(move |io| {
             let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
             open_connection(&conn.host(), io).map(|io| Connection::new(io))
