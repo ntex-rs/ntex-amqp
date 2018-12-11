@@ -15,9 +15,8 @@ tokio-io = "0.1"
 tokio-codec = "0.1"
 tokio-current-thread = "0.1"
 
-#actix-net = "0.3.0"
-actix-net = { git="https://github.com/actix/actix-net.git" }
-#actix-net = { path="../actix/actix-net" }
+actix-service = "0.1.1"
+actix-connector = "0.1.0"
 
 [build-dependencies]
 handlebars = { version = "0.27", optional = true }

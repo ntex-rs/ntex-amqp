@@ -3,9 +3,8 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
-use actix_net::connector::Connect;
-use actix_net::resolver::RequestHost;
-use actix_net::service::Service;
+use actix_connector::{Connect, RequestHost};
+use actix_service::Service;
 use bytes::Bytes;
 use futures::prelude::*;
 use futures::stream::{SplitSink, SplitStream};

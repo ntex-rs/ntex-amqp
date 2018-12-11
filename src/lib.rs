@@ -1,4 +1,5 @@
-extern crate actix_net;
+extern crate actix_connector;
+extern crate actix_service;
 extern crate bytes;
 extern crate chrono;
 extern crate futures;
