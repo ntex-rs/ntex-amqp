@@ -37,9 +37,9 @@ lazy_static! {
             "ErrorCondition",
             "DistributionMode"
         ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
     );
     static ref ENUM_TYPES: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
 }
@@ -214,12 +214,22 @@ impl Definitions {
                 }
                 _Type::Described(ref d) if d.source == "list" && d.class != "restricted" => {
                     let ls = Described::list(d.clone());
-                    Definitions::register_provides(&mut provide_map, &ls.name, Some(ls.descriptor.clone()), &ls.provides);
+                    Definitions::register_provides(
+                        &mut provide_map,
+                        &ls.name,
+                        Some(ls.descriptor.clone()),
+                        &ls.provides,
+                    );
                     lists.push(ls);
                 }
                 _Type::Described(ref d) if d.class == "restricted" => {
                     let ls = Described::alias(d.clone());
-                    Definitions::register_provides(&mut provide_map, &ls.name, Some(ls.descriptor.clone()), &ls.provides);
+                    Definitions::register_provides(
+                        &mut provide_map,
+                        &ls.name,
+                        Some(ls.descriptor.clone()),
+                        &ls.provides,
+                    );
                     described_restricted.push(ls);
                 }
                 _ => {}
@@ -238,7 +248,8 @@ impl Definitions {
                         options: v,
                     })
                 }
-            }).collect();
+            })
+            .collect();
 
         Definitions {
             aliases,
@@ -249,16 +260,23 @@ impl Definitions {
         }
     }
 
-    fn register_provides(map: &mut HashMap<String, Vec<ProvidesItem>>, name: &str, descriptor: Option<Descriptor>, provides: &Vec<String>) {
+    fn register_provides(
+        map: &mut HashMap<String, Vec<ProvidesItem>>,
+        name: &str,
+        descriptor: Option<Descriptor>,
+        provides: &Vec<String>,
+    ) {
         for p in provides.iter() {
-            map.entry(p.clone()).or_insert_with(|| vec![]).push(ProvidesItem {
-                ty: name.to_string(),
-                descriptor: descriptor.clone().unwrap_or_else(|| Descriptor {
-                    name: String::new(),
-                    domain: 0,
-                    code: 0,
-                }),
-            });
+            map.entry(p.clone())
+                .or_insert_with(|| vec![])
+                .push(ProvidesItem {
+                    ty: name.to_string(),
+                    descriptor: descriptor.clone().unwrap_or_else(|| Descriptor {
+                        name: String::new(),
+                        domain: 0,
+                        code: 0,
+                    }),
+                });
         }
     }
 }
@@ -289,7 +307,8 @@ impl Enum {
                     name: camel_case(&*c.name),
                     value_len: c.value.len(),
                     value: c.value,
-                }).collect(),
+                })
+                .collect(),
         }
     }
 }
@@ -323,7 +342,8 @@ impl Descriptor {
             .map(|p| {
                 assert!(p.starts_with("0x"));
                 u32::from_str_radix(&p[2..], 16).expect("malformed descriptor code")
-            }).collect();
+            })
+            .collect();
         Descriptor {
             name: d.name,
             domain: code_parts[0],
@@ -354,11 +374,13 @@ impl Field {
     fn format_default(default: Option<String>, ty: &str) -> String {
         match default {
             None => String::new(),
-            Some(def) => if ENUM_TYPES.lock().unwrap().contains(ty) {
-                format!("{}::{}", ty, camel_case(&*def))
-            } else {
-                def
-            },
+            Some(def) => {
+                if ENUM_TYPES.lock().unwrap().contains(ty) {
+                    format!("{}::{}", ty, camel_case(&*def))
+                } else {
+                    def
+                }
+            }
         }
     }
 }
@@ -383,8 +405,10 @@ fn parse_provides(p: Option<String>) -> Vec<String> {
                 } else {
                     Some(camel_case(&s))
                 }
-            }).collect()
-    }).unwrap_or(vec![])
+            })
+            .collect()
+    })
+    .unwrap_or(vec![])
 }
 
 fn string_as_bool<'de, T, D>(deserializer: D) -> Result<T, D::Error>
@@ -392,7 +416,9 @@ where
     T: FromStr<Err = ParseBoolError>,
     D: Deserializer<'de>,
 {
-    Ok(String::deserialize(deserializer)?.parse::<T>().expect("Error parsing bool from string"))
+    Ok(String::deserialize(deserializer)?
+        .parse::<T>()
+        .expect("Error parsing bool from string"))
 }
 
 pub fn camel_case(name: &str) -> String {
@@ -402,7 +428,11 @@ pub fn camel_case(name: &str) -> String {
             new_word = true;
             result
         } else {
-            result.push(if new_word { ch.to_ascii_uppercase() } else { ch });
+            result.push(if new_word {
+                ch.to_ascii_uppercase()
+            } else {
+                ch
+            });
             new_word = false;
             result
         }
@@ -427,7 +457,11 @@ pub fn snake_case(name: &str) -> String {
                         new_word = false;
                     }
                     last_was_upper = uppercase;
-                    result.push(if uppercase { ch.to_ascii_lowercase() } else { ch });
+                    result.push(if uppercase {
+                        ch.to_ascii_lowercase()
+                    } else {
+                        ch
+                    });
                     result
                 }
             })

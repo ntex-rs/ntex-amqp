@@ -18,7 +18,7 @@ pub mod codec;
 mod errors;
 pub mod framing;
 pub mod types;
-pub use errors::*; // todo: revisit API guidelines for this
+pub use crate::errors::*; // todo: revisit API guidelines for this
 pub mod io;
 pub mod protocol;
 pub mod transport;

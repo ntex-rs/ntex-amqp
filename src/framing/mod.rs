@@ -18,7 +18,11 @@ pub struct AmqpFrame {
 
 impl AmqpFrame {
     pub fn new(channel_id: u16, performative: protocol::Frame, body: Bytes) -> AmqpFrame {
-        AmqpFrame { channel_id, performative, body }
+        AmqpFrame {
+            channel_id,
+            performative,
+            body,
+        }
     }
 
     #[inline]

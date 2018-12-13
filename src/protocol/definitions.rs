@@ -1,8 +1,8 @@
 #![allow(unused_variables, unused_assignments, unused_mut, unreachable_patterns)]
 use super::*;
+use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
+use crate::errors::Result;
 use bytes::{BufMut, Bytes, BytesMut};
-use codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
-use errors::Result;
 use std::u8;
 use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
@@ -22,28 +22,58 @@ impl DecodeFormatted for Section {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
         match descriptor {
-            Descriptor::Ulong(112) => decode_header_inner(input).map(|(i, r)| (i, Section::Header(r))),
-            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input).map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
-            Descriptor::Ulong(114) => decode_message_annotations_inner(input).map(|(i, r)| (i, Section::MessageAnnotations(r))),
-            Descriptor::Ulong(116) => decode_application_properties_inner(input).map(|(i, r)| (i, Section::ApplicationProperties(r))),
+            Descriptor::Ulong(112) => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
+                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
+            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
+                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
+            Descriptor::Ulong(116) => decode_application_properties_inner(input)
+                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
             Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
-            Descriptor::Ulong(118) => decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r))),
-            Descriptor::Ulong(119) => decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r))),
-            Descriptor::Ulong(120) => decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r))),
-            Descriptor::Ulong(115) => decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => decode_header_inner(input).map(|(i, r)| (i, Section::Header(r))),
+            Descriptor::Ulong(118) => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Ulong(119) => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Ulong(120) => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Ulong(115) => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
-                decode_delivery_annotations_inner(input).map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
+                decode_delivery_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
             }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => decode_message_annotations_inner(input).map(|(i, r)| (i, Section::MessageAnnotations(r))),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
+                decode_message_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
+            }
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
-                decode_application_properties_inner(input).map(|(i, r)| (i, Section::ApplicationProperties(r)))
+                decode_application_properties_inner(input)
+                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
             }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r))),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
+                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
             _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
@@ -89,16 +119,36 @@ impl DecodeFormatted for DeliveryState {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
         match descriptor {
-            Descriptor::Ulong(35) => decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r))),
-            Descriptor::Ulong(36) => decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r))),
-            Descriptor::Ulong(37) => decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r))),
-            Descriptor::Ulong(38) => decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r))),
-            Descriptor::Ulong(39) => decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r))),
+            Descriptor::Ulong(35) => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
             _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
@@ -135,14 +185,30 @@ impl DecodeFormatted for Outcome {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
         match descriptor {
-            Descriptor::Ulong(36) => decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r))),
-            Descriptor::Ulong(37) => decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r))),
-            Descriptor::Ulong(38) => decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r))),
-            Descriptor::Ulong(39) => decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r))),
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
             _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
@@ -186,20 +252,42 @@ impl DecodeFormatted for Frame {
             Descriptor::Ulong(17) => decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r))),
             Descriptor::Ulong(18) => decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r))),
             Descriptor::Ulong(19) => decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r))),
-            Descriptor::Ulong(20) => decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r))),
-            Descriptor::Ulong(21) => decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r))),
+            Descriptor::Ulong(20) => {
+                decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r)))
+            }
+            Descriptor::Ulong(21) => {
+                decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r)))
+            }
             Descriptor::Ulong(22) => decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r))),
             Descriptor::Ulong(23) => decode_end_inner(input).map(|(i, r)| (i, Frame::End(r))),
             Descriptor::Ulong(24) => decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:open:list" => decode_open_inner(input).map(|(i, r)| (i, Frame::Open(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:begin:list" => decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:attach:list" => decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:flow:list" => decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:transfer:list" => decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:disposition:list" => decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:detach:list" => decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:end:list" => decode_end_inner(input).map(|(i, r)| (i, Frame::End(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r))),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:open:list" => {
+                decode_open_inner(input).map(|(i, r)| (i, Frame::Open(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:begin:list" => {
+                decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:attach:list" => {
+                decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:flow:list" => {
+                decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:transfer:list" => {
+                decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:disposition:list" => {
+                decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:detach:list" => {
+                decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:end:list" => {
+                decode_end_inner(input).map(|(i, r)| (i, Frame::End(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => {
+                decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
+            }
             _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
@@ -245,16 +333,36 @@ impl DecodeFormatted for SaslFrameBody {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
         match descriptor {
-            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
-            Descriptor::Ulong(65) => decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r))),
-            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
-            Descriptor::Ulong(67) => decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r))),
-            Descriptor::Ulong(68) => decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => decode_sasl_mechanisms_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => decode_sasl_challenge_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r))),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r))),
+            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
+            Descriptor::Ulong(65) => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
+            }
+            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
+            Descriptor::Ulong(67) => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
+            }
+            Descriptor::Ulong(68) => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
+                decode_sasl_mechanisms_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
+                decode_sasl_challenge_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
+            }
             _ => Err(ErrorKind::InvalidDescriptor(descriptor).into()),
         }
     }
@@ -506,17 +614,25 @@ impl Encode for AmqpError {
         match *self {
             AmqpError::InternalError => Symbol::from_static("amqp:internal-error").encode(buf),
             AmqpError::NotFound => Symbol::from_static("amqp:not-found").encode(buf),
-            AmqpError::UnauthorizedAccess => Symbol::from_static("amqp:unauthorized-access").encode(buf),
+            AmqpError::UnauthorizedAccess => {
+                Symbol::from_static("amqp:unauthorized-access").encode(buf)
+            }
             AmqpError::DecodeError => Symbol::from_static("amqp:decode-error").encode(buf),
-            AmqpError::ResourceLimitExceeded => Symbol::from_static("amqp:resource-limit-exceeded").encode(buf),
+            AmqpError::ResourceLimitExceeded => {
+                Symbol::from_static("amqp:resource-limit-exceeded").encode(buf)
+            }
             AmqpError::NotAllowed => Symbol::from_static("amqp:not-allowed").encode(buf),
             AmqpError::InvalidField => Symbol::from_static("amqp:invalid-field").encode(buf),
             AmqpError::NotImplemented => Symbol::from_static("amqp:not-implemented").encode(buf),
             AmqpError::ResourceLocked => Symbol::from_static("amqp:resource-locked").encode(buf),
-            AmqpError::PreconditionFailed => Symbol::from_static("amqp:precondition-failed").encode(buf),
+            AmqpError::PreconditionFailed => {
+                Symbol::from_static("amqp:precondition-failed").encode(buf)
+            }
             AmqpError::ResourceDeleted => Symbol::from_static("amqp:resource-deleted").encode(buf),
             AmqpError::IllegalState => Symbol::from_static("amqp:illegal-state").encode(buf),
-            AmqpError::FrameSizeTooSmall => Symbol::from_static("amqp:frame-size-too-small").encode(buf),
+            AmqpError::FrameSizeTooSmall => {
+                Symbol::from_static("amqp:frame-size-too-small").encode(buf)
+            }
         }
     }
 }
@@ -552,9 +668,15 @@ impl Encode for ConnectionError {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            ConnectionError::ConnectionForced => Symbol::from_static("amqp:connection:forced").encode(buf),
-            ConnectionError::FramingError => Symbol::from_static("amqp:connection:framing-error").encode(buf),
-            ConnectionError::Redirect => Symbol::from_static("amqp:connection:redirect").encode(buf),
+            ConnectionError::ConnectionForced => {
+                Symbol::from_static("amqp:connection:forced").encode(buf)
+            }
+            ConnectionError::FramingError => {
+                Symbol::from_static("amqp:connection:framing-error").encode(buf)
+            }
+            ConnectionError::Redirect => {
+                Symbol::from_static("amqp:connection:redirect").encode(buf)
+            }
         }
     }
 }
@@ -593,10 +715,16 @@ impl Encode for SessionError {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            SessionError::WindowViolation => Symbol::from_static("amqp:session:window-violation").encode(buf),
+            SessionError::WindowViolation => {
+                Symbol::from_static("amqp:session:window-violation").encode(buf)
+            }
             SessionError::ErrantLink => Symbol::from_static("amqp:session:errant-link").encode(buf),
-            SessionError::HandleInUse => Symbol::from_static("amqp:session:handle-in-use").encode(buf),
-            SessionError::UnattachedHandle => Symbol::from_static("amqp:session:unattached-handle").encode(buf),
+            SessionError::HandleInUse => {
+                Symbol::from_static("amqp:session:handle-in-use").encode(buf)
+            }
+            SessionError::UnattachedHandle => {
+                Symbol::from_static("amqp:session:unattached-handle").encode(buf)
+            }
         }
     }
 }
@@ -639,8 +767,12 @@ impl Encode for LinkError {
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             LinkError::DetachForced => Symbol::from_static("amqp:link:detach-forced").encode(buf),
-            LinkError::TransferLimitExceeded => Symbol::from_static("amqp:link:transfer-limit-exceeded").encode(buf),
-            LinkError::MessageSizeExceeded => Symbol::from_static("amqp:link:message-size-exceeded").encode(buf),
+            LinkError::TransferLimitExceeded => {
+                Symbol::from_static("amqp:link:transfer-limit-exceeded").encode(buf)
+            }
+            LinkError::MessageSizeExceeded => {
+                Symbol::from_static("amqp:link:message-size-exceeded").encode(buf)
+            }
             LinkError::Redirect => Symbol::from_static("amqp:link:redirect").encode(buf),
             LinkError::Stolen => Symbol::from_static("amqp:link:stolen").encode(buf),
         }
@@ -815,7 +947,9 @@ impl Encode for TerminusExpiryPolicy {
         match *self {
             TerminusExpiryPolicy::LinkDetach => Symbol::from_static("link-detach").encode(buf),
             TerminusExpiryPolicy::SessionEnd => Symbol::from_static("session-end").encode(buf),
-            TerminusExpiryPolicy::ConnectionClose => Symbol::from_static("connection-close").encode(buf),
+            TerminusExpiryPolicy::ConnectionClose => {
+                Symbol::from_static("connection-close").encode(buf)
+            }
             TerminusExpiryPolicy::Never => Symbol::from_static("never").encode(buf),
         }
     }
@@ -956,16 +1090,33 @@ fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error)> {
     } else {
         info = None;
     }
-    Ok((remainder, Error { condition, description, info }))
+    Ok((
+        remainder,
+        Error {
+            condition,
+            description,
+            info,
+        },
+    ))
 }
 fn encoded_size_error_inner(list: &Error) -> usize {
-    let content_size = 0 + list.condition.encoded_size() + list.description.encoded_size() + list.info.encoded_size();
+    let content_size = 0
+        + list.condition.encoded_size()
+        + list.description.encoded_size()
+        + list.info.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_error_inner(list: &Error, buf: &mut BytesMut) {
     Descriptor::Ulong(29).encode(buf);
-    let content_size = 0 + list.condition.encoded_size() + list.description.encoded_size() + list.info.encoded_size();
+    let content_size = 0
+        + list.condition.encoded_size()
+        + list.description.encoded_size()
+        + list.info.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
@@ -983,7 +1134,9 @@ impl DecodeFormatted for Error {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(29) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:error:list")) {
+        if descriptor != Descriptor::Ulong(29)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:error:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_error_inner(input)
@@ -1169,7 +1322,11 @@ fn encoded_size_open_inner(list: &Open) -> usize {
         + list.desired_capabilities.encoded_size()
         + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
     Descriptor::Ulong(16).encode(buf);
@@ -1208,7 +1365,9 @@ impl DecodeFormatted for Open {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(16) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:open:list")) {
+        if descriptor != Descriptor::Ulong(16)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:open:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_open_inner(input)
@@ -1364,7 +1523,11 @@ fn encoded_size_begin_inner(list: &Begin) -> usize {
         + list.desired_capabilities.encoded_size()
         + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
     Descriptor::Ulong(17).encode(buf);
@@ -1399,7 +1562,9 @@ impl DecodeFormatted for Begin {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(17) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:begin:list")) {
+        if descriptor != Descriptor::Ulong(17)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:begin:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_begin_inner(input)
@@ -1645,7 +1810,11 @@ fn encoded_size_attach_inner(list: &Attach) -> usize {
         + list.desired_capabilities.encoded_size()
         + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
     Descriptor::Ulong(18).encode(buf);
@@ -1692,7 +1861,9 @@ impl DecodeFormatted for Attach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(18) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:attach:list")) {
+        if descriptor != Descriptor::Ulong(18)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:attach:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_attach_inner(input)
@@ -1893,7 +2064,11 @@ fn encoded_size_flow_inner(list: &Flow) -> usize {
         + list.echo.encoded_size()
         + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
     Descriptor::Ulong(19).encode(buf);
@@ -1934,7 +2109,9 @@ impl DecodeFormatted for Flow {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(19) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:flow:list")) {
+        if descriptor != Descriptor::Ulong(19)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:flow:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_flow_inner(input)
@@ -2135,7 +2312,11 @@ fn encoded_size_transfer_inner(list: &Transfer) -> usize {
         + list.aborted.encoded_size()
         + list.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
     Descriptor::Ulong(20).encode(buf);
@@ -2176,7 +2357,9 @@ impl DecodeFormatted for Transfer {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(20) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:transfer:list")) {
+        if descriptor != Descriptor::Ulong(20)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:transfer:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_transfer_inner(input)
@@ -2302,7 +2485,11 @@ fn encoded_size_disposition_inner(list: &Disposition) -> usize {
         + list.state.encoded_size()
         + list.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
     Descriptor::Ulong(21).encode(buf);
@@ -2333,7 +2520,9 @@ impl DecodeFormatted for Disposition {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(21) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:disposition:list")) {
+        if descriptor != Descriptor::Ulong(21)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:disposition:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_disposition_inner(input)
@@ -2399,16 +2588,29 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach)> {
     } else {
         error = None;
     }
-    Ok((remainder, Detach { handle, closed, error }))
+    Ok((
+        remainder,
+        Detach {
+            handle,
+            closed,
+            error,
+        },
+    ))
 }
 fn encoded_size_detach_inner(list: &Detach) -> usize {
-    let content_size = 0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size =
+        0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
     Descriptor::Ulong(22).encode(buf);
-    let content_size = 0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size =
+        0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
@@ -2426,7 +2628,9 @@ impl DecodeFormatted for Detach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(22) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:detach:list")) {
+        if descriptor != Descriptor::Ulong(22)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:detach:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_detach_inner(input)
@@ -2471,7 +2675,11 @@ fn decode_end_inner(input: &[u8]) -> Result<(&[u8], End)> {
 fn encoded_size_end_inner(list: &End) -> usize {
     let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_end_inner(list: &End, buf: &mut BytesMut) {
     Descriptor::Ulong(23).encode(buf);
@@ -2491,7 +2699,9 @@ impl DecodeFormatted for End {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(23) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:end:list")) {
+        if descriptor != Descriptor::Ulong(23)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:end:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_end_inner(input)
@@ -2536,7 +2746,11 @@ fn decode_close_inner(input: &[u8]) -> Result<(&[u8], Close)> {
 fn encoded_size_close_inner(list: &Close) -> usize {
     let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_close_inner(list: &Close, buf: &mut BytesMut) {
     Descriptor::Ulong(24).encode(buf);
@@ -2556,7 +2770,9 @@ impl DecodeFormatted for Close {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(24) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:close:list")) {
+        if descriptor != Descriptor::Ulong(24)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:close:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_close_inner(input)
@@ -2596,12 +2812,21 @@ fn decode_sasl_mechanisms_inner(input: &[u8]) -> Result<(&[u8], SaslMechanisms)>
     } else {
         bail!("Required field sasl_server_mechanisms was omitted.");
     }
-    Ok((remainder, SaslMechanisms { sasl_server_mechanisms }))
+    Ok((
+        remainder,
+        SaslMechanisms {
+            sasl_server_mechanisms,
+        },
+    ))
 }
 fn encoded_size_sasl_mechanisms_inner(list: &SaslMechanisms) -> usize {
     let content_size = 0 + list.sasl_server_mechanisms.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_sasl_mechanisms_inner(list: &SaslMechanisms, buf: &mut BytesMut) {
     Descriptor::Ulong(64).encode(buf);
@@ -2621,7 +2846,9 @@ impl DecodeFormatted for SaslMechanisms {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(64) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-mechanisms:list")) {
+        if descriptor != Descriptor::Ulong(64)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-mechanisms:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_sasl_mechanisms_inner(input)
@@ -2697,13 +2924,23 @@ fn decode_sasl_init_inner(input: &[u8]) -> Result<(&[u8], SaslInit)> {
     ))
 }
 fn encoded_size_sasl_init_inner(list: &SaslInit) -> usize {
-    let content_size = 0 + list.mechanism.encoded_size() + list.initial_response.encoded_size() + list.hostname.encoded_size();
+    let content_size = 0
+        + list.mechanism.encoded_size()
+        + list.initial_response.encoded_size()
+        + list.hostname.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_sasl_init_inner(list: &SaslInit, buf: &mut BytesMut) {
     Descriptor::Ulong(65).encode(buf);
-    let content_size = 0 + list.mechanism.encoded_size() + list.initial_response.encoded_size() + list.hostname.encoded_size();
+    let content_size = 0
+        + list.mechanism.encoded_size()
+        + list.initial_response.encoded_size()
+        + list.hostname.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
@@ -2721,7 +2958,9 @@ impl DecodeFormatted for SaslInit {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(65) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-init:list")) {
+        if descriptor != Descriptor::Ulong(65)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-init:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_sasl_init_inner(input)
@@ -2766,7 +3005,11 @@ fn decode_sasl_challenge_inner(input: &[u8]) -> Result<(&[u8], SaslChallenge)> {
 fn encoded_size_sasl_challenge_inner(list: &SaslChallenge) -> usize {
     let content_size = 0 + list.challenge.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_sasl_challenge_inner(list: &SaslChallenge, buf: &mut BytesMut) {
     Descriptor::Ulong(66).encode(buf);
@@ -2786,7 +3029,9 @@ impl DecodeFormatted for SaslChallenge {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(66) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-challenge:list")) {
+        if descriptor != Descriptor::Ulong(66)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-challenge:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_sasl_challenge_inner(input)
@@ -2831,7 +3076,11 @@ fn decode_sasl_response_inner(input: &[u8]) -> Result<(&[u8], SaslResponse)> {
 fn encoded_size_sasl_response_inner(list: &SaslResponse) -> usize {
     let content_size = 0 + list.response.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_sasl_response_inner(list: &SaslResponse, buf: &mut BytesMut) {
     Descriptor::Ulong(67).encode(buf);
@@ -2851,7 +3100,9 @@ impl DecodeFormatted for SaslResponse {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(67) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-response:list")) {
+        if descriptor != Descriptor::Ulong(67)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-response:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_sasl_response_inner(input)
@@ -2904,12 +3155,22 @@ fn decode_sasl_outcome_inner(input: &[u8]) -> Result<(&[u8], SaslOutcome)> {
     } else {
         additional_data = None;
     }
-    Ok((remainder, SaslOutcome { code, additional_data }))
+    Ok((
+        remainder,
+        SaslOutcome {
+            code,
+            additional_data,
+        },
+    ))
 }
 fn encoded_size_sasl_outcome_inner(list: &SaslOutcome) -> usize {
     let content_size = 0 + list.code.encoded_size() + list.additional_data.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_sasl_outcome_inner(list: &SaslOutcome, buf: &mut BytesMut) {
     Descriptor::Ulong(68).encode(buf);
@@ -2930,7 +3191,9 @@ impl DecodeFormatted for SaslOutcome {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(68) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-outcome:list")) {
+        if descriptor != Descriptor::Ulong(68)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:sasl-outcome:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_sasl_outcome_inner(input)
@@ -3131,7 +3394,11 @@ fn encoded_size_source_inner(list: &Source) -> usize {
         + list.outcomes.encoded_size()
         + list.capabilities.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_source_inner(list: &Source, buf: &mut BytesMut) {
     Descriptor::Ulong(40).encode(buf);
@@ -3172,7 +3439,9 @@ impl DecodeFormatted for Source {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(40) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:source:list")) {
+        if descriptor != Descriptor::Ulong(40)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:source:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_source_inner(input)
@@ -3313,7 +3582,11 @@ fn encoded_size_target_inner(list: &Target) -> usize {
         + list.dynamic_node_properties.encoded_size()
         + list.capabilities.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_target_inner(list: &Target, buf: &mut BytesMut) {
     Descriptor::Ulong(41).encode(buf);
@@ -3346,7 +3619,9 @@ impl DecodeFormatted for Target {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(41) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:target:list")) {
+        if descriptor != Descriptor::Ulong(41)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:target:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_target_inner(input)
@@ -3450,15 +3725,27 @@ fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header)> {
     ))
 }
 fn encoded_size_header_inner(list: &Header) -> usize {
-    let content_size =
-        0 + list.durable.encoded_size() + list.priority.encoded_size() + list.ttl.encoded_size() + list.first_acquirer.encoded_size() + list.delivery_count.encoded_size();
+    let content_size = 0
+        + list.durable.encoded_size()
+        + list.priority.encoded_size()
+        + list.ttl.encoded_size()
+        + list.first_acquirer.encoded_size()
+        + list.delivery_count.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_header_inner(list: &Header, buf: &mut BytesMut) {
     Descriptor::Ulong(112).encode(buf);
-    let content_size =
-        0 + list.durable.encoded_size() + list.priority.encoded_size() + list.ttl.encoded_size() + list.first_acquirer.encoded_size() + list.delivery_count.encoded_size();
+    let content_size = 0
+        + list.durable.encoded_size()
+        + list.priority.encoded_size()
+        + list.ttl.encoded_size()
+        + list.first_acquirer.encoded_size()
+        + list.delivery_count.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
@@ -3478,7 +3765,9 @@ impl DecodeFormatted for Header {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(112) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:header:list")) {
+        if descriptor != Descriptor::Ulong(112)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:header:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_header_inner(input)
@@ -3709,7 +3998,11 @@ fn encoded_size_properties_inner(list: &Properties) -> usize {
         + list.group_sequence.encoded_size()
         + list.reply_to_group_id.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_properties_inner(list: &Properties, buf: &mut BytesMut) {
     Descriptor::Ulong(115).encode(buf);
@@ -3754,7 +4047,9 @@ impl DecodeFormatted for Properties {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(115) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:properties:list")) {
+        if descriptor != Descriptor::Ulong(115)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:properties:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_properties_inner(input)
@@ -3807,12 +4102,22 @@ fn decode_received_inner(input: &[u8]) -> Result<(&[u8], Received)> {
     } else {
         bail!("Required field section_offset was omitted.");
     }
-    Ok((remainder, Received { section_number, section_offset }))
+    Ok((
+        remainder,
+        Received {
+            section_number,
+            section_offset,
+        },
+    ))
 }
 fn encoded_size_received_inner(list: &Received) -> usize {
     let content_size = 0 + list.section_number.encoded_size() + list.section_offset.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_received_inner(list: &Received, buf: &mut BytesMut) {
     Descriptor::Ulong(35).encode(buf);
@@ -3833,7 +4138,9 @@ impl DecodeFormatted for Received {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(35) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:received:list")) {
+        if descriptor != Descriptor::Ulong(35)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:received:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_received_inner(input)
@@ -3863,7 +4170,11 @@ fn decode_accepted_inner(input: &[u8]) -> Result<(&[u8], Accepted)> {
 fn encoded_size_accepted_inner(list: &Accepted) -> usize {
     let content_size = 0;
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_accepted_inner(list: &Accepted, buf: &mut BytesMut) {
     Descriptor::Ulong(36).encode(buf);
@@ -3882,7 +4193,9 @@ impl DecodeFormatted for Accepted {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(36) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:accepted:list")) {
+        if descriptor != Descriptor::Ulong(36)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:accepted:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_accepted_inner(input)
@@ -3927,7 +4240,11 @@ fn decode_rejected_inner(input: &[u8]) -> Result<(&[u8], Rejected)> {
 fn encoded_size_rejected_inner(list: &Rejected) -> usize {
     let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_rejected_inner(list: &Rejected, buf: &mut BytesMut) {
     Descriptor::Ulong(37).encode(buf);
@@ -3947,7 +4264,9 @@ impl DecodeFormatted for Rejected {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(37) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:rejected:list")) {
+        if descriptor != Descriptor::Ulong(37)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:rejected:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_rejected_inner(input)
@@ -3977,7 +4296,11 @@ fn decode_released_inner(input: &[u8]) -> Result<(&[u8], Released)> {
 fn encoded_size_released_inner(list: &Released) -> usize {
     let content_size = 0;
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_released_inner(list: &Released, buf: &mut BytesMut) {
     Descriptor::Ulong(38).encode(buf);
@@ -3996,7 +4319,9 @@ impl DecodeFormatted for Released {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(38) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:released:list")) {
+        if descriptor != Descriptor::Ulong(38)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:released:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_released_inner(input)
@@ -4072,13 +4397,23 @@ fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified)> {
     ))
 }
 fn encoded_size_modified_inner(list: &Modified) -> usize {
-    let content_size = 0 + list.delivery_failed.encoded_size() + list.undeliverable_here.encoded_size() + list.message_annotations.encoded_size();
+    let content_size = 0
+        + list.delivery_failed.encoded_size()
+        + list.undeliverable_here.encoded_size()
+        + list.message_annotations.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
-    (if content_size + 1 > u8::MAX as usize { 12 } else { 6 }) + content_size
+    (if content_size + 1 > u8::MAX as usize {
+        12
+    } else {
+        6
+    }) + content_size
 }
 fn encode_modified_inner(list: &Modified, buf: &mut BytesMut) {
     Descriptor::Ulong(39).encode(buf);
-    let content_size = 0 + list.delivery_failed.encoded_size() + list.undeliverable_here.encoded_size() + list.message_annotations.encoded_size();
+    let content_size = 0
+        + list.delivery_failed.encoded_size()
+        + list.undeliverable_here.encoded_size()
+        + list.message_annotations.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
@@ -4096,7 +4431,9 @@ impl DecodeFormatted for Modified {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong(39) && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:modified:list")) {
+        if descriptor != Descriptor::Ulong(39)
+            && descriptor != Descriptor::Symbol(Symbol::from_static("amqp:modified:list"))
+        {
             bail!("Invalid descriptor.");
         }
         decode_modified_inner(input)

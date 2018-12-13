@@ -1,9 +1,9 @@
+use crate::types::{ByteStr, Descriptor, List, Symbol};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use types::{ByteStr, Descriptor, List, Symbol};
 use uuid::Uuid;
 
 /// Represents an AMQP type for use in polymorphic collections

@@ -1,7 +1,7 @@
 use super::errors::{Error, Result};
 use super::framing::HEADER_LEN;
+use crate::codec::{Decode, Encode};
 use bytes::{BigEndian, BufMut, ByteOrder, BytesMut};
-use codec::{Decode, Encode};
 use std::marker::PhantomData;
 use tokio_io::codec::{Decoder, Encoder};
 

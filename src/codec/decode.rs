@@ -1,15 +1,15 @@
 use std::{char, str, u8};
 
+use crate::codec::{self, Decode, DecodeFormatted};
+use crate::errors::{ErrorKind, Result};
+use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
+use crate::protocol::{self, CompoundHeader};
+use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
 use bytes::{BigEndian, ByteOrder, Bytes};
 use chrono::{DateTime, TimeZone, Utc};
-use codec::{self, Decode, DecodeFormatted};
-use errors::{ErrorKind, Result};
-use framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use ordered_float::OrderedFloat;
-use protocol::{self, CompoundHeader};
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
-use types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
 use uuid::Uuid;
 
 pub const INVALID_DESCRIPTOR: u32 = 0x0003;
@@ -222,12 +222,15 @@ impl DecodeFormatted for Symbol {
     }
 }
 
-impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted for HashMap<K, V, S> {
+impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
+    for HashMap<K, V, S>
+{
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         let (input, header) = decode_map_header(input, fmt)?;
         let mut map_input = &input[..header.size as usize];
         let count = header.count / 2;
-        let mut map: HashMap<K, V, S> = HashMap::with_capacity_and_hasher(count as usize, Default::default());
+        let mut map: HashMap<K, V, S> =
+            HashMap::with_capacity_and_hasher(count as usize, Default::default());
         for _ in 0..count {
             let (input1, key) = K::decode(map_input)?;
             let (input2, value) = V::decode(input1)?;
@@ -286,42 +289,93 @@ impl DecodeFormatted for Variant {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         match fmt {
             codec::FORMATCODE_NULL => Ok((input, Variant::Null)),
-            codec::FORMATCODE_BOOLEAN => bool::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Boolean(o))),
+            codec::FORMATCODE_BOOLEAN => {
+                bool::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Boolean(o)))
+            }
             codec::FORMATCODE_BOOLEAN_FALSE => Ok((input, Variant::Boolean(false))),
             codec::FORMATCODE_BOOLEAN_TRUE => Ok((input, Variant::Boolean(true))),
             codec::FORMATCODE_UINT_0 => Ok((input, Variant::Uint(0))),
             codec::FORMATCODE_ULONG_0 => Ok((input, Variant::Ulong(0))),
-            codec::FORMATCODE_UBYTE => u8::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ubyte(o))),
-            codec::FORMATCODE_USHORT => u16::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ushort(o))),
-            codec::FORMATCODE_UINT => u32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Uint(o))),
-            codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ulong(o))),
-            codec::FORMATCODE_BYTE => i8::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Byte(o))),
-            codec::FORMATCODE_SHORT => i16::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Short(o))),
-            codec::FORMATCODE_INT => i32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Int(o))),
-            codec::FORMATCODE_LONG => i64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Long(o))),
-            codec::FORMATCODE_SMALLUINT => u32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Uint(o))),
-            codec::FORMATCODE_SMALLULONG => u64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ulong(o))),
-            codec::FORMATCODE_SMALLINT => i32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Int(o))),
-            codec::FORMATCODE_SMALLLONG => i64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Long(o))),
-            codec::FORMATCODE_FLOAT => f32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Float(OrderedFloat(o)))),
-            codec::FORMATCODE_DOUBLE => f64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Double(OrderedFloat(o)))),
+            codec::FORMATCODE_UBYTE => {
+                u8::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ubyte(o)))
+            }
+            codec::FORMATCODE_USHORT => {
+                u16::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ushort(o)))
+            }
+            codec::FORMATCODE_UINT => {
+                u32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Uint(o)))
+            }
+            codec::FORMATCODE_ULONG => {
+                u64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ulong(o)))
+            }
+            codec::FORMATCODE_BYTE => {
+                i8::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Byte(o)))
+            }
+            codec::FORMATCODE_SHORT => {
+                i16::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Short(o)))
+            }
+            codec::FORMATCODE_INT => {
+                i32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Int(o)))
+            }
+            codec::FORMATCODE_LONG => {
+                i64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Long(o)))
+            }
+            codec::FORMATCODE_SMALLUINT => {
+                u32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Uint(o)))
+            }
+            codec::FORMATCODE_SMALLULONG => {
+                u64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Ulong(o)))
+            }
+            codec::FORMATCODE_SMALLINT => {
+                i32::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Int(o)))
+            }
+            codec::FORMATCODE_SMALLLONG => {
+                i64::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Long(o)))
+            }
+            codec::FORMATCODE_FLOAT => f32::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::Float(OrderedFloat(o)))),
+            codec::FORMATCODE_DOUBLE => f64::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::Double(OrderedFloat(o)))),
             // codec::FORMATCODE_DECIMAL32 => x::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Decimal(o))),
             // codec::FORMATCODE_DECIMAL64 => x::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Decimal(o))),
             // codec::FORMATCODE_DECIMAL128 => x::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Decimal(o))),
-            codec::FORMATCODE_CHAR => char::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Char(o))),
-            codec::FORMATCODE_TIMESTAMP => DateTime::<Utc>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Timestamp(o))),
-            codec::FORMATCODE_UUID => Uuid::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Uuid(o))),
-            codec::FORMATCODE_BINARY8 => Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Binary(o))),
-            codec::FORMATCODE_BINARY32 => Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Binary(o))),
-            codec::FORMATCODE_STRING8 => ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o))),
-            codec::FORMATCODE_STRING32 => ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o))),
-            codec::FORMATCODE_SYMBOL8 => Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Symbol(o))),
-            codec::FORMATCODE_SYMBOL32 => Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Symbol(o))),
+            codec::FORMATCODE_CHAR => {
+                char::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Char(o)))
+            }
+            codec::FORMATCODE_TIMESTAMP => DateTime::<Utc>::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::Timestamp(o))),
+            codec::FORMATCODE_UUID => {
+                Uuid::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Uuid(o)))
+            }
+            codec::FORMATCODE_BINARY8 => {
+                Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Binary(o)))
+            }
+            codec::FORMATCODE_BINARY32 => {
+                Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Binary(o)))
+            }
+            codec::FORMATCODE_STRING8 => {
+                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o)))
+            }
+            codec::FORMATCODE_STRING32 => {
+                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o)))
+            }
+            codec::FORMATCODE_SYMBOL8 => {
+                Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Symbol(o)))
+            }
+            codec::FORMATCODE_SYMBOL32 => {
+                Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Symbol(o)))
+            }
             codec::FORMATCODE_LIST0 => Ok((input, Variant::List(List(vec![])))),
-            codec::FORMATCODE_LIST8 => List::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::List(o))),
-            codec::FORMATCODE_LIST32 => List::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::List(o))),
-            codec::FORMATCODE_MAP8 => HashMap::<Variant, Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
-            codec::FORMATCODE_MAP32 => HashMap::<Variant, Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
+            codec::FORMATCODE_LIST8 => {
+                List::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::List(o)))
+            }
+            codec::FORMATCODE_LIST32 => {
+                List::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::List(o)))
+            }
+            codec::FORMATCODE_MAP8 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
+            codec::FORMATCODE_MAP32 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
             // codec::FORMATCODE_ARRAY8 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
             // codec::FORMATCODE_ARRAY32 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
             codec::FORMATCODE_DESCRIBED => {
@@ -346,10 +400,18 @@ impl<T: DecodeFormatted> DecodeFormatted for Option<T> {
 impl DecodeFormatted for Descriptor {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         match fmt {
-            codec::FORMATCODE_SMALLULONG => u64::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Ulong(o))),
-            codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Ulong(o))),
-            codec::FORMATCODE_SYMBOL8 => Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o))),
-            codec::FORMATCODE_SYMBOL32 => Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o))),
+            codec::FORMATCODE_SMALLULONG => {
+                u64::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Ulong(o)))
+            }
+            codec::FORMATCODE_ULONG => {
+                u64::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Ulong(o)))
+            }
+            codec::FORMATCODE_SYMBOL8 => {
+                Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o)))
+            }
+            codec::FORMATCODE_SYMBOL32 => {
+                Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o)))
+            }
             _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }
@@ -376,7 +438,11 @@ fn decode_frame_header(input: &[u8], expected_frame_type: u8) -> Result<(&[u8], 
     decode_check_len!(input, 4);
     let doff = input[0];
     let frame_type = input[1];
-    ensure!(frame_type == expected_frame_type, "Unexpected frame type: {:?}", frame_type);
+    ensure!(
+        frame_type == expected_frame_type,
+        "Unexpected frame type: {:?}",
+        frame_type
+    );
 
     let channel_id = BigEndian::read_u16(&input[2..]);
     let ext_header_len = doff as usize * 4 - HEADER_LEN;
@@ -427,7 +493,13 @@ fn decode_compound32(input: &[u8]) -> Result<(&[u8], CompoundHeader)> {
     decode_check_len!(input, 8);
     let size = BigEndian::read_u32(input) - 4; // -4 for 4 byte count
     let count = BigEndian::read_u32(&input[4..]);
-    Ok((&input[8..], CompoundHeader { size: size, count: count }))
+    Ok((
+        &input[8..],
+        CompoundHeader {
+            size: size,
+            count: count,
+        },
+    ))
 }
 
 fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
@@ -447,8 +519,8 @@ fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::Encode;
     use bytes::{BufMut, BytesMut};
-    use codec::Encode;
 
     const LOREM: &str = include_str!("lorem.txt");
 
@@ -546,7 +618,7 @@ mod tests {
     }
 
     fn unwrap_value<T>(res: Result<(&[u8], T)>) -> T {
-        let r = res.map(|(i, o)| o);
+        let r = res.map(|(_i, o)| o);
         assert!(r.is_ok());
         r.unwrap()
     }
@@ -638,7 +710,10 @@ mod tests {
         Variant::Timestamp(datetime).encode(b1);
 
         let expected = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
-        assert_eq!(Variant::Timestamp(expected), unwrap_value(Variant::decode(b1)));
+        assert_eq!(
+            Variant::Timestamp(expected),
+            unwrap_value(Variant::decode(b1))
+        );
     }
 
     #[test]
@@ -648,7 +723,10 @@ mod tests {
         Variant::Timestamp(datetime).encode(b1);
 
         let expected = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
-        assert_eq!(Variant::Timestamp(expected), unwrap_value(Variant::decode(b1)));
+        assert_eq!(
+            Variant::Timestamp(expected),
+            unwrap_value(Variant::decode(b1))
+        );
     }
 
     #[test]
@@ -670,7 +748,10 @@ mod tests {
         let b1 = &mut BytesMut::with_capacity(0);
         Some(ByteStr::from("hello")).encode(b1);
 
-        assert_eq!(Some(ByteStr::from("hello")), unwrap_value(Option::<ByteStr>::decode(b1)));
+        assert_eq!(
+            Some(ByteStr::from("hello")),
+            unwrap_value(Option::<ByteStr>::decode(b1))
+        );
 
         let b2 = &mut BytesMut::with_capacity(0);
         let o1: Option<ByteStr> = None;

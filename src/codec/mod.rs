@@ -5,7 +5,10 @@ use bytes::BytesMut;
 
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
-        ensure!($buf.len() >= $size, ::errors::ErrorKind::Incomplete(Some($size)));
+        ensure!(
+            $buf.len() >= $size,
+            crate::errors::ErrorKind::Incomplete(Some($size))
+        );
     };
 }
 

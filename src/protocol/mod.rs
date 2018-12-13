@@ -30,9 +30,17 @@ pub enum ProtocolId {
 }
 
 pub fn decode_protocol_header(src: &[u8]) -> Result<ProtocolId> {
-    ensure!(&src[0..4] == PROTOCOL_HEADER_PREFIX, "Protocol header is invalid. {:?}", src);
+    ensure!(
+        &src[0..4] == PROTOCOL_HEADER_PREFIX,
+        "Protocol header is invalid. {:?}",
+        src
+    );
     let protocol_id = src[4];
-    ensure!(&src[5..8] == PROTOCOL_VERSION, "Protocol version is incompatible. {:?}", &src[5..8]);
+    ensure!(
+        &src[5..8] == PROTOCOL_VERSION,
+        "Protocol version is incompatible. {:?}",
+        &src[5..8]
+    );
     match protocol_id {
         0 => Ok(ProtocolId::Amqp),
         2 => Ok(ProtocolId::AmqpTls),
@@ -72,10 +80,18 @@ pub enum MessageId {
 impl DecodeFormatted for MessageId {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
         match fmt {
-            codec::FORMATCODE_SMALLULONG | codec::FORMATCODE_ULONG | codec::FORMATCODE_ULONG_0 => u64::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Ulong(o))),
-            codec::FORMATCODE_UUID => Uuid::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Uuid(o))),
-            codec::FORMATCODE_BINARY8 | codec::FORMATCODE_BINARY32 => Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Binary(o))),
-            codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::String(o))),
+            codec::FORMATCODE_SMALLULONG | codec::FORMATCODE_ULONG | codec::FORMATCODE_ULONG_0 => {
+                u64::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Ulong(o)))
+            }
+            codec::FORMATCODE_UUID => {
+                Uuid::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Uuid(o)))
+            }
+            codec::FORMATCODE_BINARY8 | codec::FORMATCODE_BINARY32 => {
+                Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Binary(o)))
+            }
+            codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
+                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::String(o)))
+            }
             _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
         }
     }

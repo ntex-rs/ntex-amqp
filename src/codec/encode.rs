@@ -1,12 +1,12 @@
 use std::{i8, u8};
 
+use crate::codec::{self, ArrayEncode, Encode};
+use crate::framing::{self, AmqpFrame, SaslFrame};
+use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant};
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
-use codec::{self, ArrayEncode, Encode};
-use framing::{self, AmqpFrame, SaslFrame};
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
-use types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant};
 use uuid::Uuid;
 
 fn ensure_capacity<T: Encode>(encodable: &T, buf: &mut BytesMut) {
@@ -36,7 +36,11 @@ impl Encode for bool {
         1
     }
     fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u8(if *self { codec::FORMATCODE_BOOLEAN_TRUE } else { codec::FORMATCODE_BOOLEAN_FALSE });
+        buf.put_u8(if *self {
+            codec::FORMATCODE_BOOLEAN_TRUE
+        } else {
+            codec::FORMATCODE_BOOLEAN_FALSE
+        });
     }
 }
 impl ArrayEncode for bool {
@@ -407,8 +411,11 @@ impl ArrayEncode for Symbol {
     }
 }
 
-fn map_encoded_size<K: Hash + Eq + Encode, V: Encode, S: BuildHasher>(map: &HashMap<K, V, S>) -> usize {
-    map.iter().fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
+fn map_encoded_size<K: Hash + Eq + Encode, V: Encode, S: BuildHasher>(
+    map: &HashMap<K, V, S>,
+) -> usize {
+    map.iter()
+        .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
 }
 impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, S> {
     fn encoded_size(&self) -> usize {
@@ -513,7 +520,11 @@ impl Encode for List {
     fn encoded_size(&self) -> usize {
         let content_size = list_encoded_size(self);
         // format_code + size + count
-        (if content_size + 1 > u8::MAX as usize { 9 } else { 3 }) + content_size
+        (if content_size + 1 > u8::MAX as usize {
+            9
+        } else {
+            3
+        }) + content_size
     }
 
     fn encode(&self, buf: &mut BytesMut) {

@@ -7,9 +7,9 @@ use std::rc::{Rc, Weak};
 use uuid::Uuid;
 
 use super::*;
-use framing::AmqpFrame;
-use protocol::*;
-use types::ByteStr;
+use crate::framing::AmqpFrame;
+use crate::protocol::*;
+use crate::types::ByteStr;
 
 #[derive(Clone)]
 pub struct Session {
@@ -25,7 +25,11 @@ impl Session {
         future::ok(())
     }
 
-    pub fn open_sender_link(&self, address: String, name: String) -> impl Future<Item = SenderLink, Error = Error> {
+    pub fn open_sender_link(
+        &self,
+        address: String,
+        name: String,
+    ) -> impl Future<Item = SenderLink, Error = Error> {
         self.inner.borrow_mut().open_sender_link(address, name)
     }
 }
@@ -51,7 +55,13 @@ struct PendingTransfer {
 }
 
 impl SessionInner {
-    pub fn new(connection: Rc<RefCell<ConnectionInner>>, remote_channel_id: u16, outgoing_window: u32, next_incoming_id: DeliveryNumber, incoming_window: u32) -> SessionInner {
+    pub fn new(
+        connection: Rc<RefCell<ConnectionInner>>,
+        remote_channel_id: u16,
+        outgoing_window: u32,
+        next_incoming_id: DeliveryNumber,
+        incoming_window: u32,
+    ) -> SessionInner {
         SessionInner {
             connection,
             remote_channel_id,
@@ -67,7 +77,12 @@ impl SessionInner {
         }
     }
 
-    pub fn handle_frame(&mut self, frame: AmqpFrame, self_rc: Rc<RefCell<SessionInner>>, conn: &mut ConnectionInner) {
+    pub fn handle_frame(
+        &mut self,
+        frame: AmqpFrame,
+        self_rc: Rc<RefCell<SessionInner>>,
+        conn: &mut ConnectionInner,
+    ) {
         match *frame.performative() {
             Frame::Attach(ref attach) => self.complete_link_creation(attach, self_rc),
             Frame::Disposition(ref disp) => self.settle_deliveries(disp),
@@ -96,10 +111,14 @@ impl SessionInner {
         assert!(disposition.settled()); // we can only work with settled for now
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
-        let actionable = self.unsettled_deliveries.range(from..to + 1).map(|(k, _)| k.clone()).collect::<Vec<_>>();
+        let actionable = self
+            .unsettled_deliveries
+            .range(from..to + 1)
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>();
         let outcome: Outcome;
         match disposition.state().map(|s| s.clone()) {
-            Some(DeliveryState::Received(v)) => {
+            Some(DeliveryState::Received(_v)) => {
                 return;
             } // todo: apply more thinking
             Some(DeliveryState::Accepted(v)) => outcome = Outcome::Accepted(v.clone()),
@@ -110,12 +129,16 @@ impl SessionInner {
         }
         // let state = disposition.state().map(|s| s.clone()).unwrap_or(DeliveryState::Accepted(Accepted {})).clone(); // todo: honor Source.default_outcome()
         for k in actionable {
-            self.unsettled_deliveries.remove(&k).unwrap().send(Ok(outcome.clone()));
+            self.unsettled_deliveries
+                .remove(&k)
+                .unwrap()
+                .send(Ok(outcome.clone()));
         }
     }
 
     fn apply_flow(&mut self, conn: &mut ConnectionInner, flow: &Flow) {
-        self.outgoing_window = flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
+        self.outgoing_window =
+            flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
         // println!("session received credit. window: {}, pending: {}", self.outgoing_window, self.pending_transfers.len());
         while let Some(t) = self.pending_transfers.pop_front() {
             self.send_transfer_conn(conn, t.link_handle, t.message, t.promise);
@@ -123,7 +146,11 @@ impl SessionInner {
                 break;
             }
         }
-        if let Some(link) = flow.handle().and_then(|h| self.links.get(h)).and_then(|lr| lr.upgrade()) {
+        if let Some(link) = flow
+            .handle()
+            .and_then(|h| self.links.get(h))
+            .and_then(|lr| lr.upgrade())
+        {
             link.borrow_mut().apply_flow(flow, self, conn);
         } else if flow.echo() {
             self.send_flow(conn);
@@ -156,7 +183,11 @@ impl SessionInner {
         conn.post_frame(AmqpFrame::new(channel_id, frame, payload));
     }
 
-    pub fn open_sender_link(&mut self, address: String, name: String) -> impl Future<Item = SenderLink, Error = Error> {
+    pub fn open_sender_link(
+        &mut self,
+        address: String,
+        name: String,
+    ) -> impl Future<Item = SenderLink, Error = Error> {
         let local_handle = self.handles.push(());
         let (tx, rx) = oneshot::channel();
         let name = ByteStr::from(&name[..]);
@@ -192,32 +223,56 @@ impl SessionInner {
             properties: None,
         };
         self.post_frame(Frame::Attach(attach), Bytes::new());
-        rx.map_err(|e| "Canceled".into())
+        rx.map_err(|_e| "Canceled".into())
     }
 
-    pub fn send_transfer(&mut self, link_handle: Handle, message: Message, promise: DeliveryPromise) {
+    pub fn send_transfer(
+        &mut self,
+        link_handle: Handle,
+        message: Message,
+        promise: DeliveryPromise,
+    ) {
         // todo: DRY
         if self.outgoing_window == 0 {
             // todo: queue up instead
-            self.pending_transfers.push_back(PendingTransfer { link_handle, message, promise });
+            self.pending_transfers.push_back(PendingTransfer {
+                link_handle,
+                message,
+                promise,
+            });
             return;
         }
         let (frame, body) = self.prepare_transfer(link_handle, message, promise);
         self.post_frame(frame, body);
     }
 
-    pub fn send_transfer_conn(&mut self, conn: &mut ConnectionInner, link_handle: Handle, message: Message, promise: DeliveryPromise) {
+    pub fn send_transfer_conn(
+        &mut self,
+        conn: &mut ConnectionInner,
+        link_handle: Handle,
+        message: Message,
+        promise: DeliveryPromise,
+    ) {
         // todo: DRY
         if self.outgoing_window == 0 {
             // todo: queue up instead
-            self.pending_transfers.push_back(PendingTransfer { link_handle, message, promise });
+            self.pending_transfers.push_back(PendingTransfer {
+                link_handle,
+                message,
+                promise,
+            });
             return;
         }
         let (frame, body) = self.prepare_transfer(link_handle, message, promise);
         self.post_frame_conn(conn, frame, body);
     }
 
-    pub fn prepare_transfer(&mut self, link_handle: Handle, message: Message, promise: DeliveryPromise) -> (Frame, Bytes) {
+    pub fn prepare_transfer(
+        &mut self,
+        link_handle: Handle,
+        message: Message,
+        promise: DeliveryPromise,
+    ) -> (Frame, Bytes) {
         self.outgoing_window -= 1;
         let delivery_id = self.next_outgoing_id;
         self.next_outgoing_id += 1;

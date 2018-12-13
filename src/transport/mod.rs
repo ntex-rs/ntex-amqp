@@ -9,11 +9,11 @@ use tokio_io::io::{read_exact, write_all};
 use tokio_io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-use errors::*;
-use framing::SaslFrame;
-use io::AmqpCodec;
-use protocol::*;
-use types::{ByteStr, Symbol};
+use crate::errors::*;
+use crate::framing::SaslFrame;
+use crate::io::AmqpCodec;
+use crate::protocol::*;
+use crate::types::{ByteStr, Symbol};
 
 mod connection;
 mod link;
@@ -78,7 +78,11 @@ impl<T: Clone> HandleVec<T> {
             self.items.push(Some(item));
             return len as Handle;
         }
-        let index = self.items.iter().position(|i| i.is_none()).expect("empty_count got out of sync.");
+        let index = self
+            .items
+            .iter()
+            .position(|i| i.is_none())
+            .expect("empty_count got out of sync.");
         self.items[index as usize] = Some(item);
         self.empty_count -= 1;
         index as Handle
@@ -118,22 +122,31 @@ where
     T: AsyncRead + AsyncWrite,
 {
     let header_buf = encode_protocol_header(protocol_id);
-    write_all(io, header_buf).map_err(Error::from).and_then(|(io, _)| {
-        let header_buf = [0; 8];
-        read_exact(io, header_buf).map_err(Error::from).and_then(|(io, header_buf)| {
-            let recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
-                                                                         // ensure!(
-                                                                         //     recv_protocol_id == protocol_id,
-                                                                         //     "Expected `{:?}` protocol id, seen `{:?} instead.`",
-                                                                         //     protocol_id,
-                                                                         //     recv_protocol_id);
-            Ok(io)
+    write_all(io, header_buf)
+        .map_err(Error::from)
+        .and_then(|(io, _)| {
+            let header_buf = [0; 8];
+            read_exact(io, header_buf)
+                .map_err(Error::from)
+                .and_then(|(io, header_buf)| {
+                    let _recv_protocol_id = decode_protocol_header(&header_buf)?; // todo: surface for higher level to be able to respond properly / validate
+                                                                                  // ensure!(
+                                                                                  //     recv_protocol_id == protocol_id,
+                                                                                  //     "Expected `{:?}` protocol id, seen `{:?} instead.`",
+                                                                                  //     protocol_id,
+                                                                                  //     recv_protocol_id);
+                    Ok(io)
+                })
         })
-    })
 }
 
 /// negotiating SASL authentication
-pub fn sasl_auth<T>(authz_id: String, authn_id: String, password: String, io: T) -> impl Future<Item = T, Error = Error>
+pub fn sasl_auth<T>(
+    authz_id: String,
+    authn_id: String,
+    password: String,
+    io: T,
+) -> impl Future<Item = T, Error = Error>
 where
     T: AsyncRead + AsyncWrite,
 {
@@ -141,7 +154,7 @@ where
         let sasl_io = Framed::new(io, AmqpCodec::<SaslFrame>::new());
 
         // processing sasl-mechanisms
-        sasl_io.into_future().map_err(|e| e.0).and_then(move |(sasl_frame, sasl_io)| {
+        sasl_io.into_future().map_err(|e| e.0).and_then(move |(_sasl_frame, sasl_io)| {
             let plain_symbol = Symbol::from_static("PLAIN");
             // if let Some(SaslFrame { body: SaslFrameBody::SaslMechanisms(mechs) }) = sasl_frame {
             //     if !mechs

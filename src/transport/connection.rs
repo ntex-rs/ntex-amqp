@@ -13,9 +13,9 @@ use futures::{future, AsyncSink, Future, Poll, Sink, Stream};
 use tokio_codec::Framed;
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use errors::Error;
-use framing::AmqpFrame;
-use io::AmqpCodec;
+use crate::errors::Error;
+use crate::framing::AmqpFrame;
+use crate::io::AmqpCodec;
 
 use super::session::*;
 use super::*;
@@ -55,10 +55,12 @@ where
     }
 
     fn call(&mut self, (conn, stream): (Connect, Io)) -> Self::Future {
-        Box::new(negotiate_protocol(ProtocolId::Amqp, stream).and_then(move |io| {
-            let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
-            open_connection(&conn.host(), io).map(|io| Connection::new(io))
-        }))
+        Box::new(
+            negotiate_protocol(ProtocolId::Amqp, stream).and_then(move |io| {
+                let io = Framed::new(io, AmqpCodec::<AmqpFrame>::new());
+                open_connection(&conn.host(), io).map(|io| Connection::new(io))
+            }),
+        )
     }
 }
 
@@ -96,7 +98,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
             connection: inner.clone(),
             flushed: true,
         };
-        Connection { inner, reader, transport }
+        Connection {
+            inner,
+            reader,
+            transport,
+        }
     }
 
     pub fn close() -> impl Future<Item = (), Error = Error> {
@@ -117,7 +123,9 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
         loop {
             match self.reader.poll() {
                 Ok(Async::Ready(Some(frame))) => {
-                    self.inner.borrow_mut().handle_frame(frame, self.inner.clone());
+                    self.inner
+                        .borrow_mut()
+                        .handle_frame(frame, self.inner.clone());
                 }
                 Ok(Async::Ready(None)) => return Err(()),
                 Ok(Async::NotReady) => break,
@@ -241,16 +249,31 @@ impl ConnectionInner {
             _ => (), // todo: handle unexpected frames
         }
 
-        if let Some(session) = self.sessions.get(frame.channel_id() as u32).and_then(|sr| sr.upgrade()) {
-            session.borrow_mut().handle_frame(frame, session.clone(), self);
+        if let Some(session) = self
+            .sessions
+            .get(frame.channel_id() as u32)
+            .and_then(|sr| sr.upgrade())
+        {
+            session
+                .borrow_mut()
+                .handle_frame(frame, session.clone(), self);
         } else {
             // todo: missing session
             println!("todo: missing session: {}", frame.channel_id());
         }
     }
 
-    fn complete_session_creation(&mut self, channel_id: u16, begin: &Begin, self_rc: Rc<RefCell<ConnectionInner>>) {
-        if let Some(index) = self.pending_sessions.iter().position(|r| r.channel == channel_id) {
+    fn complete_session_creation(
+        &mut self,
+        channel_id: u16,
+        begin: &Begin,
+        self_rc: Rc<RefCell<ConnectionInner>>,
+    ) {
+        if let Some(index) = self
+            .pending_sessions
+            .iter()
+            .position(|r| r.channel == channel_id)
+        {
             let req = self.pending_sessions.remove(index);
             let session = Rc::new(RefCell::new(SessionInner::new(
                 self_rc,
@@ -259,7 +282,8 @@ impl ConnectionInner {
                 begin.next_outgoing_id(),
                 begin.outgoing_window(),
             )));
-            self.sessions.set(req.channel as u32, Rc::downgrade(&session));
+            self.sessions
+                .set(req.channel as u32, Rc::downgrade(&session));
             let _ = req.promise.send(Session::new(session));
         } else {
             // todo: rogue begin right now - do nothing. in future might indicate incoming attach
@@ -285,15 +309,21 @@ impl ConnectionInner {
             desired_capabilities: None,
             properties: None,
         };
-        self.post_frame(AmqpFrame::new(local_channel, Frame::Begin(begin), Bytes::new()));
-        rx.map_err(|e| "Canceled".into())
+        self.post_frame(AmqpFrame::new(
+            local_channel,
+            Frame::Begin(begin),
+            Bytes::new(),
+        ));
+        rx.map_err(|_e| "Canceled".into())
     }
 }
 
 /// Performs connection opening.
 fn open_connection<T>(hostname: &str, io: T) -> impl Future<Item = T, Error = Error>
 where
-    T: Stream<Item = AmqpFrame, Error = Error> + Sink<SinkItem = AmqpFrame, SinkError = Error> + 'static,
+    T: Stream<Item = AmqpFrame, Error = Error>
+        + Sink<SinkItem = AmqpFrame, SinkError = Error>
+        + 'static,
 {
     let open = Open {
         container_id: ByteStr::from(&Uuid::new_v4().simple().to_string()[..]),
@@ -308,17 +338,24 @@ where
         properties: None,
     };
 
-    io.send(AmqpFrame::new(0, Frame::Open(open), Bytes::new())).and_then(|io| {
-        io.into_future().map_err(|e| e.0).and_then(|(frame_opt, io)| {
-            if let Some(frame) = frame_opt {
-                if let Frame::Open(ref open) = *frame.performative() {
-                    Ok(io)
-                } else {
-                    Err(format!("Expected Open performative to arrive, seen `{:?}` instead.", frame).into())
-                }
-            } else {
-                Err("Connection is closed.".into())
-            }
+    io.send(AmqpFrame::new(0, Frame::Open(open), Bytes::new()))
+        .and_then(|io| {
+            io.into_future()
+                .map_err(|e| e.0)
+                .and_then(|(frame_opt, io)| {
+                    if let Some(frame) = frame_opt {
+                        if let Frame::Open(ref _open) = *frame.performative() {
+                            Ok(io)
+                        } else {
+                            Err(format!(
+                                "Expected Open performative to arrive, seen `{:?}` instead.",
+                                frame
+                            )
+                            .into())
+                        }
+                    } else {
+                        Err("Connection is closed.".into())
+                    }
+                })
         })
-    })
 }

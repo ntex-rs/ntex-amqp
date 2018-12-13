@@ -1,6 +1,6 @@
 #![allow(unused_doc_comments)]
 
-error_chain!{
+error_chain! {
     errors {
         Incomplete(n: Option<usize>) {
             description("More data required during frame parsing")
@@ -10,7 +10,7 @@ error_chain!{
             description("Unexpected format code")
             display("Unexpected format code: '{}'", code)
         }
-        InvalidDescriptor(descriptor: ::types::Descriptor) {
+        InvalidDescriptor(descriptor: crate::types::Descriptor) {
             description("Unexpected descriptor")
             display("Unexpected descriptor: '{:?}'", descriptor)
         }
