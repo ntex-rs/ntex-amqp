@@ -22,3 +22,16 @@ error_chain! {
         Utf8Error(::std::str::Utf8Error);
     }
 }
+
+pub enum ProtocolIdError {
+    InvalidHeader,
+    Incompatible,
+    Unknown,
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for ProtocolIdError {
+    fn from(err: std::io::Error) -> Self {
+        ProtocolIdError::Io(err)
+    }
+}
