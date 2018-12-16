@@ -10,8 +10,8 @@ impl Symbol {
         Symbol(slice)
     }
 
-    pub fn from_static(s: &'static str) -> Symbol {
-        Symbol(Bytes::from_static(s.as_bytes()))
+    pub fn from_slice<'a>(s: &'a str) -> Symbol {
+        Symbol(Bytes::from(s.as_bytes()))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -30,5 +30,14 @@ impl Symbol {
 impl<'a> From<&'a str> for Symbol {
     fn from(s: &'a str) -> Symbol {
         Symbol(Bytes::from(s))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StaticSymbol(pub &'static str);
+
+impl From<&'static str> for StaticSymbol {
+    fn from(s: &'static str) -> StaticSymbol {
+        StaticSymbol(s)
     }
 }

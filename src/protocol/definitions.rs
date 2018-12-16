@@ -1,77 +1,10 @@
-#![allow(unused_variables, unused_assignments, unused_mut, unreachable_patterns)]
-use bytes::{BufMut, Bytes, BytesMut};
-use std::u8;
-use uuid::Uuid;
+#![allow(unused_assignments, unused_variables)]
 use super::*;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 use crate::errors::AmqpParseError;
-#[derive(Clone, Debug, PartialEq)]
-pub enum SaslFrameBody {
-    SaslMechanisms(SaslMechanisms),
-    SaslInit(SaslInit),
-    SaslChallenge(SaslChallenge),
-    SaslResponse(SaslResponse),
-    SaslOutcome(SaslOutcome),
-}
-impl DecodeFormatted for SaslFrameBody {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
-                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
-            Descriptor::Ulong(65) => {
-                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
-            }
-            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
-                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
-            Descriptor::Ulong(67) => {
-                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
-            }
-            Descriptor::Ulong(68) => {
-                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
-                decode_sasl_mechanisms_inner(input)
-                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
-                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
-                decode_sasl_challenge_inner(input)
-                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
-                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
-                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for SaslFrameBody {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            SaslFrameBody::SaslMechanisms(ref v) => encoded_size_sasl_mechanisms_inner(v),
-            SaslFrameBody::SaslInit(ref v) => encoded_size_sasl_init_inner(v),
-            SaslFrameBody::SaslChallenge(ref v) => encoded_size_sasl_challenge_inner(v),
-            SaslFrameBody::SaslResponse(ref v) => encoded_size_sasl_response_inner(v),
-            SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
-            SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
-            SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
-            SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
-            SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
-        }
-    }
-}
+use bytes::{BufMut, Bytes, BytesMut};
+use std::u8;
+use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Section {
     Header(Header),
@@ -170,73 +103,6 @@ impl Encode for Section {
             Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
             Section::Footer(ref v) => encode_footer_inner(v, buf),
             Section::Properties(ref v) => encode_properties_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum DeliveryState {
-    Received(Received),
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for DeliveryState {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(35) => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for DeliveryState {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
-            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
-            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
-            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
-            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
-            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
-            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
-            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
-            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -384,6 +250,140 @@ impl Encode for Frame {
             Frame::Detach(ref v) => encode_detach_inner(v, buf),
             Frame::End(ref v) => encode_end_inner(v, buf),
             Frame::Close(ref v) => encode_close_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeliveryState {
+    Received(Received),
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for DeliveryState {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(35) => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for DeliveryState {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
+            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
+            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
+            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
+            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
+            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
+            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
+            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
+            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum SaslFrameBody {
+    SaslMechanisms(SaslMechanisms),
+    SaslInit(SaslInit),
+    SaslChallenge(SaslChallenge),
+    SaslResponse(SaslResponse),
+    SaslOutcome(SaslOutcome),
+}
+impl DecodeFormatted for SaslFrameBody {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
+            Descriptor::Ulong(65) => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
+            }
+            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
+            Descriptor::Ulong(67) => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
+            }
+            Descriptor::Ulong(68) => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
+                decode_sasl_mechanisms_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
+                decode_sasl_challenge_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for SaslFrameBody {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            SaslFrameBody::SaslMechanisms(ref v) => encoded_size_sasl_mechanisms_inner(v),
+            SaslFrameBody::SaslInit(ref v) => encoded_size_sasl_init_inner(v),
+            SaslFrameBody::SaslChallenge(ref v) => encoded_size_sasl_challenge_inner(v),
+            SaslFrameBody::SaslResponse(ref v) => encoded_size_sasl_response_inner(v),
+            SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
+            SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
+            SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
+            SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
+            SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
         }
     }
 }
@@ -612,27 +612,21 @@ impl Encode for AmqpError {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            AmqpError::InternalError => Symbol::from_static("amqp:internal-error").encode(buf),
-            AmqpError::NotFound => Symbol::from_static("amqp:not-found").encode(buf),
-            AmqpError::UnauthorizedAccess => {
-                Symbol::from_static("amqp:unauthorized-access").encode(buf)
-            }
-            AmqpError::DecodeError => Symbol::from_static("amqp:decode-error").encode(buf),
+            AmqpError::InternalError => StaticSymbol("amqp:internal-error").encode(buf),
+            AmqpError::NotFound => StaticSymbol("amqp:not-found").encode(buf),
+            AmqpError::UnauthorizedAccess => StaticSymbol("amqp:unauthorized-access").encode(buf),
+            AmqpError::DecodeError => StaticSymbol("amqp:decode-error").encode(buf),
             AmqpError::ResourceLimitExceeded => {
-                Symbol::from_static("amqp:resource-limit-exceeded").encode(buf)
+                StaticSymbol("amqp:resource-limit-exceeded").encode(buf)
             }
-            AmqpError::NotAllowed => Symbol::from_static("amqp:not-allowed").encode(buf),
-            AmqpError::InvalidField => Symbol::from_static("amqp:invalid-field").encode(buf),
-            AmqpError::NotImplemented => Symbol::from_static("amqp:not-implemented").encode(buf),
-            AmqpError::ResourceLocked => Symbol::from_static("amqp:resource-locked").encode(buf),
-            AmqpError::PreconditionFailed => {
-                Symbol::from_static("amqp:precondition-failed").encode(buf)
-            }
-            AmqpError::ResourceDeleted => Symbol::from_static("amqp:resource-deleted").encode(buf),
-            AmqpError::IllegalState => Symbol::from_static("amqp:illegal-state").encode(buf),
-            AmqpError::FrameSizeTooSmall => {
-                Symbol::from_static("amqp:frame-size-too-small").encode(buf)
-            }
+            AmqpError::NotAllowed => StaticSymbol("amqp:not-allowed").encode(buf),
+            AmqpError::InvalidField => StaticSymbol("amqp:invalid-field").encode(buf),
+            AmqpError::NotImplemented => StaticSymbol("amqp:not-implemented").encode(buf),
+            AmqpError::ResourceLocked => StaticSymbol("amqp:resource-locked").encode(buf),
+            AmqpError::PreconditionFailed => StaticSymbol("amqp:precondition-failed").encode(buf),
+            AmqpError::ResourceDeleted => StaticSymbol("amqp:resource-deleted").encode(buf),
+            AmqpError::IllegalState => StaticSymbol("amqp:illegal-state").encode(buf),
+            AmqpError::FrameSizeTooSmall => StaticSymbol("amqp:frame-size-too-small").encode(buf),
         }
     }
 }
@@ -668,15 +662,11 @@ impl Encode for ConnectionError {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            ConnectionError::ConnectionForced => {
-                Symbol::from_static("amqp:connection:forced").encode(buf)
-            }
+            ConnectionError::ConnectionForced => StaticSymbol("amqp:connection:forced").encode(buf),
             ConnectionError::FramingError => {
-                Symbol::from_static("amqp:connection:framing-error").encode(buf)
+                StaticSymbol("amqp:connection:framing-error").encode(buf)
             }
-            ConnectionError::Redirect => {
-                Symbol::from_static("amqp:connection:redirect").encode(buf)
-            }
+            ConnectionError::Redirect => StaticSymbol("amqp:connection:redirect").encode(buf),
         }
     }
 }
@@ -716,14 +706,12 @@ impl Encode for SessionError {
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             SessionError::WindowViolation => {
-                Symbol::from_static("amqp:session:window-violation").encode(buf)
+                StaticSymbol("amqp:session:window-violation").encode(buf)
             }
-            SessionError::ErrantLink => Symbol::from_static("amqp:session:errant-link").encode(buf),
-            SessionError::HandleInUse => {
-                Symbol::from_static("amqp:session:handle-in-use").encode(buf)
-            }
+            SessionError::ErrantLink => StaticSymbol("amqp:session:errant-link").encode(buf),
+            SessionError::HandleInUse => StaticSymbol("amqp:session:handle-in-use").encode(buf),
             SessionError::UnattachedHandle => {
-                Symbol::from_static("amqp:session:unattached-handle").encode(buf)
+                StaticSymbol("amqp:session:unattached-handle").encode(buf)
             }
         }
     }
@@ -766,15 +754,15 @@ impl Encode for LinkError {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            LinkError::DetachForced => Symbol::from_static("amqp:link:detach-forced").encode(buf),
+            LinkError::DetachForced => StaticSymbol("amqp:link:detach-forced").encode(buf),
             LinkError::TransferLimitExceeded => {
-                Symbol::from_static("amqp:link:transfer-limit-exceeded").encode(buf)
+                StaticSymbol("amqp:link:transfer-limit-exceeded").encode(buf)
             }
             LinkError::MessageSizeExceeded => {
-                Symbol::from_static("amqp:link:message-size-exceeded").encode(buf)
+                StaticSymbol("amqp:link:message-size-exceeded").encode(buf)
             }
-            LinkError::Redirect => Symbol::from_static("amqp:link:redirect").encode(buf),
-            LinkError::Stolen => Symbol::from_static("amqp:link:stolen").encode(buf),
+            LinkError::Redirect => StaticSymbol("amqp:link:redirect").encode(buf),
+            LinkError::Stolen => StaticSymbol("amqp:link:stolen").encode(buf),
         }
     }
 }
@@ -945,12 +933,10 @@ impl Encode for TerminusExpiryPolicy {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            TerminusExpiryPolicy::LinkDetach => Symbol::from_static("link-detach").encode(buf),
-            TerminusExpiryPolicy::SessionEnd => Symbol::from_static("session-end").encode(buf),
-            TerminusExpiryPolicy::ConnectionClose => {
-                Symbol::from_static("connection-close").encode(buf)
-            }
-            TerminusExpiryPolicy::Never => Symbol::from_static("never").encode(buf),
+            TerminusExpiryPolicy::LinkDetach => StaticSymbol("link-detach").encode(buf),
+            TerminusExpiryPolicy::SessionEnd => StaticSymbol("session-end").encode(buf),
+            TerminusExpiryPolicy::ConnectionClose => StaticSymbol("connection-close").encode(buf),
+            TerminusExpiryPolicy::Never => StaticSymbol("never").encode(buf),
         }
     }
 }

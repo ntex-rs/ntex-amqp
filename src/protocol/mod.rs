@@ -163,8 +163,8 @@ impl Encode for DistributionMode {
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            DistributionMode::Move => Symbol::from_static("move").encode(buf),
-            DistributionMode::Copy => Symbol::from_static("copy").encode(buf),
+            DistributionMode::Move => Symbol::from("move").encode(buf),
+            DistributionMode::Copy => Symbol::from("copy").encode(buf),
             DistributionMode::Custom(ref v) => v.encode(buf),
         }
     }

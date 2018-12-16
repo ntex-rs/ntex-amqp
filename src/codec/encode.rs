@@ -8,13 +8,7 @@ use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
-use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant};
-
-fn ensure_capacity<T: Encode>(encodable: &T, buf: &mut BytesMut) {
-    if buf.remaining_mut() < encodable.encoded_size() {
-        buf.reserve(encodable.encoded_size());
-    }
-}
+use crate::types::{ByteStr, Descriptor, List, Multiple, StaticSymbol, Symbol, Variant};
 
 fn encode_null(buf: &mut BytesMut) {
     buf.put_u8(codec::FORMATCODE_NULL);
@@ -87,8 +81,6 @@ impl Encode for u32 {
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
-        ensure_capacity(self, buf);
-
         if *self == 0 {
             buf.put_u8(codec::FORMATCODE_UINT_0)
         } else if *self > u32::from(u8::MAX) {
@@ -122,8 +114,6 @@ impl Encode for u64 {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        ensure_capacity(self, buf);
-
         if *self == 0 {
             buf.put_u8(codec::FORMATCODE_ULONG_0)
         } else if *self > u64::from(u8::MAX) {
@@ -135,6 +125,7 @@ impl Encode for u64 {
         }
     }
 }
+
 impl ArrayEncode for u64 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_ULONG;
     fn array_encoded_size(&self) -> usize {
@@ -146,6 +137,7 @@ impl ArrayEncode for u64 {
 }
 
 impl FixedEncode for i8 {}
+
 impl ArrayEncode for i8 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_BYTE;
     fn array_encoded_size(&self) -> usize {
@@ -157,6 +149,7 @@ impl ArrayEncode for i8 {
 }
 
 impl FixedEncode for i16 {}
+
 impl ArrayEncode for i16 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_SHORT;
     fn array_encoded_size(&self) -> usize {
@@ -175,9 +168,8 @@ impl Encode for i32 {
             2
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
-        ensure_capacity(self, buf);
 
+    fn encode(&self, buf: &mut BytesMut) {
         if *self > i32::from(i8::MAX) || *self < i32::from(i8::MIN) {
             buf.put_u8(codec::FORMATCODE_INT);
             buf.put_i32_be(*self);
@@ -187,11 +179,14 @@ impl Encode for i32 {
         }
     }
 }
+
 impl ArrayEncode for i32 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_INT;
+
     fn array_encoded_size(&self) -> usize {
         4
     }
+
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_i32_be(*self);
     }
@@ -207,8 +202,6 @@ impl Encode for i64 {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        ensure_capacity(self, buf);
-
         if *self > i64::from(i8::MAX) || *self < i64::from(i8::MIN) {
             buf.put_u8(codec::FORMATCODE_LONG);
             buf.put_i64_be(*self);
@@ -218,6 +211,7 @@ impl Encode for i64 {
         }
     }
 }
+
 impl ArrayEncode for i64 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_LONG;
     fn array_encoded_size(&self) -> usize {
@@ -229,17 +223,21 @@ impl ArrayEncode for i64 {
 }
 
 impl FixedEncode for f32 {}
+
 impl ArrayEncode for f32 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_FLOAT;
+
     fn array_encoded_size(&self) -> usize {
         4
     }
+
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_f32_be(*self);
     }
 }
 
 impl FixedEncode for f64 {}
+
 impl ArrayEncode for f64 {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_DOUBLE;
     fn array_encoded_size(&self) -> usize {
@@ -251,6 +249,7 @@ impl ArrayEncode for f64 {
 }
 
 impl FixedEncode for char {}
+
 impl ArrayEncode for char {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_CHAR;
     fn array_encoded_size(&self) -> usize {
@@ -262,6 +261,7 @@ impl ArrayEncode for char {
 }
 
 impl FixedEncode for DateTime<Utc> {}
+
 impl ArrayEncode for DateTime<Utc> {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_TIMESTAMP;
     fn array_encoded_size(&self) -> usize {
@@ -274,13 +274,14 @@ impl ArrayEncode for DateTime<Utc> {
 }
 
 impl FixedEncode for Uuid {}
+
 impl ArrayEncode for Uuid {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_UUID;
     fn array_encoded_size(&self) -> usize {
         16
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_slice(self.as_bytes());
+        buf.extend_from_slice(self.as_bytes());
     }
 }
 
@@ -300,9 +301,10 @@ impl Encode for Bytes {
             buf.put_u8(codec::FORMATCODE_BINARY8);
             buf.put_u8(length as u8);
         }
-        buf.put(self);
+        buf.put_slice(self);
     }
 }
+
 impl ArrayEncode for Bytes {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_BINARY32;
     fn array_encoded_size(&self) -> usize {
@@ -310,7 +312,7 @@ impl ArrayEncode for Bytes {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_u32_be(self.len() as u32);
-        buf.put(self);
+        buf.put_slice(&self);
     }
 }
 
@@ -322,8 +324,6 @@ impl Encode for ByteStr {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        ensure_capacity(self, buf);
-
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
@@ -332,7 +332,7 @@ impl Encode for ByteStr {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
         }
-        buf.put(self.as_bytes());
+        buf.put_slice(self.as_bytes());
     }
 }
 impl ArrayEncode for ByteStr {
@@ -342,7 +342,7 @@ impl ArrayEncode for ByteStr {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_u32_be(self.len() as u32);
-        buf.put(self.as_bytes());
+        buf.put_slice(self.as_bytes());
     }
 }
 
@@ -354,10 +354,6 @@ impl Encode for str {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        if buf.remaining_mut() < self.encoded_size() {
-            buf.reserve(self.encoded_size());
-        }
-
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
@@ -366,9 +362,10 @@ impl Encode for str {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
         }
-        buf.put(self.as_bytes());
+        buf.put_slice(self.as_bytes());
     }
 }
+
 impl ArrayEncode for str {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_STRING32;
     fn array_encoded_size(&self) -> usize {
@@ -376,7 +373,7 @@ impl ArrayEncode for str {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_u32_be(self.len() as u32);
-        buf.put(self.as_bytes());
+        buf.put_slice(self.as_bytes());
     }
 }
 
@@ -388,8 +385,6 @@ impl Encode for Symbol {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        ensure_capacity(self, buf);
-
         let length = self.as_str().len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_SYMBOL32);
@@ -398,9 +393,10 @@ impl Encode for Symbol {
             buf.put_u8(codec::FORMATCODE_SYMBOL8);
             buf.put_u8(length as u8);
         }
-        buf.put(self.as_bytes());
+        buf.put_slice(self.as_bytes());
     }
 }
+
 impl ArrayEncode for Symbol {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_SYMBOL32;
     fn array_encoded_size(&self) -> usize {
@@ -408,7 +404,27 @@ impl ArrayEncode for Symbol {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_u32_be(self.len() as u32);
-        buf.put(self.as_bytes());
+        buf.put_slice(self.as_bytes());
+    }
+}
+
+impl Encode for StaticSymbol {
+    fn encoded_size(&self) -> usize {
+        let length = self.0.len();
+        let size = if length > u8::MAX as usize { 5 } else { 2 };
+        size + length
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let length = self.0.len();
+        if length > u8::MAX as usize {
+            buf.put_u8(codec::FORMATCODE_SYMBOL32);
+            buf.put_u32_be(length as u32);
+        } else {
+            buf.put_u8(codec::FORMATCODE_SYMBOL8);
+            buf.put_u8(length as u8);
+        }
+        buf.put_slice(self.0.as_bytes());
     }
 }
 
@@ -646,7 +662,7 @@ impl Encode for AmqpFrame {
         buf.put_u8(framing::FRAME_TYPE_AMQP);
         buf.put_u16_be(self.channel_id());
         self.performative().encode(buf);
-        buf.put(self.body());
+        buf.put_slice(self.body());
     }
 }
 

@@ -1,4 +1,4 @@
-#![allow(unused_variables, unused_assignments, unused_mut, unreachable_patterns)]
+#![allow(unused_assignments, unused_variables)]
 
 use std::u8;
 use bytes::{BufMut, Bytes, BytesMut};
@@ -89,7 +89,7 @@ impl Encode for {{enum.name}} {
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             {{#each enum.items as |item|}}
-            {{enum.name}}::{{item.name}} => Symbol::from_static("{{item.value}}").encode(buf),
+            {{enum.name}}::{{item.name}} => StaticSymbol("{{item.value}}").encode(buf),
             {{/each}}
         }
     }

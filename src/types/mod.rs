@@ -5,7 +5,7 @@ mod symbol;
 mod variant;
 
 pub type ByteStr = String<Bytes>;
-pub use self::symbol::Symbol;
+pub use self::symbol::{StaticSymbol, Symbol};
 pub use self::variant::Variant;
 pub use self::variant::VariantMap;
 
