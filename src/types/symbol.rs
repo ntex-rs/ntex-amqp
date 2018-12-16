@@ -27,9 +27,9 @@ impl Symbol {
     }
 }
 
-impl<'a> From<&'a str> for Symbol {
-    fn from(s: &'a str) -> Symbol {
-        Symbol(Bytes::from(s))
+impl From<&'static str> for Symbol {
+    fn from(s: &'static str) -> Symbol {
+        Symbol(Bytes::from_static(s.as_bytes()))
     }
 }
 

@@ -214,11 +214,11 @@ impl DecodeFormatted for Symbol {
         match fmt {
             codec::FORMATCODE_SYMBOL8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
-                Ok((input, Symbol::from(str::from_utf8(bytes)?)))
+                Ok((input, Symbol::from_slice(str::from_utf8(bytes)?)))
             }
             codec::FORMATCODE_SYMBOL32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
-                Ok((input, Symbol::from(str::from_utf8(bytes)?)))
+                Ok((input, Symbol::from_slice(str::from_utf8(bytes)?)))
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
