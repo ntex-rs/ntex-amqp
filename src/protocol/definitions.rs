@@ -6,107 +6,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use std::u8;
 use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
-pub enum Section {
-    Header(Header),
-    DeliveryAnnotations(DeliveryAnnotations),
-    MessageAnnotations(MessageAnnotations),
-    ApplicationProperties(ApplicationProperties),
-    Data(Data),
-    AmqpSequence(AmqpSequence),
-    AmqpValue(AmqpValue),
-    Footer(Footer),
-    Properties(Properties),
-}
-impl DecodeFormatted for Section {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(112) => {
-                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
-            }
-            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
-                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
-            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
-                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
-            Descriptor::Ulong(116) => decode_application_properties_inner(input)
-                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
-            Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
-            Descriptor::Ulong(118) => {
-                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
-            }
-            Descriptor::Ulong(119) => {
-                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
-            }
-            Descriptor::Ulong(120) => {
-                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
-            }
-            Descriptor::Ulong(115) => {
-                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
-                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
-                decode_delivery_annotations_inner(input)
-                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
-                decode_message_annotations_inner(input)
-                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
-                decode_application_properties_inner(input)
-                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
-                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
-                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
-                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
-                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
-                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for Section {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Section::Header(ref v) => encoded_size_header_inner(v),
-            Section::DeliveryAnnotations(ref v) => encoded_size_delivery_annotations_inner(v),
-            Section::MessageAnnotations(ref v) => encoded_size_message_annotations_inner(v),
-            Section::ApplicationProperties(ref v) => encoded_size_application_properties_inner(v),
-            Section::Data(ref v) => encoded_size_data_inner(v),
-            Section::AmqpSequence(ref v) => encoded_size_amqp_sequence_inner(v),
-            Section::AmqpValue(ref v) => encoded_size_amqp_value_inner(v),
-            Section::Footer(ref v) => encoded_size_footer_inner(v),
-            Section::Properties(ref v) => encoded_size_properties_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Section::Header(ref v) => encode_header_inner(v, buf),
-            Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
-            Section::MessageAnnotations(ref v) => encode_message_annotations_inner(v, buf),
-            Section::ApplicationProperties(ref v) => encode_application_properties_inner(v, buf),
-            Section::Data(ref v) => encode_data_inner(v, buf),
-            Section::AmqpSequence(ref v) => encode_amqp_sequence_inner(v, buf),
-            Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
-            Section::Footer(ref v) => encode_footer_inner(v, buf),
-            Section::Properties(ref v) => encode_properties_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
     Accepted(Accepted),
     Rejected(Rejected),
@@ -254,73 +153,6 @@ impl Encode for Frame {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub enum DeliveryState {
-    Received(Received),
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for DeliveryState {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(35) => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for DeliveryState {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
-            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
-            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
-            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
-            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
-            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
-            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
-            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
-            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
 pub enum SaslFrameBody {
     SaslMechanisms(SaslMechanisms),
     SaslInit(SaslInit),
@@ -384,6 +216,174 @@ impl Encode for SaslFrameBody {
             SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
             SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
             SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Section {
+    Header(Header),
+    DeliveryAnnotations(DeliveryAnnotations),
+    MessageAnnotations(MessageAnnotations),
+    ApplicationProperties(ApplicationProperties),
+    Data(Data),
+    AmqpSequence(AmqpSequence),
+    AmqpValue(AmqpValue),
+    Footer(Footer),
+    Properties(Properties),
+}
+impl DecodeFormatted for Section {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(112) => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
+                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
+            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
+                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
+            Descriptor::Ulong(116) => decode_application_properties_inner(input)
+                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
+            Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
+            Descriptor::Ulong(118) => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Ulong(119) => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Ulong(120) => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Ulong(115) => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
+                decode_delivery_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
+                decode_message_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
+                decode_application_properties_inner(input)
+                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
+                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for Section {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Section::Header(ref v) => encoded_size_header_inner(v),
+            Section::DeliveryAnnotations(ref v) => encoded_size_delivery_annotations_inner(v),
+            Section::MessageAnnotations(ref v) => encoded_size_message_annotations_inner(v),
+            Section::ApplicationProperties(ref v) => encoded_size_application_properties_inner(v),
+            Section::Data(ref v) => encoded_size_data_inner(v),
+            Section::AmqpSequence(ref v) => encoded_size_amqp_sequence_inner(v),
+            Section::AmqpValue(ref v) => encoded_size_amqp_value_inner(v),
+            Section::Footer(ref v) => encoded_size_footer_inner(v),
+            Section::Properties(ref v) => encoded_size_properties_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Section::Header(ref v) => encode_header_inner(v, buf),
+            Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
+            Section::MessageAnnotations(ref v) => encode_message_annotations_inner(v, buf),
+            Section::ApplicationProperties(ref v) => encode_application_properties_inner(v, buf),
+            Section::Data(ref v) => encode_data_inner(v, buf),
+            Section::AmqpSequence(ref v) => encode_amqp_sequence_inner(v, buf),
+            Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
+            Section::Footer(ref v) => encode_footer_inner(v, buf),
+            Section::Properties(ref v) => encode_properties_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeliveryState {
+    Received(Received),
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for DeliveryState {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(35) => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for DeliveryState {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
+            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
+            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
+            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
+            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
+            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
+            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
+            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
+            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }

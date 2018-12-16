@@ -1,11 +1,15 @@
-use bytes::{BigEndian, BufMut, ByteOrder, BytesMut};
 use std::marker::PhantomData;
+
+use bytes::{BigEndian, BufMut, ByteOrder, BytesMut};
 use tokio_io::codec::{Decoder, Encoder};
 
 use super::errors::{AmqpCodecError, ProtocolIdError};
 use super::framing::HEADER_LEN;
 use crate::codec::{Decode, Encode};
 use crate::protocol::ProtocolId;
+
+const SIZE_LOW_WM: usize = 4096;
+const SIZE_HIGH_WM: usize = 32768;
 
 pub struct AmqpCodec<T: Decode + Encode> {
     state: DecodeState,
@@ -46,11 +50,16 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                         return Ok(None);
                     }
                     let size = BigEndian::read_u32(src.as_ref()) as usize;
+
                     // todo: max frame size check
                     self.state = DecodeState::Frame(size);
                     src.split_to(4);
+
                     if len < size {
-                        src.reserve(size); // extend receiving buffer to fit the whole frame -- todo: too eager?
+                        // extend receiving buffer to fit the whole frame
+                        if src.remaining_mut() < std::cmp::max(SIZE_LOW_WM, size + HEADER_LEN) {
+                            src.reserve(SIZE_HIGH_WM);
+                        }
                         return Ok(None);
                     }
                 }
@@ -65,7 +74,6 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                         // todo: could it really happen?
                         return Err(AmqpCodecError::UnparsedBytesLeft);
                     }
-                    src.reserve(HEADER_LEN);
                     self.state = DecodeState::FrameHeader;
                     return Ok(Some(frame));
                 }
@@ -80,8 +88,8 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let size = item.encoded_size();
-        if dst.remaining_mut() < size {
-            dst.reserve(size);
+        if dst.remaining_mut() < std::cmp::max(SIZE_LOW_WM, size) {
+            dst.reserve(SIZE_HIGH_WM);
         }
 
         item.encode(dst);
@@ -126,9 +134,10 @@ impl Encoder for ProtocolIdCodec {
     type Error = ProtocolIdError;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.extend_from_slice(PROTOCOL_HEADER_PREFIX);
+        dst.reserve(PROTOCOL_HEADER_LEN);
+        dst.put_slice(PROTOCOL_HEADER_PREFIX);
         dst.put_u8(item as u8);
-        dst.extend_from_slice(PROTOCOL_VERSION);
+        dst.put_slice(PROTOCOL_VERSION);
         Ok(())
     }
 }
