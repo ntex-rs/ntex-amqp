@@ -1,11 +1,12 @@
-use super::codec::{self, DecodeFormatted, Encode};
-use super::errors::*;
-use super::types::*;
-use bytes::{BufMut, Bytes, BytesMut};
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::u8;
+
+use bytes::{Bytes, BytesMut};
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
+
+use super::codec::{self, DecodeFormatted, Encode};
+use super::errors::AmqpParseError;
+use super::types::*;
 
 pub(crate) struct CompoundHeader {
     pub size: u32,
@@ -18,43 +19,11 @@ impl CompoundHeader {
     }
 }
 
-pub const PROTOCOL_HEADER_LEN: usize = 8;
-const PROTOCOL_HEADER_PREFIX: &'static [u8] = b"AMQP";
-const PROTOCOL_VERSION: &'static [u8] = &[1, 0, 0];
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum ProtocolId {
     Amqp = 0,
     AmqpTls = 2,
     AmqpSasl = 3,
-}
-
-pub fn decode_protocol_header(src: &[u8]) -> Result<ProtocolId> {
-    ensure!(
-        &src[0..4] == PROTOCOL_HEADER_PREFIX,
-        "Protocol header is invalid. {:?}",
-        src
-    );
-    let protocol_id = src[4];
-    ensure!(
-        &src[5..8] == PROTOCOL_VERSION,
-        "Protocol version is incompatible. {:?}",
-        &src[5..8]
-    );
-    match protocol_id {
-        0 => Ok(ProtocolId::Amqp),
-        2 => Ok(ProtocolId::AmqpTls),
-        3 => Ok(ProtocolId::AmqpSasl),
-        _ => Err("Unknown protocol id.".into()),
-    }
-}
-
-pub fn encode_protocol_header(protocol_id: ProtocolId) -> BytesMut {
-    let mut buf = BytesMut::with_capacity(8);
-    buf.put_slice(PROTOCOL_HEADER_PREFIX);
-    buf.put_u8(protocol_id as u8);
-    buf.put_slice(PROTOCOL_VERSION);
-    buf
 }
 
 pub type Map = HashMap<Variant, Variant>;
@@ -78,7 +47,7 @@ pub enum MessageId {
 }
 
 impl DecodeFormatted for MessageId {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_SMALLULONG | codec::FORMATCODE_ULONG | codec::FORMATCODE_ULONG_0 => {
                 u64::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Ulong(o)))
@@ -92,7 +61,7 @@ impl DecodeFormatted for MessageId {
             codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
                 ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::String(o)))
             }
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
@@ -126,7 +95,7 @@ pub enum ErrorCondition {
 }
 
 impl DecodeFormatted for ErrorCondition {
-    fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, result) = Symbol::decode_with_format(input, format)?;
         if let Ok(r) = AmqpError::try_from(&result) {
             return Ok((input, ErrorCondition::AmqpError(r)));
@@ -173,7 +142,7 @@ pub enum DistributionMode {
 }
 
 impl DecodeFormatted for DistributionMode {
-    fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, result) = Symbol::decode_with_format(input, format)?;
         let result = match result.as_str() {
             "move" => DistributionMode::Move,

@@ -1,13 +1,14 @@
+use std::collections::HashMap;
+use std::hash::{BuildHasher, Hash};
 use std::{i8, u8};
+
+use bytes::{BufMut, Bytes, BytesMut};
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
 use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant};
-use bytes::{BufMut, Bytes, BytesMut};
-use chrono::{DateTime, Utc};
-use std::collections::HashMap;
-use std::hash::{BuildHasher, Hash};
-use uuid::Uuid;
 
 fn ensure_capacity<T: Encode>(encodable: &T, buf: &mut BytesMut) {
     if buf.remaining_mut() < encodable.encoded_size() {
@@ -79,7 +80,7 @@ impl Encode for u32 {
     fn encoded_size(&self) -> usize {
         if *self == 0 {
             1
-        } else if *self > u8::MAX as u32 {
+        } else if *self > u32::from(u8::MAX) {
             5
         } else {
             2
@@ -90,7 +91,7 @@ impl Encode for u32 {
 
         if *self == 0 {
             buf.put_u8(codec::FORMATCODE_UINT_0)
-        } else if *self > u8::MAX as u32 {
+        } else if *self > u32::from(u8::MAX) {
             buf.put_u8(codec::FORMATCODE_UINT);
             buf.put_u32_be(*self);
         } else {
@@ -113,7 +114,7 @@ impl Encode for u64 {
     fn encoded_size(&self) -> usize {
         if *self == 0 {
             1
-        } else if *self > u8::MAX as u64 {
+        } else if *self > u64::from(u8::MAX) {
             9
         } else {
             2
@@ -125,7 +126,7 @@ impl Encode for u64 {
 
         if *self == 0 {
             buf.put_u8(codec::FORMATCODE_ULONG_0)
-        } else if *self > u8::MAX as u64 {
+        } else if *self > u64::from(u8::MAX) {
             buf.put_u8(codec::FORMATCODE_ULONG);
             buf.put_u64_be(*self);
         } else {
@@ -168,7 +169,7 @@ impl ArrayEncode for i16 {
 
 impl Encode for i32 {
     fn encoded_size(&self) -> usize {
-        if *self > i8::MAX as i32 || *self < i8::MIN as i32 {
+        if *self > i32::from(i8::MAX) || *self < i32::from(i8::MIN) {
             5
         } else {
             2
@@ -177,7 +178,7 @@ impl Encode for i32 {
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
 
-        if *self > i8::MAX as i32 || *self < i8::MIN as i32 {
+        if *self > i32::from(i8::MAX) || *self < i32::from(i8::MIN) {
             buf.put_u8(codec::FORMATCODE_INT);
             buf.put_i32_be(*self);
         } else {
@@ -198,7 +199,7 @@ impl ArrayEncode for i32 {
 
 impl Encode for i64 {
     fn encoded_size(&self) -> usize {
-        if *self > i8::MAX as i64 || *self < i8::MIN as i64 {
+        if *self > i64::from(i8::MAX) || *self < i64::from(i8::MIN) {
             9
         } else {
             2
@@ -208,7 +209,7 @@ impl Encode for i64 {
     fn encode(&self, buf: &mut BytesMut) {
         ensure_capacity(self, buf);
 
-        if *self > i8::MAX as i64 || *self < i8::MIN as i64 {
+        if *self > i64::from(i8::MAX) || *self < i64::from(i8::MIN) {
             buf.put_u8(codec::FORMATCODE_LONG);
             buf.put_i64_be(*self);
         } else {
@@ -267,7 +268,7 @@ impl ArrayEncode for DateTime<Utc> {
         8
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        let timestamp = self.timestamp() * 1000 + (self.timestamp_subsec_millis() as i64);
+        let timestamp = self.timestamp() * 1000 + i64::from(self.timestamp_subsec_millis());
         buf.put_i64_be(timestamp);
     }
 }
@@ -292,7 +293,7 @@ impl Encode for Bytes {
 
     fn encode(&self, buf: &mut BytesMut) {
         let length = self.len();
-        if length > u8::MAX as usize as usize {
+        if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_BINARY32);
             buf.put_u32_be(length as u32);
         } else {
@@ -324,7 +325,7 @@ impl Encode for ByteStr {
         ensure_capacity(self, buf);
 
         let length = self.len();
-        if length > u8::MAX as usize as usize {
+        if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
             buf.put_u32_be(length as u32);
         } else {
@@ -462,7 +463,7 @@ impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
     }
 }
 
-fn array_encoded_size<T: ArrayEncode>(vec: &Vec<T>) -> usize {
+fn array_encoded_size<T: ArrayEncode>(vec: &[T]) -> usize {
     vec.iter().fold(0, |r, i| r + i.array_encoded_size())
 }
 impl<T: ArrayEncode> Encode for Vec<T> {

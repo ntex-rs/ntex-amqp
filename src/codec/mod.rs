@@ -1,14 +1,13 @@
+use bytes::BytesMut;
 use std::marker::Sized;
 
-use super::errors::Result;
-use bytes::BytesMut;
+use crate::errors::AmqpParseError;
 
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
-        ensure!(
-            $buf.len() >= $size,
-            crate::errors::ErrorKind::Incomplete(Some($size))
-        );
+        if $buf.len() < $size {
+            return Err(AmqpParseError::Incomplete(Some($size)));
+        }
     };
 }
 
@@ -21,12 +20,15 @@ pub use self::decode::INVALID_DESCRIPTOR;
 
 pub trait Encode {
     fn encoded_size(&self) -> usize;
+
     fn encode(&self, buf: &mut BytesMut);
 }
 
 pub trait ArrayEncode {
     const ARRAY_FORMAT_CODE: u8;
+
     fn array_encoded_size(&self) -> usize;
+
     fn array_encode(&self, buf: &mut BytesMut);
 }
 
@@ -34,24 +36,24 @@ pub trait Decode
 where
     Self: Sized,
 {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self)>;
+    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError>;
 }
 
 pub trait DecodeFormatted
 where
     Self: Sized,
 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)>;
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError>;
 }
 
 impl<T: DecodeFormatted> Decode for T {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self)> {
+    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, fmt) = decode_format_code(input)?;
         T::decode_with_format(input, fmt)
     }
 }
 
-pub fn decode_format_code(input: &[u8]) -> Result<(&[u8], u8)> {
+pub fn decode_format_code(input: &[u8]) -> Result<(&[u8], u8), AmqpParseError> {
     decode_check_len!(input, 1);
     Ok((&input[1..], input[0]))
 }

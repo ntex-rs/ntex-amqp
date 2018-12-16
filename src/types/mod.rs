@@ -1,8 +1,10 @@
-mod str;
+use bytes::Bytes;
+use string::String;
+
 mod symbol;
 mod variant;
 
-pub use self::str::ByteStr;
+pub type ByteStr = String<Bytes>;
 pub use self::symbol::Symbol;
 pub use self::variant::Variant;
 pub use self::variant::VariantMap;
@@ -21,6 +23,10 @@ impl<T> Multiple<T> {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn iter(&self) -> ::std::slice::Iter<T> {
         self.0.iter()
     }
@@ -32,6 +38,10 @@ pub struct List(pub Vec<Variant>);
 impl List {
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub fn iter(&self) -> ::std::slice::Iter<Variant> {

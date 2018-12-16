@@ -1,16 +1,17 @@
+use std::collections::HashMap;
+use std::hash::{BuildHasher, Hash};
 use std::{char, str, u8};
 
-use crate::codec::{self, Decode, DecodeFormatted};
-use crate::errors::{ErrorKind, Result};
-use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
-use crate::protocol::{self, CompoundHeader};
-use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
 use bytes::{BigEndian, ByteOrder, Bytes};
 use chrono::{DateTime, TimeZone, Utc};
 use ordered_float::OrderedFloat;
-use std::collections::HashMap;
-use std::hash::{BuildHasher, Hash};
 use uuid::Uuid;
+
+use crate::codec::{self, Decode, DecodeFormatted};
+use crate::errors::AmqpParseError;
+use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
+use crate::protocol::{self, CompoundHeader};
+use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
 
 pub const INVALID_DESCRIPTOR: u32 = 0x0003;
 
@@ -22,17 +23,17 @@ macro_rules! be_read {
     }};
 }
 
-fn read_u8(input: &[u8]) -> Result<(&[u8], u8)> {
+fn read_u8(input: &[u8]) -> Result<(&[u8], u8), AmqpParseError> {
     decode_check_len!(input, 1);
     Ok((&input[1..], input[0]))
 }
 
-fn read_i8(input: &[u8]) -> Result<(&[u8], i8)> {
+fn read_i8(input: &[u8]) -> Result<(&[u8], i8), AmqpParseError> {
     decode_check_len!(input, 1);
     Ok((&input[1..], input[0] as i8))
 }
 
-fn read_bytes_u8(input: &[u8]) -> Result<(&[u8], &[u8])> {
+fn read_bytes_u8(input: &[u8]) -> Result<(&[u8], &[u8]), AmqpParseError> {
     let (input, len) = read_u8(input)?;
     let len = len as usize;
     decode_check_len!(input, len);
@@ -40,8 +41,8 @@ fn read_bytes_u8(input: &[u8]) -> Result<(&[u8], &[u8])> {
     Ok((input, bytes))
 }
 
-fn read_bytes_u32(input: &[u8]) -> Result<(&[u8], &[u8])> {
-    let result: Result<(&[u8], u32)> = be_read!(input, read_u32, 4);
+fn read_bytes_u32(input: &[u8]) -> Result<(&[u8], &[u8]), AmqpParseError> {
+    let result: Result<(&[u8], u32), AmqpParseError> = be_read!(input, read_u32, 4);
     let (input, len) = result?;
     let len = len as usize;
     decode_check_len!(input, len);
@@ -52,162 +53,164 @@ fn read_bytes_u32(input: &[u8]) -> Result<(&[u8], &[u8])> {
 #[macro_export]
 macro_rules! validate_code {
     ($fmt:ident, $code:expr) => {
-        ensure!($fmt == $code, ErrorKind::InvalidFormatCode($fmt));
+        if $fmt != $code {
+            return Err(AmqpParseError::InvalidFormatCode($fmt));
+        }
     };
 }
 
 impl DecodeFormatted for bool {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_BOOLEAN => read_u8(input).map(|(i, o)| (i, o != 0)),
             codec::FORMATCODE_BOOLEAN_TRUE => Ok((input, true)),
             codec::FORMATCODE_BOOLEAN_FALSE => Ok((input, false)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for u8 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_UBYTE);
         read_u8(input)
     }
 }
 
 impl DecodeFormatted for u16 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_USHORT);
         be_read!(input, read_u16, 2)
     }
 }
 
 impl DecodeFormatted for u32 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_UINT => be_read!(input, read_u32, 4),
-            codec::FORMATCODE_SMALLUINT => read_u8(input).map(|(i, o)| (i, o as u32)),
+            codec::FORMATCODE_SMALLUINT => read_u8(input).map(|(i, o)| (i, u32::from(o))),
             codec::FORMATCODE_UINT_0 => Ok((input, 0)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for u64 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_ULONG => be_read!(input, read_u64, 8),
-            codec::FORMATCODE_SMALLULONG => read_u8(input).map(|(i, o)| (i, o as u64)),
+            codec::FORMATCODE_SMALLULONG => read_u8(input).map(|(i, o)| (i, u64::from(o))),
             codec::FORMATCODE_ULONG_0 => Ok((input, 0)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for i8 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_BYTE);
         read_i8(input)
     }
 }
 
 impl DecodeFormatted for i16 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_SHORT);
         be_read!(input, read_i16, 2)
     }
 }
 
 impl DecodeFormatted for i32 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_INT => be_read!(input, read_i32, 4),
-            codec::FORMATCODE_SMALLINT => read_i8(input).map(|(i, o)| (i, o as i32)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            codec::FORMATCODE_SMALLINT => read_i8(input).map(|(i, o)| (i, i32::from(o))),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for i64 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_LONG => be_read!(input, read_i64, 8),
-            codec::FORMATCODE_SMALLLONG => read_i8(input).map(|(i, o)| (i, o as i64)),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            codec::FORMATCODE_SMALLLONG => read_i8(input).map(|(i, o)| (i, i64::from(o))),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for f32 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_FLOAT);
         be_read!(input, read_f32, 4)
     }
 }
 
 impl DecodeFormatted for f64 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DOUBLE);
         be_read!(input, read_f64, 8)
     }
 }
 
 impl DecodeFormatted for char {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_CHAR);
-        let result: Result<(&[u8], u32)> = be_read!(input, read_u32, 4);
+        let result: Result<(&[u8], u32), AmqpParseError> = be_read!(input, read_u32, 4);
         let (i, o) = result?;
         if let Some(c) = char::from_u32(o) {
             Ok((i, c))
         } else {
-            Err(format!("Invalid value converting to char: {}", o).into())
+            Err(AmqpParseError::InvalidChar(o))
         } // todo: replace with CharTryFromError once try_from is stabilized
     }
 }
 
 impl DecodeFormatted for DateTime<Utc> {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_TIMESTAMP);
         be_read!(input, read_i64, 8).map(|(i, o)| (i, datetime_from_millis(o)))
     }
 }
 
 impl DecodeFormatted for Uuid {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_UUID);
         decode_check_len!(input, 16);
-        let uuid = Uuid::from_bytes(&input[..16])?;
+        let uuid = Uuid::from_slice(&input[..16])?;
         Ok((&input[16..], uuid))
     }
 }
 
 impl DecodeFormatted for Bytes {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_BINARY8 => read_bytes_u8(input).map(|(i, o)| (i, Bytes::from(o))),
             codec::FORMATCODE_BINARY32 => read_bytes_u32(input).map(|(i, o)| (i, Bytes::from(o))),
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for ByteStr {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_STRING8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
-                Ok((input, ByteStr::from(str::from_utf8(bytes)?)))
+                Ok((input, ByteStr::from_str(str::from_utf8(bytes)?)))
             }
             codec::FORMATCODE_STRING32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
-                Ok((input, ByteStr::from(str::from_utf8(bytes)?)))
+                Ok((input, ByteStr::from_str(str::from_utf8(bytes)?)))
             }
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl DecodeFormatted for Symbol {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_SYMBOL8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
@@ -217,7 +220,7 @@ impl DecodeFormatted for Symbol {
                 let (input, bytes) = read_bytes_u32(input)?;
                 Ok((input, Symbol::from(str::from_utf8(bytes)?)))
             }
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
@@ -225,7 +228,7 @@ impl DecodeFormatted for Symbol {
 impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
     for HashMap<K, V, S>
 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, header) = decode_map_header(input, fmt)?;
         let mut map_input = &input[..header.size as usize];
         let count = header.count / 2;
@@ -243,7 +246,7 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
 }
 
 impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, header) = decode_array_header(input, fmt)?;
         let item_fmt = input[0]; // todo: support descriptor
         let mut input = &input[1..];
@@ -258,7 +261,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
 }
 
 impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
                 let (input, items) = Vec::<T>::decode_with_format(input, fmt)?;
@@ -273,7 +276,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
 }
 
 impl DecodeFormatted for List {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (mut input, header) = decode_list_header(input, fmt)?;
         let mut result: Vec<Variant> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
@@ -286,7 +289,7 @@ impl DecodeFormatted for List {
 }
 
 impl DecodeFormatted for Variant {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_NULL => Ok((input, Variant::Null)),
             codec::FORMATCODE_BOOLEAN => {
@@ -383,13 +386,13 @@ impl DecodeFormatted for Variant {
                 let (input, value) = Variant::decode(input)?;
                 Ok((input, Variant::Described((descriptor, Box::new(value)))))
             }
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl<T: DecodeFormatted> DecodeFormatted for Option<T> {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_NULL => Ok((input, None)),
             _ => T::decode_with_format(input, fmt).map(|(i, o)| (i, Some(o))),
@@ -398,7 +401,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Option<T> {
 }
 
 impl DecodeFormatted for Descriptor {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_SMALLULONG => {
                 u64::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Ulong(o)))
@@ -412,13 +415,13 @@ impl DecodeFormatted for Descriptor {
             codec::FORMATCODE_SYMBOL32 => {
                 Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Descriptor::Symbol(o)))
             }
-            _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
 }
 
 impl Decode for AmqpFrame {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self)> {
+    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, channel_id) = decode_frame_header(input, framing::FRAME_TYPE_AMQP)?;
         let (input, performative) = protocol::Frame::decode(input)?;
         let body = Bytes::from(input);
@@ -427,22 +430,23 @@ impl Decode for AmqpFrame {
 }
 
 impl Decode for SaslFrame {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self)> {
+    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, _) = decode_frame_header(input, framing::FRAME_TYPE_SASL)?;
         let (input, frame) = protocol::SaslFrameBody::decode(input)?;
         Ok((input, SaslFrame { body: frame }))
     }
 }
 
-fn decode_frame_header(input: &[u8], expected_frame_type: u8) -> Result<(&[u8], u16)> {
+fn decode_frame_header(
+    input: &[u8],
+    expected_frame_type: u8,
+) -> Result<(&[u8], u16), AmqpParseError> {
     decode_check_len!(input, 4);
     let doff = input[0];
     let frame_type = input[1];
-    ensure!(
-        frame_type == expected_frame_type,
-        "Unexpected frame type: {:?}",
-        frame_type
-    );
+    if frame_type != expected_frame_type {
+        return Err(AmqpParseError::UnexpectedFrameType(frame_type));
+    }
 
     let channel_id = BigEndian::read_u16(&input[2..]);
     let ext_header_len = doff as usize * 4 - HEADER_LEN;
@@ -451,55 +455,55 @@ fn decode_frame_header(input: &[u8], expected_frame_type: u8) -> Result<(&[u8], 
     Ok((input, channel_id))
 }
 
-fn decode_array_header(input: &[u8], fmt: u8) -> Result<(&[u8], CompoundHeader)> {
+fn decode_array_header(input: &[u8], fmt: u8) -> Result<(&[u8], CompoundHeader), AmqpParseError> {
     match fmt {
         codec::FORMATCODE_ARRAY8 => decode_compound8(input),
         codec::FORMATCODE_ARRAY32 => decode_compound32(input),
-        _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
     }
 }
 
-pub(crate) fn decode_list_header(input: &[u8], fmt: u8) -> Result<(&[u8], CompoundHeader)> {
+pub(crate) fn decode_list_header(
+    input: &[u8],
+    fmt: u8,
+) -> Result<(&[u8], CompoundHeader), AmqpParseError> {
     match fmt {
         codec::FORMATCODE_LIST0 => Ok((input, CompoundHeader::empty())),
         codec::FORMATCODE_LIST8 => decode_compound8(input),
         codec::FORMATCODE_LIST32 => decode_compound32(input),
-        _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
     }
 }
 
-pub(crate) fn decode_map_header(input: &[u8], fmt: u8) -> Result<(&[u8], CompoundHeader)> {
+pub(crate) fn decode_map_header(
+    input: &[u8],
+    fmt: u8,
+) -> Result<(&[u8], CompoundHeader), AmqpParseError> {
     match fmt {
         codec::FORMATCODE_MAP8 => decode_compound8(input),
         codec::FORMATCODE_MAP32 => decode_compound32(input),
-        _ => Err(ErrorKind::InvalidFormatCode(fmt).into()),
+        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
     }
 }
 
-fn decode_compound8(input: &[u8]) -> Result<(&[u8], CompoundHeader)> {
+fn decode_compound8(input: &[u8]) -> Result<(&[u8], CompoundHeader), AmqpParseError> {
     decode_check_len!(input, 2);
     let size = input[0] - 1; // -1 for 1 byte count
     let count = input[1];
     Ok((
         &input[2..],
         CompoundHeader {
-            size: size as u32,
-            count: count as u32,
+            size: u32::from(size),
+            count: u32::from(count),
         },
     ))
 }
 
-fn decode_compound32(input: &[u8]) -> Result<(&[u8], CompoundHeader)> {
+fn decode_compound32(input: &[u8]) -> Result<(&[u8], CompoundHeader), AmqpParseError> {
     decode_check_len!(input, 8);
     let size = BigEndian::read_u32(input) - 4; // -4 for 4 byte count
     let count = BigEndian::read_u32(&input[4..]);
-    Ok((
-        &input[8..],
-        CompoundHeader {
-            size: size,
-            count: count,
-        },
-    ))
+    Ok((&input[8..], CompoundHeader { size, count }))
 }
 
 fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
@@ -565,14 +569,14 @@ mod tests {
 
          test_char: char, '💯', '💯',
 
-         uuid: Uuid, Uuid::from_bytes(&[4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87]).expect("parse error"),
+         uuid: Uuid, Uuid::from_slice(&[4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87]).expect("parse error"),
              Uuid::parse_str("0436430c2b02624c2032570501212b57").expect("parse error"),
 
          binary_short: Bytes, Bytes::from(&[4u8, 5u8][..]), Bytes::from(&[4u8, 5u8][..]),
          binary_long: Bytes, Bytes::from(&[4u8; 500][..]), Bytes::from(&[4u8; 500][..]),
 
-         string_short: ByteStr, ByteStr::from("Hello there"), ByteStr::from("Hello there"),
-         string_long: ByteStr, ByteStr::from(LOREM), ByteStr::from(LOREM),
+         string_short: ByteStr, ByteStr::from_str("Hello there"), ByteStr::from_str("Hello there"),
+         string_long: ByteStr, ByteStr::from_str(LOREM), ByteStr::from_str(LOREM),
 
          symbol_short: Symbol, Symbol::from("Hello there"), Symbol::from("Hello there"),
          symbol_long: Symbol, Symbol::from(LOREM), Symbol::from(LOREM),
@@ -604,20 +608,20 @@ mod tests {
 
          variant_char: Variant, Variant::Char('💯'), Variant::Char('💯'),
 
-         variant_uuid: Variant, Variant::Uuid(Uuid::from_bytes(&[4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87]).expect("parse error")),
+         variant_uuid: Variant, Variant::Uuid(Uuid::from_slice(&[4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, 87]).expect("parse error")),
              Variant::Uuid(Uuid::parse_str("0436430c2b02624c2032570501212b57").expect("parse error")),
 
          variant_binary_short: Variant, Variant::Binary(Bytes::from(&[4u8, 5u8][..])), Variant::Binary(Bytes::from(&[4u8, 5u8][..])),
          variant_binary_long: Variant, Variant::Binary(Bytes::from(&[4u8; 500][..])), Variant::Binary(Bytes::from(&[4u8; 500][..])),
 
-         variant_string_short: Variant, Variant::String(ByteStr::from("Hello there")), Variant::String(ByteStr::from("Hello there")),
-         variant_string_long: Variant, Variant::String(ByteStr::from(LOREM)), Variant::String(ByteStr::from(LOREM)),
+         variant_string_short: Variant, Variant::String(ByteStr::from_str("Hello there")), Variant::String(ByteStr::from_str("Hello there")),
+         variant_string_long: Variant, Variant::String(ByteStr::from_str(LOREM)), Variant::String(ByteStr::from_str(LOREM)),
 
          variant_symbol_short: Variant, Variant::Symbol(Symbol::from("Hello there")), Variant::Symbol(Symbol::from("Hello there")),
          variant_symbol_long: Variant, Variant::Symbol(Symbol::from(LOREM)), Variant::Symbol(Symbol::from(LOREM)),
     }
 
-    fn unwrap_value<T>(res: Result<(&[u8], T)>) -> T {
+    fn unwrap_value<T>(res: Result<(&[u8], T), AmqpParseError>) -> T {
         let r = res.map(|(_i, o)| o);
         assert!(r.is_ok());
         r.unwrap()
@@ -746,10 +750,10 @@ mod tests {
     #[test]
     fn option_string() {
         let b1 = &mut BytesMut::with_capacity(0);
-        Some(ByteStr::from("hello")).encode(b1);
+        Some(ByteStr::from_str("hello")).encode(b1);
 
         assert_eq!(
-            Some(ByteStr::from("hello")),
+            Some(ByteStr::from_str("hello")),
             unwrap_value(Option::<ByteStr>::decode(b1))
         );
 

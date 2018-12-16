@@ -1,11 +1,12 @@
 #![allow(unused_variables, unused_assignments, unused_mut, unreachable_patterns)]
 
-use bytes::{BufMut, Bytes, BytesMut};
-use ::errors::Result;
-use uuid::Uuid;
-use ::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 use std::u8;
+use bytes::{BufMut, Bytes, BytesMut};
+use uuid::Uuid;
+
 use super::*;
+use crate::errors::AmqpParseError;
+use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 
 {{#each defs.provides as |provide|}}
 {{#if provide.described}}
@@ -16,7 +17,7 @@ pub enum {{provide.name}} {
 {{/each}}
 }
 impl DecodeFormatted for {{provide.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
         match descriptor {
@@ -26,7 +27,7 @@ impl DecodeFormatted for {{provide.name}} {
             {{#each provide.options as |option|}}
             Descriptor::Symbol(ref a) if a.as_str() == "{{option.descriptor.name}}" => decode_{{snake option.ty}}_inner(input).map(|(i, r)| (i, {{provide.name}}::{{option.ty}}(r))),
             {{/each}}
-            _ => Err(ErrorKind::InvalidDescriptor(descriptor).into())
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor))
         }
     }
 }
@@ -62,17 +63,17 @@ pub enum {{enum.name}} {
 }
 {{#if enum.is_symbol}}
 impl {{enum.name}} {
-    pub fn try_from(v: &Symbol) -> Result<Self> {
+    pub fn try_from(v: &Symbol) -> Result<Self, AmqpParseError> {
         match v.as_str() {
             {{#each enum.items as |item|}}
             "{{item.value}}" => Ok({{enum.name}}::{{item.name}}),
             {{/each}}
-            _ => Err("unknown {{enum.name}} option.".into())
+            _ => Err(AmqpParseError::UnknownEnumOption("{{enum.name}}"))
         }
     }
 }
 impl DecodeFormatted for {{enum.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, base) = Symbol::decode_with_format(input, fmt)?;
         Ok((input, Self::try_from(&base)?))
     }
@@ -95,17 +96,17 @@ impl Encode for {{enum.name}} {
 }
 {{else}}
 impl {{enum.name}} {
-    pub fn try_from(v: {{enum.ty}}) -> Result<Self> {
+    pub fn try_from(v: {{enum.ty}}) -> Result<Self, AmqpParseError> {
         match v {
             {{#each enum.items as |item|}}
             {{item.value}} => Ok({{enum.name}}::{{item.name}}),
             {{/each}}
-            _ => Err("unknown {{enum.name}} option.".into())
+            _ => Err(AmqpParseError::UnknownEnumOption("{{enum.name}}"))
         }
     }
 }
 impl DecodeFormatted for {{enum.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, base) = {{enum.ty}}::decode_with_format(input, fmt)?;
         Ok((input, Self::try_from(base)?))
     }
@@ -137,7 +138,7 @@ impl Encode for {{enum.name}} {
 
 {{#each defs.described_restricted as |dr|}}
 type {{dr.name}} = {{dr.ty}};
-fn decode_{{snake dr.name}}_inner(input: &[u8]) -> Result<(&[u8], {{dr.name}})> {
+fn decode_{{snake dr.name}}_inner(input: &[u8]) -> Result<(&[u8], {{dr.name}}), AmqpParseError> {
     {{dr.name}}::decode(input)
 }
 fn encoded_size_{{snake dr.name}}_inner(dr: &{{dr.name}}) -> usize {
@@ -192,9 +193,10 @@ impl {{list.name}} {
         {{/if}}
     {{/each}}
 
+    #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 {{#each list.fields as |field|}} + 1{{/each}};
 }
-fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}})> {
+fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}}), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
@@ -231,7 +233,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
         {{#if field.default}}
         {{field.name}} = {{field.default}};
         {{else}}
-        bail!("Required field {{field.name}} was omitted.");
+        return Err(AmqpParseError::RequiredFieldOmitted("{{field.name}}"))
         {{/if}}
     }
     {{/if}}
@@ -247,6 +249,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
 }
 
 fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
+    #[allow(clippy::identity_op)]
     let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
@@ -254,6 +257,7 @@ fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
 }
 fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     Descriptor::Ulong({{list.descriptor.code}}).encode(buf);
+    #[allow(clippy::identity_op)]
     let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
@@ -271,15 +275,18 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
 }
 
 impl DecodeFormatted for {{list.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self)> {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
-        if descriptor != Descriptor::Ulong({{list.descriptor.code}})
-            && descriptor != Descriptor::Symbol(Symbol::from_static("{{list.descriptor.name}}"))
-        {
-            bail!("Invalid descriptor.");
+        let is_match = match descriptor {
+            Descriptor::Ulong(val) => val == {{list.descriptor.code}},
+            Descriptor::Symbol(ref sym) => sym.as_bytes() == b"{{list.descriptor.name}}",
+        };
+        if !is_match {
+            Err(AmqpParseError::InvalidDescriptor(descriptor))
+        } else {
+            decode_{{snake list.name}}_inner(input)
         }
-        decode_{{snake list.name}}_inner(input)
     }
 }
 
