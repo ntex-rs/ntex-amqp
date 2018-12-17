@@ -1,0 +1,21 @@
+[package]
+name = "amqp-transport"
+version = "0.1.0"
+authors = ["Nikolay Kim <fafhrd91@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+amqp = { git = "https://github.com/fafhrd91/rust-amqp.git" }
+
+derive_more = "0.13"
+either = "1.5"
+futures = "0.1"
+log = "0.4"
+bytes = "0.4"
+uuid = { version = "0.7", features = ["v4"] }
+slab = "0.4"
+string = "0.1"
+
+actix-codec = "0.1.0"
+actix-service = "0.1.2"
+actix-connector = "0.1.0"
