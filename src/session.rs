@@ -134,6 +134,7 @@ impl SessionInner {
             match self.links.get_mut(index) {
                 Some(item) => {
                     if item.is_opening() {
+                        trace!("sender link opened: {:?}", name);
                         let local_sender = std::mem::replace(item, LinkState::None);
 
                         if let LinkState::Opening(tx, self_rc) = local_sender {
@@ -148,7 +149,6 @@ impl SessionInner {
                 }
             }
         } else {
-            println!("1 not found");
             // todo: rogue attach right now - do nothing. in future will indicate incoming attach
         }
     }
@@ -185,7 +185,11 @@ impl SessionInner {
     fn apply_flow(&mut self, flow: &Flow) {
         self.outgoing_window =
             flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
-        // println!("session received credit. window: {}, pending: {}", self.outgoing_window, self.pending_transfers.len());
+        trace!(
+            "session received credit. window: {}, pending: {}",
+            self.outgoing_window,
+            self.pending_transfers.len()
+        );
         while let Some(t) = self.pending_transfers.pop_front() {
             self.send_transfer_conn(t.link_handle, t.message, t.promise);
             if self.outgoing_window == 0 {

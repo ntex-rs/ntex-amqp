@@ -99,7 +99,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
                 Ok(Async::Ready(None)) => return Err(()),
                 Ok(Async::NotReady) => break,
                 Err(e) => {
-                    warn!("AMQP: Error reading: {:?}", e);
+                    trace!("error reading: {:?}", e);
                     return Err(());
                 }
             }
@@ -108,7 +108,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
         loop {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
-                    println!("SEND: {:?} \n", frame);
+                    trace!("outgoing: {:?}", frame);
                     if let Err(_) = self.framed.force_send(frame) {
                         return Err(());
                     }
@@ -121,7 +121,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
                 match self.framed.poll_complete() {
                     Ok(Async::NotReady) => break,
                     Err(e) => {
-                        debug!("Error sending data: {}", e);
+                        trace!("error sending data: {}", e);
                         return Err(());
                     }
                     Ok(Async::Ready(_)) => {
@@ -172,7 +172,7 @@ impl ConnectionInner {
     }
 
     fn handle_frame(&mut self, frame: AmqpFrame) {
-        println!("FRAME: {:?} \n", frame);
+        trace!("incoming: {:?} \n", frame);
 
         match *frame.performative() {
             Frame::Begin(ref begin) if begin.remote_channel().is_some() => {
@@ -201,7 +201,11 @@ impl ConnectionInner {
     }
 
     fn complete_session_creation(&mut self, channel_id: usize, begin: &Begin) {
-        println!("COMPLETE: {:?} {:?}", channel_id, begin.remote_channel());
+        trace!(
+            "session opened: {:?} {:?}",
+            channel_id,
+            begin.remote_channel()
+        );
 
         let id = begin.remote_channel().unwrap() as usize;
 
@@ -240,8 +244,6 @@ impl ConnectionInner {
 
         let entry = self.channels.vacant_entry();
         let token = entry.key();
-
-        println!("TOKEN-ID: {:?}", token);
 
         if token >= self.local.channel_max {
             Either::A(err(AmqpTransportError::TooManyChannels.into()))

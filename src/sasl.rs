@@ -111,7 +111,6 @@ where
                 .and_then(|(frame, framed)| {
                     if let Some(frame) = frame {
                         if let Frame::Open(open) = frame.performative() {
-                            println!("OPEN: {:?} \n", open);
                             Ok(Connection::new(framed, config, open.into()))
                         } else {
                             Err(Either::Left(SaslConnectError::ExpectedOpenFrame))
