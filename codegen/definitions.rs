@@ -1,4 +1,4 @@
-#![allow(unused_assignments, unused_variables)]
+#![allow(unused_assignments, unused_variables, unreachable_patterns)]
 
 use std::u8;
 use bytes::{BufMut, Bytes, BytesMut};

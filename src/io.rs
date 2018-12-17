@@ -52,7 +52,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     let size = BigEndian::read_u32(src.as_ref()) as usize;
 
                     // todo: max frame size check
-                    self.state = DecodeState::Frame(size);
+                    self.state = DecodeState::Frame(size - 4);
                     src.split_to(4);
 
                     if len < size {
@@ -64,13 +64,13 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     }
                 }
                 DecodeState::Frame(size) => {
-                    if src.len() < size - 4 {
+                    if src.len() < size {
                         return Ok(None);
                     }
 
-                    let frame_buf = src.split_to(size - 4);
+                    let frame_buf = src.split_to(size);
                     let (remainder, frame) = T::decode(frame_buf.as_ref())?;
-                    if remainder.is_empty() {
+                    if !remainder.is_empty() {
                         // todo: could it really happen?
                         return Err(AmqpCodecError::UnparsedBytesLeft);
                     }

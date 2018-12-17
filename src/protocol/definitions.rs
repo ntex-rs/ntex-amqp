@@ -1,4 +1,4 @@
-#![allow(unused_assignments, unused_variables)]
+#![allow(unused_assignments, unused_variables, unreachable_patterns)]
 use super::*;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 use crate::errors::AmqpParseError;
@@ -6,60 +6,69 @@ use bytes::{BufMut, Bytes, BytesMut};
 use std::u8;
 use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
+pub enum SaslFrameBody {
+    SaslMechanisms(SaslMechanisms),
+    SaslInit(SaslInit),
+    SaslChallenge(SaslChallenge),
+    SaslResponse(SaslResponse),
+    SaslOutcome(SaslOutcome),
 }
-impl DecodeFormatted for Outcome {
+impl DecodeFormatted for SaslFrameBody {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
         let (input, descriptor) = Descriptor::decode(input)?;
         match descriptor {
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
+            Descriptor::Ulong(65) => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
             }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
+            Descriptor::Ulong(67) => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
             }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            Descriptor::Ulong(68) => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
             }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
+                decode_sasl_mechanisms_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
             }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
             }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
+                decode_sasl_challenge_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
             }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
             }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
             }
             _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
         }
     }
 }
-impl Encode for Outcome {
+impl Encode for SaslFrameBody {
     fn encoded_size(&self) -> usize {
         match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+            SaslFrameBody::SaslMechanisms(ref v) => encoded_size_sasl_mechanisms_inner(v),
+            SaslFrameBody::SaslInit(ref v) => encoded_size_sasl_init_inner(v),
+            SaslFrameBody::SaslChallenge(ref v) => encoded_size_sasl_challenge_inner(v),
+            SaslFrameBody::SaslResponse(ref v) => encoded_size_sasl_response_inner(v),
+            SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
         }
     }
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
+            SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
+            SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
+            SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
+            SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
+            SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
         }
     }
 }
@@ -149,73 +158,6 @@ impl Encode for Frame {
             Frame::Detach(ref v) => encode_detach_inner(v, buf),
             Frame::End(ref v) => encode_end_inner(v, buf),
             Frame::Close(ref v) => encode_close_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum SaslFrameBody {
-    SaslMechanisms(SaslMechanisms),
-    SaslInit(SaslInit),
-    SaslChallenge(SaslChallenge),
-    SaslResponse(SaslResponse),
-    SaslOutcome(SaslOutcome),
-}
-impl DecodeFormatted for SaslFrameBody {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
-                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
-            Descriptor::Ulong(65) => {
-                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
-            }
-            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
-                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
-            Descriptor::Ulong(67) => {
-                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
-            }
-            Descriptor::Ulong(68) => {
-                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
-                decode_sasl_mechanisms_inner(input)
-                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
-                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
-                decode_sasl_challenge_inner(input)
-                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
-                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
-                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for SaslFrameBody {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            SaslFrameBody::SaslMechanisms(ref v) => encoded_size_sasl_mechanisms_inner(v),
-            SaslFrameBody::SaslInit(ref v) => encoded_size_sasl_init_inner(v),
-            SaslFrameBody::SaslChallenge(ref v) => encoded_size_sasl_challenge_inner(v),
-            SaslFrameBody::SaslResponse(ref v) => encoded_size_sasl_response_inner(v),
-            SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
-            SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
-            SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
-            SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
-            SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
         }
     }
 }
@@ -317,6 +259,64 @@ impl Encode for Section {
             Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
             Section::Footer(ref v) => encode_footer_inner(v, buf),
             Section::Properties(ref v) => encode_properties_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
