@@ -243,8 +243,12 @@ impl Definitions {
                     None
                 } else {
                     Some(ProvidesEnum {
+                        described: if k == "Frame" {
+                            false
+                        } else {
+                            v.iter().any(|v| v.descriptor.code != 0)
+                        },
                         name: k,
-                        described: v.iter().any(|v| v.descriptor.code != 0),
                         options: v,
                     })
                 }

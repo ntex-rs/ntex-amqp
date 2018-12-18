@@ -8,6 +8,114 @@ use super::*;
 use crate::errors::AmqpParseError;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Frame {
+    Open(Open),
+    Begin(Begin),
+    Attach(Attach),
+    Flow(Flow),
+    Transfer(Transfer),
+    Disposition(Disposition),
+    Detach(Detach),
+    End(End),
+    Close(Close),
+    Empty,
+}
+
+impl Decode for Frame {
+    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
+        if input.is_empty() {
+            Ok((input, Frame::Empty))
+        } else {
+            let (input, fmt) = decode_format_code(input)?;
+            validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+            let (input, descriptor) = Descriptor::decode(input)?;
+            match descriptor {
+                Descriptor::Ulong(16) => decode_open_inner(input).map(|(i, r)| (i, Frame::Open(r))),
+                Descriptor::Ulong(17) => {
+                    decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r)))
+                }
+                Descriptor::Ulong(18) => {
+                    decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r)))
+                }
+                Descriptor::Ulong(19) => decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r))),
+                Descriptor::Ulong(20) => {
+                    decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r)))
+                }
+                Descriptor::Ulong(21) => {
+                    decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r)))
+                }
+                Descriptor::Ulong(22) => {
+                    decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r)))
+                }
+                Descriptor::Ulong(23) => decode_end_inner(input).map(|(i, r)| (i, Frame::End(r))),
+                Descriptor::Ulong(24) => {
+                    decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:open:list" => {
+                    decode_open_inner(input).map(|(i, r)| (i, Frame::Open(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:begin:list" => {
+                    decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:attach:list" => {
+                    decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:flow:list" => {
+                    decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:transfer:list" => {
+                    decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:disposition:list" => {
+                    decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:detach:list" => {
+                    decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:end:list" => {
+                    decode_end_inner(input).map(|(i, r)| (i, Frame::End(r)))
+                }
+                Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => {
+                    decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
+                }
+                _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+            }
+        }
+    }
+}
+
+impl Encode for Frame {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Frame::Open(ref v) => encoded_size_open_inner(v),
+            Frame::Begin(ref v) => encoded_size_begin_inner(v),
+            Frame::Attach(ref v) => encoded_size_attach_inner(v),
+            Frame::Flow(ref v) => encoded_size_flow_inner(v),
+            Frame::Transfer(ref v) => encoded_size_transfer_inner(v),
+            Frame::Disposition(ref v) => encoded_size_disposition_inner(v),
+            Frame::Detach(ref v) => encoded_size_detach_inner(v),
+            Frame::End(ref v) => encoded_size_end_inner(v),
+            Frame::Close(ref v) => encoded_size_close_inner(v),
+            Frame::Empty => 0,
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Frame::Open(ref v) => encode_open_inner(v, buf),
+            Frame::Begin(ref v) => encode_begin_inner(v, buf),
+            Frame::Attach(ref v) => encode_attach_inner(v, buf),
+            Frame::Flow(ref v) => encode_flow_inner(v, buf),
+            Frame::Transfer(ref v) => encode_transfer_inner(v, buf),
+            Frame::Disposition(ref v) => encode_disposition_inner(v, buf),
+            Frame::Detach(ref v) => encode_detach_inner(v, buf),
+            Frame::End(ref v) => encode_end_inner(v, buf),
+            Frame::Close(ref v) => encode_close_inner(v, buf),
+            Frame::Empty => (),
+        }
+    }
+}
+
 {{#each defs.provides as |provide|}}
 {{#if provide.described}}
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +124,7 @@ pub enum {{provide.name}} {
     {{option.ty}}({{option.ty}}),
 {{/each}}
 }
+
 impl DecodeFormatted for {{provide.name}} {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
@@ -31,6 +140,7 @@ impl DecodeFormatted for {{provide.name}} {
         }
     }
 }
+
 impl Encode for {{provide.name}} {
     fn encoded_size(&self) -> usize {
         match *self {
