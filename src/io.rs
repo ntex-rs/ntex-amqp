@@ -88,8 +88,9 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let size = item.encoded_size();
-        if dst.remaining_mut() < std::cmp::max(SIZE_LOW_WM, size) {
-            dst.reserve(SIZE_HIGH_WM);
+        let need = std::cmp::max(SIZE_LOW_WM, size);
+        if dst.remaining_mut() < need {
+            dst.reserve(std::cmp::max(need, SIZE_HIGH_WM));
         }
 
         item.encode(dst);
