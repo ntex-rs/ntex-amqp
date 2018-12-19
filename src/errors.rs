@@ -1,9 +1,9 @@
-use amqp::errors::{AmqpCodecError, AmqpParseError, ProtocolIdError};
+use amqp::errors::{AmqpCodecError, ProtocolIdError};
 use amqp::protocol::SaslCode;
 
-#[derive(Debug, Display, From)]
+#[derive(Debug, Display, From, Clone)]
 pub enum AmqpTransportError {
-    ParseError(AmqpParseError),
+    Codec(AmqpCodecError),
     TooManyChannels,
     Disconnected,
 }

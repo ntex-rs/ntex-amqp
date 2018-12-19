@@ -19,6 +19,7 @@ pub(crate) struct SenderLinkInner {
     delivery_count: SequenceNo,
     link_credit: u32,
     pending_transfers: VecDeque<PendingTransfer>,
+    error: Option<AmqpTransportError>,
 }
 
 struct PendingTransfer {
@@ -47,7 +48,17 @@ impl SenderLinkInner {
             delivery_count: 0,
             link_credit: 0,
             pending_transfers: VecDeque::new(),
+            error: None,
         }
+    }
+
+    pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
+        // drop pending transfers
+        for tr in self.pending_transfers.drain(..) {
+            let _ = tr.promise.send(Err(err.clone()));
+        }
+
+        self.error = Some(err);
     }
 
     pub fn apply_flow(&mut self, flow: &Flow) {

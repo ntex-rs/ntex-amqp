@@ -96,6 +96,7 @@ where
         |(connect, config, framed): (Connect, Configuration, Framed<Io, ProtocolIdCodec>)| {
             let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
             let open = config.into_open(Some(connect.host()));
+            trace!("Open connection: {:?}", open);
             framed
                 .send(AmqpFrame::new(0, Frame::Open(open), Bytes::new()))
                 .map_err(|e| Either::Left(SaslConnectError::from(e)))
@@ -111,6 +112,7 @@ where
                 .and_then(|(frame, framed)| {
                     if let Some(frame) = frame {
                         if let Frame::Open(open) = frame.performative() {
+                            trace!("Open confirmed: {:?}", open);
                             Ok(Connection::new(framed, config, open.into()))
                         } else {
                             Err(Either::Left(SaslConnectError::ExpectedOpenFrame))

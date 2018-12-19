@@ -79,6 +79,7 @@ pub(crate) struct SessionInner {
     links: Slab<LinkState>,
     pending_links: HashMap<string::String<Bytes>, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
+    error: Option<AmqpTransportError>,
 }
 
 struct PendingTransfer {
@@ -108,7 +109,30 @@ impl SessionInner {
             links: Slab::new(),
             pending_links: HashMap::new(),
             pending_transfers: VecDeque::new(),
+            error: None,
         }
+    }
+
+    /// Set error. New operations will return error.
+    pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
+        // drop pending transfers
+        for tr in self.pending_transfers.drain(..) {
+            let _ = tr.promise.send(Err(err.clone()));
+        }
+
+        // drop links
+        self.pending_links.clear();
+        for (_, st) in self.links.iter_mut() {
+            match st {
+                LinkState::Opening(_, _) | LinkState::None => (),
+                LinkState::Established(ref mut link) | LinkState::Closing(ref mut link) => {
+                    link.get_mut().set_error(err.clone())
+                }
+            }
+        }
+        self.links.clear();
+
+        self.error = Some(err);
     }
 
     fn drop_session(&mut self) {
@@ -116,14 +140,16 @@ impl SessionInner {
     }
 
     pub fn handle_frame(&mut self, frame: AmqpFrame, self_rc: Cell<SessionInner>) {
-        match *frame.performative() {
-            Frame::Attach(ref attach) => self.complete_link_creation(attach),
-            Frame::Disposition(ref disp) => self.settle_deliveries(disp),
-            Frame::Flow(ref flow) => self.apply_flow(flow),
-            Frame::Detach(_) => println!("unexpected frame: {:#?}", frame),
-            // todo: handle Detach, End
-            _ => {
-                // todo: handle unexpected frames
+        if self.error.is_none() {
+            match *frame.performative() {
+                Frame::Attach(ref attach) => self.complete_link_creation(attach),
+                Frame::Disposition(ref disp) => self.settle_deliveries(disp),
+                Frame::Flow(ref flow) => self.apply_flow(flow),
+                Frame::Detach(_) => println!("unexpected frame: {:#?}", frame),
+                // todo: handle Detach, End
+                _ => {
+                    // todo: handle unexpected frames
+                }
             }
         }
     }

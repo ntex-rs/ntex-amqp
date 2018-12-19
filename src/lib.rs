@@ -5,8 +5,7 @@ extern crate log;
 
 use amqp::protocol::{Handle, Milliseconds, Open, Outcome};
 use bytes::Bytes;
-use futures::unsync::oneshot;
-use futures::{Async, Future, Poll};
+use futures::{unsync::oneshot, Async, Future, Poll};
 use string::{String, TryFrom};
 use uuid::Uuid;
 
@@ -77,7 +76,7 @@ impl Configuration {
         Configuration {
             max_frame_size: std::u16::MAX as u32,
             channel_max: 1024,
-            idle_time_out: Some(30000),
+            idle_time_out: Some(120000),
         }
     }
 
@@ -101,7 +100,7 @@ impl Configuration {
 
     /// Set idle time-out for the connection in milliseconds
     ///
-    /// By default idle time-out is set to 30000 milliseconds
+    /// By default idle time-out is set to 120000 milliseconds
     pub fn idle_time_out(mut self, timeout: u32) -> Self {
         self.idle_time_out = Some(timeout as Milliseconds);
         self

@@ -7,6 +7,7 @@ use futures::task::AtomicTask;
 use futures::unsync::oneshot;
 use futures::{future, Async, Future, Poll, Sink, Stream};
 
+use amqp::errors::AmqpCodecError;
 use amqp::framing::AmqpFrame;
 use amqp::protocol::{Begin, Frame};
 use amqp::AmqpCodec;
@@ -61,6 +62,7 @@ pub(crate) struct ConnectionInner {
     write_queue: VecDeque<AmqpFrame>,
     write_task: AtomicTask,
     channels: slab::Slab<ChannelState>,
+    error: Option<AmqpTransportError>,
 }
 
 impl<T: AsyncRead + AsyncWrite> Connection<T> {
@@ -88,19 +90,23 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
 impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
     type Item = ();
-    type Error = ();
+    type Error = AmqpCodecError;
 
-    fn poll(&mut self) -> Poll<(), ()> {
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let inner = self.inner.get_mut();
 
         loop {
             match self.framed.poll() {
                 Ok(Async::Ready(Some(frame))) => inner.handle_frame(frame),
-                Ok(Async::Ready(None)) => return Err(()),
+                Ok(Async::Ready(None)) => {
+                    inner.set_error(AmqpTransportError::Disconnected);
+                    return Ok(Async::Ready(()));
+                }
                 Ok(Async::NotReady) => break,
                 Err(e) => {
                     trace!("error reading: {:?}", e);
-                    return Err(());
+                    inner.set_error(e.clone().into());
+                    return Err(e);
                 }
             }
         }
@@ -109,8 +115,9 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
                     trace!("outgoing: {:?}", frame);
-                    if let Err(_) = self.framed.force_send(frame) {
-                        return Err(());
+                    if let Err(e) = self.framed.force_send(frame) {
+                        inner.set_error(e.clone().into());
+                        return Err(e);
                     }
                 } else {
                     break;
@@ -122,7 +129,8 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
                     Ok(Async::NotReady) => break,
                     Err(e) => {
                         trace!("error sending data: {}", e);
-                        return Err(());
+                        inner.set_error(e.clone().into());
+                        return Err(e);
                     }
                     Ok(Async::Ready(_)) => {
                         inner.write_task.register();
@@ -159,7 +167,22 @@ impl ConnectionInner {
             write_queue: VecDeque::new(),
             write_task: AtomicTask::new(),
             channels: slab::Slab::new(),
+            error: None,
         }
+    }
+
+    fn set_error(&mut self, err: AmqpTransportError) {
+        for (_, channel) in self.channels.iter_mut() {
+            match channel {
+                ChannelState::Opening(_, _) | ChannelState::None => (),
+                ChannelState::Established(ref mut ses) | ChannelState::Closing(ref mut ses) => {
+                    ses.get_mut().set_error(err.clone());
+                }
+            }
+        }
+        self.channels.clear();
+
+        self.error = Some(err);
     }
 
     fn pop_next_frame(&mut self) -> Option<AmqpFrame> {
@@ -173,6 +196,11 @@ impl ConnectionInner {
 
     fn handle_frame(&mut self, frame: AmqpFrame) {
         trace!("incoming: {:?} \n", frame);
+
+        if self.error.is_some() {
+            error!("connection closed but new framed is received: {:?}", frame);
+            return;
+        }
 
         match *frame.performative() {
             Frame::Begin(ref begin) if begin.remote_channel().is_some() => {
@@ -240,33 +268,37 @@ impl ConnectionInner {
         &mut self,
         inner: Cell<ConnectionInner>,
     ) -> impl Future<Item = Session, Error = AmqpTransportError> {
-        let (tx, rx) = oneshot::channel();
-
-        let entry = self.channels.vacant_entry();
-        let token = entry.key();
-
-        if token >= self.local.channel_max {
-            Either::A(err(AmqpTransportError::TooManyChannels.into()))
+        if let Some(ref e) = self.error {
+            Either::A(err(e.clone()))
         } else {
-            entry.insert(ChannelState::Opening(tx, inner));
+            let (tx, rx) = oneshot::channel();
 
-            let begin = Begin {
-                // todo: let user specify settings
-                remote_channel: None,
-                next_outgoing_id: 1,
-                incoming_window: 0,
-                outgoing_window: ::std::u32::MAX,
-                handle_max: ::std::u32::MAX,
-                offered_capabilities: None,
-                desired_capabilities: None,
-                properties: None,
-            };
-            self.post_frame(AmqpFrame::new(
-                token as u16,
-                Frame::Begin(begin),
-                Bytes::new(),
-            ));
-            Either::B(rx.map_err(|_e| AmqpTransportError::Disconnected))
+            let entry = self.channels.vacant_entry();
+            let token = entry.key();
+
+            if token >= self.local.channel_max {
+                Either::A(err(AmqpTransportError::TooManyChannels))
+            } else {
+                entry.insert(ChannelState::Opening(tx, inner));
+
+                let begin = Begin {
+                    // todo: let user specify settings
+                    remote_channel: None,
+                    next_outgoing_id: 1,
+                    incoming_window: 0,
+                    outgoing_window: ::std::u32::MAX,
+                    handle_max: ::std::u32::MAX,
+                    offered_capabilities: None,
+                    desired_capabilities: None,
+                    properties: None,
+                };
+                self.post_frame(AmqpFrame::new(
+                    token as u16,
+                    Frame::Begin(begin),
+                    Bytes::new(),
+                ));
+                Either::B(rx.map_err(|_e| AmqpTransportError::Disconnected))
+            }
         }
     }
 }

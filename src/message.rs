@@ -72,7 +72,6 @@ impl Message {
         if let Some(ref ap) = self.application_properties {
             size += ap.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-
         if let Some(ref f) = self.footer {
             size += f.encoded_size() + SECTION_PREFIX_LENGTH;
         }
