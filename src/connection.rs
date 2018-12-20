@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
+use std::time::Duration;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
+use actix_utils::time::LowResTimeService;
 use bytes::Bytes;
 use futures::future::{err, Either};
 use futures::task::AtomicTask;
@@ -14,6 +16,7 @@ use amqp::AmqpCodec;
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
+use crate::hb::{Heartbeat, HeartbeatAction};
 use crate::session::{Session, SessionInner};
 use crate::Configuration;
 
@@ -38,6 +41,7 @@ impl ChannelId {
 pub struct Connection<T: AsyncRead + AsyncWrite + 'static> {
     inner: Cell<ConnectionInner>,
     framed: Framed<T, AmqpCodec<AmqpFrame>>,
+    hb: Heartbeat,
 }
 
 enum ChannelState {
@@ -70,9 +74,15 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         framed: Framed<T, AmqpCodec<AmqpFrame>>,
         local: Configuration,
         remote: Configuration,
+        time: Option<LowResTimeService>,
     ) -> Connection<T> {
         Connection {
             framed,
+            hb: Heartbeat::new(
+                local.timeout().unwrap(),
+                remote.timeout(),
+                time.unwrap_or_else(|| LowResTimeService::with(Duration::from_secs(1))),
+            ),
             inner: Cell::new(ConnectionInner::new(local, remote)),
         }
     }
@@ -95,14 +105,41 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let inner = self.inner.get_mut();
 
+        // connection heartbeat
+        match self.hb.poll() {
+            Ok(act) => match act {
+                HeartbeatAction::None => (),
+                HeartbeatAction::Close => {
+                    inner.set_error(AmqpTransportError::Timeout);
+                    return Ok(Async::Ready(()));
+                }
+                HeartbeatAction::Heartbeat => {
+                    inner
+                        .write_queue
+                        .push_back(AmqpFrame::new(0, Frame::Empty, Bytes::new()));
+                }
+            },
+            Err(e) => {
+                inner.set_error(e);
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        let mut update = false;
         loop {
             match self.framed.poll() {
-                Ok(Async::Ready(Some(frame))) => inner.handle_frame(frame),
+                Ok(Async::Ready(Some(frame))) => {
+                    update = true;
+                    inner.handle_frame(frame)
+                }
                 Ok(Async::Ready(None)) => {
                     inner.set_error(AmqpTransportError::Disconnected);
                     return Ok(Async::Ready(()));
                 }
-                Ok(Async::NotReady) => break,
+                Ok(Async::NotReady) => {
+                    self.hb.update_local(update);
+                    break;
+                }
                 Err(e) => {
                     trace!("error reading: {:?}", e);
                     inner.set_error(e.clone().into());
@@ -111,10 +148,12 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
             }
         }
 
+        let mut update = false;
         loop {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
                     trace!("outgoing: {:?}", frame);
+                    update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
                         return Err(e);
@@ -140,6 +179,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
                 break;
             }
         }
+        self.hb.update_remote(update);
 
         Ok(Async::NotReady)
     }
@@ -195,7 +235,7 @@ impl ConnectionInner {
     }
 
     fn handle_frame(&mut self, frame: AmqpFrame) {
-        trace!("incoming: {:?} \n", frame);
+        trace!("incoming: {:?}", frame);
 
         if self.error.is_some() {
             error!("connection closed but new framed is received: {:?}", frame);

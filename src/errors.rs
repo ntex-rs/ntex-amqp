@@ -6,6 +6,7 @@ pub enum AmqpTransportError {
     Codec(AmqpCodecError),
     TooManyChannels,
     Disconnected,
+    Timeout,
 }
 
 #[derive(Debug, From)]

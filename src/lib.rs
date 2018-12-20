@@ -3,6 +3,8 @@ extern crate derive_more;
 #[macro_use]
 extern crate log;
 
+use std::time::Duration;
+
 use amqp::protocol::{Handle, Milliseconds, Open, Outcome};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Async, Future, Poll};
@@ -12,6 +14,7 @@ use uuid::Uuid;
 mod cell;
 mod connection;
 mod errors;
+mod hb;
 mod link;
 mod message;
 pub mod sasl;
@@ -123,6 +126,11 @@ impl Configuration {
             desired_capabilities: None,
             properties: None,
         }
+    }
+
+    pub(crate) fn timeout(&self) -> Option<Duration> {
+        self.idle_time_out
+            .map(|v| Duration::from_millis(((v as f32) * 0.8) as u64))
     }
 }
 

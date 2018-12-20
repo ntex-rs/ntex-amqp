@@ -1,6 +1,7 @@
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_connector::{Connect, RequestHost};
 use actix_service::{FnService, IntoService, Service, ServiceExt};
+use actix_utils::time::LowResTimeService;
 use bytes::Bytes;
 use either::Either;
 use futures::future::{ok, Future};
@@ -23,6 +24,7 @@ pub struct SaslConnect {
     pub connect: Connect,
     pub config: Configuration,
     pub auth: SaslAuth,
+    pub time: Option<LowResTimeService>,
 }
 
 #[derive(Debug)]
@@ -53,67 +55,79 @@ where
             connect,
             config,
             auth,
+            time,
         } = connect;
-        ok((connect, config, auth))
+        ok((connect, config, auth, time))
     })
     // connect to host
     .apply(
         connector.map_err(|e| either::Right(e)),
-        |(connect, config, auth), srv| {
+        |(connect, config, auth, time), srv| {
             srv.call(connect)
-                .map(|(connect, io)| (io, connect, config, auth))
+                .map(|(connect, io)| (io, connect, config, auth, time))
         },
     )
     // sasl protocol negotiation
     .apply(
         ProtocolNegotiation::new(ProtocolId::AmqpSasl)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
-        |(io, connect, config, auth): (Io, Connect, Configuration, SaslAuth), srv| {
+        |(io, connect, config, auth, time): (Io, Connect, Configuration, SaslAuth, _), srv| {
             let framed = Framed::new(io, ProtocolIdCodec);
             srv.call(framed)
-                .map(move |framed| (framed, connect, config, auth))
+                .map(move |framed| (framed, connect, config, auth, time))
         },
     )
     // sasl auth
     .apply(
         sasl_connect.into_service().map_err(Either::Left),
-        |(framed, connect, config, auth), srv| {
+        |(framed, connect, config, auth, time), srv| {
             srv.call((framed, auth))
-                .map(move |framed| (connect, config, framed))
+                .map(move |framed| (connect, config, framed, time))
         },
     )
     // protocol negotiation
     .apply(
         ProtocolNegotiation::new(ProtocolId::Amqp)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
-        |(connect, config, framed): (Connect, Configuration, Framed<Io, ProtocolIdCodec>), srv| {
+        |(connect, config, framed, time): (
+            Connect,
+            Configuration,
+            Framed<Io, ProtocolIdCodec>,
+            _,
+        ),
+         srv| {
             srv.call(framed)
-                .map(move |framed| (connect, config, framed))
+                .map(move |framed| (connect, config, framed, time))
         },
     )
     // open connection
     .and_then(
-        |(connect, config, framed): (Connect, Configuration, Framed<Io, ProtocolIdCodec>)| {
+        |(connect, config, framed, time): (
+            Connect,
+            Configuration,
+            Framed<Io, ProtocolIdCodec>,
+            _,
+        )| {
             let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
             let open = config.into_open(Some(connect.host()));
             trace!("Open connection: {:?}", open);
             framed
                 .send(AmqpFrame::new(0, Frame::Open(open), Bytes::new()))
                 .map_err(|e| Either::Left(SaslConnectError::from(e)))
-                .map(|framed| (config, framed))
+                .map(move |framed| (config, framed, time))
         },
     )
     // read open frame
     .and_then(
-        |(config, framed): (Configuration, Framed<_, AmqpCodec<AmqpFrame>>)| {
+        move |(config, framed, time): (Configuration, Framed<_, AmqpCodec<AmqpFrame>>, _)| {
             framed
                 .into_future()
                 .map_err(|e| Either::Left(SaslConnectError::from(e.0)))
-                .and_then(|(frame, framed)| {
+                .and_then(move |(frame, framed)| {
                     if let Some(frame) = frame {
                         if let Frame::Open(open) = frame.performative() {
                             trace!("Open confirmed: {:?}", open);
-                            Ok(Connection::new(framed, config, open.into()))
+                            Ok(Connection::new(framed, config, open.into(), time))
                         } else {
                             Err(Either::Left(SaslConnectError::ExpectedOpenFrame))
                         }
