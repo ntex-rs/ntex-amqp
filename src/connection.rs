@@ -9,6 +9,7 @@ use futures::task::AtomicTask;
 use futures::unsync::oneshot;
 use futures::{future, Async, Future, Poll, Sink, Stream};
 
+use amqp::codec::Encode;
 use amqp::errors::AmqpCodecError;
 use amqp::framing::AmqpFrame;
 use amqp::protocol::{Begin, Frame};
@@ -143,21 +144,11 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
         loop {
             match self.framed.poll() {
                 Ok(Async::Ready(Some(frame))) => {
-                    let f = match frame.performative() {
-                        Frame::Open(_) => "Open",
-                        Frame::Begin(_) => "Begin",
-                        Frame::Attach(_) => "Attach",
-                        Frame::Flow(_) => "Flow",
-                        Frame::Transfer(_) => "Transfer",
-                        Frame::Disposition(_) => "Disposition",
-                        Frame::Detach(_) => "Detach",
-                        Frame::End(_) => "End",
-                        Frame::Close(_) => "Close",
-                        Frame::Empty => "Empty",
-                    };
-                    use amqp::codec::Encode;
-                    println!("incoming: {:?} - {:?}", f, frame.encoded_size());
-
+                    trace!(
+                        "incoming: {:?} - {:?}",
+                        frame.performative().name(),
+                        frame.encoded_size()
+                    );
                     update = true;
                     inner.handle_frame(frame)
                 }
@@ -181,22 +172,11 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
         loop {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
-                    trace!("outgoing: {:?}", frame);
-                    let f = match frame.performative() {
-                        Frame::Open(_) => "Open",
-                        Frame::Begin(_) => "Begin",
-                        Frame::Attach(_) => "Attach",
-                        Frame::Flow(_) => "Flow",
-                        Frame::Transfer(_) => "Transfer",
-                        Frame::Disposition(_) => "Disposition",
-                        Frame::Detach(_) => "Detach",
-                        Frame::End(_) => "End",
-                        Frame::Close(_) => "Close",
-                        Frame::Empty => "Empty",
-                    };
-
-                    use amqp::codec::Encode;
-                    println!("outgoing: {:?} - {:?}", f, frame.encoded_size());
+                    trace!(
+                        "outgoing: {:?} - {:?}",
+                        frame.performative().name(),
+                        frame.encoded_size()
+                    );
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
@@ -241,6 +221,12 @@ impl ConnectionController {
     }
 
     pub(crate) fn drop_session_copy(&mut self, id: ChannelId) {}
+}
+
+impl Drop for ConnectionInner {
+    fn drop(&mut self) {
+        println!("connection inner droped");
+    }
 }
 
 impl ConnectionInner {
