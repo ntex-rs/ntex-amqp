@@ -143,6 +143,21 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
         loop {
             match self.framed.poll() {
                 Ok(Async::Ready(Some(frame))) => {
+                    let f = match frame.performative() {
+                        Frame::Open(_) => "Open",
+                        Frame::Begin(_) => "Begin",
+                        Frame::Attach(_) => "Attach",
+                        Frame::Flow(_) => "Flow",
+                        Frame::Transfer(_) => "Transfer",
+                        Frame::Disposition(_) => "Disposition",
+                        Frame::Detach(_) => "Detach",
+                        Frame::End(_) => "End",
+                        Frame::Close(_) => "Close",
+                        Frame::Empty => "Empty",
+                    };
+                    use amqp::codec::Encode;
+                    println!("incoming: {:?} - {:?}", f, frame.encoded_size());
+
                     update = true;
                     inner.handle_frame(frame)
                 }
@@ -167,21 +182,21 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
                     trace!("outgoing: {:?}", frame);
-                    // let f = match frame.performative() {
-                    //     Frame::Open(_) => "Open",
-                    //     Frame::Begin(_) => "Begin",
-                    //     Frame::Attach(_) => "Attach",
-                    //     Frame::Flow(_) => "Flow",
-                    //     Frame::Transfer(_) => "Transfer",
-                    //     Frame::Disposition(_) => "Disposition",
-                    //     Frame::Detach(_) => "Detach",
-                    //     Frame::End(_) => "End",
-                    //     Frame::Close(_) => "Close",
-                    //     Frame::Empty => "Empty",
-                    // };
+                    let f = match frame.performative() {
+                        Frame::Open(_) => "Open",
+                        Frame::Begin(_) => "Begin",
+                        Frame::Attach(_) => "Attach",
+                        Frame::Flow(_) => "Flow",
+                        Frame::Transfer(_) => "Transfer",
+                        Frame::Disposition(_) => "Disposition",
+                        Frame::Detach(_) => "Detach",
+                        Frame::End(_) => "End",
+                        Frame::Close(_) => "Close",
+                        Frame::Empty => "Empty",
+                    };
 
-                    // use amqp::codec::Encode;
-                    // println!("outgoing: {:?} - {:?}", f, frame.encoded_size());
+                    use amqp::codec::Encode;
+                    println!("outgoing: {:?} - {:?}", f, frame.encoded_size());
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
