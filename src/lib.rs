@@ -88,23 +88,28 @@ impl Configuration {
     /// number of Sessions that can be simultaneously active on the Connection.
     ///
     /// By default channel max value is set to 1024
-    pub fn channel_max(mut self, num: u16) -> Self {
+    pub fn channel_max(&mut self, num: u16) -> &mut Self {
         self.channel_max = num as usize;
         self
     }
 
     /// Set max frame size for the connection.
     ///
-    /// By default max size is set to 65535
-    pub fn max_frame_size(mut self, size: u32) -> Self {
+    /// By default max size is set to 64kb
+    pub fn max_frame_size(&mut self, size: u32) -> &mut Self {
         self.max_frame_size = size;
         self
+    }
+
+    /// Get max frame size for the connection.
+    pub fn get_max_frame_size(&self) -> usize {
+        self.max_frame_size as usize
     }
 
     /// Set idle time-out for the connection in milliseconds
     ///
     /// By default idle time-out is set to 120000 milliseconds
-    pub fn idle_time_out(mut self, timeout: u32) -> Self {
+    pub fn idle_timeout(&mut self, timeout: u32) -> &mut Self {
         self.idle_time_out = Some(timeout as Milliseconds);
         self
     }

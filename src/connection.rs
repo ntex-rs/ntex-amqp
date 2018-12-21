@@ -87,6 +87,12 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         }
     }
 
+    /// Get remote configuration
+    pub fn remote_config(&self) -> &Configuration {
+        &self.inner.get_ref().remote
+    }
+
+    /// Gracefully close connection
     pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
         future::ok(())
     }
