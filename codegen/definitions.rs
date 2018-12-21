@@ -22,6 +22,23 @@ pub enum Frame {
     Empty,
 }
 
+impl Frame {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Frame::Open(_) => "Open",
+            Frame::Begin(_) => "Begin",
+            Frame::Attach(_) => "Attach",
+            Frame::Flow(_) => "Flow",
+            Frame::Transfer(_) => "Transfer",
+            Frame::Disposition(_) => "Disposition",
+            Frame::Detach(_) => "Detach",
+            Frame::End(_) => "End",
+            Frame::Close(_) => "Close",
+            Frame::Empty => "Empty",
+        }
+    }
+}
+
 impl Decode for Frame {
     fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
         if input.is_empty() {
