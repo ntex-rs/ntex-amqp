@@ -1,3 +1,5 @@
+#![allow(unused_variables, dead_code)]
+
 #[macro_use]
 extern crate derive_more;
 #[macro_use]
@@ -12,12 +14,14 @@ use string::{String, TryFrom};
 use uuid::Uuid;
 
 mod cell;
+pub mod client;
 mod connection;
 mod errors;
 mod hb;
 mod link;
 mod message;
 pub mod sasl;
+pub mod server;
 mod service;
 mod session;
 
@@ -25,6 +29,7 @@ pub use self::connection::Connection;
 pub use self::errors::AmqpTransportError;
 pub use self::link::SenderLink;
 pub use self::message::{Message, MessageBody};
+pub use self::service::ServerProtocolNegotiation;
 pub use self::session::Session;
 
 pub enum Delivery {
@@ -115,7 +120,7 @@ impl Configuration {
     }
 
     /// Create `Open` performative for this configuration.
-    pub fn into_open(&self, hostname: Option<&str>) -> Open {
+    pub fn to_open(&self, hostname: Option<&str>) -> Open {
         Open {
             container_id: String::<Bytes>::try_from(Bytes::from(
                 Uuid::new_v4().to_simple().to_string(),
@@ -130,6 +135,7 @@ impl Configuration {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
+            body: None,
         }
     }
 

@@ -1,5 +1,4 @@
-use amqp::errors::{AmqpCodecError, ProtocolIdError};
-use amqp::protocol::SaslCode;
+use amqp::{protocol, AmqpCodecError, ProtocolIdError};
 
 #[derive(Debug, Display, From, Clone)]
 pub enum AmqpTransportError {
@@ -7,13 +6,21 @@ pub enum AmqpTransportError {
     TooManyChannels,
     Disconnected,
     Timeout,
+    #[display(fmt = "Link detached, error: {:?}", _0)]
+    LinkDetached(Option<protocol::Error>),
+}
+
+impl From<protocol::Error> for AmqpTransportError {
+    fn from(err: protocol::Error) -> Self {
+        AmqpTransportError::LinkDetached(Some(err))
+    }
 }
 
 #[derive(Debug, From)]
 pub enum SaslConnectError {
     Protocol(ProtocolIdError),
     AmqpError(AmqpCodecError),
-    Sasl(SaslCode),
+    Sasl(protocol::SaslCode),
     ExpectedOpenFrame,
     Disconnected,
 }

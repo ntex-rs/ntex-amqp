@@ -2,15 +2,13 @@ use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_connector::{Connect, RequestHost};
 use actix_service::{FnService, IntoService, Service, ServiceExt};
 use actix_utils::time::LowResTimeService;
-use bytes::Bytes;
 use either::Either;
 use futures::future::{ok, Future};
 use futures::{Sink, Stream};
 
-use amqp::framing::{AmqpFrame, SaslFrame};
 use amqp::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use amqp::types::Symbol;
-use amqp::{AmqpCodec, ProtocolIdCodec};
+use amqp::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 
 use crate::connection::Connection;
 use crate::service::ProtocolNegotiation;
@@ -109,10 +107,10 @@ where
             _,
         )| {
             let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
-            let open = config.into_open(Some(connect.host()));
+            let open = config.to_open(Some(connect.host()));
             trace!("Open connection: {:?}", open);
             framed
-                .send(AmqpFrame::new(0, Frame::Open(open), Bytes::new()))
+                .send(AmqpFrame::new(0, Frame::Open(open)))
                 .map_err(|e| Either::Left(SaslConnectError::from(e)))
                 .map(move |framed| (config, framed, time))
         },

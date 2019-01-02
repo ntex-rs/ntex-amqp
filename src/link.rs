@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
-use amqp::protocol::{Flow, Outcome, SequenceNo};
+use amqp::protocol::{Attach, Error, Flow, Outcome, SequenceNo};
+use amqp::types::ByteStr;
 use futures::{unsync::oneshot, Future};
 
 use crate::cell::Cell;
@@ -14,6 +15,7 @@ pub struct SenderLink {
 }
 
 pub(crate) struct SenderLinkInner {
+    id: usize,
     session: Cell<SessionInner>,
     remote_handle: Handle,
     delivery_count: SequenceNo,
@@ -41,8 +43,9 @@ impl SenderLink {
 }
 
 impl SenderLinkInner {
-    pub(crate) fn new(session: Cell<SessionInner>, handle: Handle) -> SenderLinkInner {
+    pub(crate) fn new(session: Cell<SessionInner>, id: usize, handle: Handle) -> SenderLinkInner {
         SenderLinkInner {
+            id,
             session,
             remote_handle: handle,
             delivery_count: 0,
@@ -50,6 +53,19 @@ impl SenderLinkInner {
             pending_transfers: VecDeque::new(),
             error: None,
         }
+    }
+
+    pub fn id(&self) -> u32 {
+        self.id as u32
+    }
+
+    pub(crate) fn detached(&mut self, err: AmqpTransportError) {
+        // drop pending transfers
+        for tr in self.pending_transfers.drain(..) {
+            let _ = tr.promise.send(Err(err.clone()));
+        }
+
+        self.error = Some(err);
     }
 
     pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
@@ -75,7 +91,7 @@ impl SenderLinkInner {
                         // can't move to a fn because of self colliding with session
                         self.link_credit -= 1;
                         self.delivery_count += 1;
-                        self.session.get_mut().send_transfer_conn(
+                        self.session.get_mut().send_transfer(
                             self.remote_handle,
                             transfer.message,
                             transfer.promise,
@@ -110,5 +126,83 @@ impl SenderLinkInner {
             session.send_transfer(self.remote_handle, message, delivery_tx);
         }
         Delivery::Pending(delivery_rx)
+    }
+}
+
+#[derive(Clone)]
+pub struct ReceiverLink {
+    inner: Cell<ReceiverLinkInner>,
+}
+impl ReceiverLink {
+    pub(crate) fn new(inner: Cell<ReceiverLinkInner>) -> ReceiverLink {
+        ReceiverLink { inner }
+    }
+
+    pub fn frame(&self) -> &Attach {
+        &self.inner.get_ref().attach
+    }
+
+    pub fn open(&mut self) {
+        let inner = self.inner.get_mut();
+        inner
+            .session
+            .get_mut()
+            .confirm_receiver_link(inner.handle, &inner.attach);
+    }
+
+    pub fn close(mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
+        self.inner.get_mut().close(None)
+    }
+
+    pub fn close_with_error(
+        mut self,
+        error: Error,
+    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+        self.inner.get_mut().close(Some(error))
+    }
+}
+
+pub(crate) struct ReceiverLinkInner {
+    handle: usize,
+    attach: Attach,
+    session: Cell<SessionInner>,
+    closed: bool,
+}
+
+impl ReceiverLinkInner {
+    pub(crate) fn new(
+        session: Cell<SessionInner>,
+        handle: usize,
+        attach: Attach,
+    ) -> ReceiverLinkInner {
+        ReceiverLinkInner {
+            handle,
+            attach,
+            session,
+            closed: false,
+        }
+    }
+
+    pub fn name(&self) -> &ByteStr {
+        &self.attach.name
+    }
+
+    pub fn close(
+        &mut self,
+        error: Option<Error>,
+    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+        let (tx, rx) = oneshot::channel();
+        if self.closed {
+            let _ = tx.send(Ok(()));
+        } else {
+            self.session
+                .get_mut()
+                .detach_receiver_link(self.handle, true, error, tx);
+        }
+        rx.then(|res| match res {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(AmqpTransportError::Disconnected),
+        })
     }
 }
