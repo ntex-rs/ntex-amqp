@@ -29,7 +29,6 @@ pub use self::connection::Connection;
 pub use self::errors::AmqpTransportError;
 pub use self::link::SenderLink;
 pub use self::message::{Message, MessageBody};
-pub use self::service::ServerProtocolNegotiation;
 pub use self::session::Session;
 
 pub enum Delivery {

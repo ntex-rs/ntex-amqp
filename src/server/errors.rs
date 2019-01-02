@@ -4,7 +4,7 @@ use bytes::Bytes;
 use derive_more::{Display, From};
 use string::TryFrom;
 
-#[derive(Display, From)]
+#[derive(Debug, Display, From)]
 pub enum HandshakeError {
     #[display(fmt = "Protocol negotiation error: {}", _0)]
     Protocol(ProtocolIdError),

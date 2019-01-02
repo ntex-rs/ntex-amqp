@@ -16,10 +16,11 @@ impl From<protocol::Error> for AmqpTransportError {
     }
 }
 
-#[derive(Debug, From)]
+#[derive(Debug, Display, From)]
 pub enum SaslConnectError {
     Protocol(ProtocolIdError),
     AmqpError(AmqpCodecError),
+    #[display(fmt = "Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
     ExpectedOpenFrame,
     Disconnected,
