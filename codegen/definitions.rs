@@ -3,12 +3,13 @@
 use std::u8;
 use bytes::{BufMut, Bytes, BytesMut};
 use uuid::Uuid;
+use derive_more::From;
 
 use super::*;
 use crate::errors::AmqpParseError;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, From)]
 pub enum Frame {
     Open(Open),
     Begin(Begin),
@@ -35,6 +36,21 @@ impl Frame {
             Frame::End(_) => "End",
             Frame::Close(_) => "Close",
             Frame::Empty => "Empty",
+        }
+    }
+
+    pub fn body(&self) -> Option<&Bytes> {
+        match self {
+            Frame::Open(frm) => frm.body.as_ref(),
+            Frame::Begin(frm) => frm.body.as_ref(),
+            Frame::Attach(frm) => frm.body.as_ref(),
+            Frame::Flow(frm) => frm.body.as_ref(),
+            Frame::Transfer(frm) => frm.body.as_ref(),
+            Frame::Disposition(frm) => frm.body.as_ref(),
+            Frame::Detach(frm) => frm.body.as_ref(),
+            Frame::End(frm) => frm.body.as_ref(),
+            Frame::Close(frm) => frm.body.as_ref(),
+            Frame::Empty => None,
         }
     }
 }
@@ -288,6 +304,9 @@ pub struct {{list.name}} {
     pub {{field.name}}: {{{field.ty}}},
     {{/if}}
     {{/each}}
+    {{#if list.frame}}
+    pub body: Option<Bytes>,
+    {{/if}}
 }
 
 impl {{list.name}} {
@@ -320,16 +339,23 @@ impl {{list.name}} {
         {{/if}}
     {{/each}}
 
+    {{#if list.frame}}
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
+    {{/if}}
+
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 {{#each list.fields as |field|}} + 1{{/each}};
 }
+#[allow(unused_mut)]
 fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}}), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     {{#if list.fields}}
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     {{#each list.fields as |field|}}
     {{#if field.optional}}
@@ -366,18 +392,37 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
     {{/if}}
     {{/each}}
     {{else}}
-    let remainder = &input[size..];
+    let mut remainder = &input[size..];
     {{/if}}
+
+    {{#if list.frame}}
+    let body = if remainder.is_empty() {
+            None
+        } else {
+            let b = Bytes::from(remainder);
+            remainder = &[];
+            Some(b)
+        };
+    {{/if}}
+
     Ok((remainder, {{list.name}} {
     {{#each list.fields as |field|}}
     {{field.name}},
     {{/each}}
+        {{#if list.frame}}
+        body
+        {{/if}}
     }))
 }
 
 fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
+    let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}}
+      {{#if list.frame}}
+      + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+      {{else}}
+      ;
+      {{/if}}
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
         + content_size
@@ -399,6 +444,11 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     {{#each list.fields as |field|}}
     list.{{field.name}}.encode(buf);
     {{/each}}
+    {{#if list.frame}}
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
+    {{/if}}
 }
 
 impl DecodeFormatted for {{list.name}} {

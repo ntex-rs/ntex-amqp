@@ -650,9 +650,10 @@ impl Encode for Descriptor {
 }
 
 const WORD_LEN: usize = 4;
+
 impl Encode for AmqpFrame {
     fn encoded_size(&self) -> usize {
-        framing::HEADER_LEN + self.performative().encoded_size() + self.body().len()
+        framing::HEADER_LEN + self.performative().encoded_size()
     }
 
     fn encode(&self, buf: &mut BytesMut) {
@@ -662,7 +663,6 @@ impl Encode for AmqpFrame {
         buf.put_u8(framing::FRAME_TYPE_AMQP);
         buf.put_u16_be(self.channel_id());
         self.performative().encode(buf);
-        buf.put_slice(self.body());
     }
 }
 

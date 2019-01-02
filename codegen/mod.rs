@@ -173,6 +173,7 @@ pub struct Described {
     provides: Vec<String>,
     descriptor: Descriptor,
     fields: Vec<Field>,
+    frame: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,12 +320,14 @@ impl Enum {
 
 impl Described {
     fn list(d: _Described) -> Described {
+        let frame = d.provides == Some("frame".to_owned());
         Described {
             name: camel_case(&d.name),
             ty: String::new(),
             provides: parse_provides(d.provides),
             descriptor: Descriptor::from(d.descriptor),
             fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
+            frame,
         }
     }
     fn alias(d: _Described) -> Described {
@@ -334,6 +337,7 @@ impl Described {
             provides: parse_provides(d.provides),
             descriptor: Descriptor::from(d.descriptor),
             fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
+            frame: false,
         }
     }
 }

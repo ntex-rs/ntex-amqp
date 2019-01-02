@@ -71,6 +71,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     let frame_buf = src.split_to(size);
                     let (remainder, frame) = T::decode(frame_buf.as_ref())?;
                     if !remainder.is_empty() {
+                        println!("=====");
                         // todo: could it really happen?
                         return Err(AmqpCodecError::UnparsedBytesLeft);
                     }
@@ -102,6 +103,7 @@ const PROTOCOL_HEADER_LEN: usize = 8;
 const PROTOCOL_HEADER_PREFIX: &[u8] = b"AMQP";
 const PROTOCOL_VERSION: &[u8] = &[1, 0, 0];
 
+#[derive(Default, Debug)]
 pub struct ProtocolIdCodec;
 
 impl Decoder for ProtocolIdCodec {

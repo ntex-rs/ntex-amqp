@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, Utc};
+use derive_more::From;
 use uuid::Uuid;
 
 use super::codec::{self, DecodeFormatted, Encode};
@@ -75,6 +76,7 @@ impl Encode for MessageId {
             MessageId::String(ref v) => v.encoded_size(),
         }
     }
+
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             MessageId::Ulong(v) => v.encode(buf),
@@ -85,7 +87,7 @@ impl Encode for MessageId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, From)]
 pub enum ErrorCondition {
     AmqpError(AmqpError),
     ConnectionError(ConnectionError),
@@ -95,6 +97,7 @@ pub enum ErrorCondition {
 }
 
 impl DecodeFormatted for ErrorCondition {
+    #[inline]
     fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, result) = Symbol::decode_with_format(input, format)?;
         if let Ok(r) = AmqpError::try_from(&result) {
@@ -123,6 +126,7 @@ impl Encode for ErrorCondition {
             ErrorCondition::Custom(ref v) => v.encoded_size(),
         }
     }
+
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             ErrorCondition::AmqpError(ref v) => v.encode(buf),
@@ -161,6 +165,7 @@ impl Encode for DistributionMode {
             DistributionMode::Custom(ref v) => v.encoded_size(),
         }
     }
+
     fn encode(&self, buf: &mut BytesMut) {
         match *self {
             DistributionMode::Move => Symbol::from("move").encode(buf),

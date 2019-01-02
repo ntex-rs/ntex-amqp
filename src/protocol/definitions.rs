@@ -1,11 +1,12 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
-use bytes::{BufMut, Bytes, BytesMut};
-use std::u8;
-use uuid::Uuid;
 use super::*;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 use crate::errors::AmqpParseError;
-#[derive(Clone, Debug, PartialEq)]
+use bytes::{BufMut, Bytes, BytesMut};
+use derive_more::From;
+use std::u8;
+use uuid::Uuid;
+#[derive(Clone, Debug, PartialEq, From)]
 pub enum Frame {
     Open(Open),
     Begin(Begin),
@@ -31,6 +32,20 @@ impl Frame {
             Frame::End(_) => "End",
             Frame::Close(_) => "Close",
             Frame::Empty => "Empty",
+        }
+    }
+    pub fn body(&self) -> Option<&Bytes> {
+        match self {
+            Frame::Open(frm) => frm.body.as_ref(),
+            Frame::Begin(frm) => frm.body.as_ref(),
+            Frame::Attach(frm) => frm.body.as_ref(),
+            Frame::Flow(frm) => frm.body.as_ref(),
+            Frame::Transfer(frm) => frm.body.as_ref(),
+            Frame::Disposition(frm) => frm.body.as_ref(),
+            Frame::Detach(frm) => frm.body.as_ref(),
+            Frame::End(frm) => frm.body.as_ref(),
+            Frame::Close(frm) => frm.body.as_ref(),
+            Frame::Empty => None,
         }
     }
 }
@@ -123,73 +138,6 @@ impl Encode for Frame {
             Frame::End(ref v) => encode_end_inner(v, buf),
             Frame::Close(ref v) => encode_close_inner(v, buf),
             Frame::Empty => (),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum DeliveryState {
-    Received(Received),
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for DeliveryState {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(35) => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for DeliveryState {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
-            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
-            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
-            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
-            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
-            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
-            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
-            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
-            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -358,6 +306,73 @@ impl Encode for SaslFrameBody {
             SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
             SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
             SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeliveryState {
+    Received(Received),
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for DeliveryState {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(35) => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for DeliveryState {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
+            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
+            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
+            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
+            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
+            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
+            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
+            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
+            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -1081,12 +1096,13 @@ impl Error {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let condition: ErrorCondition;
     if count > 0 {
@@ -1192,6 +1208,7 @@ pub struct Open {
     pub offered_capabilities: Option<Symbols>,
     pub desired_capabilities: Option<Symbols>,
     pub properties: Option<Fields>,
+    pub body: Option<Bytes>,
 }
 impl Open {
     pub fn container_id(&self) -> &ByteStr {
@@ -1224,15 +1241,19 @@ impl Open {
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let container_id: ByteStr;
     if count > 0 {
@@ -1324,6 +1345,13 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open), AmqpParseError> {
     } else {
         properties = None;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Open {
@@ -1337,6 +1365,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open), AmqpParseError> {
             offered_capabilities,
             desired_capabilities,
             properties,
+            body,
         },
     ))
 }
@@ -1352,7 +1381,8 @@ fn encoded_size_open_inner(list: &Open) -> usize {
         + list.incoming_locales.encoded_size()
         + list.offered_capabilities.encoded_size()
         + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.properties.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1393,6 +1423,9 @@ fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
     list.offered_capabilities.encode(buf);
     list.desired_capabilities.encode(buf);
     list.properties.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Open {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1427,6 +1460,7 @@ pub struct Begin {
     pub offered_capabilities: Option<Symbols>,
     pub desired_capabilities: Option<Symbols>,
     pub properties: Option<Fields>,
+    pub body: Option<Bytes>,
 }
 impl Begin {
     pub fn remote_channel(&self) -> Option<u16> {
@@ -1453,15 +1487,19 @@ impl Begin {
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let remote_channel: Option<u16>;
     if count > 0 {
@@ -1535,6 +1573,13 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin), AmqpParseError> {
     } else {
         properties = None;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Begin {
@@ -1546,6 +1591,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin), AmqpParseError> {
             offered_capabilities,
             desired_capabilities,
             properties,
+            body,
         },
     ))
 }
@@ -1559,7 +1605,8 @@ fn encoded_size_begin_inner(list: &Begin) -> usize {
         + list.handle_max.encoded_size()
         + list.offered_capabilities.encoded_size()
         + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.properties.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1596,6 +1643,9 @@ fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
     list.offered_capabilities.encode(buf);
     list.desired_capabilities.encode(buf);
     list.properties.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Begin {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1636,6 +1686,7 @@ pub struct Attach {
     pub offered_capabilities: Option<Symbols>,
     pub desired_capabilities: Option<Symbols>,
     pub properties: Option<Fields>,
+    pub body: Option<Bytes>,
 }
 impl Attach {
     pub fn name(&self) -> &ByteStr {
@@ -1680,15 +1731,19 @@ impl Attach {
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let name: ByteStr;
     if count > 0 {
@@ -1816,6 +1871,13 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach), AmqpParseError> 
     } else {
         properties = None;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Attach {
@@ -1833,6 +1895,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach), AmqpParseError> 
             offered_capabilities,
             desired_capabilities,
             properties,
+            body,
         },
     ))
 }
@@ -1852,7 +1915,8 @@ fn encoded_size_attach_inner(list: &Attach) -> usize {
         + list.max_message_size.encoded_size()
         + list.offered_capabilities.encoded_size()
         + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.properties.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1901,6 +1965,9 @@ fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
     list.offered_capabilities.encode(buf);
     list.desired_capabilities.encode(buf);
     list.properties.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Attach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1938,6 +2005,7 @@ pub struct Flow {
     pub drain: bool,
     pub echo: bool,
     pub properties: Option<Fields>,
+    pub body: Option<Bytes>,
 }
 impl Flow {
     pub fn next_incoming_id(&self) -> Option<TransferNumber> {
@@ -1973,15 +2041,19 @@ impl Flow {
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let next_incoming_id: Option<TransferNumber>;
     if count > 0 {
@@ -2082,6 +2154,13 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow), AmqpParseError> {
     } else {
         properties = None;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Flow {
@@ -2096,6 +2175,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow), AmqpParseError> {
             drain,
             echo,
             properties,
+            body,
         },
     ))
 }
@@ -2112,7 +2192,8 @@ fn encoded_size_flow_inner(list: &Flow) -> usize {
         + list.available.encoded_size()
         + list.drain.encoded_size()
         + list.echo.encoded_size()
-        + list.properties.encoded_size();
+        + list.properties.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2155,6 +2236,9 @@ fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
     list.drain.encode(buf);
     list.echo.encode(buf);
     list.properties.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Flow {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2192,6 +2276,7 @@ pub struct Transfer {
     pub resume: bool,
     pub aborted: bool,
     pub batchable: bool,
+    pub body: Option<Bytes>,
 }
 impl Transfer {
     pub fn handle(&self) -> Handle {
@@ -2227,15 +2312,19 @@ impl Transfer {
     pub fn batchable(&self) -> bool {
         self.batchable
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let handle: Handle;
     if count > 0 {
@@ -2336,6 +2425,13 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseErr
     } else {
         batchable = false;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Transfer {
@@ -2350,6 +2446,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseErr
             resume,
             aborted,
             batchable,
+            body,
         },
     ))
 }
@@ -2366,7 +2463,8 @@ fn encoded_size_transfer_inner(list: &Transfer) -> usize {
         + list.state.encoded_size()
         + list.resume.encoded_size()
         + list.aborted.encoded_size()
-        + list.batchable.encoded_size();
+        + list.batchable.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2409,6 +2507,9 @@ fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
     list.resume.encode(buf);
     list.aborted.encode(buf);
     list.batchable.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Transfer {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2441,6 +2542,7 @@ pub struct Disposition {
     pub settled: bool,
     pub state: Option<DeliveryState>,
     pub batchable: bool,
+    pub body: Option<Bytes>,
 }
 impl Disposition {
     pub fn role(&self) -> Role {
@@ -2461,15 +2563,19 @@ impl Disposition {
     pub fn batchable(&self) -> bool {
         self.batchable
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let role: Role;
     if count > 0 {
@@ -2525,6 +2631,13 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition), AmqpPa
     } else {
         batchable = false;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Disposition {
@@ -2534,6 +2647,7 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition), AmqpPa
             settled,
             state,
             batchable,
+            body,
         },
     ))
 }
@@ -2545,7 +2659,8 @@ fn encoded_size_disposition_inner(list: &Disposition) -> usize {
         + list.last.encoded_size()
         + list.settled.encoded_size()
         + list.state.encoded_size()
-        + list.batchable.encoded_size();
+        + list.batchable.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2578,6 +2693,9 @@ fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
     list.settled.encode(buf);
     list.state.encode(buf);
     list.batchable.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Disposition {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2607,6 +2725,7 @@ pub struct Detach {
     pub handle: Handle,
     pub closed: bool,
     pub error: Option<Error>,
+    pub body: Option<Bytes>,
 }
 impl Detach {
     pub fn handle(&self) -> Handle {
@@ -2618,15 +2737,19 @@ impl Detach {
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let handle: Handle;
     if count > 0 {
@@ -2655,19 +2778,30 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach), AmqpParseError> 
     } else {
         error = None;
     }
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
     Ok((
         remainder,
         Detach {
             handle,
             closed,
             error,
+            body,
         },
     ))
 }
 fn encoded_size_detach_inner(list: &Detach) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size =
-        0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size = 0
+        + list.handle.encoded_size()
+        + list.closed.encoded_size()
+        + list.error.encoded_size()
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2692,6 +2826,9 @@ fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
     list.handle.encode(buf);
     list.closed.encode(buf);
     list.error.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Detach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2719,20 +2856,25 @@ impl Encode for Detach {
 #[derive(Clone, Debug, PartialEq)]
 pub struct End {
     pub error: Option<Error>,
+    pub body: Option<Bytes>,
 }
 impl End {
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
+#[allow(unused_mut)]
 fn decode_end_inner(input: &[u8]) -> Result<(&[u8], End), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let error: Option<Error>;
     if count > 0 {
@@ -2743,11 +2885,19 @@ fn decode_end_inner(input: &[u8]) -> Result<(&[u8], End), AmqpParseError> {
     } else {
         error = None;
     }
-    Ok((remainder, End { error }))
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
+    Ok((remainder, End { error, body }))
 }
 fn encoded_size_end_inner(list: &End) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size = 0 + list.error.encoded_size();
+    let content_size =
+        0 + list.error.encoded_size() + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2769,6 +2919,9 @@ fn encode_end_inner(list: &End, buf: &mut BytesMut) {
         buf.put_u8(End::FIELD_COUNT as u8);
     }
     list.error.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for End {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2796,20 +2949,25 @@ impl Encode for End {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Close {
     pub error: Option<Error>,
+    pub body: Option<Bytes>,
 }
 impl Close {
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    pub fn body(&self) -> Option<&Bytes> {
+        self.body.as_ref()
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
+#[allow(unused_mut)]
 fn decode_close_inner(input: &[u8]) -> Result<(&[u8], Close), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let error: Option<Error>;
     if count > 0 {
@@ -2820,11 +2978,19 @@ fn decode_close_inner(input: &[u8]) -> Result<(&[u8], Close), AmqpParseError> {
     } else {
         error = None;
     }
-    Ok((remainder, Close { error }))
+    let body = if remainder.is_empty() {
+        None
+    } else {
+        let b = Bytes::from(remainder);
+        remainder = &[];
+        Some(b)
+    };
+    Ok((remainder, Close { error, body }))
 }
 fn encoded_size_close_inner(list: &Close) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size = 0 + list.error.encoded_size();
+    let content_size =
+        0 + list.error.encoded_size() + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2846,6 +3012,9 @@ fn encode_close_inner(list: &Close, buf: &mut BytesMut) {
         buf.put_u8(Close::FIELD_COUNT as u8);
     }
     list.error.encode(buf);
+    if let Some(ref body) = list.body {
+        buf.put_slice(&body)
+    }
 }
 impl DecodeFormatted for Close {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2881,12 +3050,13 @@ impl SaslMechanisms {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
+#[allow(unused_mut)]
 fn decode_sasl_mechanisms_inner(input: &[u8]) -> Result<(&[u8], SaslMechanisms), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let sasl_server_mechanisms: Symbols;
     if count > 0 {
@@ -2973,12 +3143,13 @@ impl SaslInit {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_sasl_init_inner(input: &[u8]) -> Result<(&[u8], SaslInit), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let mechanism: Symbol;
     if count > 0 {
@@ -3083,12 +3254,13 @@ impl SaslChallenge {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
+#[allow(unused_mut)]
 fn decode_sasl_challenge_inner(input: &[u8]) -> Result<(&[u8], SaslChallenge), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let challenge: Bytes;
     if count > 0 {
@@ -3160,12 +3332,13 @@ impl SaslResponse {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
+#[allow(unused_mut)]
 fn decode_sasl_response_inner(input: &[u8]) -> Result<(&[u8], SaslResponse), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let response: Bytes;
     if count > 0 {
@@ -3241,12 +3414,13 @@ impl SaslOutcome {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_sasl_outcome_inner(input: &[u8]) -> Result<(&[u8], SaslOutcome), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let code: SaslCode;
     if count > 0 {
@@ -3374,12 +3548,13 @@ impl Source {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_source_inner(input: &[u8]) -> Result<(&[u8], Source), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let address: Option<Address>;
     if count > 0 {
@@ -3612,12 +3787,13 @@ impl Target {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_target_inner(input: &[u8]) -> Result<(&[u8], Target), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let address: Option<Address>;
     if count > 0 {
@@ -3790,12 +3966,13 @@ impl Header {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_header_inner(input: &[u8]) -> Result<(&[u8], Header), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let durable: bool;
     if count > 0 {
@@ -3974,12 +4151,13 @@ impl Properties {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_properties_inner(input: &[u8]) -> Result<(&[u8], Properties), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let message_id: Option<MessageId>;
     if count > 0 {
@@ -4218,12 +4396,13 @@ impl Received {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_received_inner(input: &[u8]) -> Result<(&[u8], Received), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let section_number: u32;
     if count > 0 {
@@ -4306,12 +4485,13 @@ impl Accepted {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0;
 }
+#[allow(unused_mut)]
 fn decode_accepted_inner(input: &[u8]) -> Result<(&[u8], Accepted), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let remainder = &input[size..];
+    let mut remainder = &input[size..];
     Ok((remainder, Accepted {}))
 }
 fn encoded_size_accepted_inner(list: &Accepted) -> usize {
@@ -4372,12 +4552,13 @@ impl Rejected {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
+#[allow(unused_mut)]
 fn decode_rejected_inner(input: &[u8]) -> Result<(&[u8], Rejected), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let error: Option<Error>;
     if count > 0 {
@@ -4444,12 +4625,13 @@ impl Released {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0;
 }
+#[allow(unused_mut)]
 fn decode_released_inner(input: &[u8]) -> Result<(&[u8], Released), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let remainder = &input[size..];
+    let mut remainder = &input[size..];
     Ok((remainder, Released {}))
 }
 fn encoded_size_released_inner(list: &Released) -> usize {
@@ -4518,12 +4700,13 @@ impl Modified {
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
 }
+#[allow(unused_mut)]
 fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
     let (input, header) = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    let (mut input, remainder) = input.split_at(size);
+    let (mut input, mut remainder) = input.split_at(size);
     let mut count = header.count;
     let delivery_failed: Option<bool>;
     if count > 0 {

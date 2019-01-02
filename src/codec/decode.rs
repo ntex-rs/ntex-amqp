@@ -424,8 +424,7 @@ impl Decode for AmqpFrame {
     fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, channel_id) = decode_frame_header(input, framing::FRAME_TYPE_AMQP)?;
         let (input, performative) = protocol::Frame::decode(input)?;
-        let body = Bytes::from(input);
-        Ok((input, AmqpFrame::new(channel_id, performative, body)))
+        Ok((input, AmqpFrame::new(channel_id, performative)))
     }
 }
 
