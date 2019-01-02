@@ -69,8 +69,6 @@ where
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        println!("DISP POLL");
-
         match self.state {
             State::CreateService(ref mut fut) => match fut.poll() {
                 Ok(Async::NotReady) => (),
@@ -92,6 +90,7 @@ where
 
                             match frame {
                                 Frame::Begin(frm) => {
+                                    println!("BEGIN: {:#?}", frm);
                                     self.conn.register_remote_session(channel_id, &frm);
                                 }
                                 Frame::Attach(attach) => {
@@ -126,7 +125,6 @@ where
                 while idx < links.len() {
                     match links[idx].1.poll() {
                         Ok(Async::Ready(detach)) => {
-                            println!("READY: {:?}", detach);
                             let (link, _) = links.swap_remove(idx);
                             link.close();
                         }
@@ -142,7 +140,6 @@ where
             State::Done => (),
         }
 
-        self.conn.poll_outgoing().map_err(|_| ())?;
-        Ok(Async::NotReady)
+        self.conn.poll_outgoing().map_err(|_| ())
     }
 }

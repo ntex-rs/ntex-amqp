@@ -159,6 +159,11 @@ impl SessionInner {
         }
     }
 
+    /// Local channel id
+    pub fn id(&self) -> u16 {
+        self.id as u16
+    }
+
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
         // drop pending transfers
@@ -362,7 +367,8 @@ impl SessionInner {
                             body: None,
                         };
 
-                        link.get_mut().detached(detach.error.clone().into());
+                        link.get_mut()
+                            .detached(AmqpTransportError::LinkDetached(detach.error.clone()));
                         self.connection
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
                         true
@@ -385,7 +391,7 @@ impl SessionInner {
                         // detach confirmation
                         if let Some(tx) = tx.take() {
                             if let Some(err) = detach.error.clone() {
-                                let _ = tx.send(Err(err.into()));
+                                let _ = tx.send(Err(AmqpTransportError::LinkDetached(Some(err))));
                             } else {
                                 let _ = tx.send(Ok(()));
                             }

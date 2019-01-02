@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
@@ -9,7 +9,7 @@ use futures::unsync::oneshot;
 use futures::{future, Async, Future, Poll, Sink, Stream};
 
 use amqp::codec::Encode;
-use amqp::protocol::{Begin, Error, Frame};
+use amqp::protocol::{Begin, Close, End, Error, Frame};
 use amqp::{AmqpCodec, AmqpCodecError, AmqpFrame};
 
 use crate::cell::{Cell, WeakCell};
@@ -25,10 +25,9 @@ pub struct Connection<T: AsyncRead + AsyncWrite> {
 }
 
 pub(crate) enum ChannelState {
-    Opening(oneshot::Sender<Session>, WeakCell<ConnectionInner>),
+    Opening(Option<oneshot::Sender<Session>>, WeakCell<ConnectionInner>),
     Established(Cell<SessionInner>),
-    Closing(Cell<SessionInner>),
-    None,
+    Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
 }
 
 impl ChannelState {
@@ -45,8 +44,17 @@ pub(crate) struct ConnectionInner {
     remote: Configuration,
     write_queue: VecDeque<AmqpFrame>,
     write_task: AtomicTask,
-    channels: slab::Slab<ChannelState>,
+    sessions: slab::Slab<ChannelState>,
+    sessions_map: HashMap<u16, usize>,
     error: Option<AmqpTransportError>,
+    state: State,
+}
+
+#[derive(PartialEq)]
+enum State {
+    Normal,
+    Closing,
+    RemoteClose,
 }
 
 impl<T: AsyncRead + AsyncWrite> Connection<T> {
@@ -100,13 +108,13 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         } else {
             let (tx, rx) = oneshot::channel();
 
-            let entry = inner.channels.vacant_entry();
+            let entry = inner.sessions.vacant_entry();
             let token = entry.key();
 
             if token >= inner.local.channel_max {
                 Either::A(err(AmqpTransportError::TooManyChannels))
             } else {
-                entry.insert(ChannelState::Opening(tx, cell));
+                entry.insert(ChannelState::Opening(Some(tx), cell));
 
                 let begin = Begin {
                     // todo: let user specify settings
@@ -128,7 +136,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
     /// Get session by id. This method panics if session does not exists or in opening/closing state.
     pub(crate) fn get_session(&self, id: usize) -> Cell<SessionInner> {
-        if let Some(channel) = self.inner.get_ref().channels.get(id) {
+        if let Some(channel) = self.inner.get_ref().sessions.get(id) {
             if let ChannelState::Established(ref session) = channel {
                 return session.clone();
             }
@@ -141,7 +149,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
         let cell = self.inner.clone();
         let inner = self.inner.get_mut();
-        let entry = inner.channels.vacant_entry();
+        let entry = inner.sessions.vacant_entry();
         let token = entry.key();
 
         let session = Cell::new(SessionInner::new(
@@ -153,6 +161,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
             begin.outgoing_window(),
         ));
         entry.insert(ChannelState::Established(session));
+        inner.sessions_map.insert(channel_id, token);
 
         let begin = Begin {
             remote_channel: Some(channel_id),
@@ -211,7 +220,14 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         }
         self.hb.update_remote(update);
 
-        Ok(Async::NotReady)
+        if inner.state == State::RemoteClose
+            && inner.write_queue.is_empty()
+            && self.framed.is_write_buf_empty()
+        {
+            Ok(Async::Ready(()))
+        } else {
+            Ok(Async::NotReady)
+        }
     }
 
     pub(crate) fn poll_incoming(&mut self) -> Poll<Option<AmqpFrame>, AmqpCodecError> {
@@ -227,26 +243,53 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         frame.encoded_size()
                     );
                     update = true;
+
+                    // handle connection close
+                    if let Frame::Close(ref close) = frame.performative() {
+                        inner.set_error(AmqpTransportError::Closed(close.error.clone()));
+
+                        if inner.state == State::Closing {
+                            inner.sessions.clear();
+                            return Ok(Async::Ready(None));
+                        } else {
+                            let close = Close {
+                                error: None,
+                                body: None,
+                            };
+                            inner.post_frame(AmqpFrame::new(0, close.into()));
+                            inner.state = State::RemoteClose;
+                        }
+                    }
+
                     if inner.error.is_some() {
                         error!("connection closed but new framed is received: {:?}", frame);
                         return Ok(Async::Ready(None));
                     }
 
-                    match *frame.performative() {
-                        Frame::Begin(ref begin) if begin.remote_channel().is_some() => {
-                            inner.complete_session_creation(frame.channel_id() as usize, begin);
+                    // get local session id
+                    let channel_id =
+                        if let Some(token) = inner.sessions_map.get(&frame.channel_id()) {
+                            *token
+                        } else {
+                            // we dont have channel info, only Begin frame is allowed on new channel
+                            if let Frame::Begin(ref begin) = frame.performative() {
+                                if begin.remote_channel().is_some() {
+                                    inner.complete_session_creation(frame.channel_id(), begin);
+                                } else {
+                                    return Ok(Async::Ready(Some(frame)));
+                                }
+                            } else {
+                                warn!("Unexpected frame: {:#?}", frame);
+                            }
                             continue;
-                        }
-                        // todo: handle Close, End?
-                        Frame::End(_) | Frame::Close(_) => {
-                            println!("todo: unexpected frame: {:#?}", frame);
-                        }
-                        _ => (), // todo: handle unexpected frames
-                    }
+                        };
 
                     // handle session frames
-                    if let Some(channel) = inner.channels.get_mut(frame.channel_id() as usize) {
+                    if let Some(channel) = inner.sessions.get_mut(channel_id) {
                         match channel {
+                            ChannelState::Opening(ref mut tx, _) => {
+                                error!("Unexpected opening state: {}", channel_id);
+                            }
                             ChannelState::Established(ref mut session) => {
                                 match frame.performative() {
                                     Frame::Attach(attach) => {
@@ -258,13 +301,39 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                     Frame::Detach(detach) => {
                                         session.get_mut().handle_detach(detach);
                                     }
+                                    Frame::End(remote_end) => {
+                                        trace!("Remote session end: {}", frame.channel_id());
+                                        let end = End {
+                                            error: None,
+                                            body: None,
+                                        };
+                                        session.get_mut().set_error(
+                                            AmqpTransportError::SessionEnded(
+                                                remote_end.error.clone(),
+                                            ),
+                                        );
+                                        let id = session.get_mut().id();
+                                        inner.post_frame(AmqpFrame::new(id, end.into()));
+                                        inner.sessions.remove(channel_id);
+                                        inner.sessions_map.remove(&frame.channel_id());
+                                    }
                                     _ => session.get_mut().handle_frame(frame),
                                 }
                             }
-                            _ => (),
+                            ChannelState::Closing(ref mut tx) => match frame.performative() {
+                                Frame::End(remote_end) => {
+                                    if let Some(tx) = tx.take() {
+                                        let _ = tx.send(Ok(()));
+                                    }
+                                    inner.sessions.remove(channel_id);
+                                    inner.sessions_map.remove(&frame.channel_id());
+                                }
+                                frm => trace!("Got frame after initiated session end: {:?}", frm),
+                            },
                         }
                     } else {
-                        return Ok(Async::Ready(Some(frame)));
+                        error!("Can not find channel: {}", channel_id);
+                        continue;
                     }
                 }
                 Ok(Async::Ready(None)) => {
@@ -356,21 +425,24 @@ impl ConnectionInner {
             remote,
             write_queue: VecDeque::new(),
             write_task: AtomicTask::new(),
-            channels: slab::Slab::new(),
+            sessions: slab::Slab::with_capacity(8),
+            sessions_map: HashMap::new(),
             error: None,
+            state: State::Normal,
         }
     }
 
     fn set_error(&mut self, err: AmqpTransportError) {
-        for (_, channel) in self.channels.iter_mut() {
+        for (_, channel) in self.sessions.iter_mut() {
             match channel {
-                ChannelState::Opening(_, _) | ChannelState::None => (),
-                ChannelState::Established(ref mut ses) | ChannelState::Closing(ref mut ses) => {
+                ChannelState::Opening(_, _) | ChannelState::Closing(_) => (),
+                ChannelState::Established(ref mut ses) => {
                     ses.get_mut().set_error(err.clone());
                 }
             }
         }
-        self.channels.clear();
+        self.sessions.clear();
+        self.sessions_map.clear();
 
         self.error = Some(err);
     }
@@ -384,7 +456,7 @@ impl ConnectionInner {
         self.write_task.notify();
     }
 
-    fn complete_session_creation(&mut self, channel_id: usize, begin: &Begin) {
+    fn complete_session_creation(&mut self, channel_id: u16, begin: &Begin) {
         trace!(
             "session opened: {:?} {:?}",
             channel_id,
@@ -393,22 +465,26 @@ impl ConnectionInner {
 
         let id = begin.remote_channel().unwrap() as usize;
 
-        if let Some(channel) = self.channels.get_mut(id) {
+        if let Some(channel) = self.sessions.get_mut(id) {
             if channel.is_opening() {
-                let item = std::mem::replace(channel, ChannelState::None);
-
-                if let ChannelState::Opening(tx, cell) = item {
+                if let ChannelState::Opening(tx, cell) = channel {
                     let cell = cell.upgrade().unwrap();
                     let session = Cell::new(SessionInner::new(
                         id,
                         ConnectionController(cell),
-                        begin.remote_channel().unwrap(),
+                        channel_id,
                         begin.incoming_window(),
                         begin.next_outgoing_id(),
                         begin.outgoing_window(),
                     ));
+                    self.sessions_map.insert(channel_id, id);
 
-                    if tx.send(Session::new(session.clone())).is_err() {
+                    if tx
+                        .take()
+                        .unwrap()
+                        .send(Session::new(session.clone()))
+                        .is_err()
+                    {
                         // todo: send end session
                     }
                     *channel = ChannelState::Established(session)

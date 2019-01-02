@@ -1,18 +1,22 @@
 use amqp::{protocol, AmqpCodecError, ProtocolIdError};
 
-#[derive(Debug, Display, From, Clone)]
+#[derive(Debug, Display, Clone)]
 pub enum AmqpTransportError {
     Codec(AmqpCodecError),
     TooManyChannels,
     Disconnected,
     Timeout,
+    #[display(fmt = "Connection closed, error: {:?}", _0)]
+    Closed(Option<protocol::Error>),
+    #[display(fmt = "Session ended, error: {:?}", _0)]
+    SessionEnded(Option<protocol::Error>),
     #[display(fmt = "Link detached, error: {:?}", _0)]
     LinkDetached(Option<protocol::Error>),
 }
 
-impl From<protocol::Error> for AmqpTransportError {
-    fn from(err: protocol::Error) -> Self {
-        AmqpTransportError::LinkDetached(Some(err))
+impl From<AmqpCodecError> for AmqpTransportError {
+    fn from(err: AmqpCodecError) -> Self {
+        AmqpTransportError::Codec(err)
     }
 }
 
