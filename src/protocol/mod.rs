@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, Utc};
@@ -8,6 +9,12 @@ use uuid::Uuid;
 use super::codec::{self, DecodeFormatted, Encode};
 use super::errors::AmqpParseError;
 use super::types::*;
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
 pub(crate) struct CompoundHeader {
     pub size: u32,
