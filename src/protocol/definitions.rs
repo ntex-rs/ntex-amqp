@@ -142,107 +142,6 @@ impl Encode for Frame {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub enum Section {
-    Header(Header),
-    DeliveryAnnotations(DeliveryAnnotations),
-    MessageAnnotations(MessageAnnotations),
-    ApplicationProperties(ApplicationProperties),
-    Data(Data),
-    AmqpSequence(AmqpSequence),
-    AmqpValue(AmqpValue),
-    Footer(Footer),
-    Properties(Properties),
-}
-impl DecodeFormatted for Section {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(112) => {
-                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
-            }
-            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
-                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
-            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
-                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
-            Descriptor::Ulong(116) => decode_application_properties_inner(input)
-                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
-            Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
-            Descriptor::Ulong(118) => {
-                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
-            }
-            Descriptor::Ulong(119) => {
-                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
-            }
-            Descriptor::Ulong(120) => {
-                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
-            }
-            Descriptor::Ulong(115) => {
-                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
-                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
-                decode_delivery_annotations_inner(input)
-                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
-                decode_message_annotations_inner(input)
-                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
-                decode_application_properties_inner(input)
-                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
-                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
-                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
-                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
-                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
-                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for Section {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Section::Header(ref v) => encoded_size_header_inner(v),
-            Section::DeliveryAnnotations(ref v) => encoded_size_delivery_annotations_inner(v),
-            Section::MessageAnnotations(ref v) => encoded_size_message_annotations_inner(v),
-            Section::ApplicationProperties(ref v) => encoded_size_application_properties_inner(v),
-            Section::Data(ref v) => encoded_size_data_inner(v),
-            Section::AmqpSequence(ref v) => encoded_size_amqp_sequence_inner(v),
-            Section::AmqpValue(ref v) => encoded_size_amqp_value_inner(v),
-            Section::Footer(ref v) => encoded_size_footer_inner(v),
-            Section::Properties(ref v) => encoded_size_properties_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Section::Header(ref v) => encode_header_inner(v, buf),
-            Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
-            Section::MessageAnnotations(ref v) => encode_message_annotations_inner(v, buf),
-            Section::ApplicationProperties(ref v) => encode_application_properties_inner(v, buf),
-            Section::Data(ref v) => encode_data_inner(v, buf),
-            Section::AmqpSequence(ref v) => encode_amqp_sequence_inner(v, buf),
-            Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
-            Section::Footer(ref v) => encode_footer_inner(v, buf),
-            Section::Properties(ref v) => encode_properties_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
 pub enum SaslFrameBody {
     SaslMechanisms(SaslMechanisms),
     SaslInit(SaslInit),
@@ -431,6 +330,107 @@ impl Encode for Outcome {
             Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
             Outcome::Released(ref v) => encode_released_inner(v, buf),
             Outcome::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Section {
+    Header(Header),
+    DeliveryAnnotations(DeliveryAnnotations),
+    MessageAnnotations(MessageAnnotations),
+    ApplicationProperties(ApplicationProperties),
+    Data(Data),
+    AmqpSequence(AmqpSequence),
+    AmqpValue(AmqpValue),
+    Footer(Footer),
+    Properties(Properties),
+}
+impl DecodeFormatted for Section {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(112) => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
+                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
+            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
+                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
+            Descriptor::Ulong(116) => decode_application_properties_inner(input)
+                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
+            Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
+            Descriptor::Ulong(118) => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Ulong(119) => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Ulong(120) => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Ulong(115) => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
+                decode_delivery_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
+                decode_message_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
+                decode_application_properties_inner(input)
+                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
+                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for Section {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Section::Header(ref v) => encoded_size_header_inner(v),
+            Section::DeliveryAnnotations(ref v) => encoded_size_delivery_annotations_inner(v),
+            Section::MessageAnnotations(ref v) => encoded_size_message_annotations_inner(v),
+            Section::ApplicationProperties(ref v) => encoded_size_application_properties_inner(v),
+            Section::Data(ref v) => encoded_size_data_inner(v),
+            Section::AmqpSequence(ref v) => encoded_size_amqp_sequence_inner(v),
+            Section::AmqpValue(ref v) => encoded_size_amqp_value_inner(v),
+            Section::Footer(ref v) => encoded_size_footer_inner(v),
+            Section::Properties(ref v) => encoded_size_properties_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Section::Header(ref v) => encode_header_inner(v, buf),
+            Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
+            Section::MessageAnnotations(ref v) => encode_message_annotations_inner(v, buf),
+            Section::ApplicationProperties(ref v) => encode_application_properties_inner(v, buf),
+            Section::Data(ref v) => encode_data_inner(v, buf),
+            Section::AmqpSequence(ref v) => encode_amqp_sequence_inner(v, buf),
+            Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
+            Section::Footer(ref v) => encode_footer_inner(v, buf),
+            Section::Properties(ref v) => encode_properties_inner(v, buf),
         }
     }
 }
@@ -1381,14 +1381,14 @@ fn encoded_size_open_inner(list: &Open) -> usize {
         + list.incoming_locales.encoded_size()
         + list.offered_capabilities.encoded_size()
         + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
     Descriptor::Ulong(16).encode(buf);
@@ -1605,14 +1605,14 @@ fn encoded_size_begin_inner(list: &Begin) -> usize {
         + list.handle_max.encoded_size()
         + list.offered_capabilities.encoded_size()
         + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
     Descriptor::Ulong(17).encode(buf);
@@ -1915,14 +1915,14 @@ fn encoded_size_attach_inner(list: &Attach) -> usize {
         + list.max_message_size.encoded_size()
         + list.offered_capabilities.encoded_size()
         + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
     Descriptor::Ulong(18).encode(buf);
@@ -2192,14 +2192,14 @@ fn encoded_size_flow_inner(list: &Flow) -> usize {
         + list.available.encoded_size()
         + list.drain.encoded_size()
         + list.echo.encoded_size()
-        + list.properties.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+        + list.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
     Descriptor::Ulong(19).encode(buf);
@@ -2463,14 +2463,14 @@ fn encoded_size_transfer_inner(list: &Transfer) -> usize {
         + list.state.encoded_size()
         + list.resume.encoded_size()
         + list.aborted.encoded_size()
-        + list.batchable.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+        + list.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
     Descriptor::Ulong(20).encode(buf);
@@ -2659,14 +2659,14 @@ fn encoded_size_disposition_inner(list: &Disposition) -> usize {
         + list.last.encoded_size()
         + list.settled.encoded_size()
         + list.state.encoded_size()
-        + list.batchable.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+        + list.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
     Descriptor::Ulong(21).encode(buf);
@@ -2797,17 +2797,15 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach), AmqpParseError> 
 }
 fn encoded_size_detach_inner(list: &Detach) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size = 0
-        + list.handle.encoded_size()
-        + list.closed.encoded_size()
-        + list.error.encoded_size()
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+    let content_size =
+        0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
     Descriptor::Ulong(22).encode(buf);
@@ -2896,14 +2894,14 @@ fn decode_end_inner(input: &[u8]) -> Result<(&[u8], End), AmqpParseError> {
 }
 fn encoded_size_end_inner(list: &End) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size =
-        0 + list.error.encoded_size() + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+    let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_end_inner(list: &End, buf: &mut BytesMut) {
     Descriptor::Ulong(23).encode(buf);
@@ -2989,14 +2987,14 @@ fn decode_close_inner(input: &[u8]) -> Result<(&[u8], Close), AmqpParseError> {
 }
 fn encoded_size_close_inner(list: &Close) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size =
-        0 + list.error.encoded_size() + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
+    let content_size = 0 + list.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
+        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_close_inner(list: &Close, buf: &mut BytesMut) {
     Descriptor::Ulong(24).encode(buf);

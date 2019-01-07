@@ -417,15 +417,14 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
 
 fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}}
-      {{#if list.frame}}
-      + list.body.as_ref().map(|b| b.len()).unwrap_or(0);
-      {{else}}
-      ;
-      {{/if}}
+    let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
         + content_size
+
+    {{#if list.frame}}
+    + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
+    {{/if}}
 }
 fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     Descriptor::Ulong({{list.descriptor.code}}).encode(buf);
