@@ -7,7 +7,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::codec::{self, Decode, DecodeFormatted};
+use crate::codec::{self, ArrayDecode, Decode, DecodeFormatted};
 use crate::errors::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
@@ -225,6 +225,13 @@ impl DecodeFormatted for Symbol {
     }
 }
 
+impl ArrayDecode for Symbol {
+    fn array_decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
+        let (input, bytes) = read_bytes_u32(input)?;
+        Ok((input, Symbol::from_slice(str::from_utf8(bytes)?)))
+    }
+}
+
 impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
     for HashMap<K, V, S>
 {
@@ -245,14 +252,12 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
     }
 }
 
-impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
+impl<T: ArrayDecode> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        let (input, header) = decode_array_header(input, fmt)?;
-        let item_fmt = input[0]; // todo: support descriptor
-        let mut input = &input[1..];
+        let (mut input, header) = decode_array_header(input, fmt)?;
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
-            let (new_input, decoded) = T::decode_with_format(input, item_fmt)?;
+            let (new_input, decoded) = T::array_decode(input)?;
             result.push(decoded);
             input = new_input;
         }
@@ -260,7 +265,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     }
 }
 
-impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
+impl<T: ArrayDecode + DecodeFormatted> DecodeFormatted for Multiple<T> {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {

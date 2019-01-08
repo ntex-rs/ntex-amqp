@@ -46,6 +46,10 @@ where
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError>;
 }
 
+pub trait ArrayDecode: Sized {
+    fn array_decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError>;
+}
+
 impl<T: DecodeFormatted> Decode for T {
     fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, fmt) = decode_format_code(input)?;

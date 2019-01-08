@@ -482,23 +482,28 @@ impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
 fn array_encoded_size<T: ArrayEncode>(vec: &[T]) -> usize {
     vec.iter().fold(0, |r, i| r + i.array_encoded_size())
 }
+
 impl<T: ArrayEncode> Encode for Vec<T> {
     fn encoded_size(&self) -> usize {
         let content_size = array_encoded_size(self);
         // format_code + size + count + item constructor -- todo: support described ctor?
-        (if content_size + 2 > u8::MAX as usize { 10 } else { 4 }) // +2 for 1 byte count and 1 byte format code
+        (if content_size + 1 > u8::MAX as usize {
+            9
+        } else {
+            3
+        }) // +1 for 1 byte count and 1 byte format code
             + content_size
     }
 
     fn encode(&self, buf: &mut BytesMut) {
         let size = array_encoded_size(self);
-        if size + 2 > u8::MAX as usize {
+        if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32_be((size + 5) as u32); // +5 for 4 byte count and 1 byte item ctor that follow
+            buf.put_u32_be((size + 4) as u32); // +4 for 4 byte count and 1 byte item ctor that follow
             buf.put_u32_be(self.len() as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
-            buf.put_u8((size + 2) as u8); // +2 for 1 byte count and 1 byte item ctor that follow
+            buf.put_u8((size + 1) as u8); // +1 for 1 byte count and 1 byte item ctor that follow
             buf.put_u8(self.len() as u8);
         }
         for i in self {

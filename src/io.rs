@@ -71,7 +71,6 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     let frame_buf = src.split_to(size);
                     let (remainder, frame) = T::decode(frame_buf.as_ref())?;
                     if !remainder.is_empty() {
-                        println!("=====");
                         // todo: could it really happen?
                         return Err(AmqpCodecError::UnparsedBytesLeft);
                     }

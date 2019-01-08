@@ -16,6 +16,7 @@ impl fmt::Display for Error {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct CompoundHeader {
     pub size: u32,
     pub count: u32,
