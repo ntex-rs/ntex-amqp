@@ -48,3 +48,33 @@ impl SaslFrame {
         SaslFrame { body }
     }
 }
+
+impl From<protocol::SaslMechanisms> for SaslFrame {
+    fn from(item: protocol::SaslMechanisms) -> SaslFrame {
+        SaslFrame::new(protocol::SaslFrameBody::SaslMechanisms(item))
+    }
+}
+
+impl From<protocol::SaslInit> for SaslFrame {
+    fn from(item: protocol::SaslInit) -> SaslFrame {
+        SaslFrame::new(protocol::SaslFrameBody::SaslInit(item))
+    }
+}
+
+impl From<protocol::SaslChallenge> for SaslFrame {
+    fn from(item: protocol::SaslChallenge) -> SaslFrame {
+        SaslFrame::new(protocol::SaslFrameBody::SaslChallenge(item))
+    }
+}
+
+impl From<protocol::SaslResponse> for SaslFrame {
+    fn from(item: protocol::SaslResponse) -> SaslFrame {
+        SaslFrame::new(protocol::SaslFrameBody::SaslResponse(item))
+    }
+}
+
+impl From<protocol::SaslOutcome> for SaslFrame {
+    fn from(item: protocol::SaslOutcome) -> SaslFrame {
+        SaslFrame::new(protocol::SaslFrameBody::SaslOutcome(item))
+    }
+}

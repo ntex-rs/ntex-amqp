@@ -1,17 +1,14 @@
 use std::str;
 
 use bytes::Bytes;
+use string::{String, TryFrom};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Symbol(Bytes);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, From)]
+pub struct Symbol(String<Bytes>);
 
 impl Symbol {
-    pub unsafe fn from_utf8_unchecked(slice: Bytes) -> Symbol {
-        Symbol(slice)
-    }
-
-    pub fn from_slice<'a>(s: &'a str) -> Symbol {
-        Symbol(Bytes::from(s.as_bytes()))
+    pub fn from_slice(s: &str) -> Symbol {
+        Symbol(String::try_from(Bytes::from(s.as_bytes())).unwrap())
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -19,7 +16,7 @@ impl Symbol {
     }
 
     pub fn as_str(&self) -> &str {
-        unsafe { str::from_utf8_unchecked(self.0.as_ref()) }
+        self.0.as_ref()
     }
 
     pub fn len(&self) -> usize {
@@ -29,7 +26,7 @@ impl Symbol {
 
 impl From<&'static str> for Symbol {
     fn from(s: &'static str) -> Symbol {
-        Symbol(Bytes::from_static(s.as_bytes()))
+        Symbol(String::try_from(Bytes::from_static(s.as_bytes())).unwrap())
     }
 }
 

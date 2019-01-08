@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use bytes::Bytes;
 use string::String;
 
@@ -15,7 +17,7 @@ pub enum Descriptor {
     Symbol(Symbol),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, From)]
 pub struct Multiple<T>(pub Vec<T>);
 
 impl<T> Multiple<T> {
@@ -29,6 +31,26 @@ impl<T> Multiple<T> {
 
     pub fn iter(&self) -> ::std::slice::Iter<T> {
         self.0.iter()
+    }
+}
+
+impl<T> Default for Multiple<T> {
+    fn default() -> Multiple<T> {
+        Multiple(Vec::new())
+    }
+}
+
+impl<T> Deref for Multiple<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for Multiple<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
