@@ -488,9 +488,9 @@ impl<T: ArrayEncode> Encode for Vec<T> {
         let content_size = array_encoded_size(self);
         // format_code + size + count + item constructor -- todo: support described ctor?
         (if content_size + 1 > u8::MAX as usize {
-            9
+            10
         } else {
-            3
+            4
         }) // +1 for 1 byte count and 1 byte format code
             + content_size
     }
@@ -499,13 +499,14 @@ impl<T: ArrayEncode> Encode for Vec<T> {
         let size = array_encoded_size(self);
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32_be((size + 4) as u32); // +4 for 4 byte count and 1 byte item ctor that follow
+            buf.put_u32_be((size + 5) as u32); // +4 for 4 byte count and 1 byte item ctor that follow
             buf.put_u32_be(self.len() as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
-            buf.put_u8((size + 1) as u8); // +1 for 1 byte count and 1 byte item ctor that follow
+            buf.put_u8((size + 2) as u8); // +1 for 1 byte count and 1 byte item ctor that follow
             buf.put_u8(self.len() as u8);
         }
+        buf.put_u8(T::ARRAY_FORMAT_CODE);
         for i in self {
             i.array_encode(buf);
         }

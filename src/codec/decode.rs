@@ -252,12 +252,14 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
     }
 }
 
-impl<T: ArrayDecode> DecodeFormatted for Vec<T> {
+impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        let (mut input, header) = decode_array_header(input, fmt)?;
+        let (input, header) = decode_array_header(input, fmt)?;
+        let item_fmt = input[0]; // todo: support descriptor
+        let mut input = &input[1..];
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
-            let (new_input, decoded) = T::array_decode(input)?;
+            let (new_input, decoded) = T::decode_with_format(input, item_fmt)?;
             result.push(decoded);
             input = new_input;
         }

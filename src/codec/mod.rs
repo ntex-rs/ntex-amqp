@@ -102,3 +102,33 @@ pub const FORMATCODE_MAP8: u8 = 0xc1;
 pub const FORMATCODE_MAP32: u8 = 0xd1;
 pub const FORMATCODE_ARRAY8: u8 = 0xe0;
 pub const FORMATCODE_ARRAY32: u8 = 0xf0;
+
+#[cfg(test)]
+mod tests {
+    use bytes::{Bytes, BytesMut};
+
+    use crate::codec::{Decode, Encode};
+    use crate::errors::AmqpCodecError;
+    use crate::framing::SaslFrame;
+    use crate::protocol::SaslFrameBody;
+
+    #[test]
+    fn test_sasl_mechanisms() -> Result<(), AmqpCodecError> {
+        let data = b"\x02\x01\0\0\0S@\xc02\x01\xe0/\x04\xb3\0\0\0\x07MSSBCBS\0\0\0\x05PLAIN\0\0\0\tANONYMOUS\0\0\0\x08EXTERNAL";
+
+        let (remainder, frame) = SaslFrame::decode(data.as_ref())?;
+        assert!(remainder.is_empty());
+        match frame.body {
+            SaslFrameBody::SaslMechanisms(_) => (),
+            _ => panic!("error"),
+        }
+
+        let mut buf = BytesMut::new();
+        buf.reserve(frame.encoded_size());
+        frame.encode(&mut buf);
+        buf.split_to(4);
+        assert_eq!(Bytes::from_static(data), buf.freeze());
+
+        Ok(())
+    }
+}
