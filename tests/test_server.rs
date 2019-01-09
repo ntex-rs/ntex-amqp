@@ -1,8 +1,9 @@
-use actix_service::{IntoNewService, NewService, Service};
+use actix_connector::{Connect, Connector};
+use actix_service::{NewService, Service};
 use actix_test_server::TestServer;
 use amqp;
 use amqp_transport::server::{self, errors};
-use amqp_transport::{self, client, Configuration, Connection};
+use amqp_transport::{self, client, sasl, Configuration};
 use futures::future::err;
 use futures::{Future, Sink};
 
@@ -21,34 +22,77 @@ fn test_simple() -> std::io::Result<()> {
     env_logger::init();
 
     let mut srv = TestServer::with(|| {
-        server::handshake(Configuration::default())
-            .map_err(|_| ())
-            .and_then(server::ServerFactory::new(server::ServiceFactory::service(
-                server
-                    .into_new_service()
-                    .map_init_err(|_| errors::LinkError::force_detach()),
-            )))
+        server::ServerFactory::new(
+            Configuration::default(),
+            server::ServiceFactory::service(
+                server::App::<()>::new().service("test", server).finish(),
+            ),
+        )
+        .map_err(|_| ())
+        .and_then(server::ServerDispatcher::default())
     });
 
-    let stream = srv.connect()?;
-    let framed = client::ProtocolNegotiation::framed(stream);
-    let mut proto = client::ProtocolNegotiation::default();
-    let framed = srv.block_on(proto.call(framed)).unwrap();
-    let framed = framed.into_framed(amqp::AmqpCodec::new());
+    let mut sasl_srv = sasl::connect_service(Connector::default());
+    let req = sasl::SaslConnect {
+        connect: Connect::new(srv.host(), srv.port()),
+        config: Configuration::default(),
+        time: None,
+        auth: sasl::SaslAuth {
+            authz_id: "".to_string(),
+            authn_id: "user1".to_string(),
+            password: "password1".to_string(),
+        },
+    };
+    let res = srv.block_on(sasl_srv.call(req));
+    println!("E: {:?}", res.err());
 
-    let open = Configuration::default().to_open(None);
-    let framed = srv
-        .block_on(framed.send(amqp::AmqpFrame::new(0, open.clone().into())))
-        .unwrap();
+    Ok(())
+}
 
-    let mut conn = Connection::new(framed, Configuration::default(), (&open).into(), None);
-    let session = conn.open_session();
-    srv.spawn(conn.map_err(|_| ()));
+fn sasl_auth(auth: server::SaslAuth) -> impl Future<Item = (), Error = amqp::protocol::Error> {
+    auth.mechanism("PLAIN")
+        .mechanism("ANONYMOUS")
+        .mechanism("MSSBCBS")
+        .mechanism("AMQPCBS")
+        .send()
+        .and_then(|init| {
+            if init.mechanism() == "PLAIN" {
+                if let Some(resp) = init.initial_response() {
+                    if resp == b"\0user1\0password1" {
+                        return init.outcome(amqp::protocol::SaslCode::Ok);
+                    }
+                }
+            }
+            init.outcome(amqp::protocol::SaslCode::Auth)
+        })
+        .map_err(|e| e.into())
+}
 
-    let mut session = srv.block_on(session).unwrap();
-    let link = srv.block_on(session.open_sender_link("test", "test"));
+#[test]
+fn test_sasl() -> std::io::Result<()> {
+    let mut srv = TestServer::with(|| {
+        server::ServerFactory::new(
+            Configuration::default(),
+            server::ServiceFactory::sasl(sasl_auth)
+                .service(server::App::<()>::new().service("test", server).finish()),
+        )
+        .map_err(|_| ())
+        .and_then(server::ServerDispatcher::default())
+    });
 
-    // println!("RES: {:?}", res);
+    let mut sasl_srv = sasl::connect_service(Connector::default());
+    let req = sasl::SaslConnect {
+        connect: Connect::new(srv.host(), srv.port()),
+        config: Configuration::default(),
+        time: None,
+        auth: sasl::SaslAuth {
+            authz_id: "".to_string(),
+            authn_id: "user1".to_string(),
+            password: "password1".to_string(),
+        },
+    };
+    let res = srv.block_on(sasl_srv.call(req));
+    println!("E: {:?}", res.err());
 
     Ok(())
 }

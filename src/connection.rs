@@ -192,6 +192,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         frame.performative().name(),
                         frame.encoded_size()
                     );
+                    trace!("outgoing: {:#?}", frame);
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
@@ -241,6 +242,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         "incoming: {:?} - {:?}",
                         frame.performative().name(),
                         frame.encoded_size()
+                    );
+                    trace!(
+                        "incoming: {} {:#?}",
+                        frame.channel_id(),
+                        frame.performative()
                     );
                     update = true;
 

@@ -10,6 +10,7 @@ amqp = { git = "https://github.com/fafhrd91/rust-amqp.git" }
 actix-codec = "0.1.0"
 actix-service = "0.1.2"
 actix-connector = "0.1.0"
+actix-router = { git = "https://github.com/actix/actix-net.git" }
 actix-utils = "0.1.0"
 derive_more = "0.13"
 either = "1.5"
@@ -24,3 +25,6 @@ tokio-timer = "0.2"
 [dev-dependencies]
 env_logger = "0.5"
 actix-test-server = { git = "https://github.com/actix/actix-net.git" }
+
+[patch.crates-io]
+actix-utils = { git = "https://github.com/actix/actix-net.git" }

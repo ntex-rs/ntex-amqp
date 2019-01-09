@@ -1,9 +1,10 @@
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 
-use amqp::codec::Encode;
+use amqp::codec::{Decode, Encode};
 use amqp::protocol::{Annotations, Header, MessageFormat, Properties, Section};
 use amqp::types::{ByteStr, List, Variant};
+use amqp::AmqpParseError;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -14,6 +15,9 @@ pub struct Message {
     pub properties: Option<Properties>,
     pub application_properties: Option<HashMap<ByteStr, Variant>>,
     pub application_data: MessageBody,
+    pub sequence: Option<List>,
+    pub value: Option<Variant>,
+    pub data: Option<Bytes>,
     pub footer: Option<Annotations>,
 }
 
@@ -45,6 +49,15 @@ impl Message {
         if let Some(ap) = self.application_properties {
             Section::ApplicationProperties(ap).encode(&mut dst);
         }
+        if let Some(s) = self.sequence {
+            Section::AmqpSequence(s).encode(&mut dst);
+        }
+        if let Some(v) = self.value {
+            Section::AmqpValue(v).encode(&mut dst);
+        }
+        if let Some(v) = self.data {
+            Section::Data(v).encode(&mut dst);
+        }
 
         self.application_data.encode(&mut dst);
 
@@ -53,6 +66,49 @@ impl Message {
         }
 
         dst.freeze()
+    }
+
+    pub fn deserialize(src: &Bytes) -> Result<Message, AmqpParseError> {
+        let mut message = Message::default();
+
+        let mut input: &[u8] = &src;
+        loop {
+            let (buf, sec) = Section::decode(input)?;
+            match sec {
+                Section::Header(val) => {
+                    message.header = Some(val);
+                }
+                Section::DeliveryAnnotations(val) => {
+                    message.delivery_annotations = Some(val);
+                }
+                Section::MessageAnnotations(val) => {
+                    message.message_annotations = Some(val);
+                }
+                Section::ApplicationProperties(val) => {
+                    message.application_properties = Some(val);
+                }
+                Section::Footer(val) => {
+                    message.footer = Some(val);
+                }
+                Section::Properties(val) => {
+                    message.properties = Some(val);
+                }
+                Section::AmqpSequence(val) => {
+                    message.sequence = Some(val);
+                }
+                Section::AmqpValue(val) => {
+                    message.value = Some(val);
+                }
+                Section::Data(val) => {
+                    message.data = Some(val);
+                }
+            }
+            if buf.is_empty() {
+                break;
+            }
+            input = buf;
+        }
+        Ok(message)
     }
 
     pub fn encoded_size(&self) -> usize {
@@ -90,6 +146,9 @@ impl Default for Message {
             properties: None,
             application_properties: None,
             application_data: MessageBody::Data(Bytes::new()),
+            sequence: None,
+            value: None,
+            data: None,
             footer: None,
         }
     }

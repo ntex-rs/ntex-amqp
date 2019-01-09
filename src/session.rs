@@ -192,7 +192,7 @@ impl SessionInner {
         self.connection.drop_session_copy(self.id);
     }
 
-    /// Register remote link
+    /// Register receiver link
     pub(crate) fn open_receiver_link(
         &mut self,
         cell: Cell<SessionInner>,
@@ -210,6 +210,37 @@ impl SessionInner {
         ReceiverLink::new(inner)
     }
 
+    /// Register receiver link
+    pub(crate) fn confirm_sender_link(&mut self, cell: Cell<SessionInner>, attach: Attach) {
+        trace!("Remote sender link opened: {:?}", attach.name());
+        let handle = attach.handle();
+        let entry = self.links.vacant_entry();
+        let token = entry.key();
+
+        self.remote_handles.insert(attach.handle(), token);
+        let link = Cell::new(SenderLinkInner::new(cell, token, attach.handle()));
+        entry.insert(Either::Left(SenderLinkState::Established(link)));
+
+        let attach = Attach {
+            name: attach.name.clone(),
+            handle: token as Handle,
+            role: Role::Receiver,
+            snd_settle_mode: SenderSettleMode::Mixed,
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: attach.source.clone(),
+            target: attach.target.clone(),
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: Some(1),
+            max_message_size: None,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+            body: None,
+        };
+        self.post_frame(attach.into());
+    }
+
     pub(crate) fn confirm_receiver_link(&mut self, idx: usize, attach: &Attach) {
         if let Some(Either::Right(link)) = self.links.get_mut(idx) {
             match link {
@@ -217,14 +248,14 @@ impl SessionInner {
                     let attach = Attach {
                         name: attach.name.clone(),
                         handle: idx as Handle,
-                        role: Role::Receiver,
+                        role: Role::Sender,
                         snd_settle_mode: SenderSettleMode::Mixed,
                         rcv_settle_mode: ReceiverSettleMode::First,
                         source: attach.source.clone(),
                         target: attach.target.clone(),
                         unsettled: None,
                         incomplete_unsettled: false,
-                        initial_delivery_count: None,
+                        initial_delivery_count: Some(1),
                         max_message_size: None,
                         offered_capabilities: None,
                         desired_capabilities: None,
@@ -253,7 +284,7 @@ impl SessionInner {
                     let attach = Attach {
                         name: inner.as_ref().unwrap().get_ref().name().clone(),
                         handle: id as Handle,
-                        role: Role::Receiver,
+                        role: Role::Sender,
                         snd_settle_mode: SenderSettleMode::Mixed,
                         rcv_settle_mode: ReceiverSettleMode::First,
                         source: None,
@@ -300,10 +331,43 @@ impl SessionInner {
 
     pub fn handle_frame(&mut self, frame: AmqpFrame) {
         if self.error.is_none() {
-            match *frame.performative() {
-                Frame::Disposition(ref disp) => self.settle_deliveries(disp),
-                Frame::Flow(ref flow) => self.apply_flow(flow),
-                _ => error!("Unexpected frame: {:?}", frame),
+            match frame.into_parts().1 {
+                Frame::Disposition(disp) => self.settle_deliveries(disp),
+                Frame::Flow(flow) => self.apply_flow(flow),
+                Frame::Transfer(transfer) => {
+                    let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
+                        *idx
+                    } else {
+                        error!("Transfer's link {:?} is unknown", transfer.handle());
+                        return;
+                    };
+
+                    if let Some(link) = self.links.get_mut(idx) {
+                        match link {
+                            Either::Left(_) => error!("Got trasfer from sender link"),
+                            Either::Right(link) => match link {
+                                ReceiverLinkState::Opening(_) => {
+                                    error!(
+                                        "Got transfer for opening link: {} -> {}",
+                                        transfer.handle(),
+                                        idx
+                                    );
+                                }
+                                ReceiverLinkState::Established(link) => {
+                                    link.get_mut().handle_transfer(transfer);
+                                }
+                                ReceiverLinkState::Closing(_) => (),
+                            },
+                        }
+                    } else {
+                        error!(
+                            "Remote link handle mapped to non-existing link: {} -> {}",
+                            transfer.handle(),
+                            idx
+                        );
+                    }
+                }
+                frame => error!("Unexpected frame: {:?}", frame),
             }
         }
     }
@@ -315,7 +379,12 @@ impl SessionInner {
             match self.links.get_mut(index) {
                 Some(Either::Left(item)) => {
                     if item.is_opening() {
-                        trace!("sender link opened: {:?}", name);
+                        trace!(
+                            "sender link opened: {:?} {} -> {}",
+                            name,
+                            index,
+                            attach.handle()
+                        );
 
                         if item.is_opening() {
                             self.remote_handles.insert(attach.handle(), index);
@@ -343,6 +412,8 @@ impl SessionInner {
 
     /// Handle `Detach` frame.
     pub fn handle_detach(&mut self, detach: &Detach) {
+        println!("DETACH: {:#?}", detach);
+
         // get local link instance
         let idx = if let Some(idx) = self.remote_handles.get(&detach.handle()) {
             *idx
@@ -410,7 +481,7 @@ impl SessionInner {
         }
     }
 
-    fn settle_deliveries(&mut self, disposition: &Disposition) {
+    fn settle_deliveries(&mut self, disposition: Disposition) {
         assert!(disposition.settled()); // we can only work with settled for now
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
@@ -440,7 +511,7 @@ impl SessionInner {
         }
     }
 
-    fn apply_flow(&mut self, flow: &Flow) {
+    fn apply_flow(&mut self, flow: Flow) {
         self.outgoing_window =
             flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
         trace!(
@@ -458,7 +529,7 @@ impl SessionInner {
         {
             match link {
                 SenderLinkState::Established(ref mut link) => {
-                    link.get_mut().apply_flow(flow);
+                    link.get_mut().apply_flow(&flow);
                 }
                 _ => (),
             }
@@ -485,7 +556,7 @@ impl SessionInner {
         self.post_frame(flow.into());
     }
 
-    fn post_frame(&mut self, frame: Frame) {
+    pub fn post_frame(&mut self, frame: Frame) {
         self.connection
             .post_frame(AmqpFrame::new(self.remote_channel_id, frame));
     }

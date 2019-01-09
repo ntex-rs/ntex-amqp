@@ -1,8 +1,9 @@
-use std::fmt::Display;
+use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use actix_service::Service;
-use amqp::protocol::{Error, Frame};
+use actix_service::{NewService, Service};
+use amqp::protocol::{Error, Frame, Role};
+use futures::future::{ok, FutureResult};
 use futures::{Async, Future, Poll};
 use slab::Slab;
 
@@ -12,132 +13,162 @@ use crate::link::ReceiverLink;
 
 use super::link::OpenLink;
 
-/// Amqp server connection dispatcher.
-pub struct Dispatcher<Io, F, St, S>
+/// Sasl server dispatcher service factory
+pub struct ServerDispatcher<Io, St, S> {
+    _t: PhantomData<(Io, St, S)>,
+}
+
+impl<Io, St, S> Default for ServerDispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
+{
+    fn default() -> Self {
+        ServerDispatcher { _t: PhantomData }
+    }
+}
+
+impl<Io, St, S> NewService<(St, S, Connection<Io>)> for ServerDispatcher<Io, St, S>
+where
+    Io: AsyncRead + AsyncWrite,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
+{
+    type Response = ();
+    type Error = ();
+    type InitError = ();
+    type Service = ServerDispatcherImpl<Io, St, S>;
+    type Future = FutureResult<Self::Service, Self::Error>;
+
+    fn new_service(&self) -> Self::Future {
+        ok(ServerDispatcherImpl::default())
+    }
+}
+
+/// Sasl server dispatcher service
+pub struct ServerDispatcherImpl<Io, St, S> {
+    _t: PhantomData<(Io, St, S)>,
+}
+
+impl<Io, St, S> Default for ServerDispatcherImpl<Io, St, S>
+where
+    Io: AsyncRead + AsyncWrite,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
+{
+    fn default() -> Self {
+        ServerDispatcherImpl { _t: PhantomData }
+    }
+}
+
+impl<Io, St, S> Service<(St, S, Connection<Io>)> for ServerDispatcherImpl<Io, St, S>
+where
+    Io: AsyncRead + AsyncWrite,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
+{
+    type Response = ();
+    type Error = ();
+    type Future = Dispatcher<Io, St, S>;
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
+
+    fn call(&mut self, (st, srv, conn): (St, S, Connection<Io>)) -> Self::Future {
+        Dispatcher::new(conn, st, srv)
+    }
+}
+
+/// Amqp server connection dispatcher.
+pub struct Dispatcher<Io, St, S>
+where
+    Io: AsyncRead + AsyncWrite,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
 {
     conn: Connection<Io>,
-    state: State<F, St, S>,
-    links: Slab<()>,
+    state: Cell<St>,
+    service: S,
+    links: Vec<(ReceiverLink, S::Future)>,
     channels: slab::Slab<ChannelState>,
 }
 
-impl<Io, F, St, S> Dispatcher<Io, F, St, S>
+impl<Io, St, S> Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
 {
-    pub fn new(conn: Connection<Io>, factory: &mut F) -> Self {
+    pub fn new(conn: Connection<Io>, state: St, service: S) -> Self {
         Dispatcher {
             conn,
-            links: Slab::with_capacity(16),
-            state: State::CreateService(factory.call(())),
+            service,
+            links: Vec::with_capacity(16),
+            state: Cell::new(state),
             channels: Slab::with_capacity(16),
         }
     }
 }
 
-enum State<F, St, S>
-where
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
-{
-    CreateService(F::Future),
-    Processing(S, Cell<St>, Vec<(ReceiverLink, S::Future)>),
-    Done,
-}
-
-impl<Io, F, St, S> Future for Dispatcher<Io, F, St, S>
+impl<Io, St, S> Future for Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
 {
     type Item = ();
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.state {
-            State::CreateService(ref mut fut) => match fut.poll() {
-                Ok(Async::NotReady) => (),
-                Ok(Async::Ready((state, srv))) => {
-                    self.state = State::Processing(srv, Cell::new(state), Vec::new());
-                    return self.poll();
-                }
-                Err(err) => {
-                    self.conn.close_with_error(err.into());
-                    return Ok(Async::Ready(()));
-                }
-            },
-            State::Processing(ref mut srv, ref mut st, ref mut links) => {
-                loop {
-                    // handle remote begin and attach
-                    match self.conn.poll_incoming() {
-                        Ok(Async::Ready(Some(frame))) => {
-                            let (channel_id, frame) = frame.into_parts();
+        loop {
+            // handle remote begin and attach
+            match self.conn.poll_incoming() {
+                Ok(Async::Ready(Some(frame))) => {
+                    let (channel_id, frame) = frame.into_parts();
+                    let channel_id = channel_id as usize;
 
-                            match frame {
-                                Frame::Begin(frm) => {
-                                    println!("BEGIN: {:#?}", frm);
-                                    self.conn.register_remote_session(channel_id, &frm);
-                                }
-                                Frame::Attach(attach) => {
-                                    let channel_id = channel_id as usize;
-                                    let entry = self.links.vacant_entry();
-                                    let token = entry.key();
-                                    entry.insert(());
+                    match frame {
+                        Frame::Begin(frm) => {
+                            self.conn.register_remote_session(channel_id as u16, &frm);
+                        }
+                        Frame::Attach(attach) => {
+                            if attach.role == Role::Receiver {
+                                let mut session = self.conn.get_session(channel_id);
+                                let cell = session.clone();
+                                session.get_mut().confirm_sender_link(cell, attach);
+                            } else {
+                                let mut session = self.conn.get_session(channel_id);
+                                let cell = session.clone();
+                                let link = session.get_mut().open_receiver_link(cell, attach);
 
-                                    let mut session = self.conn.get_session(channel_id);
-                                    let cell = session.clone();
-                                    let link = session.get_mut().open_receiver_link(cell, attach);
-
-                                    let fut = srv.call(OpenLink {
-                                        state: st.clone(),
-                                        link: link.clone(),
-                                    });
-                                    links.push((link, fut));
-                                }
-                                _ => {
-                                    println!("===== {:?}", frame);
-                                }
+                                let fut = self.service.call(OpenLink {
+                                    state: self.state.clone(),
+                                    link: link.clone(),
+                                });
+                                self.links.push((link, fut));
                             }
                         }
-                        Ok(Async::Ready(None)) => break,
-                        Ok(Async::NotReady) => break,
-                        Err(_) => return Err(()),
+                        _ => {
+                            println!("===== {:?}", frame);
+                        }
                     }
                 }
+                Ok(Async::NotReady) => break,
+                Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
+                Err(_) => return Err(()),
+            }
+        }
 
-                // process service responses
-                let mut idx = 0;
-                while idx < links.len() {
-                    match links[idx].1.poll() {
-                        Ok(Async::Ready(detach)) => {
-                            let (link, _) = links.swap_remove(idx);
-                            link.close();
-                        }
-                        Ok(Async::NotReady) => idx += 1,
-                        Err(e) => {
-                            let (link, _) = links.swap_remove(idx);
-                            error!("Error in link handler: {}", e);
-                            link.close_with_error(e.into());
-                        }
-                    }
+        // process service responses
+        let mut idx = 0;
+        while idx < self.links.len() {
+            match self.links[idx].1.poll() {
+                Ok(Async::Ready(detach)) => {
+                    let (link, _) = self.links.swap_remove(idx);
+                    link.close();
+                }
+                Ok(Async::NotReady) => idx += 1,
+                Err(e) => {
+                    let (link, _) = self.links.swap_remove(idx);
+                    error!("Error in link handler: {}", e);
+                    link.close_with_error(e.into());
                 }
             }
-            State::Done => (),
         }
 
         self.conn.poll_outgoing().map_err(|_| ())

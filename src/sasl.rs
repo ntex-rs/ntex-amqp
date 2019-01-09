@@ -146,6 +146,7 @@ fn sasl_connect<Io: AsyncRead + AsyncWrite>(
         .into_future()
         .map_err(|e| SaslConnectError::from(e.0))
         .and_then(move |(_sasl_frame, sasl_io)| {
+            println!("GOT: {:?}", _sasl_frame);
             let initial_response =
                 SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
             let sasl_init = SaslInit {
@@ -154,7 +155,7 @@ fn sasl_connect<Io: AsyncRead + AsyncWrite>(
                 hostname: None,
             };
             sasl_io
-                .send(SaslFrame::new(SaslFrameBody::SaslInit(sasl_init)))
+                .send(sasl_init.into())
                 .map_err(SaslConnectError::from)
                 .and_then(|sasl_io| {
                     // processing sasl-outcome

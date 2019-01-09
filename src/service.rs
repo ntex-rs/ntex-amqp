@@ -44,7 +44,6 @@ where
 
     fn call(&mut self, req: Framed<T, ProtocolIdCodec>) -> Self::Future {
         let proto = self.proto;
-
         Box::new(
             req.send(proto)
                 .from_err()

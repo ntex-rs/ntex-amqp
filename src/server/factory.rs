@@ -1,93 +1,268 @@
-use std::fmt::Display;
 use std::marker::PhantomData;
 
-use actix_codec::{AsyncRead, AsyncWrite};
+use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::{NewService, Service};
-use amqp::protocol::Error;
-use futures::future::{ok, FutureResult};
-use futures::{Async, Poll};
+use amqp::protocol::{Error, Frame, ProtocolId};
+use amqp::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use futures::future::{err, ok, Either, FutureResult};
+use futures::{Async, Future, Poll, Sink, Stream};
+use string;
 
-use super::dispatcher::Dispatcher;
-use super::link::OpenLink;
+use crate::cell::Cell;
 use crate::connection::Connection;
+use crate::Configuration;
+
+use super::errors::HandshakeError;
+use super::link::OpenLink;
+use super::sasl::{Sasl, SaslAuth};
 
 /// Server dispatcher factory
 pub struct ServerFactory<Io, F, St, S> {
-    factory: F,
+    inner: Cell<Inner<Io, F, St, S>>,
+}
+
+pub(super) struct Inner<Io, F, St, S> {
+    pub factory: F,
+    config: Configuration,
     _t: PhantomData<(Io, St, S)>,
 }
 
 impl<Io, F, St, S> ServerFactory<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
+    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<OpenLink<St>, Response = (), Error = Error>,
 {
     /// Create server dispatcher factory
-    pub fn new(factory: F) -> Self {
+    pub fn new(config: Configuration, factory: F) -> Self {
         Self {
-            factory,
-            _t: PhantomData,
+            inner: Cell::new(Inner {
+                factory,
+                config,
+                _t: PhantomData,
+            }),
         }
     }
 }
 
-impl<Io, F: Clone, St, S> Clone for ServerFactory<Io, F, St, S> {
+impl<Io, F, St, S> Clone for ServerFactory<Io, F, St, S> {
     fn clone(&self) -> Self {
         ServerFactory {
-            factory: self.factory.clone(),
-            _t: PhantomData,
+            inner: self.inner.clone(),
         }
     }
 }
 
-impl<Io, F, St, S> NewService<Connection<Io>> for ServerFactory<Io, F, St, S>
+impl<Io, F, St, S> NewService<Io> for ServerFactory<Io, F, St, S>
 where
-    Io: AsyncRead + AsyncWrite,
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
+    Io: AsyncRead + AsyncWrite + 'static,
+    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    St: 'static,
 {
-    type Response = ();
-    type Error = ();
+    type Response = (St, S, Connection<Io>);
+    type Error = HandshakeError;
     type Service = Server<Io, F, St, S>;
     type InitError = ();
     type Future = FutureResult<Self::Service, Self::InitError>;
 
     fn new_service(&self) -> Self::Future {
         ok(Server {
-            factory: self.factory.clone(),
-            _t: PhantomData,
+            inner: self.inner.clone(),
         })
     }
 }
 
 /// Server dispatcher
 pub struct Server<Io, F, St, S> {
-    factory: F,
-    _t: PhantomData<(Io, St, S)>,
+    inner: Cell<Inner<Io, F, St, S>>,
 }
 
-impl<Io, F, St, S> Service<Connection<Io>> for Server<Io, F, St, S>
+impl<Io, F, St, S> Service<Io> for Server<Io, F, St, S>
 where
-    Io: AsyncRead + AsyncWrite,
-    F: Service<(), Response = (St, S)> + Clone,
-    F::Error: Display + Into<Error>,
-    S: Service<OpenLink<St>, Response = ()>,
-    S::Error: Display + Into<Error>,
+    Io: AsyncRead + AsyncWrite + 'static,
+    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    St: 'static,
 {
-    type Response = ();
-    type Error = ();
-    type Future = Dispatcher<Io, F, St, S>;
+    type Response = (St, S, Connection<Io>);
+    type Error = HandshakeError;
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, req: Connection<Io>) -> Self::Future {
-        Dispatcher::new(req, &mut self.factory)
+    fn call(&mut self, req: Io) -> Self::Future {
+        let inner = self.inner.clone();
+        Box::new(
+            Framed::new(req, ProtocolIdCodec)
+                .into_future()
+                .map_err(|e| HandshakeError::from(e.0))
+                .and_then(move |(protocol, framed)| match protocol {
+                    Some(ProtocolId::Amqp) => {
+                        let mut inner = inner;
+                        let framed = framed.into_framed(ProtocolIdCodec);
+                        Either::A(
+                            handshake(inner.config.clone(), framed).and_then(move |conn| {
+                                inner
+                                    .get_mut()
+                                    .factory
+                                    .call(None)
+                                    .map_err(|_| HandshakeError::Service)
+                                    .map(move |(st, srv)| (st, srv, conn))
+                            }),
+                        )
+                    }
+                    Some(ProtocolId::AmqpSasl) => {
+                        let mut inner = inner;
+                        Either::B(Either::A(
+                            framed
+                                .send(ProtocolId::AmqpSasl)
+                                .map_err(|e| HandshakeError::from(e))
+                                .and_then(move |framed| {
+                                    Sasl::new(
+                                        &mut inner,
+                                        framed.into_framed(AmqpCodec::<SaslFrame>::new()),
+                                    )
+                                    .and_then(
+                                        move |(st, srv, framed)| {
+                                            let framed = framed.into_framed(ProtocolIdCodec);
+                                            handshake(inner.config.clone(), framed)
+                                                .map(move |conn| (st, srv, conn))
+                                        },
+                                    )
+                                }),
+                        ))
+                    }
+                    Some(ProtocolId::AmqpTls) => Either::B(Either::B(err(HandshakeError::from(
+                        ProtocolIdError::Unexpected {
+                            exp: ProtocolId::Amqp,
+                            got: ProtocolId::AmqpTls,
+                        },
+                    )))),
+                    None => Either::B(Either::B(err(HandshakeError::Disconnected.into()))),
+                }),
+        )
     }
 }
+
+pub fn handshake<Io>(
+    cfg: Configuration,
+    framed: Framed<Io, ProtocolIdCodec>,
+) -> impl Future<Item = Connection<Io>, Error = HandshakeError>
+where
+    Io: AsyncRead + AsyncWrite + 'static,
+{
+    framed
+        .into_future()
+        .map_err(|e| HandshakeError::from(e.0))
+        .and_then(move |(protocol, framed)| {
+            if let Some(protocol) = protocol {
+                if protocol == ProtocolId::Amqp {
+                    Ok(framed)
+                } else {
+                    Err(ProtocolIdError::Unexpected {
+                        exp: ProtocolId::Amqp,
+                        got: protocol,
+                    }
+                    .into())
+                }
+            } else {
+                Err(ProtocolIdError::Disconnected.into())
+            }
+        })
+        .and_then(move |framed| {
+            framed
+                .send(ProtocolId::Amqp)
+                .map_err(HandshakeError::from)
+                .map(|framed| framed.into_framed(AmqpCodec::new()))
+        })
+        .and_then(move |framed: Framed<Io, AmqpCodec<AmqpFrame>>| {
+            let cfg = cfg.clone();
+            // let time = time.clone();
+
+            // read Open frame
+            framed
+                .into_future()
+                .map_err(|res| HandshakeError::from(res.0))
+                .and_then(|(frame, framed)| {
+                    if let Some(frame) = frame {
+                        let frame = frame.into_parts().1;
+                        match frame {
+                            Frame::Open(open) => {
+                                trace!("Got open: {:?}", open);
+                                Ok((open, framed))
+                            }
+                            frame => Err(HandshakeError::Unexpected(frame)),
+                        }
+                    } else {
+                        Err(HandshakeError::Disconnected)
+                    }
+                })
+                .and_then(move |(open, framed)| {
+                    // confirm Open
+                    let local = cfg.to_open(None);
+                    framed
+                        .send(AmqpFrame::new(0, local.into()))
+                        .map_err(HandshakeError::from)
+                        .map(move |framed| {
+                            Connection::new(framed, cfg.clone(), (&open).into(), None)
+                        })
+                })
+        })
+}
+
+// fn sasl_init<Io, F, St, S>(
+//     inner: Cell<Inner<Io, F, St, S>>,
+//     framed: Framed<Io, AmqpCodec<SaslFrame>>,
+// ) -> impl Future<Item = (), Error = ()>
+// where
+//     Io: AsyncRead + AsyncWrite,
+//     F: Service<Option<SaslAuth>, Response = (St, S)>,
+//     F::Error: Display + Into<Error>,
+//     S: Service<OpenLink<St>, Response = ()>,
+//     S::Error: Display + Into<Error>,
+// {
+//     let frame = SaslFrame::from(SaslMechanisms {
+//         sasl_server_mechanisms: inner.sasl_mechanisms.clone(),
+//     });
+
+//     println!("============= {:#?}", frame);
+//     framed
+//         .send(frame)
+//         .map_err(|_| ())
+//         .and_then(|framed| framed.into_future().map_err(|_| ()))
+//         .and_then(|(frame, framed)| {
+//             println!("FRAME: {:#?}", frame);
+//             framed
+//                 .send(
+//                     SaslChallenge {
+//                         challenge: Bytes::new(),
+//                     }
+//                     .into(),
+//                 )
+//                 .map_err(|_| ())
+//         })
+//         .and_then(|framed| framed.into_future().map_err(|_| ()))
+//         .and_then(|(frame, framed)| {
+//             println!("FRAME2: {:#?}", frame);
+//             framed
+//                 .send(
+//                     SaslOutcome {
+//                         code: SaslCode::Ok,
+//                         additional_data: None,
+//                     }
+//                     .into(),
+//                 )
+//                 .map_err(|_| ())
+//             // Ok(())
+//         })
+//         .and_then(|framed| framed.into_future().map_err(|_| ()))
+//         .and_then(|(frame, framed)| {
+//             println!("FRAME3: {:#?}", frame);
+//             Ok(())
+//         })
+//         .map(|_| ())
+//         .map_err(|_| ())
+// }

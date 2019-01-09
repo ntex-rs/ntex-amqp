@@ -1,26 +1,54 @@
 use std::marker::PhantomData;
 
-use actix_service::{IntoNewService, NewService, Service};
+use actix_service::{IntoNewService, IntoService, NewService, Service, ServiceExt};
 use amqp::protocol::Error;
-use futures::{future::Join, Async, Future, IntoFuture, Poll};
+use futures::future::ok;
+use futures::{Async, Future, Poll};
 
 use super::link::OpenLink;
+use super::sasl::{no_sasl_auth, SaslAuth};
 use crate::cell::Cell;
 
 pub struct ServiceFactory;
 
 impl ServiceFactory {
     /// Set state factory
-    pub fn state<State, FState, FStOut, E>(
-        state: FState,
-    ) -> ServiceFactoryBuilder<State, FState, FStOut, E>
+    pub fn state<F, State, S>(
+        state: F,
+    ) -> ServiceFactoryBuilder<
+        State,
+        impl Service<(), Response = State, Error = Error>,
+        impl Service<SaslAuth, Response = State, Error = Error>,
+    >
     where
-        FState: Fn() -> FStOut,
-        FStOut: IntoFuture<Item = State, Error = E>,
-        E: Into<Error>,
+        F: IntoService<S, ()>,
+        State: 'static,
+        S: Service<(), Response = State>,
+        S::Error: Into<Error>,
     {
         ServiceFactoryBuilder {
-            state,
+            state: state.into_service().map_err(|e| e.into()),
+            sasl: no_sasl_auth.into_service(),
+            _t: PhantomData,
+        }
+    }
+
+    /// Provide sasl auth factory
+    pub fn sasl<F, S>(
+        srv: F,
+    ) -> ServiceFactoryBuilder<
+        (),
+        impl Service<(), Response = (), Error = Error>,
+        impl Service<SaslAuth, Response = (), Error = Error>,
+    >
+    where
+        F: IntoService<S, SaslAuth>,
+        S: Service<SaslAuth, Response = ()>,
+        S::Error: Into<Error>,
+    {
+        ServiceFactoryBuilder {
+            state: (|()| ok(())).into_service(),
+            sasl: srv.into_service().map_err(|e| e.into()),
             _t: PhantomData,
         }
     }
@@ -30,82 +58,105 @@ impl ServiceFactory {
         st: F,
     ) -> ServiceFactoryService<
         (),
-        impl Fn() -> Result<(), S::InitError>,
-        Result<(), S::InitError>,
-        S,
-        S::InitError,
+        impl NewService<OpenLink<()>, Response = (), Error = Error, InitError = Error>,
+        impl Service<(), Response = (), Error = Error>,
+        impl Service<SaslAuth, Response = (), Error = Error>,
     >
     where
         F: IntoNewService<S, OpenLink<()>>,
         S: NewService<OpenLink<()>, Response = ()>,
+        S::Error: Into<Error>,
         S::InitError: Into<Error>,
     {
         ServiceFactoryService {
             inner: Cell::new(Inner {
-                state: || Ok(()),
-                service: st.into_new_service(),
+                state: (|()| ok(())).into_service(),
+                sasl: no_sasl_auth.into_service(),
+                service: st
+                    .into_new_service()
+                    .map_err(|e| e.into())
+                    .map_init_err(|e| e.into()),
                 _t: PhantomData,
             }),
         }
     }
 }
 
-pub struct ServiceFactoryBuilder<State, FState, FStOut, E> {
-    state: FState,
-    _t: PhantomData<(State, FStOut, E)>,
+pub struct ServiceFactoryBuilder<State, StateSrv, SaslSrv> {
+    state: StateSrv,
+    sasl: SaslSrv,
+    _t: PhantomData<(State,)>,
 }
 
-impl<State, FState, FStOut, E> ServiceFactoryBuilder<State, FState, FStOut, E>
+impl<State, StateSrv, SaslSrv> ServiceFactoryBuilder<State, StateSrv, SaslSrv>
 where
-    FState: Fn() -> FStOut,
-    FStOut: IntoFuture<Item = State, Error = E>,
-    E: Into<Error>,
+    State: 'static,
+    StateSrv: Service<(), Response = State, Error = Error>,
+    SaslSrv: Service<SaslAuth, Response = State, Error = Error>,
 {
     /// Set service factory
-    fn service<F, S>(self, st: F) -> ServiceFactoryService<State, FState, FStOut, S, E>
+    pub fn service<F, Srv>(
+        self,
+        st: F,
+    ) -> ServiceFactoryService<
+        State,
+        impl NewService<OpenLink<State>, Response = (), Error = Error, InitError = Error>,
+        StateSrv,
+        SaslSrv,
+    >
     where
-        F: IntoNewService<S, OpenLink<State>>,
-        S: NewService<OpenLink<State>, Response = (), InitError = E>,
+        F: IntoNewService<Srv, OpenLink<State>>,
+        Srv: NewService<OpenLink<State>, Response = ()>,
+        Srv::InitError: Into<Error>,
+        Srv::Error: Into<Error>,
     {
         ServiceFactoryService {
             inner: Cell::new(Inner {
                 state: self.state,
-                service: st.into_new_service(),
+                sasl: self.sasl,
+                service: st
+                    .into_new_service()
+                    .map_err(|e| e.into())
+                    .map_init_err(|e| e.into()),
                 _t: PhantomData,
             }),
         }
     }
+
+    /// Set sasl service factory
+    pub fn sasl<F, SaslSrv2>(
+        self,
+        srv: F,
+    ) -> ServiceFactoryBuilder<
+        State,
+        StateSrv,
+        impl Service<SaslAuth, Response = State, Error = Error>,
+    >
+    where
+        F: IntoService<SaslSrv2, SaslAuth>,
+        SaslSrv2: Service<SaslAuth, Response = State>,
+        SaslSrv2::Error: Into<Error>,
+    {
+        ServiceFactoryBuilder {
+            state: self.state,
+            sasl: srv.into_service().map_err(|e| e.into()),
+            _t: PhantomData,
+        }
+    }
 }
 
-pub struct ServiceFactoryService<State, FState, FStOut, Srv, E>
-where
-    FState: Fn() -> FStOut,
-    FStOut: IntoFuture<Item = State, Error = E>,
-    Srv: NewService<OpenLink<State>, Response = (), InitError = E>,
-    E: Into<Error>,
-{
-    inner: Cell<Inner<State, FState, FStOut, Srv, E>>,
+pub struct ServiceFactoryService<State, Srv, StateSrv, SaslSrv> {
+    inner: Cell<Inner<State, Srv, StateSrv, SaslSrv>>,
 }
 
-pub struct Inner<State, FState, FStOut, Srv, E>
-where
-    FState: Fn() -> FStOut,
-    FStOut: IntoFuture<Item = State, Error = E>,
-    Srv: NewService<OpenLink<State>, Response = (), InitError = E>,
-    E: Into<Error>,
-{
-    state: FState,
+pub struct Inner<State, Srv, StateSrv, SaslSrv> {
+    state: StateSrv,
+    sasl: SaslSrv,
     service: Srv,
-    _t: PhantomData<(E,)>,
+    _t: PhantomData<(State,)>,
 }
 
-impl<State, FState, FStOut, Srv, E> Clone for ServiceFactoryService<State, FState, FStOut, Srv, E>
-where
-    FState: Fn() -> FStOut,
-    FStOut: IntoFuture<Item = State, Error = E>,
-    Srv: NewService<OpenLink<State>, Response = (), InitError = E>,
-    E: Into<Error>,
-{
+impl<State, Srv, StateSrv, SaslSrv> Clone for ServiceFactoryService<State, Srv, StateSrv, SaslSrv> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -113,26 +164,30 @@ where
     }
 }
 
-impl<State, FState, FStOut, Srv, E> Service<()>
-    for ServiceFactoryService<State, FState, FStOut, Srv, E>
+impl<State, Srv, StateSrv, SaslSrv> Service<Option<SaslAuth>>
+    for ServiceFactoryService<State, Srv, StateSrv, SaslSrv>
 where
-    FState: Fn() -> FStOut,
-    FStOut: IntoFuture<Item = State, Error = E>,
-    Srv: NewService<OpenLink<State>, Response = (), InitError = E>,
-    E: Into<Error>,
+    Srv: NewService<OpenLink<State>, Response = (), InitError = Error>,
+    Srv::Future: 'static,
+    StateSrv: Service<(), Response = State, Error = Error>,
+    StateSrv::Future: 'static,
+    SaslSrv: Service<SaslAuth, Response = State, Error = Error>,
+    SaslSrv::Future: 'static,
 {
     type Response = (State, Srv::Service);
-    type Error = E;
-    type Future = Join<FStOut::Future, Srv::Future>;
+    type Error = Error;
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, req: ()) -> Self::Future {
+    fn call(&mut self, req: Option<SaslAuth>) -> Self::Future {
         let inner = self.inner.get_mut();
-        (inner.state)()
-            .into_future()
-            .join(inner.service.new_service())
+        if let Some(auth) = req {
+            Box::new(inner.sasl.call(auth).join(inner.service.new_service()))
+        } else {
+            Box::new(inner.state.call(()).join(inner.service.new_service()))
+        }
     }
 }

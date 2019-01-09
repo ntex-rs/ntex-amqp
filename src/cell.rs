@@ -1,5 +1,6 @@
 //! Custom cell impl
 use std::cell::UnsafeCell;
+use std::ops::Deref;
 use std::rc::{Rc, Weak};
 
 pub(crate) struct Cell<T> {
@@ -15,6 +16,14 @@ impl<T> Clone for Cell<T> {
         Self {
             inner: self.inner.clone(),
         }
+    }
+}
+
+impl<T> Deref for Cell<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.get_ref()
     }
 }
 
