@@ -29,6 +29,13 @@ pub struct MessageBody {
 const SECTION_PREFIX_LENGTH: usize = 3;
 
 impl Message {
+    /// Create new message and set body
+    pub fn with_body(body: Bytes) -> Message {
+        let mut msg = Message::default();
+        msg.body.data.push(body);
+        msg
+    }
+
     /// Header
     pub fn header(&self) -> Option<&Header> {
         self.header.as_ref()
