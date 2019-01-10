@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::codec::{Decode, Encode};
 use crate::errors::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section};
-use crate::types::{ByteStr, List, Variant};
+use crate::types::{ByteStr, Descriptor, List, Variant};
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -149,33 +149,42 @@ impl Encode for Message {
 
     fn encode(&self, dst: &mut BytesMut) {
         if let Some(ref h) = self.header {
+            Descriptor::Ulong(112).encode(dst);
             h.encode(dst);
         }
         if let Some(ref da) = self.delivery_annotations {
+            Descriptor::Ulong(113).encode(dst);
             da.encode(dst);
         }
         if let Some(ref ma) = self.message_annotations {
+            Descriptor::Ulong(114).encode(dst);
             ma.encode(dst);
         }
         if let Some(ref p) = self.properties {
+            Descriptor::Ulong(115).encode(dst);
             p.encode(dst);
         }
         if let Some(ref ap) = self.application_properties {
+            Descriptor::Ulong(116).encode(dst);
             ap.encode(dst);
         }
+        if let Some(ref v) = self.data {
+            Descriptor::Ulong(117).encode(dst);
+            v.encode(dst);
+        }
         if let Some(ref s) = self.sequence {
+            Descriptor::Ulong(118).encode(dst);
             s.encode(dst);
         }
         if let Some(ref v) = self.value {
-            v.encode(dst);
-        }
-        if let Some(ref v) = self.data {
+            Descriptor::Ulong(119).encode(dst);
             v.encode(dst);
         }
 
         self.application_data.encode(dst);
 
         if let Some(ref f) = self.footer {
+            Descriptor::Ulong(120).encode(dst);
             f.encode(dst);
         }
     }
@@ -218,11 +227,53 @@ impl Encode for MessageBody {
 
     fn encode(&self, dst: &mut BytesMut) {
         match self {
-            MessageBody::Data(d) => d.encode(dst),
-            MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| d.encode(dst)),
-            MessageBody::Messages(msgs) => msgs.into_iter().for_each(|m| m.encode(dst)),
-            MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| seq.encode(dst)),
-            MessageBody::Value(val) => val.encode(dst),
+            MessageBody::Data(d) => {
+                Descriptor::Ulong(117).encode(dst);
+                d.encode(dst)
+            }
+            MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| {
+                Descriptor::Ulong(117).encode(dst);
+                d.encode(dst);
+            }),
+            MessageBody::Messages(msgs) => msgs.into_iter().for_each(|m| {
+                Descriptor::Ulong(117).encode(dst);
+                m.encode(dst)
+            }),
+            MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| {
+                Descriptor::Ulong(118).encode(dst);
+                seq.encode(dst)
+            }),
+            MessageBody::Value(val) => {
+                Descriptor::Ulong(119).encode(dst);
+                val.encode(dst)
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+
+    use crate::codec::{Decode, Encode};
+    use crate::errors::AmqpCodecError;
+
+    use super::Message;
+
+    #[test]
+    fn test_message_app_properties() -> Result<(), AmqpCodecError> {
+        let msg = Message::default().set_app_property(string::String::from_str("test"), 1);
+
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg2 = Message::decode(&buf)?.1;
+        let props = msg2.application_properties.as_ref().unwrap();
+        assert_eq!(
+            *props.get(&string::String::from_str("test")).unwrap(),
+            1.into()
+        );
+
+        Ok(())
     }
 }
