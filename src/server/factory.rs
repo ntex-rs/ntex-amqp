@@ -102,17 +102,17 @@ where
                 .and_then(move |(protocol, framed)| match protocol {
                     Some(ProtocolId::Amqp) => {
                         let mut inner = inner;
-                        let framed = framed.into_framed(ProtocolIdCodec);
-                        Either::A(
-                            handshake(inner.config.clone(), framed).and_then(move |conn| {
+                        let framed = framed.into_framed(AmqpCodec::new());
+                        Either::A(open_connection(inner.config.clone(), framed).and_then(
+                            move |conn| {
                                 inner
                                     .get_mut()
                                     .factory
                                     .call(None)
                                     .map_err(|_| HandshakeError::Service)
                                     .map(move |(st, srv)| (st, srv, conn))
-                            }),
-                        )
+                            },
+                        ))
                     }
                     Some(ProtocolId::AmqpSasl) => {
                         let mut inner = inner;
@@ -178,91 +178,42 @@ where
                 .map_err(HandshakeError::from)
                 .map(|framed| framed.into_framed(AmqpCodec::new()))
         })
-        .and_then(move |framed: Framed<Io, AmqpCodec<AmqpFrame>>| {
-            let cfg = cfg.clone();
-            // let time = time.clone();
-
-            // read Open frame
-            framed
-                .into_future()
-                .map_err(|res| HandshakeError::from(res.0))
-                .and_then(|(frame, framed)| {
-                    if let Some(frame) = frame {
-                        let frame = frame.into_parts().1;
-                        match frame {
-                            Frame::Open(open) => {
-                                trace!("Got open: {:?}", open);
-                                Ok((open, framed))
-                            }
-                            frame => Err(HandshakeError::Unexpected(frame)),
-                        }
-                    } else {
-                        Err(HandshakeError::Disconnected)
-                    }
-                })
-                .and_then(move |(open, framed)| {
-                    // confirm Open
-                    let local = cfg.to_open(None);
-                    framed
-                        .send(AmqpFrame::new(0, local.into()))
-                        .map_err(HandshakeError::from)
-                        .map(move |framed| {
-                            Connection::new(framed, cfg.clone(), (&open).into(), None)
-                        })
-                })
-        })
+        .and_then(move |framed| open_connection(cfg.clone(), framed))
 }
 
-// fn sasl_init<Io, F, St, S>(
-//     inner: Cell<Inner<Io, F, St, S>>,
-//     framed: Framed<Io, AmqpCodec<SaslFrame>>,
-// ) -> impl Future<Item = (), Error = ()>
-// where
-//     Io: AsyncRead + AsyncWrite,
-//     F: Service<Option<SaslAuth>, Response = (St, S)>,
-//     F::Error: Display + Into<Error>,
-//     S: Service<OpenLink<St>, Response = ()>,
-//     S::Error: Display + Into<Error>,
-// {
-//     let frame = SaslFrame::from(SaslMechanisms {
-//         sasl_server_mechanisms: inner.sasl_mechanisms.clone(),
-//     });
+pub fn open_connection<Io>(
+    cfg: Configuration,
+    framed: Framed<Io, AmqpCodec<AmqpFrame>>,
+) -> impl Future<Item = Connection<Io>, Error = HandshakeError>
+where
+    Io: AsyncRead + AsyncWrite + 'static,
+{
+    // let time = time.clone();
 
-//     println!("============= {:#?}", frame);
-//     framed
-//         .send(frame)
-//         .map_err(|_| ())
-//         .and_then(|framed| framed.into_future().map_err(|_| ()))
-//         .and_then(|(frame, framed)| {
-//             println!("FRAME: {:#?}", frame);
-//             framed
-//                 .send(
-//                     SaslChallenge {
-//                         challenge: Bytes::new(),
-//                     }
-//                     .into(),
-//                 )
-//                 .map_err(|_| ())
-//         })
-//         .and_then(|framed| framed.into_future().map_err(|_| ()))
-//         .and_then(|(frame, framed)| {
-//             println!("FRAME2: {:#?}", frame);
-//             framed
-//                 .send(
-//                     SaslOutcome {
-//                         code: SaslCode::Ok,
-//                         additional_data: None,
-//                     }
-//                     .into(),
-//                 )
-//                 .map_err(|_| ())
-//             // Ok(())
-//         })
-//         .and_then(|framed| framed.into_future().map_err(|_| ()))
-//         .and_then(|(frame, framed)| {
-//             println!("FRAME3: {:#?}", frame);
-//             Ok(())
-//         })
-//         .map(|_| ())
-//         .map_err(|_| ())
-// }
+    // read Open frame
+    framed
+        .into_future()
+        .map_err(|res| HandshakeError::from(res.0))
+        .and_then(|(frame, framed)| {
+            if let Some(frame) = frame {
+                let frame = frame.into_parts().1;
+                match frame {
+                    Frame::Open(open) => {
+                        trace!("Got open: {:?}", open);
+                        Ok((open, framed))
+                    }
+                    frame => Err(HandshakeError::Unexpected(frame)),
+                }
+            } else {
+                Err(HandshakeError::Disconnected)
+            }
+        })
+        .and_then(move |(open, framed)| {
+            // confirm Open
+            let local = cfg.to_open(None);
+            framed
+                .send(AmqpFrame::new(0, local.into()))
+                .map_err(HandshakeError::from)
+                .map(move |framed| Connection::new(framed, cfg.clone(), (&open).into(), None))
+        })
+}
