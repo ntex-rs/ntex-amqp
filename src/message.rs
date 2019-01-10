@@ -59,7 +59,7 @@ impl Message {
         self
     }
 
-    pub(crate) fn serialize(self) -> Bytes {
+    pub fn serialize(self) -> Bytes {
         let mut dst = BytesMut::with_capacity(self.encoded_size());
         if let Some(h) = self.header {
             Section::Header(h).encode(&mut dst);
@@ -95,7 +95,7 @@ impl Message {
         dst.freeze()
     }
 
-    pub(crate) fn deserialize(src: &Bytes) -> Result<Message, AmqpParseError> {
+    pub fn deserialize(src: &Bytes) -> Result<Message, AmqpParseError> {
         let mut message = Message::default();
 
         let mut input: &[u8] = &src;
