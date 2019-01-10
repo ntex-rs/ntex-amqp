@@ -26,6 +26,7 @@ pub enum MessageBody {
     Data(Bytes),
     DataVec(Vec<Bytes>),
     SequenceVec(Vec<List>),
+    Messages(Vec<Message>),
     Value(Variant),
 }
 
@@ -208,6 +209,9 @@ impl Encode for MessageBody {
             MessageBody::SequenceVec(ref seqs) => seqs
                 .iter()
                 .fold(0, |a, seq| a + seq.encoded_size() + SECTION_PREFIX_LENGTH),
+            MessageBody::Messages(ref msgs) => msgs
+                .iter()
+                .fold(0, |a, m| a + m.encoded_size() + SECTION_PREFIX_LENGTH),
             MessageBody::Value(ref val) => val.encoded_size() + SECTION_PREFIX_LENGTH,
         }
     }
@@ -216,6 +220,7 @@ impl Encode for MessageBody {
         match self {
             MessageBody::Data(d) => d.encode(dst),
             MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| d.encode(dst)),
+            MessageBody::Messages(msgs) => msgs.into_iter().for_each(|m| m.encode(dst)),
             MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| seq.encode(dst)),
             MessageBody::Value(val) => val.encode(dst),
         }
