@@ -50,7 +50,6 @@ impl SenderLink {
         &mut self,
         msg: Message,
     ) -> impl Future<Item = Outcome, Error = AmqpTransportError> {
-        println!("MSG: {:#?}", msg);
         self.inner.get_mut().send(msg)
     }
 }

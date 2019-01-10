@@ -115,8 +115,6 @@ where
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        println!("POLL DISP");
-
         loop {
             // handle remote begin and attach
             match self.conn.poll_incoming() {
