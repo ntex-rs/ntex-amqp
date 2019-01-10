@@ -13,8 +13,6 @@ use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
 use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
 
-pub const INVALID_DESCRIPTOR: u32 = 0x0003;
-
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
         decode_check_len!($input, $size);

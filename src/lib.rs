@@ -2,7 +2,7 @@
 extern crate derive_more;
 
 #[macro_use]
-pub mod codec;
+mod codec;
 mod errors;
 mod framing;
 mod io;

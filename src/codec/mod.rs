@@ -16,7 +16,6 @@ mod decode;
 mod encode;
 
 pub(crate) use self::decode::decode_list_header;
-pub use self::decode::INVALID_DESCRIPTOR;
 
 pub trait Encode {
     fn encoded_size(&self) -> usize;
@@ -83,9 +82,9 @@ pub const FORMATCODE_SMALLINT: u8 = 0x54;
 pub const FORMATCODE_SMALLLONG: u8 = 0x55;
 pub const FORMATCODE_FLOAT: u8 = 0x72;
 pub const FORMATCODE_DOUBLE: u8 = 0x82;
-pub const FORMATCODE_DECIMAL32: u8 = 0x74;
-pub const FORMATCODE_DECIMAL64: u8 = 0x84;
-pub const FORMATCODE_DECIMAL128: u8 = 0x94;
+// pub const FORMATCODE_DECIMAL32: u8 = 0x74;
+// pub const FORMATCODE_DECIMAL64: u8 = 0x84;
+// pub const FORMATCODE_DECIMAL128: u8 = 0x94;
 pub const FORMATCODE_CHAR: u8 = 0x73;
 pub const FORMATCODE_TIMESTAMP: u8 = 0x83;
 pub const FORMATCODE_UUID: u8 = 0x98;

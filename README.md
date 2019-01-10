@@ -1,3 +1,3 @@
-# AMQP 1.0 Protocol implementation in Rust
+# AMQP 1.0 Protocol Codec
 
-[![Build Status](https://travis-ci.org/myagley/rust-amqp1.svg?branch=master)](https://travis-ci.org/myagley/rust-amqp1)
+[![Build Status](https://travis-ci.org/fafhrd91/amqp-codec.svg?branch=master)](https://travis-ci.org/fafhrd91/amqp-codec)
