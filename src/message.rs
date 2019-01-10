@@ -1,12 +1,12 @@
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
 
-use crate::codec::{Decode, Encode};
+use crate::codec::{Decode, Encode, FORMATCODE_BINARY32, FORMATCODE_BINARY8};
 use crate::errors::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section};
 use crate::types::{ByteStr, Descriptor, List, Variant};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Message {
     pub message_format: Option<MessageFormat>,
     pub header: Option<Header>,
@@ -14,20 +14,16 @@ pub struct Message {
     pub message_annotations: Option<Annotations>,
     pub properties: Option<Properties>,
     pub application_properties: Option<HashMap<ByteStr, Variant>>,
-    pub application_data: MessageBody,
-    pub sequence: Option<List>,
-    pub value: Option<Variant>,
-    pub data: Option<Bytes>,
     pub footer: Option<Annotations>,
+    pub body: MessageBody,
 }
 
-#[derive(Debug, Clone)]
-pub enum MessageBody {
-    Data(Bytes),
-    DataVec(Vec<Bytes>),
-    SequenceVec(Vec<List>),
-    Messages(Vec<Message>),
-    Value(Variant),
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MessageBody {
+    pub data: Vec<Bytes>,
+    pub sequence: Vec<List>,
+    pub messages: Vec<Message>,
+    pub value: Option<Variant>,
 }
 
 const SECTION_PREFIX_LENGTH: usize = 3;
@@ -87,6 +83,20 @@ impl Message {
             self
         }
     }
+
+    /// Message body
+    pub fn body(&self) -> &MessageBody {
+        &self.body
+    }
+
+    /// Set message body
+    pub fn set_body<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&mut MessageBody),
+    {
+        f(&mut self.body);
+        self
+    }
 }
 
 impl Decode for Message {
@@ -114,14 +124,16 @@ impl Decode for Message {
                 Section::Properties(val) => {
                     message.properties = Some(val);
                 }
+
+                // body
                 Section::AmqpSequence(val) => {
-                    message.sequence = Some(val);
+                    message.body.sequence.push(val);
                 }
                 Section::AmqpValue(val) => {
-                    message.value = Some(val);
+                    message.body.value = Some(val);
                 }
                 Section::Data(val) => {
-                    message.data = Some(val);
+                    message.body.data.push(val);
                 }
             }
             if buf.is_empty() {
@@ -135,35 +147,34 @@ impl Decode for Message {
 
 impl Encode for Message {
     fn encoded_size(&self) -> usize {
-        let mut size = self.application_data.encoded_size();
+        // body size, always add empty body if needed
+        let body_size = self.body.encoded_size();
+        let mut size = if body_size == 0 {
+            // empty bytes
+            SECTION_PREFIX_LENGTH + 2
+        } else {
+            body_size
+        };
+
         if let Some(ref h) = self.header {
             size += h.encoded_size() + SECTION_PREFIX_LENGTH;
         }
         if let Some(ref da) = self.delivery_annotations {
-            size += SECTION_PREFIX_LENGTH + da.encoded_size();
+            size += da.encoded_size() + SECTION_PREFIX_LENGTH;
         }
         if let Some(ref ma) = self.message_annotations {
             size += ma.encoded_size() + SECTION_PREFIX_LENGTH;
         }
         if let Some(ref p) = self.properties {
-            size += p.encoded_size() + SECTION_PREFIX_LENGTH;
+            size += p.encoded_size();
         }
         if let Some(ref ap) = self.application_properties {
             size += ap.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-        if let Some(ref sec) = self.sequence {
-            size += sec.encoded_size() + SECTION_PREFIX_LENGTH;
-        }
-        if let Some(ref v) = self.value {
-            size += v.encoded_size() + SECTION_PREFIX_LENGTH;
-        }
-        if let Some(ref d) = self.data {
-            size += d.encoded_size() + SECTION_PREFIX_LENGTH;
-        }
         if let Some(ref f) = self.footer {
             size += f.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-        size + self.application_data.encoded_size() + SECTION_PREFIX_LENGTH
+        size
     }
 
     fn encode(&self, dst: &mut BytesMut) {
@@ -185,21 +196,18 @@ impl Encode for Message {
             Descriptor::Ulong(116).encode(dst);
             ap.encode(dst);
         }
-        if let Some(ref v) = self.data {
+
+        // message body
+        if self.body.encoded_size() == 0 {
+            // special treatment for empty body
             Descriptor::Ulong(117).encode(dst);
-            v.encode(dst);
-        }
-        if let Some(ref s) = self.sequence {
-            Descriptor::Ulong(118).encode(dst);
-            s.encode(dst);
-        }
-        if let Some(ref v) = self.value {
-            Descriptor::Ulong(119).encode(dst);
-            v.encode(dst);
+            dst.put_u8(FORMATCODE_BINARY8);
+            dst.put_u8(0);
+        } else {
+            self.body.encode(dst);
         }
 
-        self.application_data.encode(dst);
-
+        // message footer, always last item
         if let Some(ref f) = self.footer {
             Descriptor::Ulong(120).encode(dst);
             f.encode(dst);
@@ -207,70 +215,83 @@ impl Encode for Message {
     }
 }
 
-impl Default for Message {
-    fn default() -> Message {
-        Message {
-            message_format: None,
-            header: None,
-            delivery_annotations: None,
-            message_annotations: None,
-            properties: None,
-            application_properties: None,
-            application_data: MessageBody::Data(Bytes::new()),
-            sequence: None,
-            value: None,
-            data: None,
-            footer: None,
+impl MessageBody {
+    pub fn data(&self) -> Option<&Bytes> {
+        if self.data.is_empty() {
+            None
+        } else {
+            Some(&self.data[0])
         }
+    }
+
+    pub fn value(&self) -> Option<&Variant> {
+        self.value.as_ref()
+    }
+
+    pub fn set_data(&mut self, data: Bytes) {
+        self.data.clear();
+        self.data.push(data);
     }
 }
 
 impl Encode for MessageBody {
     fn encoded_size(&self) -> usize {
-        match *self {
-            MessageBody::Data(ref d) => d.encoded_size() + SECTION_PREFIX_LENGTH,
-            MessageBody::DataVec(ref ds) => ds
-                .iter()
-                .fold(0, |a, d| a + d.encoded_size() + SECTION_PREFIX_LENGTH),
-            MessageBody::SequenceVec(ref seqs) => seqs
-                .iter()
-                .fold(0, |a, seq| a + seq.encoded_size() + SECTION_PREFIX_LENGTH),
-            MessageBody::Messages(ref msgs) => msgs
-                .iter()
-                .fold(0, |a, m| a + m.encoded_size() + SECTION_PREFIX_LENGTH),
-            MessageBody::Value(ref val) => val.encoded_size() + SECTION_PREFIX_LENGTH,
+        let mut size = self
+            .data
+            .iter()
+            .fold(0, |a, d| a + d.encoded_size() + SECTION_PREFIX_LENGTH);
+        size += self
+            .sequence
+            .iter()
+            .fold(0, |a, seq| a + seq.encoded_size() + SECTION_PREFIX_LENGTH);
+        size += self.messages.iter().fold(0, |a, m| {
+            let length = m.encoded_size();
+            let size = length + if length > std::u8::MAX as usize { 5 } else { 2 };
+            a + size + SECTION_PREFIX_LENGTH
+        });
+
+        if let Some(ref val) = self.value {
+            size + val.encoded_size() + SECTION_PREFIX_LENGTH
+        } else {
+            size
         }
     }
 
     fn encode(&self, dst: &mut BytesMut) {
-        match self {
-            MessageBody::Data(d) => {
-                Descriptor::Ulong(117).encode(dst);
-                d.encode(dst)
-            }
-            MessageBody::DataVec(ds) => ds.into_iter().for_each(|d| {
-                Descriptor::Ulong(117).encode(dst);
-                d.encode(dst);
-            }),
-            MessageBody::Messages(msgs) => msgs.into_iter().for_each(|m| {
-                Descriptor::Ulong(117).encode(dst);
-                m.encode(dst)
-            }),
-            MessageBody::SequenceVec(seqs) => seqs.into_iter().for_each(|seq| {
-                Descriptor::Ulong(118).encode(dst);
-                seq.encode(dst)
-            }),
-            MessageBody::Value(val) => {
-                Descriptor::Ulong(119).encode(dst);
-                val.encode(dst)
-            }
+        self.data.iter().for_each(|d| {
+            Descriptor::Ulong(117).encode(dst);
+            d.encode(dst);
+        });
+        self.sequence.iter().for_each(|seq| {
+            Descriptor::Ulong(118).encode(dst);
+            seq.encode(dst)
+        });
+        if let Some(ref val) = self.value {
+            Descriptor::Ulong(119).encode(dst);
+            val.encode(dst);
         }
+        // encode Message as nested Bytes object
+        self.messages.iter().for_each(|m| {
+            Descriptor::Ulong(117).encode(dst);
+
+            // Bytes prefix
+            let length = m.encoded_size();
+            if length > std::u8::MAX as usize {
+                dst.put_u8(FORMATCODE_BINARY32);
+                dst.put_u32_be(length as u32);
+            } else {
+                dst.put_u8(FORMATCODE_BINARY8);
+                dst.put_u8(length as u8);
+            }
+            // encode nested Message
+            m.encode(dst);
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
+    use bytes::{Bytes, BytesMut};
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
@@ -323,6 +344,51 @@ mod tests {
 
         let msg2 = Message::decode(&buf)?.1;
         assert_eq!(msg2.header().unwrap(), &hdr);
+        Ok(())
+    }
+
+    #[test]
+    fn test_data() -> Result<(), AmqpCodecError> {
+        let data = Bytes::from_static(b"test data");
+
+        let msg = Message::default().set_body(|body| body.set_data(data.clone()));
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg2 = Message::decode(&buf)?.1;
+        assert_eq!(msg2.body.data().unwrap(), &data);
+        Ok(())
+    }
+
+    #[test]
+    fn test_data_empty() -> Result<(), AmqpCodecError> {
+        let msg = Message::default();
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg2 = Message::decode(&buf)?.1;
+        assert_eq!(msg2.body.data().unwrap(), &Bytes::from_static(b""));
+        Ok(())
+    }
+
+    #[test]
+    fn test_messages() -> Result<(), AmqpCodecError> {
+        let msg1 = Message::default().set_properties(|props| props.message_id = Some(1.into()));
+        let msg2 = Message::default().set_properties(|props| props.message_id = Some(2.into()));
+
+        let msg = Message::default().set_body(|body| {
+            body.messages.push(msg1.clone());
+            body.messages.push(msg2.clone());
+        });
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg3 = Message::decode(&buf)?.1;
+        let msg4 = Message::decode(&msg3.body.data().unwrap())?.1;
+        assert_eq!(msg1.properties, msg4.properties);
+
+        let msg5 = Message::decode(&msg3.body.data[1])?.1;
+        assert_eq!(msg2.properties, msg5.properties);
         Ok(())
     }
 }
