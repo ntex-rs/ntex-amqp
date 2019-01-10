@@ -33,7 +33,18 @@ pub enum MessageBody {
 const SECTION_PREFIX_LENGTH: usize = 3;
 
 impl Message {
-    /// Add property
+    /// Header
+    pub fn header(&self) -> Option<&Header> {
+        self.header.as_ref()
+    }
+
+    /// Set message header
+    pub fn set_header(mut self, header: Header) -> Self {
+        self.header = Some(header);
+        self
+    }
+
+    /// Message properties
     pub fn properties(&self) -> Option<&Properties> {
         self.properties.as_ref()
     }
@@ -140,16 +151,23 @@ impl Encode for Message {
         if let Some(ref ap) = self.application_properties {
             size += ap.encoded_size() + SECTION_PREFIX_LENGTH;
         }
+        if let Some(ref sec) = self.sequence {
+            size += sec.encoded_size() + SECTION_PREFIX_LENGTH;
+        }
+        if let Some(ref v) = self.value {
+            size += v.encoded_size() + SECTION_PREFIX_LENGTH;
+        }
+        if let Some(ref d) = self.data {
+            size += d.encoded_size() + SECTION_PREFIX_LENGTH;
+        }
         if let Some(ref f) = self.footer {
             size += f.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-
-        size
+        size + self.application_data.encoded_size() + SECTION_PREFIX_LENGTH
     }
 
     fn encode(&self, dst: &mut BytesMut) {
         if let Some(ref h) = self.header {
-            Descriptor::Ulong(112).encode(dst);
             h.encode(dst);
         }
         if let Some(ref da) = self.delivery_annotations {
@@ -161,7 +179,6 @@ impl Encode for Message {
             ma.encode(dst);
         }
         if let Some(ref p) = self.properties {
-            Descriptor::Ulong(115).encode(dst);
             p.encode(dst);
         }
         if let Some(ref ap) = self.application_properties {
@@ -257,11 +274,25 @@ mod tests {
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
+    use crate::protocol::Header;
 
     use super::Message;
 
     #[test]
-    fn test_message_app_properties() -> Result<(), AmqpCodecError> {
+    fn test_properties() -> Result<(), AmqpCodecError> {
+        let msg = Message::default().set_properties(|props| props.message_id = Some(1.into()));
+
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg2 = Message::decode(&buf)?.1;
+        let props = msg2.properties.as_ref().unwrap();
+        assert_eq!(props.message_id, Some(1.into()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_app_properties() -> Result<(), AmqpCodecError> {
         let msg = Message::default().set_app_property(string::String::from_str("test"), 1);
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
@@ -273,7 +304,25 @@ mod tests {
             *props.get(&string::String::from_str("test")).unwrap(),
             1.into()
         );
+        Ok(())
+    }
 
+    #[test]
+    fn test_header() -> Result<(), AmqpCodecError> {
+        let hdr = Header {
+            durable: false,
+            priority: 1,
+            ttl: None,
+            first_acquirer: false,
+            delivery_count: 1,
+        };
+
+        let msg = Message::default().set_header(hdr.clone());
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg2 = Message::decode(&buf)?.1;
+        assert_eq!(msg2.header().unwrap(), &hdr);
         Ok(())
     }
 }
