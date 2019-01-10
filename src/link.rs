@@ -2,21 +2,31 @@ use std::collections::VecDeque;
 
 use amqp::protocol::{Attach, Disposition, Error, Flow, Outcome, SequenceNo, Transfer};
 use amqp::types::ByteStr;
+use bytes::Bytes;
 use futures::task::AtomicTask;
 use futures::{unsync::oneshot, Async, Future, Poll, Stream};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
-use crate::session::SessionInner;
+use crate::session::{Session, SessionInner};
 use crate::{Delivery, DeliveryPromise, Handle, Message};
 
 #[derive(Clone)]
 pub struct SenderLink {
-    inner: Cell<SenderLinkInner>,
+    pub(crate) inner: Cell<SenderLinkInner>,
+}
+
+impl std::fmt::Debug for SenderLink {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_tuple("SenderLink")
+            .field(&std::ops::Deref::deref(&self.inner.get_ref().name))
+            .finish()
+    }
 }
 
 pub(crate) struct SenderLinkInner {
     id: usize,
+    name: string::String<Bytes>,
     session: Cell<SessionInner>,
     remote_handle: Handle,
     delivery_count: SequenceNo,
@@ -37,16 +47,23 @@ impl SenderLink {
 
     pub fn send(
         &mut self,
-        message: Message,
+        msg: Message,
     ) -> impl Future<Item = Outcome, Error = AmqpTransportError> {
-        self.inner.get_mut().send(message)
+        println!("MSG: {:#?}", msg);
+        self.inner.get_mut().send(msg)
     }
 }
 
 impl SenderLinkInner {
-    pub(crate) fn new(session: Cell<SessionInner>, id: usize, handle: Handle) -> SenderLinkInner {
+    pub(crate) fn new(
+        id: usize,
+        name: string::String<Bytes>,
+        handle: Handle,
+        session: Cell<SessionInner>,
+    ) -> SenderLinkInner {
         SenderLinkInner {
             id,
+            name,
             session,
             remote_handle: handle,
             delivery_count: 0,
@@ -58,6 +75,10 @@ impl SenderLinkInner {
 
     pub fn id(&self) -> u32 {
         self.id as u32
+    }
+
+    pub(crate) fn name(&self) -> &string::String<Bytes> {
+        &self.name
     }
 
     pub(crate) fn detached(&mut self, err: AmqpTransportError) {
@@ -140,6 +161,14 @@ impl ReceiverLink {
         ReceiverLink { inner }
     }
 
+    pub fn session(&self) -> &Session {
+        &self.inner.get_ref().session
+    }
+
+    pub fn session_mut(&mut self) -> &mut Session {
+        &mut self.inner.get_mut().session
+    }
+
     pub fn frame(&self) -> &Attach {
         &self.inner.get_ref().attach
     }
@@ -148,6 +177,7 @@ impl ReceiverLink {
         let inner = self.inner.get_mut();
         inner
             .session
+            .inner
             .get_mut()
             .confirm_receiver_link(inner.handle, &inner.attach);
     }
@@ -169,7 +199,7 @@ impl ReceiverLink {
             properties: None,
             body: None,
         };
-        inner.session.get_mut().post_frame(flow.into());
+        inner.session.inner.get_mut().post_frame(flow.into());
     }
 
     /// Send disposition frame
@@ -177,6 +207,7 @@ impl ReceiverLink {
         self.inner
             .get_mut()
             .session
+            .inner
             .get_mut()
             .post_frame(disp.into());
     }
@@ -216,7 +247,7 @@ impl Stream for ReceiverLink {
 pub(crate) struct ReceiverLinkInner {
     handle: usize,
     attach: Attach,
-    session: Cell<SessionInner>,
+    session: Session,
     closed: bool,
     reader_task: AtomicTask,
     queue: VecDeque<Transfer>,
@@ -231,7 +262,7 @@ impl ReceiverLinkInner {
         ReceiverLinkInner {
             handle,
             attach,
-            session,
+            session: Session::new(session),
             closed: false,
             reader_task: AtomicTask::new(),
             queue: VecDeque::with_capacity(4),
@@ -251,6 +282,7 @@ impl ReceiverLinkInner {
             let _ = tx.send(Ok(()));
         } else {
             self.session
+                .inner
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }

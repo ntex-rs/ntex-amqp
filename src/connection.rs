@@ -192,7 +192,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         frame.performative().name(),
                         frame.encoded_size()
                     );
-                    trace!("outgoing: {:#?}", frame);
+                    // trace!("outgoing: {:#?}", frame);
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
@@ -211,9 +211,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         inner.set_error(e.clone().into());
                         return Err(e);
                     }
-                    Ok(Async::Ready(_)) => {
-                        inner.write_task.register();
-                    }
+                    Ok(Async::Ready(_)) => inner.write_task.register(),
                 }
             } else {
                 break;

@@ -23,7 +23,7 @@ use crate::DeliveryPromise;
 
 #[derive(Clone)]
 pub struct Session {
-    inner: Cell<SessionInner>,
+    pub(crate) inner: Cell<SessionInner>,
 }
 
 impl Drop for Session {
@@ -39,6 +39,19 @@ impl Session {
 
     pub fn close(&self) -> impl Future<Item = (), Error = AmqpTransportError> {
         future::ok(())
+    }
+
+    pub fn get_sender_link(&mut self, name: &str) -> Option<&mut SenderLink> {
+        let inner = self.inner.get_mut();
+
+        if let Some(id) = inner.sender_links.get(name) {
+            if let Some(Either::Left(SenderLinkState::Established(ref mut link))) =
+                inner.links.get_mut(*id)
+            {
+                return Some(link);
+            }
+        }
+        None
     }
 
     /// Open sender link
@@ -78,13 +91,13 @@ impl Session {
             unsettled: None,
             incomplete_unsettled: false,
             initial_delivery_count: None,
-            max_message_size: None,
+            max_message_size: Some(65536),
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
             body: None,
         };
-        inner.pending_links.insert(name, token);
+        inner.sender_links.insert(name, token);
         inner.post_frame(Frame::Attach(attach));
         rx.map_err(|_e| AmqpTransportError::Disconnected)
     }
@@ -92,8 +105,8 @@ impl Session {
 
 enum SenderLinkState {
     Opening(oneshot::Sender<SenderLink>),
-    Established(Cell<SenderLinkInner>),
-    Closing(Cell<SenderLinkInner>),
+    Established(SenderLink),
+    Closing(SenderLink),
 }
 
 enum ReceiverLinkState {
@@ -121,8 +134,8 @@ pub(crate) struct SessionInner {
     incoming_window: u32,
     unsettled_deliveries: BTreeMap<DeliveryNumber, DeliveryPromise>,
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
+    sender_links: HashMap<string::String<Bytes>, usize>,
     remote_handles: HashMap<Handle, usize>,
-    pending_links: HashMap<string::String<Bytes>, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
     error: Option<AmqpTransportError>,
 }
@@ -152,8 +165,8 @@ impl SessionInner {
             incoming_window,
             unsettled_deliveries: BTreeMap::new(),
             links: Slab::new(),
+            sender_links: HashMap::new(),
             remote_handles: HashMap::new(),
-            pending_links: HashMap::new(),
             pending_transfers: VecDeque::new(),
             error: None,
         }
@@ -172,13 +185,13 @@ impl SessionInner {
         }
 
         // drop links
-        self.pending_links.clear();
+        self.sender_links.clear();
         for (_, st) in self.links.iter_mut() {
             match st {
                 Either::Left(SenderLinkState::Opening(_)) => (),
                 Either::Left(SenderLinkState::Established(ref mut link))
                 | Either::Left(SenderLinkState::Closing(ref mut link)) => {
-                    link.get_mut().set_error(err.clone())
+                    link.inner.get_mut().set_error(err.clone())
                 }
                 _ => (),
             }
@@ -217,9 +230,24 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
+        let mut name = None;
+        if let Some(ref source) = attach.source {
+            if let Some(ref addr) = source.address {
+                name = Some(addr.clone());
+                self.sender_links.insert(addr.clone(), token);
+            }
+        }
+
         self.remote_handles.insert(attach.handle(), token);
-        let link = Cell::new(SenderLinkInner::new(cell, token, attach.handle()));
-        entry.insert(Either::Left(SenderLinkState::Established(link)));
+        let link = Cell::new(SenderLinkInner::new(
+            token,
+            name.unwrap_or_else(|| string::String::default()),
+            attach.handle(),
+            cell,
+        ));
+        entry.insert(Either::Left(SenderLinkState::Established(SenderLink::new(
+            link,
+        ))));
 
         let attach = Attach {
             name: attach.name.clone(),
@@ -232,7 +260,7 @@ impl SessionInner {
             unsettled: None,
             incomplete_unsettled: false,
             initial_delivery_count: Some(1),
-            max_message_size: None,
+            max_message_size: Some(65536),
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
@@ -375,8 +403,8 @@ impl SessionInner {
     /// Handle `Attach` frame. return false if attach frame is remote and can not be handled
     pub fn handle_attach(&mut self, attach: &Attach, cell: Cell<SessionInner>) -> bool {
         let name = attach.name();
-        if let Some(index) = self.pending_links.remove(name) {
-            match self.links.get_mut(index) {
+        if let Some(index) = self.sender_links.get(name) {
+            match self.links.get_mut(*index) {
                 Some(Either::Left(item)) => {
                     if item.is_opening() {
                         trace!(
@@ -387,11 +415,17 @@ impl SessionInner {
                         );
 
                         if item.is_opening() {
-                            self.remote_handles.insert(attach.handle(), index);
-                            let link =
-                                Cell::new(SenderLinkInner::new(cell, index, attach.handle()));
-                            let local_sender =
-                                std::mem::replace(item, SenderLinkState::Established(link.clone()));
+                            self.remote_handles.insert(attach.handle(), *index);
+                            let link = Cell::new(SenderLinkInner::new(
+                                *index,
+                                name.clone(),
+                                attach.handle(),
+                                cell,
+                            ));
+                            let local_sender = std::mem::replace(
+                                item,
+                                SenderLinkState::Established(SenderLink::new(link.clone())),
+                            );
 
                             if let SenderLinkState::Opening(tx) = local_sender {
                                 let _ = tx.send(SenderLink::new(link));
@@ -432,13 +466,16 @@ impl SessionInner {
                     SenderLinkState::Established(link) => {
                         // detach from remote endpoint
                         let detach = Detach {
-                            handle: link.get_ref().id(),
+                            handle: link.inner.get_ref().id(),
                             closed: true,
                             error: None,
                             body: None,
                         };
+                        // remove name
+                        self.sender_links.remove(link.inner.name());
 
-                        link.get_mut()
+                        link.inner
+                            .get_mut()
                             .detached(AmqpTransportError::LinkDetached(detach.error.clone()));
                         self.connection
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
@@ -512,8 +549,7 @@ impl SessionInner {
     }
 
     fn apply_flow(&mut self, flow: Flow) {
-        self.outgoing_window =
-            flow.next_incoming_id().unwrap_or(0) + flow.incoming_window() - self.next_outgoing_id;
+        self.outgoing_window = flow.incoming_window(); // - flow.next_incoming_id().unwrap_or(0 - self.next_outgoing_id;
         trace!(
             "session received credit. window: {}, pending: {}",
             self.outgoing_window,
@@ -529,7 +565,7 @@ impl SessionInner {
         {
             match link {
                 SenderLinkState::Established(ref mut link) => {
-                    link.get_mut().apply_flow(&flow);
+                    link.inner.get_mut().apply_flow(&flow);
                 }
                 _ => (),
             }

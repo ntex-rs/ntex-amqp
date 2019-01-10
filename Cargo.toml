@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 amqp = { git = "https://github.com/fafhrd91/rust-amqp.git" }
+#amqp = { path="../rust-amqp" }
 
 actix-codec = "0.1.0"
 actix-service = "0.1.2"
@@ -19,7 +20,8 @@ log = "0.4"
 bytes = "0.4"
 uuid = { version = "0.7", features = ["v4"] }
 slab = "0.4"
-string = "0.1"
+#string = "0.1"
+string = { git="https://github.com/fafhrd91/string.git" }
 tokio-timer = "0.2"
 
 [dev-dependencies]

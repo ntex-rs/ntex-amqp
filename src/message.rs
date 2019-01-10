@@ -32,7 +32,34 @@ pub enum MessageBody {
 const SECTION_PREFIX_LENGTH: usize = 3;
 
 impl Message {
-    pub fn serialize(self) -> Bytes {
+    /// Add property
+    pub fn properties<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&mut Properties),
+    {
+        if let Some(ref mut props) = self.properties {
+            f(props);
+        } else {
+            let mut props = Properties::default();
+            f(&mut props);
+            self.properties = Some(props);
+        }
+        self
+    }
+
+    /// Add application property
+    pub fn app_property<V: Into<Variant>>(mut self, key: ByteStr, value: V) -> Self {
+        if let Some(ref mut props) = self.application_properties {
+            props.insert(key, value.into());
+        } else {
+            let mut props = HashMap::new();
+            props.insert(key, value.into());
+            self.application_properties = Some(props);
+        }
+        self
+    }
+
+    pub(crate) fn serialize(self) -> Bytes {
         let mut dst = BytesMut::with_capacity(self.encoded_size());
         if let Some(h) = self.header {
             Section::Header(h).encode(&mut dst);
@@ -68,7 +95,7 @@ impl Message {
         dst.freeze()
     }
 
-    pub fn deserialize(src: &Bytes) -> Result<Message, AmqpParseError> {
+    pub(crate) fn deserialize(src: &Bytes) -> Result<Message, AmqpParseError> {
         let mut message = Message::default();
 
         let mut input: &[u8] = &src;
@@ -111,7 +138,7 @@ impl Message {
         Ok(message)
     }
 
-    pub fn encoded_size(&self) -> usize {
+    pub(crate) fn encoded_size(&self) -> usize {
         let mut size = self.application_data.encoded_size();
         if let Some(ref h) = self.header {
             size += h.encoded_size() + SECTION_PREFIX_LENGTH;

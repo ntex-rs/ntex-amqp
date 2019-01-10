@@ -4,6 +4,7 @@ use futures::{Async, Poll, Stream};
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
 use crate::link::ReceiverLink;
+use crate::session::Session;
 use crate::Message as RawMessage;
 
 pub struct OpenLink<S> {
@@ -119,11 +120,19 @@ impl<S> Message<S> {
         &self.message
     }
 
-    pub fn accept(&mut self) {
+    pub fn accept(self) {
         self.settle(DeliveryState::Accepted(Accepted {}))
     }
 
-    pub fn settle(&mut self, state: DeliveryState) {
+    pub fn session(&self) -> &Session {
+        self.link.as_ref().unwrap().session()
+    }
+
+    pub fn session_mut(&mut self) -> &mut Session {
+        self.link.as_mut().unwrap().session_mut()
+    }
+
+    pub fn settle(mut self, state: DeliveryState) {
         if let Some(mut link) = self.link.take() {
             let disposition = Disposition {
                 state: Some(state),
