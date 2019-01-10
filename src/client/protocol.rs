@@ -4,8 +4,8 @@ use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::Service;
 use futures::{Async, Future, Poll, Sink, Stream};
 
-use amqp::protocol::ProtocolId;
-use amqp::{ProtocolIdCodec, ProtocolIdError};
+use amqp_codec::protocol::ProtocolId;
+use amqp_codec::{ProtocolIdCodec, ProtocolIdError};
 
 pub struct ProtocolNegotiation<Io> {
     proto: ProtocolId,

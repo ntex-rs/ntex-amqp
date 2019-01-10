@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use actix_service::{NewService, Service};
-use amqp::protocol::{Error, Frame, Role};
+use amqp_codec::protocol::{Error, Frame, Role};
 use futures::future::{ok, FutureResult};
 use futures::{Async, Future, Poll};
 use slab::Slab;
@@ -115,6 +115,8 @@ where
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        println!("POLL DISP");
+
         loop {
             // handle remote begin and attach
             match self.conn.poll_incoming() {

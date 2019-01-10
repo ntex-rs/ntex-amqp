@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::{NewService, Service};
-use amqp::protocol::{Error, Frame, ProtocolId};
-use amqp::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use amqp_codec::protocol::{Error, Frame, ProtocolId};
+use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 use futures::future::{err, ok, Either, FutureResult};
 use futures::{Async, Future, Poll, Sink, Stream};
 use string;
@@ -102,17 +102,24 @@ where
                 .and_then(move |(protocol, framed)| match protocol {
                     Some(ProtocolId::Amqp) => {
                         let mut inner = inner;
-                        let framed = framed.into_framed(AmqpCodec::new());
-                        Either::A(open_connection(inner.config.clone(), framed).and_then(
-                            move |conn| {
-                                inner
-                                    .get_mut()
-                                    .factory
-                                    .call(None)
-                                    .map_err(|_| HandshakeError::Service)
-                                    .map(move |(st, srv)| (st, srv, conn))
-                            },
-                        ))
+                        Either::A(
+                            framed
+                                .send(ProtocolId::Amqp)
+                                .map_err(|e| HandshakeError::from(e))
+                                .and_then(move |framed| {
+                                    let framed = framed.into_framed(AmqpCodec::new());
+                                    open_connection(inner.config.clone(), framed).and_then(
+                                        move |conn| {
+                                            inner
+                                                .get_mut()
+                                                .factory
+                                                .call(None)
+                                                .map_err(|_| HandshakeError::Service)
+                                                .map(move |(st, srv)| (st, srv, conn))
+                                        },
+                                    )
+                                }),
+                        )
                     }
                     Some(ProtocolId::AmqpSasl) => {
                         let mut inner = inner;

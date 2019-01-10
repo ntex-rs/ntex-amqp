@@ -1,5 +1,5 @@
-use amqp::types::ByteStr;
-use amqp::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
+use amqp_codec::types::ByteStr;
+use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 use bytes::Bytes;
 use derive_more::{Display, From};
 use string::TryFrom;

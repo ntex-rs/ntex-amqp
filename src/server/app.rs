@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use actix_router::{Path, Router, RouterBuilder};
 use actix_service::{IntoService, NewService, Service};
-use amqp::protocol::Error;
+use amqp_codec::protocol::Error;
 use bytes::Bytes;
 use futures::future::{err, ok, Either, FutureResult};
 use futures::{Async, Future, Poll};

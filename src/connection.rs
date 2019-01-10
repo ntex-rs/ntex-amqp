@@ -8,9 +8,8 @@ use futures::task::AtomicTask;
 use futures::unsync::oneshot;
 use futures::{future, Async, Future, Poll, Sink, Stream};
 
-use amqp::codec::Encode;
-use amqp::protocol::{Begin, Close, End, Error, Frame};
-use amqp::{AmqpCodec, AmqpCodecError, AmqpFrame};
+use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
+use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame, Encode};
 
 use crate::cell::{Cell, WeakCell};
 use crate::errors::AmqpTransportError;

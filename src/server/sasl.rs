@@ -2,10 +2,10 @@ use std::fmt;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::Service;
-use amqp::protocol::{
+use amqp_codec::protocol::{
     self, Error, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
-use amqp::{AmqpCodec, SaslFrame};
+use amqp_codec::{AmqpCodec, SaslFrame};
 use bytes::Bytes;
 use futures::unsync::{mpsc, oneshot};
 use futures::{future::err, Async, Future, Poll, Sink, Stream};

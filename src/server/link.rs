@@ -1,11 +1,13 @@
-use amqp::protocol::{Accepted, Attach, DeliveryState, Disposition, Rejected, Role, Transfer};
+use amqp_codec::protocol::{
+    Accepted, Attach, DeliveryState, Disposition, Rejected, Role, Transfer,
+};
+use amqp_codec::Decode;
 use futures::{Async, Poll, Stream};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
 use crate::link::ReceiverLink;
 use crate::session::Session;
-use crate::Message as RawMessage;
 
 pub struct OpenLink<S> {
     pub(crate) state: Cell<S>,
@@ -52,7 +54,7 @@ impl<S> Stream for Link<S> {
             return match self.link.poll()? {
                 Async::Ready(Some(transfer)) => {
                     if let Some(ref b) = transfer.body {
-                        if let Ok(msg) = RawMessage::deserialize(b) {
+                        if let Ok((_, msg)) = amqp_codec::Message::decode(b) {
                             let msg = Message {
                                 state: self.state.clone(),
                                 transfer,
@@ -91,7 +93,7 @@ pub struct Message<S> {
     state: Cell<S>,
     transfer: Transfer,
     link: Option<ReceiverLink>,
-    message: RawMessage,
+    message: amqp_codec::Message,
 }
 
 impl<S> Drop for Message<S> {
@@ -116,7 +118,7 @@ impl<S> Message<S> {
         &self.transfer
     }
 
-    pub fn message(&self) -> &RawMessage {
+    pub fn message(&self) -> &amqp_codec::Message {
         &self.message
     }
 
@@ -130,6 +132,12 @@ impl<S> Message<S> {
 
     pub fn session_mut(&mut self) -> &mut Session {
         self.link.as_mut().unwrap().session_mut()
+    }
+
+    pub fn reply_message(&self) -> amqp_codec::Message {
+        amqp_codec::Message::default().if_some(&self.message.properties, |msg, data| {
+            msg.set_properties(|props| props.correlation_id = data.message_id.clone())
+        })
     }
 
     pub fn settle(mut self, state: DeliveryState) {

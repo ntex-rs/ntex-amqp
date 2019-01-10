@@ -1,7 +1,6 @@
 use actix_connector::{Connect, Connector};
 use actix_service::{NewService, Service};
 use actix_test_server::TestServer;
-use amqp;
 use amqp_transport::server::{self, errors};
 use amqp_transport::{self, client, sasl, Configuration};
 use futures::future::err;
@@ -49,7 +48,9 @@ fn test_simple() -> std::io::Result<()> {
     Ok(())
 }
 
-fn sasl_auth(auth: server::SaslAuth) -> impl Future<Item = (), Error = amqp::protocol::Error> {
+fn sasl_auth(
+    auth: server::SaslAuth,
+) -> impl Future<Item = (), Error = amqp_codec::protocol::Error> {
     auth.mechanism("PLAIN")
         .mechanism("ANONYMOUS")
         .mechanism("MSSBCBS")
@@ -59,11 +60,11 @@ fn sasl_auth(auth: server::SaslAuth) -> impl Future<Item = (), Error = amqp::pro
             if init.mechanism() == "PLAIN" {
                 if let Some(resp) = init.initial_response() {
                     if resp == b"\0user1\0password1" {
-                        return init.outcome(amqp::protocol::SaslCode::Ok);
+                        return init.outcome(amqp_codec::protocol::SaslCode::Ok);
                     }
                 }
             }
-            init.outcome(amqp::protocol::SaslCode::Auth)
+            init.outcome(amqp_codec::protocol::SaslCode::Auth)
         })
         .map_err(|e| e.into())
 }

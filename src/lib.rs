@@ -7,7 +7,7 @@ extern crate log;
 
 use std::time::Duration;
 
-use amqp::protocol::{Handle, Milliseconds, Open, Outcome};
+use amqp_codec::protocol::{Handle, Milliseconds, Open, Outcome};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Async, Future, Poll};
 use string::{String, TryFrom};
@@ -19,7 +19,6 @@ mod connection;
 mod errors;
 mod hb;
 mod link;
-mod message;
 pub mod sasl;
 pub mod server;
 mod service;
@@ -28,7 +27,6 @@ mod session;
 pub use self::connection::Connection;
 pub use self::errors::AmqpTransportError;
 pub use self::link::SenderLink;
-pub use self::message::{Message, MessageBody};
 pub use self::session::Session;
 
 pub enum Delivery {

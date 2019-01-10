@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use actix_service::{IntoNewService, IntoService, NewService, Service, ServiceExt};
-use amqp::protocol::Error;
+use amqp_codec::protocol::Error;
 use futures::future::ok;
 use futures::{Async, Future, Poll};
 

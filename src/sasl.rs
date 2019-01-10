@@ -6,9 +6,9 @@ use either::Either;
 use futures::future::{ok, Future};
 use futures::{Sink, Stream};
 
-use amqp::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
-use amqp::types::Symbol;
-use amqp::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
+use amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
+use amqp_codec::types::Symbol;
+use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 
 use crate::connection::Connection;
 use crate::service::ProtocolNegotiation;

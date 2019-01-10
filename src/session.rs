@@ -1,24 +1,23 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use either::Either;
 use futures::{future, unsync::oneshot, Future};
 use slab::Slab;
 use string::{self, TryFrom};
 use uuid::Uuid;
 
-use amqp::protocol::{
+use amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
     Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Target, TerminusDurability,
     TerminusExpiryPolicy, Transfer,
 };
-use amqp::AmqpFrame;
+use amqp_codec::{AmqpFrame, Encode, Message};
 
 use crate::cell::Cell;
 use crate::connection::ConnectionController;
 use crate::errors::AmqpTransportError;
 use crate::link::{ReceiverLink, ReceiverLinkInner, SenderLink, SenderLinkInner};
-use crate::message::Message;
 use crate::DeliveryPromise;
 
 #[derive(Clone)]
@@ -626,6 +625,8 @@ impl SessionInner {
         let delivery_id = self.next_outgoing_id;
         self.next_outgoing_id += 1;
         let delivery_tag = Bytes::from(&Uuid::new_v4().as_bytes()[..]);
+        let mut body = BytesMut::with_capacity(message.encoded_size());
+        message.encode(&mut body);
         let transfer = Transfer {
             handle: link_handle,
             delivery_id: Some(delivery_id),
@@ -638,7 +639,7 @@ impl SessionInner {
             resume: false,
             aborted: false,
             batchable: false,
-            body: Some(message.serialize()),
+            body: Some(body.freeze()),
         };
         self.unsettled_deliveries.insert(delivery_id, promise);
         Frame::Transfer(transfer)

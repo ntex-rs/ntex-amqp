@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 
-use amqp::protocol::{Attach, Disposition, Error, Flow, Outcome, SequenceNo, Transfer};
-use amqp::types::ByteStr;
+use amqp_codec::protocol::{Attach, Disposition, Error, Flow, Outcome, SequenceNo, Transfer};
+use amqp_codec::types::ByteStr;
+use amqp_codec::Message;
 use bytes::Bytes;
 use futures::task::AtomicTask;
 use futures::{unsync::oneshot, Async, Future, Poll, Stream};
@@ -9,7 +10,7 @@ use futures::{unsync::oneshot, Async, Future, Poll, Stream};
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
 use crate::session::{Session, SessionInner};
-use crate::{Delivery, DeliveryPromise, Handle, Message};
+use crate::{Delivery, DeliveryPromise, Handle};
 
 #[derive(Clone)]
 pub struct SenderLink {
