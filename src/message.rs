@@ -72,7 +72,15 @@ impl Message {
         self
     }
 
-    /// Execute closure if value is Some value
+    /// Call closure with message reference
+    pub fn update<F>(self, f: F) -> Self
+    where
+        F: Fn(Self) -> Self,
+    {
+        f(self)
+    }
+
+    /// Call closure if value is Some value
     pub fn if_some<T, F>(self, value: &Option<T>, f: F) -> Self
     where
         F: Fn(Self, &T) -> Self,
