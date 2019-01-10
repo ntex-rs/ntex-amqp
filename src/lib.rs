@@ -5,10 +5,13 @@ extern crate derive_more;
 pub mod codec;
 mod errors;
 mod framing;
+mod io;
+mod message;
 pub mod protocol;
 pub mod types;
 
-mod io;
-pub use crate::errors::{AmqpCodecError, AmqpParseError, ProtocolIdError};
-pub use crate::framing::{AmqpFrame, SaslFrame};
-pub use crate::io::{AmqpCodec, ProtocolIdCodec};
+pub use self::codec::{Decode, Encode};
+pub use self::errors::{AmqpCodecError, AmqpParseError, ProtocolIdError};
+pub use self::framing::{AmqpFrame, SaslFrame};
+pub use self::io::{AmqpCodec, ProtocolIdCodec};
+pub use self::message::{Message, MessageBody};
