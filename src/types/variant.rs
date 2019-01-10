@@ -1,13 +1,15 @@
-use crate::types::{ByteStr, Descriptor, List, Symbol};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
+use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Symbol};
+
 /// Represents an AMQP type for use in polymorphic collections
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, From)]
 pub enum Variant {
     /// Indicates an empty value.
     Null,
@@ -68,6 +70,9 @@ pub enum Variant {
 
     /// Symbolic values from a constrained domain.
     Symbol(Symbol),
+
+    /// Same as Symbol but for static refs
+    StaticSymbol(StaticSymbol),
 
     /// List
     List(List),

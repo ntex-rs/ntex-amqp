@@ -109,7 +109,7 @@ mod tests {
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
-    use crate::framing::SaslFrame;
+    use crate::framing::{AmqpFrame, SaslFrame};
     use crate::protocol::SaslFrameBody;
 
     #[test]
@@ -122,6 +122,23 @@ mod tests {
             SaslFrameBody::SaslMechanisms(_) => (),
             _ => panic!("error"),
         }
+
+        let mut buf = BytesMut::new();
+        buf.reserve(frame.encoded_size());
+        frame.encode(&mut buf);
+        buf.split_to(4);
+        assert_eq!(Bytes::from_static(data), buf.freeze());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_disposition() -> Result<(), AmqpCodecError> {
+        let data = b"\x02\0\0\0\0S\x15\xc0\x0c\x06AC@A\0S$\xc0\x01\0B";
+
+        let (remainder, frame) = AmqpFrame::decode(data.as_ref())?;
+        assert!(remainder.is_empty());
+        assert_eq!(frame.performative().name(), "Disposition");
 
         let mut buf = BytesMut::new();
         buf.reserve(frame.encoded_size());

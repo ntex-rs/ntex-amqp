@@ -455,7 +455,11 @@ fn decode_frame_header(
     }
 
     let channel_id = BigEndian::read_u16(&input[2..]);
-    let ext_header_len = doff as usize * 4 - HEADER_LEN;
+    let doff = doff as usize * 4;
+    if doff < HEADER_LEN {
+        return Err(AmqpParseError::InvalidSize);
+    }
+    let ext_header_len = doff - HEADER_LEN;
     decode_check_len!(input, ext_header_len + 4);
     let input = &input[ext_header_len + 4..]; // skipping remaining two header bytes and ext header
     Ok((input, channel_id))

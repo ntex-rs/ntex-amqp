@@ -47,7 +47,7 @@ pub type Annotations = HashMap<Symbol, Variant>;
 mod definitions;
 pub use self::definitions::*;
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, From)]
 pub enum MessageId {
     Ulong(u64),
     Uuid(Uuid),
@@ -186,5 +186,25 @@ impl Encode for DistributionMode {
 impl SaslInit {
     pub fn prepare_response(authz_id: &str, authn_id: &str, password: &str) -> Bytes {
         Bytes::from(format!("{}\x00{}\x00{}", authz_id, authn_id, password))
+    }
+}
+
+impl Default for Properties {
+    fn default() -> Properties {
+        Properties {
+            message_id: None,
+            user_id: None,
+            to: None,
+            subject: None,
+            reply_to: None,
+            correlation_id: None,
+            content_type: None,
+            content_encoding: None,
+            absolute_expiry_time: None,
+            creation_time: None,
+            group_id: None,
+            group_sequence: None,
+            reply_to_group_id: None,
+        }
     }
 }

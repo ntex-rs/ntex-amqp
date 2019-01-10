@@ -588,6 +588,7 @@ impl Encode for Variant {
             Variant::Binary(ref b) => b.encoded_size(),
             Variant::String(ref s) => s.encoded_size(),
             Variant::Symbol(ref s) => s.encoded_size(),
+            Variant::StaticSymbol(ref s) => s.encoded_size(),
             Variant::List(ref l) => l.encoded_size(),
             Variant::Map(ref m) => m.map.encoded_size(),
             Variant::Described(ref dv) => dv.0.encoded_size() + dv.1.encoded_size(),
@@ -615,6 +616,7 @@ impl Encode for Variant {
             Variant::Binary(ref b) => b.encode(buf),
             Variant::String(ref s) => s.encode(buf),
             Variant::Symbol(ref s) => s.encode(buf),
+            Variant::StaticSymbol(ref s) => s.encode(buf),
             Variant::List(ref l) => l.encode(buf),
             Variant::Map(ref m) => m.map.encode(buf),
             Variant::Described(ref dv) => {

@@ -5,6 +5,8 @@ use crate::types::Descriptor;
 
 #[derive(Debug, Display, From, Clone)]
 pub enum AmqpParseError {
+    #[display(fmt = "Loaded item size is invalid")]
+    InvalidSize,
     #[display(fmt = "More data required during frame parsing: '{:?}'", "_0")]
     Incomplete(Option<usize>),
     #[display(fmt = "Unexpected format code: '{}'", "_0")]
