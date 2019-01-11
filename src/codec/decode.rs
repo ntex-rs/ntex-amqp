@@ -378,10 +378,10 @@ impl DecodeFormatted for Variant {
                 Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Binary(o)))
             }
             codec::FORMATCODE_STRING8 => {
-                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o)))
+                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o.into())))
             }
             codec::FORMATCODE_STRING32 => {
-                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o)))
+                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o.into())))
             }
             codec::FORMATCODE_SYMBOL8 => {
                 Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Symbol(o)))

@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Symbol};
+use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Str, Symbol};
 
 /// Represents an AMQP type for use in polymorphic collections
 #[derive(Debug, Eq, PartialEq, Hash, Clone, From)]
@@ -66,7 +66,7 @@ pub enum Variant {
     Binary(Bytes),
 
     /// A sequence of Unicode characters
-    String(ByteStr),
+    String(Str),
 
     /// Symbolic values from a constrained domain.
     Symbol(Symbol),
@@ -82,6 +82,28 @@ pub enum Variant {
 
     /// Described value
     Described((Descriptor, Box<Variant>)),
+}
+
+impl From<ByteStr> for Variant {
+    fn from(s: ByteStr) -> Self {
+        Str::from(s).into()
+    }
+}
+
+impl From<&'static str> for Variant {
+    fn from(s: &'static str) -> Self {
+        Str::from(s).into()
+    }
+}
+
+impl PartialEq<str> for Variant {
+    fn eq(&self, other: &str) -> bool {
+        match self {
+            Variant::String(s) => s == other,
+            Variant::Symbol(s) => s == other,
+            _ => false,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
