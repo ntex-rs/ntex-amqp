@@ -205,24 +205,6 @@ impl SessionInner {
     }
 
     /// Register receiver link
-    pub(crate) fn open_receiver_link(
-        &mut self,
-        cell: Cell<SessionInner>,
-        attach: Attach,
-    ) -> ReceiverLink {
-        let handle = attach.handle();
-        let entry = self.links.vacant_entry();
-        let token = entry.key();
-
-        let inner = Cell::new(ReceiverLinkInner::new(cell, token, attach));
-        entry.insert(Either::Right(ReceiverLinkState::Opening(Some(
-            inner.clone(),
-        ))));
-        self.remote_handles.insert(handle, token);
-        ReceiverLink::new(inner)
-    }
-
-    /// Register receiver link
     pub(crate) fn confirm_sender_link(&mut self, cell: Cell<SessionInner>, attach: Attach) {
         trace!("Remote sender link opened: {:?}", attach.name());
         let handle = attach.handle();
@@ -268,14 +250,32 @@ impl SessionInner {
         self.post_frame(attach.into());
     }
 
-    pub(crate) fn confirm_receiver_link(&mut self, idx: usize, attach: &Attach) {
-        if let Some(Either::Right(link)) = self.links.get_mut(idx) {
+    /// Register receiver link
+    pub(crate) fn open_receiver_link(
+        &mut self,
+        cell: Cell<SessionInner>,
+        attach: Attach,
+    ) -> ReceiverLink {
+        let handle = attach.handle();
+        let entry = self.links.vacant_entry();
+        let token = entry.key();
+
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token, attach));
+        entry.insert(Either::Right(ReceiverLinkState::Opening(Some(
+            inner.clone(),
+        ))));
+        self.remote_handles.insert(handle, token);
+        ReceiverLink::new(inner)
+    }
+
+    pub(crate) fn confirm_receiver_link(&mut self, token: usize, attach: &Attach) {
+        if let Some(Either::Right(link)) = self.links.get_mut(token) {
             match link {
                 ReceiverLinkState::Opening(l) => {
                     let attach = Attach {
                         name: attach.name.clone(),
-                        handle: idx as Handle,
-                        role: Role::Sender,
+                        handle: token as Handle,
+                        role: Role::Receiver,
                         snd_settle_mode: SenderSettleMode::Mixed,
                         rcv_settle_mode: ReceiverSettleMode::First,
                         source: attach.source.clone(),
@@ -283,7 +283,7 @@ impl SessionInner {
                         unsettled: None,
                         incomplete_unsettled: false,
                         initial_delivery_count: Some(1),
-                        max_message_size: None,
+                        max_message_size: Some(65536),
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,
@@ -445,8 +445,6 @@ impl SessionInner {
 
     /// Handle `Detach` frame.
     pub fn handle_detach(&mut self, detach: &Detach) {
-        println!("DETACH: {:#?}", detach);
-
         // get local link instance
         let idx = if let Some(idx) = self.remote_handles.get(&detach.handle()) {
             *idx

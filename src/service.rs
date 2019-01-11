@@ -49,7 +49,6 @@ where
                 .from_err()
                 .and_then(|framed| framed.into_future().map_err(|e| e.0))
                 .and_then(move |(protocol, framed)| {
-                    println!("PROTO: {:?}", protocol);
                     if let Some(protocol) = protocol {
                         if proto == protocol {
                             Ok(framed)

@@ -65,7 +65,6 @@ impl<S> Stream for Link<S> {
                         } else {
                             continue;
                         }
-                    // println!("DECODE: {:#?}", msg);
                     } else {
                         let disposition = Disposition {
                             role: Role::Receiver,
@@ -79,7 +78,6 @@ impl<S> Stream for Link<S> {
                         self.link.send_disposition(disposition);
                         continue;
                     }
-                    // let msg = Message::deserialize(&b).unwrap();
                 }
                 Async::Ready(None) => Ok(Async::Ready(None)),
                 Async::NotReady => Ok(Async::NotReady),
@@ -145,7 +143,7 @@ impl<S> Message<S> {
             let disposition = Disposition {
                 state: Some(state),
                 role: Role::Receiver,
-                first: 0, // DeliveryNumber,
+                first: self.transfer.delivery_id.unwrap_or(0), // DeliveryNumber,
                 last: None,
                 settled: true,
                 batchable: false,

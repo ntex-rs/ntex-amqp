@@ -191,7 +191,12 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         frame.performative().name(),
                         frame.encoded_size()
                     );
-                    // trace!("outgoing: {:#?}", frame);
+                    if let Frame::Attach(ref attach) = frame.performative() {
+                        trace!("outgoing: {:?} {:#?}", frame.channel_id(), attach);
+                    }
+                    if let Frame::Disposition(ref disp) = frame.performative() {
+                        trace!("outgoing: {:?} {:#?}", frame.channel_id(), disp);
+                    }
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
@@ -240,12 +245,16 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         frame.performative().name(),
                         frame.encoded_size()
                     );
-                    trace!(
-                        "incoming: {} {:#?}",
-                        frame.channel_id(),
-                        frame.performative()
-                    );
+                    if let Frame::Attach(ref attach) = frame.performative() {
+                        trace!("incoming: {:?} {:#?}", frame.channel_id(), attach);
+                    }
+
                     update = true;
+
+                    if let Frame::Empty = frame.performative() {
+                        self.hb.update_local(update);
+                        continue;
+                    }
 
                     // handle connection close
                     if let Frame::Close(ref close) = frame.performative() {

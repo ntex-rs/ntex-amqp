@@ -128,10 +128,12 @@ where
                         }
                         Frame::Attach(attach) => {
                             if attach.role == Role::Receiver {
+                                // remotly opened sender link
                                 let mut session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 session.get_mut().confirm_sender_link(cell, attach);
                             } else {
+                                // receiver link
                                 let mut session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 let link = session.get_mut().open_receiver_link(cell, attach);

@@ -71,14 +71,14 @@ impl<S: 'static> Service<OpenLink<S>> for AppService<S> {
     }
 
     fn call(&mut self, link: OpenLink<S>) -> Self::Future {
-        let mut path = link
+        let path = link
             .frame()
             .target
             .as_ref()
             .and_then(|target| target.address.as_ref().map(|addr| Path::new(addr.clone())));
 
-        if let Some(ref mut path) = path {
-            if let Some((hnd, _info)) = self.router.get_mut().recognize_mut(path) {
+        if let Some(mut path) = path {
+            if let Some((hnd, _info)) = self.router.get_mut().recognize_mut(&mut path) {
                 Either::B(Box::new(hnd.call(link)))
             } else {
                 Either::A(err(LinkError::force_detach()
@@ -90,24 +90,6 @@ impl<S: 'static> Service<OpenLink<S>> for AppService<S> {
                 .description(Bytes::from_static(b"Target address is required"))
                 .into()))
         }
-
-        // println!("OPEN LINK {:#?}", link.frame());
-        // Box::new(
-        //     link.open()
-        //         .map(|tr| {
-        //             println!("TRANSFER: {:#?}", tr);
-        //             if let Some(b) = tr.body {
-        //                 let msg = Message::deserialize(&b).unwrap();
-        //                 println!("DECODE: {:#?}", msg);
-        //             }
-        //         })
-        //         .map_err(|_| {
-        //             LinkError::force_detach()
-        //                 .description("unimplemented")
-        //                 .into()
-        //         })
-        //         .fold((), |(), _| ok(())),
-        // )
     }
 }
 
