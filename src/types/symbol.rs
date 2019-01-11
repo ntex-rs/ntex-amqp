@@ -21,6 +21,10 @@ impl Symbol {
         self.0.as_str()
     }
 
+    pub fn as_bytes_str(&self) -> String<Bytes> {
+        self.0.as_bytes_str()
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }

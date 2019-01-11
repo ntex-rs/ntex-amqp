@@ -114,6 +114,14 @@ impl Variant {
             _ => None,
         }
     }
+
+    pub fn as_bytes_str(&self) -> Option<ByteStr> {
+        match self {
+            Variant::String(s) => Some(s.as_bytes_str()),
+            Variant::Symbol(s) => Some(s.as_bytes_str()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

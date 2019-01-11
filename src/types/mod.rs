@@ -1,7 +1,7 @@
-use std::{borrow, hash, ops};
+use std::{borrow, fmt, hash, ops};
 
 use bytes::Bytes;
-use string::String;
+use string::{String, TryFrom};
 
 mod symbol;
 mod variant;
@@ -71,7 +71,7 @@ impl List {
     }
 }
 
-#[derive(Debug, Clone, Eq, Ord, PartialOrd)]
+#[derive(Clone, Eq, Ord, PartialOrd)]
 pub enum Str {
     ByteStr(String<Bytes>),
     Static(&'static str),
@@ -93,6 +93,13 @@ impl Str {
         match self {
             Str::ByteStr(s) => s.as_ref(),
             Str::Static(s) => s,
+        }
+    }
+
+    pub fn as_bytes_str(&self) -> String<Bytes> {
+        match self {
+            Str::ByteStr(s) => s.clone(),
+            Str::Static(s) => String::try_from(Bytes::from_static(s.as_bytes())).unwrap(),
         }
     }
 
@@ -155,6 +162,15 @@ impl PartialEq<str> for Str {
                 t == other
             }
             Str::Static(s) => *s == other,
+        }
+    }
+}
+
+impl fmt::Debug for Str {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Str::ByteStr(s) => write!(f, "B:\"{}\"", &*s),
+            Str::Static(s) => write!(f, "S:\"{}\"", s),
         }
     }
 }
