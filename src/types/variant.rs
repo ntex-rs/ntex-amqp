@@ -106,6 +106,16 @@ impl PartialEq<str> for Variant {
     }
 }
 
+impl Variant {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Variant::String(s) => Some(s.as_str()),
+            Variant::Symbol(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct VariantMap {
     pub map: HashMap<Variant, Variant>,

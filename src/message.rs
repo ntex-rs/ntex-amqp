@@ -128,6 +128,17 @@ impl Message {
         &self.body
     }
 
+    /// Message value
+    pub fn value(&self) -> Option<&Variant> {
+        self.body.value.as_ref()
+    }
+
+    /// Set message body value
+    pub fn set_value<V: Into<Variant>>(mut self, v: V) -> Self {
+        self.body.value = Some(v.into());
+        self
+    }
+
     /// Set message body
     pub fn set_body<F>(mut self, f: F) -> Self
     where
