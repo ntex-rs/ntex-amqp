@@ -11,7 +11,7 @@ use crate::codec::{self, ArrayDecode, Decode, DecodeFormatted};
 use crate::errors::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
-use crate::types::{ByteStr, Descriptor, List, Multiple, Symbol, Variant, VariantMap};
+use crate::types::{ByteStr, Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap};
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
@@ -201,6 +201,22 @@ impl DecodeFormatted for ByteStr {
             codec::FORMATCODE_STRING32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
                 Ok((input, ByteStr::from_str(str::from_utf8(bytes)?)))
+            }
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
+        }
+    }
+}
+
+impl DecodeFormatted for Str {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        match fmt {
+            codec::FORMATCODE_STRING8 => {
+                let (input, bytes) = read_bytes_u8(input)?;
+                Ok((input, Str::from_str(str::from_utf8(bytes)?)))
+            }
+            codec::FORMATCODE_STRING32 => {
+                let (input, bytes) = read_bytes_u32(input)?;
+                Ok((input, Str::from_str(str::from_utf8(bytes)?)))
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }

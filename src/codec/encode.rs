@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
-use crate::types::{ByteStr, Descriptor, List, Multiple, StaticSymbol, Symbol, Variant};
+use crate::types::{ByteStr, Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant};
 
 fn encode_null(buf: &mut BytesMut) {
     buf.put_u8(codec::FORMATCODE_NULL);
@@ -373,6 +373,26 @@ impl ArrayEncode for str {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_u32_be(self.len() as u32);
+        buf.put_slice(self.as_bytes());
+    }
+}
+
+impl Encode for Str {
+    fn encoded_size(&self) -> usize {
+        let length = self.len();
+        let size = if length > u8::MAX as usize { 5 } else { 2 };
+        size + length
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let length = self.as_str().len();
+        if length > u8::MAX as usize {
+            buf.put_u8(codec::FORMATCODE_STRING32);
+            buf.put_u32_be(length as u32);
+        } else {
+            buf.put_u8(codec::FORMATCODE_STRING8);
+            buf.put_u8(length as u8);
+        }
         buf.put_slice(self.as_bytes());
     }
 }

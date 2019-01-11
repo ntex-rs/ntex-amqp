@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use derive_more::From;
 use uuid::Uuid;
 
 use super::codec::{self, DecodeFormatted, Encode};
 use super::errors::AmqpParseError;
+use super::message::Message;
 use super::types::*;
 
 impl fmt::Display for Error {
@@ -36,7 +37,7 @@ pub enum ProtocolId {
 }
 
 pub type Map = HashMap<Variant, Variant>;
-pub type StringVariantMap = HashMap<ByteStr, Variant>;
+pub type StringVariantMap = HashMap<Str, Variant>;
 pub type Fields = HashMap<Symbol, Variant>;
 pub type FilterSet = HashMap<Symbol, Option<ByteStr>>;
 pub type Timestamp = DateTime<Utc>;
@@ -205,6 +206,26 @@ impl Default for Properties {
             group_id: None,
             group_sequence: None,
             reply_to_group_id: None,
+        }
+    }
+}
+
+pub enum TransferBody {
+    Data(Bytes),
+    Message(Message),
+}
+
+impl Encode for TransferBody {
+    fn encoded_size(&self) -> usize {
+        match self {
+            TransferBody::Data(ref data) => data.len(),
+            TransferBody::Message(ref data) => data.encoded_size(),
+        }
+    }
+    fn encode(&self, dst: &mut BytesMut) {
+        match *self {
+            TransferBody::Data(ref data) => dst.put_slice(&data),
+            TransferBody::Message(ref data) => data.encode(dst),
         }
     }
 }

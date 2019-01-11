@@ -1,21 +1,24 @@
-use bytes::{BufMut, Bytes, BytesMut};
+use std::cell::Cell;
 use std::collections::HashMap;
+
+use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::codec::{Decode, Encode, FORMATCODE_BINARY32, FORMATCODE_BINARY8};
 use crate::errors::AmqpParseError;
-use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section};
-use crate::types::{ByteStr, Descriptor, List, Variant};
+use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, StringVariantMap};
+use crate::types::{Descriptor, List, Str, Variant};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Message {
     pub message_format: Option<MessageFormat>,
-    pub header: Option<Header>,
-    pub delivery_annotations: Option<Annotations>,
-    pub message_annotations: Option<Annotations>,
-    pub properties: Option<Properties>,
-    pub application_properties: Option<HashMap<ByteStr, Variant>>,
-    pub footer: Option<Annotations>,
-    pub body: MessageBody,
+    header: Option<Header>,
+    delivery_annotations: Option<Annotations>,
+    message_annotations: Option<Annotations>,
+    properties: Option<Properties>,
+    application_properties: Option<StringVariantMap>,
+    footer: Option<Annotations>,
+    body: MessageBody,
+    size: Cell<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -44,6 +47,7 @@ impl Message {
     /// Set message header
     pub fn set_header(mut self, header: Header) -> Self {
         self.header = Some(header);
+        self.size.set(0);
         self
     }
 
@@ -64,18 +68,29 @@ impl Message {
             f(&mut props);
             self.properties = Some(props);
         }
+        self.size.set(0);
         self
     }
 
+    /// Get application property
+    pub fn app_property(&self, key: &str) -> Option<&Variant> {
+        if let Some(ref props) = self.application_properties {
+            props.get(key)
+        } else {
+            None
+        }
+    }
+
     /// Add application property
-    pub fn set_app_property<V: Into<Variant>>(mut self, key: ByteStr, value: V) -> Self {
+    pub fn set_app_property<K: Into<Str>, V: Into<Variant>>(mut self, key: K, value: V) -> Self {
         if let Some(ref mut props) = self.application_properties {
-            props.insert(key, value.into());
+            props.insert(key.into(), value.into());
         } else {
             let mut props = HashMap::new();
-            props.insert(key, value.into());
+            props.insert(key.into(), value.into());
             self.application_properties = Some(props);
         }
+        self.size.set(0);
         self
     }
 
@@ -84,6 +99,7 @@ impl Message {
     where
         F: Fn(Self) -> Self,
     {
+        self.size.set(0);
         f(self)
     }
 
@@ -93,6 +109,7 @@ impl Message {
         F: Fn(Self, &T) -> Self,
     {
         if let Some(ref val) = value {
+            self.size.set(0);
             f(self, val)
         } else {
             self
@@ -110,7 +127,15 @@ impl Message {
         F: Fn(&mut MessageBody),
     {
         f(&mut self.body);
+        self.size.set(0);
         self
+    }
+
+    /// Create new message and set `correlation_id` property
+    pub fn reply_message(&self) -> Message {
+        Message::default().if_some(&self.properties, |msg, data| {
+            msg.set_properties(|props| props.correlation_id = data.message_id.clone())
+        })
     }
 }
 
@@ -162,6 +187,11 @@ impl Decode for Message {
 
 impl Encode for Message {
     fn encoded_size(&self) -> usize {
+        let size = self.size.get();
+        if size != 0 {
+            return size;
+        }
+
         // body size, always add empty body if needed
         let body_size = self.body.encoded_size();
         let mut size = if body_size == 0 {
@@ -189,6 +219,7 @@ impl Encode for Message {
         if let Some(ref f) = self.footer {
             size += f.encoded_size() + SECTION_PREFIX_LENGTH;
         }
+        self.size.set(size);
         size
     }
 
