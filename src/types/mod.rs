@@ -149,7 +149,11 @@ impl PartialEq<Str> for Str {
 impl PartialEq<str> for Str {
     fn eq(&self, other: &str) -> bool {
         match self {
-            Str::ByteStr(s) => s == other,
+            Str::ByteStr(ref s) => {
+                // workaround for possible compiler bug
+                let t: &str = &*s;
+                t == other
+            }
             Str::Static(s) => *s == other,
         }
     }
