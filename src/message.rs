@@ -360,6 +360,7 @@ mod tests {
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
     use crate::protocol::Header;
+    use crate::types::Variant;
 
     use super::Message;
 
@@ -385,10 +386,7 @@ mod tests {
 
         let msg2 = Message::decode(&buf)?.1;
         let props = msg2.application_properties.as_ref().unwrap();
-        assert_eq!(
-            *props.get(&string::String::from_str("test")).unwrap(),
-            1.into()
-        );
+        assert_eq!(*props.get("test").unwrap(), Variant::from(1));
         Ok(())
     }
 

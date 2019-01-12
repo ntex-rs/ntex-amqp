@@ -157,10 +157,10 @@ mod tests {
 
     #[test]
     fn string_eq() {
-        let a = Variant::String(ByteStr::from_str("hello"));
-        let b = Variant::String(ByteStr::from_str("world!"));
+        let a = Variant::String(ByteStr::from_str("hello").into());
+        let b = Variant::String(ByteStr::from_str("world!").into());
 
-        assert_eq!(Variant::String(ByteStr::from_str("hello")), a);
+        assert_eq!(Variant::String(ByteStr::from_str("hello").into()), a);
         assert!(a != b);
     }
 
