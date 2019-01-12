@@ -2,7 +2,7 @@
 name = "amqp-codec"
 version = "0.1.0"
 description = "AMQP1 protocol codec"
-authors = ["Mike Yagley <myagley@gmail.com>"]
+authors = ["Mike Yagley <myagley@gmail.com>", "Max Gortman <mgortman@microsoft.com>", "Nikolay Kim <fafhrd91@gmail.com>"]
 edition = "2018"
 
 [dependencies]
