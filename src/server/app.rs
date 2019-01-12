@@ -4,7 +4,6 @@ use std::marker::PhantomData;
 use actix_router::{Path, Router, RouterBuilder};
 use actix_service::{IntoService, NewService, Service};
 use amqp_codec::protocol::Error;
-use bytes::Bytes;
 use futures::future::{err, ok, Either, FutureResult};
 use futures::{Async, Future, Poll};
 
@@ -82,12 +81,12 @@ impl<S: 'static> Service<OpenLink<S>> for AppService<S> {
                 Either::B(Box::new(hnd.call(link)))
             } else {
                 Either::A(err(LinkError::force_detach()
-                    .description(Bytes::from_static(b"Target address is not supported"))
+                    .description("Target address is not supported")
                     .into()))
             }
         } else {
             Either::A(err(LinkError::force_detach()
-                .description(Bytes::from_static(b"Target address is required"))
+                .description("Target address is required")
                 .into()))
         }
     }

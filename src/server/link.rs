@@ -1,9 +1,11 @@
 use amqp_codec::protocol::{
-    Accepted, Attach, DeliveryState, Disposition, Rejected, Role, Transfer,
+    Accepted, Attach, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
 };
 use amqp_codec::Decode;
+use bytes::Bytes;
 use futures::{Async, Poll, Stream};
 
+use super::errors::AmqpError;
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
 use crate::link::ReceiverLink;
@@ -53,31 +55,24 @@ impl<S> Stream for Link<S> {
         loop {
             return match self.link.poll()? {
                 Async::Ready(Some(transfer)) => {
-                    if let Some(ref b) = transfer.body {
-                        if let Ok((_, msg)) = amqp_codec::Message::decode(b) {
-                            let msg = Message {
-                                state: self.state.clone(),
-                                transfer,
-                                link: Some(self.link.clone()),
-                                message: msg,
-                            };
-                            Ok(Async::Ready(Some(msg)))
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        let disposition = Disposition {
-                            role: Role::Receiver,
-                            first: 1, // DeliveryNumber,
-                            last: None,
-                            settled: false,
-                            state: Some(DeliveryState::Rejected(Rejected { error: None })),
-                            batchable: false,
-                            body: None,
-                        };
-                        self.link.send_disposition(disposition);
-                        continue;
-                    }
+                    Ok(Async::Ready(Some(Message {
+                        state: self.state.clone(),
+                        transfer,
+                        link: Some(self.link.clone()),
+                    })))
+                    //  else {
+                    //     let disposition = Disposition {
+                    //         role: Role::Receiver,
+                    //         first: 1, // DeliveryNumber,
+                    //         last: None,
+                    //         settled: false,
+                    //         state: Some(DeliveryState::Rejected(Rejected { error: None })),
+                    //         batchable: false,
+                    //         body: None,
+                    //     };
+                    //     self.link.send_disposition(disposition);
+                    //     continue;
+                    // }
                 }
                 Async::Ready(None) => Ok(Async::Ready(None)),
                 Async::NotReady => Ok(Async::NotReady),
@@ -91,7 +86,6 @@ pub struct Message<S> {
     state: Cell<S>,
     transfer: Transfer,
     link: Option<ReceiverLink>,
-    message: amqp_codec::Message,
 }
 
 impl<S> Drop for Message<S> {
@@ -112,16 +106,20 @@ impl<S> Drop for Message<S> {
 }
 
 impl<S> Message<S> {
+    pub fn state(&self) -> &S {
+        self.state.get_ref()
+    }
+
+    pub fn state_mut(&mut self) -> &mut S {
+        self.state.get_mut()
+    }
+
     pub fn transfer(&self) -> &Transfer {
         &self.transfer
     }
 
-    pub fn message(&self) -> &amqp_codec::Message {
-        &self.message
-    }
-
-    pub fn accept(self) {
-        self.settle(DeliveryState::Accepted(Accepted {}))
+    pub fn body(&self) -> Option<&Bytes> {
+        self.transfer.body.as_ref()
     }
 
     pub fn session(&self) -> &Session {
@@ -132,10 +130,24 @@ impl<S> Message<S> {
         self.link.as_mut().unwrap().session_mut()
     }
 
-    pub fn reply_message(&self) -> amqp_codec::Message {
-        amqp_codec::Message::default().if_some(&self.message.properties, |msg, data| {
-            msg.set_properties(|props| props.correlation_id = data.message_id.clone())
-        })
+    pub fn load_message(&self) -> Result<amqp_codec::Message, AmqpError> {
+        if let Some(ref b) = self.transfer.body {
+            if let Ok((_, msg)) = amqp_codec::Message::decode(b) {
+                Ok(msg)
+            } else {
+                Err(AmqpError::decode_error().description("Can not decode message"))
+            }
+        } else {
+            Err(AmqpError::invalid_field().description("Empty body"))
+        }
+    }
+
+    pub fn accept(self) {
+        self.settle(DeliveryState::Accepted(Accepted {}))
+    }
+
+    pub fn reject(self, error: Option<Error>) {
+        self.settle(DeliveryState::Rejected(Rejected { error }))
     }
 
     pub fn settle(mut self, state: DeliveryState) {

@@ -1,6 +1,5 @@
 use amqp_codec::types::ByteStr;
 use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
-use bytes::Bytes;
 use derive_more::{Display, From};
 use string::TryFrom;
 
@@ -61,24 +60,41 @@ impl AmqpError {
         }
     }
 
+    pub fn internal_error() -> Self {
+        Self::new(protocol::AmqpError::InternalError)
+    }
+
+    pub fn not_found() -> Self {
+        Self::new(protocol::AmqpError::NotFound)
+    }
+
+    pub fn unauthorized_access() -> Self {
+        Self::new(protocol::AmqpError::UnauthorizedAccess)
+    }
+
     pub fn decode_error() -> Self {
         Self::new(protocol::AmqpError::DecodeError)
+    }
+
+    pub fn invalid_field() -> Self {
+        Self::new(protocol::AmqpError::InvalidField)
     }
 
     pub fn not_allowed() -> Self {
         Self::new(protocol::AmqpError::NotAllowed)
     }
 
-    pub fn internal_error() -> Self {
-        Self::new(protocol::AmqpError::InternalError)
-    }
-
     pub fn not_implemented() -> Self {
         Self::new(protocol::AmqpError::NotImplemented)
     }
 
-    pub fn description<T: Into<Bytes>>(mut self, text: T) -> Self {
-        self.description = Some(ByteStr::try_from(Bytes::from(text.into())).unwrap());
+    pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
+        self.description = Some(ByteStr::from_str(text.as_ref()));
+        self
+    }
+
+    pub fn set_description(mut self, text: ByteStr) -> Self {
+        self.description = Some(text);
         self
     }
 }
@@ -110,8 +126,8 @@ impl LinkError {
         }
     }
 
-    pub fn description<T: Into<Bytes>>(mut self, text: T) -> Self {
-        self.description = Some(ByteStr::try_from(Bytes::from(text.into())).unwrap());
+    pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
+        self.description = Some(ByteStr::from_str(text.as_ref()));
         self
     }
 }
