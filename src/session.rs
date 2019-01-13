@@ -1,24 +1,26 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
 use futures::{future, unsync::oneshot, Future};
 use slab::Slab;
 use string::{self, TryFrom};
-use uuid::Uuid;
 
 use amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
     Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Target, TerminusDurability,
-    TerminusExpiryPolicy, Transfer,
+    TerminusExpiryPolicy, Transfer, TransferNumber,
 };
 use amqp_codec::{AmqpFrame, Encode, Message};
 
 use crate::cell::Cell;
 use crate::connection::ConnectionController;
 use crate::errors::AmqpTransportError;
-use crate::link::{ReceiverLink, ReceiverLinkInner, SenderLink, SenderLinkInner};
+use crate::rcvlink::{ReceiverLink, ReceiverLinkInner};
+use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::DeliveryPromise;
+
+const INITIAL_OUTGOING_ID: TransferNumber = 1;
 
 #[derive(Clone)]
 pub struct Session {
@@ -94,7 +96,6 @@ impl Session {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-            body: None,
         };
         inner.sender_links.insert(name, token);
         inner.post_frame(Frame::Attach(attach));
@@ -126,11 +127,14 @@ impl SenderLinkState {
 pub(crate) struct SessionInner {
     id: usize,
     connection: ConnectionController,
+    next_outgoing_id: TransferNumber,
+    local: bool,
+
     remote_channel_id: u16,
-    next_outgoing_id: DeliveryNumber,
-    outgoing_window: u32,
-    next_incoming_id: DeliveryNumber,
-    incoming_window: u32,
+    next_incoming_id: TransferNumber,
+    remote_outgoing_window: u32,
+    remote_incoming_window: u32,
+
     unsettled_deliveries: BTreeMap<DeliveryNumber, DeliveryPromise>,
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
     sender_links: HashMap<string::String<Bytes>, usize>,
@@ -141,6 +145,7 @@ pub(crate) struct SessionInner {
 
 struct PendingTransfer {
     link_handle: Handle,
+    idx: u32,
     message: Message,
     promise: DeliveryPromise,
 }
@@ -148,20 +153,22 @@ struct PendingTransfer {
 impl SessionInner {
     pub fn new(
         id: usize,
+        local: bool,
         connection: ConnectionController,
         remote_channel_id: u16,
-        outgoing_window: u32,
         next_incoming_id: DeliveryNumber,
-        incoming_window: u32,
+        remote_incoming_window: u32,
+        remote_outgoing_window: u32,
     ) -> SessionInner {
         SessionInner {
             id,
+            local,
             connection,
-            remote_channel_id,
-            next_outgoing_id: 1,
-            outgoing_window: outgoing_window,
             next_incoming_id,
-            incoming_window,
+            remote_channel_id,
+            remote_incoming_window,
+            remote_outgoing_window,
+            next_outgoing_id: INITIAL_OUTGOING_ID,
             unsettled_deliveries: BTreeMap::new(),
             links: Slab::new(),
             sender_links: HashMap::new(),
@@ -204,12 +211,13 @@ impl SessionInner {
         self.connection.drop_session_copy(self.id);
     }
 
-    /// Register receiver link
+    /// Register remote sender link
     pub(crate) fn confirm_sender_link(&mut self, cell: Cell<SessionInner>, attach: Attach) {
         trace!("Remote sender link opened: {:?}", attach.name());
         let handle = attach.handle();
         let entry = self.links.vacant_entry();
         let token = entry.key();
+        let delivery_count = attach.initial_delivery_count.unwrap_or(0);
 
         let mut name = None;
         if let Some(ref source) = attach.source {
@@ -224,6 +232,7 @@ impl SessionInner {
             token,
             name.unwrap_or_else(|| string::String::default()),
             attach.handle(),
+            delivery_count,
             cell,
         ));
         entry.insert(Either::Left(SenderLinkState::Established(SenderLink::new(
@@ -240,12 +249,11 @@ impl SessionInner {
             target: attach.target.clone(),
             unsettled: None,
             incomplete_unsettled: false,
-            initial_delivery_count: Some(1),
+            initial_delivery_count: Some(delivery_count),
             max_message_size: Some(65536),
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-            body: None,
         };
         self.post_frame(attach.into());
     }
@@ -282,12 +290,11 @@ impl SessionInner {
                         target: attach.target.clone(),
                         unsettled: None,
                         incomplete_unsettled: false,
-                        initial_delivery_count: Some(1),
+                        initial_delivery_count: Some(0),
                         max_message_size: Some(65536),
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,
-                        body: None,
                     };
                     *link = ReceiverLinkState::Established(l.take().unwrap());
                     self.post_frame(attach.into());
@@ -323,13 +330,11 @@ impl SessionInner {
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,
-                        body: None,
                     };
                     let detach = Detach {
                         handle: id as u32,
                         closed,
                         error,
-                        body: None,
                     };
                     *link = ReceiverLinkState::Closing(Some(tx));
                     self.post_frame(attach.into());
@@ -340,7 +345,6 @@ impl SessionInner {
                         handle: id as u32,
                         closed,
                         error,
-                        body: None,
                     };
                     *link = ReceiverLinkState::Closing(Some(tx));
                     self.post_frame(detach.into());
@@ -381,6 +385,8 @@ impl SessionInner {
                                     );
                                 }
                                 ReceiverLinkState::Established(link) => {
+                                    // self.outgoing_window -= 1;
+                                    self.next_incoming_id.wrapping_add(1);
                                     link.get_mut().handle_transfer(transfer);
                                 }
                                 ReceiverLinkState::Closing(_) => (),
@@ -415,10 +421,12 @@ impl SessionInner {
 
                         if item.is_opening() {
                             self.remote_handles.insert(attach.handle(), *index);
+                            let delivery_count = attach.initial_delivery_count.unwrap_or(0);
                             let link = Cell::new(SenderLinkInner::new(
                                 *index,
                                 name.clone(),
                                 attach.handle(),
+                                delivery_count,
                                 cell,
                             ));
                             let local_sender = std::mem::replace(
@@ -466,7 +474,6 @@ impl SessionInner {
                             handle: link.inner.get_ref().id(),
                             closed: true,
                             error: None,
-                            body: None,
                         };
                         // remove name
                         self.sender_links.remove(link.inner.name());
@@ -546,25 +553,37 @@ impl SessionInner {
     }
 
     fn apply_flow(&mut self, flow: Flow) {
-        self.outgoing_window = flow.incoming_window(); // - flow.next_incoming_id().unwrap_or(0 - self.next_outgoing_id;
+        // # AMQP1.0 2.5.6
+        self.next_incoming_id = flow.next_outgoing_id();
+        self.remote_outgoing_window = flow.outgoing_window();
+
+        self.remote_incoming_window = flow
+            .next_incoming_id()
+            .unwrap_or(INITIAL_OUTGOING_ID)
+            .saturating_add(flow.incoming_window())
+            .saturating_sub(self.next_outgoing_id);
+
         trace!(
             "session received credit. window: {}, pending: {}",
-            self.outgoing_window,
+            self.remote_outgoing_window,
             self.pending_transfers.len()
         );
+
         while let Some(t) = self.pending_transfers.pop_front() {
-            self.send_transfer(t.link_handle, t.message, t.promise);
-            if self.outgoing_window == 0 {
+            self.send_transfer(t.link_handle, t.idx, t.message, t.promise);
+            if self.remote_outgoing_window == 0 {
                 break;
             }
         }
+
+        // apply link flow
         if let Some(Either::Left(link)) = flow.handle().and_then(|h| self.links.get_mut(h as usize))
         {
             match link {
                 SenderLinkState::Established(ref mut link) => {
                     link.inner.get_mut().apply_flow(&flow);
                 }
-                _ => (),
+                _ => warn!("Received flow frame"),
             }
         } else if flow.echo() {
             self.send_flow();
@@ -573,10 +592,14 @@ impl SessionInner {
 
     fn send_flow(&mut self) {
         let flow = Flow {
-            next_incoming_id: Some(self.next_incoming_id), // todo: derive from begin/flow
-            incoming_window: self.incoming_window,
+            next_incoming_id: if self.local {
+                Some(self.next_incoming_id)
+            } else {
+                None
+            },
+            incoming_window: std::u32::MAX,
             next_outgoing_id: self.next_outgoing_id,
-            outgoing_window: self.outgoing_window,
+            outgoing_window: self.remote_incoming_window,
             handle: None,
             delivery_count: None,
             link_credit: None,
@@ -584,7 +607,27 @@ impl SessionInner {
             drain: false,
             echo: false,
             properties: None,
-            body: None,
+        };
+        self.post_frame(flow.into());
+    }
+
+    pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
+        let flow = Flow {
+            next_incoming_id: if self.local {
+                Some(self.next_incoming_id)
+            } else {
+                None
+            },
+            incoming_window: std::u32::MAX,
+            next_outgoing_id: self.next_outgoing_id,
+            outgoing_window: self.remote_incoming_window,
+            handle: Some(handle),
+            delivery_count: Some(delivery_count),
+            link_credit: Some(credit),
+            available: None,
+            drain: false,
+            echo: true,
+            properties: None,
         };
         self.post_frame(flow.into());
     }
@@ -597,38 +640,44 @@ impl SessionInner {
     pub fn send_transfer(
         &mut self,
         link_handle: Handle,
+        idx: u32,
         message: Message,
         promise: DeliveryPromise,
     ) {
-        if self.outgoing_window == 0 {
-            // todo: queue up instead
+        if self.remote_incoming_window == 0 {
             self.pending_transfers.push_back(PendingTransfer {
                 link_handle,
+                idx,
                 message,
                 promise,
             });
             return;
         }
-        let frame = self.prepare_transfer(link_handle, message, promise);
+        let frame = self.prepare_transfer(link_handle, idx, message, promise);
         self.post_frame(frame);
     }
 
     pub fn prepare_transfer(
         &mut self,
         link_handle: Handle,
+        idx: u32,
         message: Message,
         promise: DeliveryPromise,
     ) -> Frame {
-        self.outgoing_window -= 1;
         let delivery_id = self.next_outgoing_id;
+
+        let mut buf = BytesMut::new();
+        buf.put_u32_be(idx);
+
         self.next_outgoing_id += 1;
-        let delivery_tag = Bytes::from(&Uuid::new_v4().as_bytes()[..]);
+        self.remote_incoming_window -= 1;
+
         let mut body = BytesMut::with_capacity(message.encoded_size());
         message.encode(&mut body);
         let transfer = Transfer {
             handle: link_handle,
             delivery_id: Some(delivery_id),
-            delivery_tag: Some(delivery_tag.clone()),
+            delivery_tag: None, // Some(delivery_tag.clone()),
             message_format: message.message_format,
             settled: Some(false),
             more: false,

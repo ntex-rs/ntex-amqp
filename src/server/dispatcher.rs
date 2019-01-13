@@ -9,7 +9,7 @@ use slab::Slab;
 
 use crate::cell::Cell;
 use crate::connection::{ChannelState, Connection};
-use crate::link::ReceiverLink;
+use crate::rcvlink::ReceiverLink;
 
 use super::link::OpenLink;
 
@@ -126,13 +126,14 @@ where
                         Frame::Begin(frm) => {
                             self.conn.register_remote_session(channel_id as u16, &frm);
                         }
-                        Frame::Attach(attach) => {
-                            if attach.role == Role::Receiver {
+                        Frame::Attach(attach) => match attach.role {
+                            Role::Receiver => {
                                 // remotly opened sender link
                                 let mut session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 session.get_mut().confirm_sender_link(cell, attach);
-                            } else {
+                            }
+                            Role::Sender => {
                                 // receiver link
                                 let mut session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
@@ -144,7 +145,7 @@ where
                                 });
                                 self.links.push((link, fut));
                             }
-                        }
+                        },
                         _ => {
                             println!("===== {:?}", frame);
                         }
@@ -161,12 +162,12 @@ where
         while idx < self.links.len() {
             match self.links[idx].1.poll() {
                 Ok(Async::Ready(detach)) => {
-                    let (link, _) = self.links.swap_remove(idx);
+                    let (mut link, _) = self.links.swap_remove(idx);
                     link.close();
                 }
                 Ok(Async::NotReady) => idx += 1,
                 Err(e) => {
-                    let (link, _) = self.links.swap_remove(idx);
+                    let (mut link, _) = self.links.swap_remove(idx);
                     error!("Error in link handler: {}", e);
                     link.close_with_error(e.into());
                 }

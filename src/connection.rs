@@ -116,16 +116,14 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                 entry.insert(ChannelState::Opening(Some(tx), cell));
 
                 let begin = Begin {
-                    // todo: let user specify settings
                     remote_channel: None,
                     next_outgoing_id: 1,
-                    incoming_window: 0,
-                    outgoing_window: ::std::u32::MAX,
-                    handle_max: ::std::u32::MAX,
+                    incoming_window: std::u32::MAX,
+                    outgoing_window: std::u32::MAX,
+                    handle_max: std::u32::MAX,
                     offered_capabilities: None,
                     desired_capabilities: None,
                     properties: None,
-                    body: None,
                 };
                 inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
                 Either::B(rx.map_err(|_e| AmqpTransportError::Disconnected))
@@ -153,10 +151,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
         let session = Cell::new(SessionInner::new(
             token,
+            false,
             ConnectionController(cell),
             token as u16,
-            begin.incoming_window(),
             begin.next_outgoing_id(),
+            begin.incoming_window(),
             begin.outgoing_window(),
         ));
         entry.insert(ChannelState::Established(session));
@@ -165,13 +164,12 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         let begin = Begin {
             remote_channel: Some(channel_id),
             next_outgoing_id: 1,
-            incoming_window: 0,
-            outgoing_window: ::std::u32::MAX,
-            handle_max: ::std::u32::MAX,
+            incoming_window: std::u32::MAX,
+            outgoing_window: begin.incoming_window(),
+            handle_max: std::u32::MAX,
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-            body: None,
         };
         inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
     }
@@ -186,17 +184,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         loop {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
-                    trace!(
-                        "outgoing: {:?} - {:?}",
-                        frame.performative().name(),
-                        frame.encoded_size()
-                    );
-                    if let Frame::Attach(ref attach) = frame.performative() {
-                        trace!("outgoing: {:?} {:#?}", frame.channel_id(), attach);
-                    }
-                    if let Frame::Disposition(ref disp) = frame.performative() {
-                        trace!("outgoing: {:?} {:#?}", frame.channel_id(), disp);
-                    }
+                    trace!("outgoing: {:#?}", frame);
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
@@ -240,14 +228,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         loop {
             match self.framed.poll() {
                 Ok(Async::Ready(Some(frame))) => {
-                    trace!(
-                        "incoming: {:?} - {:?}",
-                        frame.performative().name(),
-                        frame.encoded_size()
-                    );
-                    if let Frame::Attach(ref attach) = frame.performative() {
-                        trace!("incoming: {:?} {:#?}", frame.channel_id(), attach);
-                    }
+                    trace!("incoming: {:#?}", frame);
 
                     update = true;
 
@@ -264,10 +245,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                             inner.sessions.clear();
                             return Ok(Async::Ready(None));
                         } else {
-                            let close = Close {
-                                error: None,
-                                body: None,
-                            };
+                            let close = Close { error: None };
                             inner.post_frame(AmqpFrame::new(0, close.into()));
                             inner.state = State::RemoteClose;
                         }
@@ -315,10 +293,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                     }
                                     Frame::End(remote_end) => {
                                         trace!("Remote session end: {}", frame.channel_id());
-                                        let end = End {
-                                            error: None,
-                                            body: None,
-                                        };
+                                        let end = End { error: None };
                                         session.get_mut().set_error(
                                             AmqpTransportError::SessionEnded(
                                                 remote_end.error.clone(),
@@ -483,10 +458,11 @@ impl ConnectionInner {
                     let cell = cell.upgrade().unwrap();
                     let session = Cell::new(SessionInner::new(
                         id,
+                        true,
                         ConnectionController(cell),
                         channel_id,
-                        begin.incoming_window(),
                         begin.next_outgoing_id(),
+                        begin.incoming_window(),
                         begin.outgoing_window(),
                     ));
                     self.sessions_map.insert(channel_id, id);

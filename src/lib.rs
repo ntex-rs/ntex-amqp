@@ -18,16 +18,18 @@ pub mod client;
 mod connection;
 mod errors;
 mod hb;
-mod link;
+mod rcvlink;
 pub mod sasl;
 pub mod server;
 mod service;
 mod session;
+mod sndlink;
 
 pub use self::connection::Connection;
 pub use self::errors::AmqpTransportError;
-pub use self::link::SenderLink;
+pub use self::rcvlink::ReceiverLink;
 pub use self::session::Session;
+pub use self::sndlink::SenderLink;
 
 pub enum Delivery {
     Resolved(Result<Outcome, AmqpTransportError>),
@@ -132,7 +134,6 @@ impl Configuration {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-            body: None,
         }
     }
 
