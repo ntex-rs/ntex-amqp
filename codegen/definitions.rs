@@ -41,16 +41,8 @@ impl Frame {
 
     pub fn body(&self) -> Option<&Bytes> {
         match self {
-            Frame::Open(frm) => frm.body.as_ref(),
-            Frame::Begin(frm) => frm.body.as_ref(),
-            Frame::Attach(frm) => frm.body.as_ref(),
-            Frame::Flow(frm) => frm.body.as_ref(),
             Frame::Transfer(frm) => frm.body.as_ref(),
-            Frame::Disposition(frm) => frm.body.as_ref(),
-            Frame::Detach(frm) => frm.body.as_ref(),
-            Frame::End(frm) => frm.body.as_ref(),
-            Frame::Close(frm) => frm.body.as_ref(),
-            Frame::Empty => None,
+            _ => None,
         }
     }
 }
@@ -304,7 +296,7 @@ pub struct {{list.name}} {
     pub {{field.name}}: {{{field.ty}}},
     {{/if}}
     {{/each}}
-    {{#if list.frame}}
+    {{#if list.transfer}}
     pub body: Option<Bytes>,
     {{/if}}
 }
@@ -339,7 +331,7 @@ impl {{list.name}} {
         {{/if}}
     {{/each}}
 
-    {{#if list.frame}}
+    {{#if list.transfer}}
     pub fn body(&self) -> Option<&Bytes> {
         self.body.as_ref()
     }
@@ -395,7 +387,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
     let mut remainder = &input[size..];
     {{/if}}
 
-    {{#if list.frame}}
+    {{#if list.transfer}}
     let body = if remainder.is_empty() {
             None
         } else {
@@ -409,7 +401,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
     {{#each list.fields as |field|}}
     {{field.name}},
     {{/each}}
-        {{#if list.frame}}
+        {{#if list.transfer}}
         body
         {{/if}}
     }))
@@ -422,7 +414,7 @@ fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
     (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
         + content_size
 
-    {{#if list.frame}}
+    {{#if list.transfer}}
     + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
     {{/if}}
 }
@@ -443,7 +435,7 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     {{#each list.fields as |field|}}
     list.{{field.name}}.encode(buf);
     {{/each}}
-    {{#if list.frame}}
+    {{#if list.transfer}}
     if let Some(ref body) = list.body {
         buf.put_slice(&body)
     }
