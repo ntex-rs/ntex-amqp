@@ -130,6 +130,11 @@ impl LinkError {
         self.description = Some(ByteStr::from_str(text.as_ref()));
         self
     }
+
+    pub fn set_description(mut self, text: ByteStr) -> Self {
+        self.description = Some(text);
+        self
+    }
 }
 
 impl Into<protocol::Error> for LinkError {

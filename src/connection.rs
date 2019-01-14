@@ -9,7 +9,7 @@ use futures::unsync::oneshot;
 use futures::{future, Async, Future, Poll, Sink, Stream};
 
 use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
-use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame, Encode};
+use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
 
 use crate::cell::{Cell, WeakCell};
 use crate::errors::AmqpTransportError;

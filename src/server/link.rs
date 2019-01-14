@@ -18,6 +18,14 @@ impl<S> OpenLink<S> {
         self.link.frame()
     }
 
+    pub fn state(&self) -> &S {
+        self.state.get_ref()
+    }
+
+    pub fn state_mut(&mut self) -> &mut S {
+        self.state.get_mut()
+    }
+
     pub fn open(mut self, credit: u32) -> Link<S> {
         self.link.open();
         self.link.set_link_credit(credit);
