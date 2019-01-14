@@ -626,7 +626,7 @@ impl SessionInner {
             link_credit: Some(credit),
             available: None,
             drain: false,
-            echo: true,
+            echo: false,
             properties: None,
         };
         self.post_frame(flow.into());
