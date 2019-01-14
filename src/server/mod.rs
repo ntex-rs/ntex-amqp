@@ -10,7 +10,7 @@ mod service;
 pub use self::app::App;
 pub use self::dispatcher::ServerDispatcher;
 pub use self::factory::ServerFactory;
-pub use self::link::OpenLink;
+pub use self::link::{Link, OpenLink};
 pub use self::proto::{Flow, Frame, Message, ServerFrame};
 pub use self::sasl::SaslAuth;
 pub use self::service::ServiceFactory;

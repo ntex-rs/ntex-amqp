@@ -106,7 +106,7 @@ where
     >
     where
         F: IntoNewService<Srv, OpenLink<State>>,
-        Srv: NewService<OpenLink<State>, Response = ()>,
+        Srv: NewService<OpenLink<State>, Response = (), InitError = Error>,
         Srv::InitError: Into<Error>,
         Srv::Error: Into<Error>,
     {
