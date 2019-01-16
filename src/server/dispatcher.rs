@@ -138,11 +138,9 @@ where
                                 let mut session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 let link = session.get_mut().open_receiver_link(cell, attach);
-
-                                let fut = self.service.call(OpenLink {
-                                    state: self.state.clone(),
-                                    link: link.clone(),
-                                });
+                                let fut = self
+                                    .service
+                                    .call(OpenLink::new(link.clone(), self.state.clone()));
                                 self.links.push((link, fut));
                             }
                         },

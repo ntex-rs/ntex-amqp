@@ -1,7 +1,7 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use actix_router::{Path, Router};
+use actix_router::Router;
 use actix_service::{IntoNewService, NewService, Service, ServiceExt};
 use amqp_codec::protocol::Error;
 use futures::future::{err, join_all, ok, Either, FutureResult};
@@ -73,15 +73,16 @@ impl<S: 'static> Service<OpenLink<S>> for AppService<S> {
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, link: OpenLink<S>) -> Self::Future {
+    fn call(&mut self, mut link: OpenLink<S>) -> Self::Future {
         let path = link
             .frame()
             .target
             .as_ref()
-            .and_then(|target| target.address.as_ref().map(|addr| Path::new(addr.clone())));
+            .and_then(|target| target.address.as_ref().map(|addr| addr.clone()));
 
-        if let Some(mut path) = path {
-            if let Some((hnd, _info)) = self.router.recognize_mut(&mut path) {
+        if let Some(path) = path {
+            link.path_mut().set(path);
+            if let Some((hnd, _info)) = self.router.recognize_mut(link.path_mut()) {
                 Either::B(Box::new(hnd.call(link)))
             } else {
                 Either::A(err(LinkError::force_detach()

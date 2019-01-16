@@ -1,4 +1,5 @@
-use amqp_codec::protocol::Attach;
+use actix_router::Path;
+use amqp_codec::{protocol::Attach, types::ByteStr};
 use futures::{Async, Poll, Stream};
 
 use crate::cell::Cell;
@@ -11,9 +12,26 @@ use super::proto::{Flow, Frame, Message};
 pub struct OpenLink<S> {
     pub(crate) state: Cell<S>,
     pub(crate) link: ReceiverLink,
+    pub(crate) path: Path<ByteStr>,
 }
 
 impl<S> OpenLink<S> {
+    pub(crate) fn new(link: ReceiverLink, state: Cell<S>) -> Self {
+        OpenLink {
+            state,
+            link,
+            path: Path::new(ByteStr::from_str("")),
+        }
+    }
+
+    pub fn path(&self) -> &Path<ByteStr> {
+        &self.path
+    }
+
+    pub fn path_mut(&mut self) -> &mut Path<ByteStr> {
+        &mut self.path
+    }
+
     pub fn frame(&self) -> &Attach {
         self.link.frame()
     }
