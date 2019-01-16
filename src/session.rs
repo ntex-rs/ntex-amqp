@@ -12,7 +12,7 @@ use amqp_codec::protocol::{
     Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Target, TerminusDurability,
     TerminusExpiryPolicy, Transfer, TransferNumber,
 };
-use amqp_codec::{AmqpFrame, Encode, Message};
+use amqp_codec::{AmqpFrame, Message};
 
 use crate::cell::Cell;
 use crate::connection::ConnectionController;
@@ -673,8 +673,6 @@ impl SessionInner {
         self.next_outgoing_id += 1;
         self.remote_incoming_window -= 1;
 
-        let mut body = BytesMut::with_capacity(message.encoded_size());
-        message.encode(&mut body);
         let transfer = Transfer {
             handle: link_handle,
             delivery_id: Some(delivery_id),
@@ -687,7 +685,7 @@ impl SessionInner {
             resume: false,
             aborted: false,
             batchable: false,
-            body: Some(body.freeze()),
+            body: Some(message.into()),
         };
         self.unsettled_deliveries.insert(delivery_id, promise);
         Frame::Transfer(transfer)

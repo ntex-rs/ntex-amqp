@@ -1,6 +1,8 @@
 use std::fmt;
 
-use amqp_codec::protocol::{Accepted, DeliveryState, Disposition, Error, Rejected, Role, Transfer};
+use amqp_codec::protocol::{
+    Accepted, DeliveryState, Disposition, Error, Rejected, Role, Transfer, TransferBody,
+};
 use amqp_codec::Decode;
 use bytes::Bytes;
 
@@ -85,18 +87,21 @@ impl<S> Message<S> {
     }
 
     pub fn body(&self) -> Option<&Bytes> {
-        self.frame.body.as_ref()
+        match self.frame.body {
+            Some(TransferBody::Data(ref b)) => Some(b),
+            _ => None,
+        }
     }
 
     pub fn load_message(&self) -> Result<amqp_codec::Message, AmqpError> {
-        if let Some(ref b) = self.frame.body {
+        if let Some(TransferBody::Data(ref b)) = self.frame.body {
             if let Ok((_, msg)) = amqp_codec::Message::decode(b) {
                 Ok(msg)
             } else {
                 Err(AmqpError::decode_error().description("Can not decode message"))
             }
         } else {
-            Err(AmqpError::invalid_field().description("Empty body"))
+            Err(AmqpError::invalid_field().description("Unknown body"))
         }
     }
 
