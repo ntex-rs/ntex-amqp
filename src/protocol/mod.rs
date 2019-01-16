@@ -210,9 +210,16 @@ impl Default for Properties {
     }
 }
 
+#[derive(Debug, Clone, From, PartialEq)]
 pub enum TransferBody {
     Data(Bytes),
     Message(Message),
+}
+
+impl TransferBody {
+    pub fn len(&self) -> usize {
+        self.encoded_size()
+    }
 }
 
 impl Encode for TransferBody {

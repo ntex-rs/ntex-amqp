@@ -38,13 +38,6 @@ impl Frame {
             Frame::Empty => "Empty",
         }
     }
-
-    pub fn body(&self) -> Option<&Bytes> {
-        match self {
-            Frame::Transfer(frm) => frm.body.as_ref(),
-            _ => None,
-        }
-    }
 }
 
 impl Decode for Frame {
@@ -297,7 +290,7 @@ pub struct {{list.name}} {
     {{/if}}
     {{/each}}
     {{#if list.transfer}}
-    pub body: Option<Bytes>,
+    pub body: Option<TransferBody>,
     {{/if}}
 }
 
@@ -332,7 +325,7 @@ impl {{list.name}} {
     {{/each}}
 
     {{#if list.transfer}}
-    pub fn body(&self) -> Option<&Bytes> {
+    pub fn body(&self) -> Option<&TransferBody> {
         self.body.as_ref()
     }
     {{/if}}
@@ -393,7 +386,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
         } else {
             let b = Bytes::from(remainder);
             remainder = &[];
-            Some(b)
+            Some(b.into())
         };
     {{/if}}
 
@@ -437,7 +430,7 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     {{/each}}
     {{#if list.transfer}}
     if let Some(ref body) = list.body {
-        buf.put_slice(&body)
+        body.encode(buf)
     }
     {{/if}}
 }
