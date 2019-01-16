@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::{char, str, u8};
 
 use bytes::{BigEndian, ByteOrder, Bytes};
 use chrono::{DateTime, TimeZone, Utc};
+use hashbrown::HashMap;
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 

@@ -1,7 +1,7 @@
 use std::cell::Cell;
-use std::collections::HashMap;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use hashbrown::HashMap;
 
 use crate::codec::{Decode, Encode, FORMATCODE_BINARY32, FORMATCODE_BINARY8};
 use crate::errors::AmqpParseError;

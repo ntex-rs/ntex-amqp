@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::{i8, u8};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};

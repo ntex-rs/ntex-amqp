@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::fmt;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use derive_more::From;
+use hashbrown::HashMap;
 use uuid::Uuid;
 
 use super::codec::{self, DecodeFormatted, Encode};
