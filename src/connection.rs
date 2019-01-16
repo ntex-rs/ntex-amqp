@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
@@ -7,6 +7,7 @@ use futures::future::{err, Either};
 use futures::task::AtomicTask;
 use futures::unsync::oneshot;
 use futures::{future, Async, Future, Poll, Sink, Stream};
+use hashbrown::HashMap;
 
 use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
 use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};

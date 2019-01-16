@@ -8,7 +8,7 @@ use futures::{Future, Sink};
 
 fn server(link: server::OpenLink<()>) -> impl Future<Item = (), Error = errors::LinkError> {
     println!("OPEN LINK");
-    let link = link.open();
+    let link = link.open(10);
     err(errors::LinkError::force_detach().description("unimplemented"))
 }
 

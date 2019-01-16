@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
 use futures::{future, unsync::oneshot, Future};
+use hashbrown::HashMap;
 use slab::Slab;
 use string::{self, TryFrom};
 
