@@ -11,7 +11,9 @@ use crate::codec::{self, ArrayDecode, Decode, DecodeFormatted};
 use crate::errors::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
-use crate::types::{ByteStr, Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap};
+use crate::types::{
+    ByteStr, Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecVariantMap,
+};
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
@@ -278,6 +280,23 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
             input = new_input;
         }
         Ok((input, result))
+    }
+}
+
+impl DecodeFormatted for VecVariantMap {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        let (input, header) = decode_map_header(input, fmt)?;
+        let mut map_input = &input[..header.size as usize];
+        let count = header.count / 2;
+        let mut map = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let (input1, key) = Str::decode(map_input)?;
+            let (input2, value) = Variant::decode(input1)?;
+            map_input = input2;
+            map.push((key, value)); // todo: ensure None returned?
+        }
+        // todo: validate map_input is empty
+        Ok((&input[header.size as usize..], VecVariantMap(map)))
     }
 }
 

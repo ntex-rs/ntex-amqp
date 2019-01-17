@@ -8,7 +8,9 @@ use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
-use crate::types::{ByteStr, Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant};
+use crate::types::{
+    ByteStr, Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant, VecVariantMap,
+};
 
 fn encode_null(buf: &mut BytesMut) {
     buf.put_u8(codec::FORMATCODE_NULL);
@@ -493,6 +495,42 @@ impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
         buf.put_u32_be(count as u32);
 
         for (k, v) in self {
+            k.encode(buf);
+            v.encode(buf);
+        }
+    }
+}
+
+impl Encode for VecVariantMap {
+    fn encoded_size(&self) -> usize {
+        let size = self
+            .0
+            .iter()
+            .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
+
+        // f:1 + s:4 + c:4 vs f:1 + s:1 + c:1
+        let preamble = if size + 1 > u8::MAX as usize { 9 } else { 3 };
+        preamble + size
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let count = self.len() * 2; // key-value pair accounts for two items in count
+        let size = self
+            .0
+            .iter()
+            .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
+
+        if size + 1 > u8::MAX as usize {
+            buf.put_u8(codec::FORMATCODE_MAP32);
+            buf.put_u32_be((size + 4) as u32); // +4 for 4 byte count that follows
+            buf.put_u32_be(count as u32);
+        } else {
+            buf.put_u8(codec::FORMATCODE_MAP8);
+            buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
+            buf.put_u8(count as u8);
+        }
+
+        for (k, v) in self.iter() {
             k.encode(buf);
             v.encode(buf);
         }

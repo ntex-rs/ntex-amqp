@@ -141,6 +141,29 @@ impl Hash for VariantMap {
     }
 }
 
+#[derive(PartialEq, Clone, Debug)]
+pub struct VecVariantMap(pub Vec<(Str, Variant)>);
+
+impl Default for VecVariantMap {
+    fn default() -> Self {
+        VecVariantMap(Vec::with_capacity(8))
+    }
+}
+
+impl std::ops::Deref for VecVariantMap {
+    type Target = Vec<(Str, Variant)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for VecVariantMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
