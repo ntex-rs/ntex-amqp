@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
-use amqp_codec::protocol::{Flow, Outcome, SequenceNo};
-use amqp_codec::Message;
+use amqp_codec::protocol::{Flow, Outcome, SequenceNo, TransferBody};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Future};
 
@@ -37,7 +36,7 @@ pub(crate) struct SenderLinkInner {
 
 struct PendingTransfer {
     idx: u32,
-    message: Message,
+    body: TransferBody,
     promise: DeliveryPromise,
 }
 
@@ -46,11 +45,11 @@ impl SenderLink {
         SenderLink { inner }
     }
 
-    pub fn send(
+    pub fn send<T: Into<TransferBody>>(
         &mut self,
-        msg: Message,
+        body: T,
     ) -> impl Future<Item = Outcome, Error = AmqpTransportError> {
-        self.inner.get_mut().send(msg)
+        self.inner.get_mut().send(body)
     }
 }
 
@@ -121,7 +120,7 @@ impl SenderLinkInner {
                     session.send_transfer(
                         self.remote_handle,
                         transfer.idx,
-                        transfer.message,
+                        transfer.body,
                         transfer.promise,
                     );
                 } else {
@@ -135,11 +134,12 @@ impl SenderLinkInner {
         }
     }
 
-    pub fn send(&mut self, message: Message) -> Delivery {
+    pub fn send<T: Into<TransferBody>>(&mut self, body: T) -> Delivery {
+        let body = body.into();
         let (delivery_tx, delivery_rx) = oneshot::channel();
         if self.link_credit == 0 {
             self.pending_transfers.push_back(PendingTransfer {
-                message,
+                body,
                 idx: self.idx,
                 promise: delivery_tx,
             });
@@ -147,7 +147,7 @@ impl SenderLinkInner {
             let session = self.session.get_mut();
             self.link_credit -= 1;
             self.delivery_count.saturating_add(1);
-            session.send_transfer(self.remote_handle, self.idx, message, delivery_tx);
+            session.send_transfer(self.remote_handle, self.idx, body, delivery_tx);
         }
         self.idx.saturating_add(1);
         Delivery::Pending(delivery_rx)

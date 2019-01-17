@@ -93,9 +93,9 @@ impl<S> Message<S> {
         }
     }
 
-    pub fn load_message(&self) -> Result<amqp_codec::Message, AmqpError> {
+    pub fn load_message<T: Decode>(&self) -> Result<T, AmqpError> {
         if let Some(TransferBody::Data(ref b)) = self.frame.body {
-            if let Ok((_, msg)) = amqp_codec::Message::decode(b) {
+            if let Ok((_, msg)) = T::decode(b) {
                 Ok(msg)
             } else {
                 Err(AmqpError::decode_error().description("Can not decode message"))

@@ -10,9 +10,9 @@ use string::{self, TryFrom};
 use amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
     Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Target, TerminusDurability,
-    TerminusExpiryPolicy, Transfer, TransferNumber,
+    TerminusExpiryPolicy, Transfer, TransferBody, TransferNumber,
 };
-use amqp_codec::{AmqpFrame, Message};
+use amqp_codec::AmqpFrame;
 
 use crate::cell::Cell;
 use crate::connection::ConnectionController;
@@ -147,7 +147,7 @@ pub(crate) struct SessionInner {
 struct PendingTransfer {
     link_handle: Handle,
     idx: u32,
-    message: Message,
+    body: TransferBody,
     promise: DeliveryPromise,
 }
 
@@ -571,7 +571,7 @@ impl SessionInner {
         );
 
         while let Some(t) = self.pending_transfers.pop_front() {
-            self.send_transfer(t.link_handle, t.idx, t.message, t.promise);
+            self.send_transfer(t.link_handle, t.idx, t.body, t.promise);
             if self.remote_outgoing_window == 0 {
                 break;
             }
@@ -642,19 +642,19 @@ impl SessionInner {
         &mut self,
         link_handle: Handle,
         idx: u32,
-        message: Message,
+        body: TransferBody,
         promise: DeliveryPromise,
     ) {
         if self.remote_incoming_window == 0 {
             self.pending_transfers.push_back(PendingTransfer {
                 link_handle,
                 idx,
-                message,
+                body,
                 promise,
             });
             return;
         }
-        let frame = self.prepare_transfer(link_handle, idx, message, promise);
+        let frame = self.prepare_transfer(link_handle, idx, body, promise);
         self.post_frame(frame);
     }
 
@@ -662,7 +662,7 @@ impl SessionInner {
         &mut self,
         link_handle: Handle,
         idx: u32,
-        message: Message,
+        body: TransferBody,
         promise: DeliveryPromise,
     ) -> Frame {
         let delivery_id = self.next_outgoing_id;
@@ -677,7 +677,7 @@ impl SessionInner {
             handle: link_handle,
             delivery_id: Some(delivery_id),
             delivery_tag: None, // Some(delivery_tag.clone()),
-            message_format: message.message_format,
+            message_format: body.message_format(),
             settled: Some(false),
             more: false,
             rcv_settle_mode: None,
@@ -685,7 +685,7 @@ impl SessionInner {
             resume: false,
             aborted: false,
             batchable: false,
-            body: Some(message.into()),
+            body: Some(body),
         };
         self.unsettled_deliveries.insert(delivery_id, promise);
         Frame::Transfer(transfer)
