@@ -55,7 +55,7 @@ where
             auth,
             time,
         } = connect;
-        ok((connect, config, auth, time))
+        ok::<_, either::Either<SaslConnectError, T::Error>>((connect, config, auth, time))
     })
     // connect to host
     .apply(
