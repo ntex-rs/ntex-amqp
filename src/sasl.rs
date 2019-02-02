@@ -39,12 +39,12 @@ pub struct SaslAuth {
 pub fn connect_service<T, Io>(
     connector: T,
 ) -> impl Service<
-    SaslConnect,
+    Request = SaslConnect,
     Response = Connection<Io>,
     Error = either::Either<SaslConnectError, T::Error>,
 >
 where
-    T: Service<Connect, Response = (Connect, Io)>,
+    T: Service<Request = Connect, Response = (Connect, Io)>,
     T::Error: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {

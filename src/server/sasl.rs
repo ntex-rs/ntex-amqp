@@ -205,8 +205,8 @@ pub(crate) fn no_sasl_auth<S>(sasl: SaslAuth) -> impl Future<Item = S, Error = E
 pub(crate) struct Sasl<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     fut: F::Future,
@@ -285,8 +285,8 @@ impl SaslState {
 impl<Io, F, St, S> Sasl<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     pub(super) fn new(
@@ -310,8 +310,8 @@ where
 impl<Io, F, St, S> Future for Sasl<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     type Item = (St, S, Framed<Io, AmqpCodec<SaslFrame>>);
@@ -320,7 +320,7 @@ where
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         match self.fut.poll() {
             Ok(Async::Ready((st, srv))) => {
-                return Ok(Async::Ready((st, srv, self.framed.take().unwrap())))
+                return Ok(Async::Ready((st, srv, self.framed.take().unwrap())));
             }
             Ok(Async::NotReady) => (),
             Err(e) => {

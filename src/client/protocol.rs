@@ -43,10 +43,11 @@ impl<Io> Default for ProtocolNegotiation<Io> {
     }
 }
 
-impl<Io> Service<Framed<Io, ProtocolIdCodec>> for ProtocolNegotiation<Io>
+impl<Io> Service for ProtocolNegotiation<Io>
 where
     Io: AsyncRead + AsyncWrite + 'static,
 {
+    type Request = Framed<Io, ProtocolIdCodec>;
     type Response = Framed<Io, ProtocolIdCodec>;
     type Error = ProtocolIdError;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;

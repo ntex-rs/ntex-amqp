@@ -30,10 +30,11 @@ impl<T> ProtocolNegotiation<T> {
     }
 }
 
-impl<T> Service<Framed<T, ProtocolIdCodec>> for ProtocolNegotiation<T>
+impl<T> Service for ProtocolNegotiation<T>
 where
     T: AsyncRead + AsyncWrite + 'static,
 {
+    type Request = Framed<T, ProtocolIdCodec>;
     type Response = Framed<T, ProtocolIdCodec>;
     type Error = ProtocolIdError;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;

@@ -21,18 +21,19 @@ pub struct ServerDispatcher<Io, St, S> {
 impl<Io, St, S> Default for ServerDispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
     fn default() -> Self {
         ServerDispatcher { _t: PhantomData }
     }
 }
 
-impl<Io, St, S> NewService<(St, S, Connection<Io>)> for ServerDispatcher<Io, St, S>
+impl<Io, St, S> NewService for ServerDispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
+    type Request = (St, S, Connection<Io>);
     type Response = ();
     type Error = ();
     type InitError = ();
@@ -52,18 +53,19 @@ pub struct ServerDispatcherImpl<Io, St, S> {
 impl<Io, St, S> Default for ServerDispatcherImpl<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
     fn default() -> Self {
         ServerDispatcherImpl { _t: PhantomData }
     }
 }
 
-impl<Io, St, S> Service<(St, S, Connection<Io>)> for ServerDispatcherImpl<Io, St, S>
+impl<Io, St, S> Service for ServerDispatcherImpl<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
+    type Request = (St, S, Connection<Io>);
     type Response = ();
     type Error = ();
     type Future = Dispatcher<Io, St, S>;
@@ -81,7 +83,7 @@ where
 pub struct Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
     conn: Connection<Io>,
     state: Cell<St>,
@@ -93,7 +95,7 @@ where
 impl<Io, St, S> Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
     pub fn new(conn: Connection<Io>, state: St, service: S) -> Self {
         Dispatcher {
@@ -109,7 +111,7 @@ where
 impl<Io, St, S> Future for Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
     type Item = ();
     type Error = ();

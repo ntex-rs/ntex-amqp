@@ -6,7 +6,6 @@ use amqp_codec::protocol::{Error, Frame, ProtocolId};
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 use futures::future::{err, ok, Either, FutureResult};
 use futures::{Async, Future, Poll, Sink, Stream};
-use string;
 
 use crate::cell::Cell;
 use crate::connection::Connection;
@@ -30,8 +29,8 @@ pub(super) struct Inner<Io, F, St, S> {
 impl<Io, F, St, S> ServerFactory<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<OpenLink<St>, Response = (), Error = Error>,
+    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
 {
     /// Create server dispatcher factory
     pub fn new(config: Configuration, factory: F) -> Self {
@@ -53,13 +52,14 @@ impl<Io, F, St, S> Clone for ServerFactory<Io, F, St, S> {
     }
 }
 
-impl<Io, F, St, S> NewService<Io> for ServerFactory<Io, F, St, S>
+impl<Io, F, St, S> NewService for ServerFactory<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
+    type Request = Io;
     type Response = (St, S, Connection<Io>);
     type Error = HandshakeError;
     type Service = Server<Io, F, St, S>;
@@ -78,13 +78,14 @@ pub struct Server<Io, F, St, S> {
     inner: Cell<Inner<Io, F, St, S>>,
 }
 
-impl<Io, F, St, S> Service<Io> for Server<Io, F, St, S>
+impl<Io, F, St, S> Service for Server<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<OpenLink<St>, Response = (), Error = Error> + 'static,
+    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
+    type Request = Io;
     type Response = (St, S, Connection<Io>);
     type Error = HandshakeError;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;

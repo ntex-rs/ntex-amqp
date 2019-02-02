@@ -17,13 +17,13 @@ impl ServiceFactory {
         state: F,
     ) -> ServiceFactoryBuilder<
         State,
-        impl Service<(), Response = State, Error = Error>,
-        impl Service<SaslAuth, Response = State, Error = Error>,
+        impl Service<Request = (), Response = State, Error = Error>,
+        impl Service<Request = SaslAuth, Response = State, Error = Error>,
     >
     where
-        F: IntoService<S, ()>,
+        F: IntoService<S>,
         State: 'static,
-        S: Service<(), Response = State>,
+        S: Service<Request = (), Response = State>,
         S::Error: Into<Error>,
     {
         ServiceFactoryBuilder {
@@ -38,12 +38,12 @@ impl ServiceFactory {
         srv: F,
     ) -> ServiceFactoryBuilder<
         (),
-        impl Service<(), Response = (), Error = Error>,
-        impl Service<SaslAuth, Response = (), Error = Error>,
+        impl Service<Request = (), Response = (), Error = Error>,
+        impl Service<Request = SaslAuth, Response = (), Error = Error>,
     >
     where
-        F: IntoService<S, SaslAuth>,
-        S: Service<SaslAuth, Response = ()>,
+        F: IntoService<S>,
+        S: Service<Request = SaslAuth, Response = ()>,
         S::Error: Into<Error>,
     {
         ServiceFactoryBuilder {
@@ -58,13 +58,13 @@ impl ServiceFactory {
         st: F,
     ) -> ServiceFactoryService<
         (),
-        impl NewService<OpenLink<()>, Response = (), Error = Error, InitError = Error>,
-        impl Service<(), Response = (), Error = Error>,
-        impl Service<SaslAuth, Response = (), Error = Error>,
+        impl NewService<Request = OpenLink<()>, Response = (), Error = Error, InitError = Error>,
+        impl Service<Request = (), Response = (), Error = Error>,
+        impl Service<Request = SaslAuth, Response = (), Error = Error>,
     >
     where
-        F: IntoNewService<S, OpenLink<()>>,
-        S: NewService<OpenLink<()>, Response = ()>,
+        F: IntoNewService<S>,
+        S: NewService<Request = OpenLink<()>, Response = ()>,
         S::Error: Into<Error>,
         S::InitError: Into<Error>,
     {
@@ -91,8 +91,8 @@ pub struct ServiceFactoryBuilder<State, StateSrv, SaslSrv> {
 impl<State, StateSrv, SaslSrv> ServiceFactoryBuilder<State, StateSrv, SaslSrv>
 where
     State: 'static,
-    StateSrv: Service<(), Response = State, Error = Error>,
-    SaslSrv: Service<SaslAuth, Response = State, Error = Error>,
+    StateSrv: Service<Request = (), Response = State, Error = Error>,
+    SaslSrv: Service<Request = SaslAuth, Response = State, Error = Error>,
 {
     /// Set service factory
     pub fn service<F, Srv>(
@@ -100,13 +100,13 @@ where
         st: F,
     ) -> ServiceFactoryService<
         State,
-        impl NewService<OpenLink<State>, Response = (), Error = Error, InitError = Error>,
+        impl NewService<Request = OpenLink<State>, Response = (), Error = Error, InitError = Error>,
         StateSrv,
         SaslSrv,
     >
     where
-        F: IntoNewService<Srv, OpenLink<State>>,
-        Srv: NewService<OpenLink<State>, Response = (), InitError = Error>,
+        F: IntoNewService<Srv>,
+        Srv: NewService<Request = OpenLink<State>, Response = (), InitError = Error>,
         Srv::InitError: Into<Error>,
         Srv::Error: Into<Error>,
     {
@@ -130,11 +130,11 @@ where
     ) -> ServiceFactoryBuilder<
         State,
         StateSrv,
-        impl Service<SaslAuth, Response = State, Error = Error>,
+        impl Service<Request = SaslAuth, Response = State, Error = Error>,
     >
     where
-        F: IntoService<SaslSrv2, SaslAuth>,
-        SaslSrv2: Service<SaslAuth, Response = State>,
+        F: IntoService<SaslSrv2>,
+        SaslSrv2: Service<Request = SaslAuth, Response = State>,
         SaslSrv2::Error: Into<Error>,
     {
         ServiceFactoryBuilder {
@@ -164,16 +164,16 @@ impl<State, Srv, StateSrv, SaslSrv> Clone for ServiceFactoryService<State, Srv, 
     }
 }
 
-impl<State, Srv, StateSrv, SaslSrv> Service<Option<SaslAuth>>
-    for ServiceFactoryService<State, Srv, StateSrv, SaslSrv>
+impl<State, Srv, StateSrv, SaslSrv> Service for ServiceFactoryService<State, Srv, StateSrv, SaslSrv>
 where
-    Srv: NewService<OpenLink<State>, Response = (), InitError = Error>,
+    Srv: NewService<Request = OpenLink<State>, Response = (), InitError = Error>,
     Srv::Future: 'static,
-    StateSrv: Service<(), Response = State, Error = Error>,
+    StateSrv: Service<Request = (), Response = State, Error = Error>,
     StateSrv::Future: 'static,
-    SaslSrv: Service<SaslAuth, Response = State, Error = Error>,
+    SaslSrv: Service<Request = SaslAuth, Response = State, Error = Error>,
     SaslSrv::Future: 'static,
 {
+    type Request = Option<SaslAuth>;
     type Response = (State, Srv::Service);
     type Error = Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;

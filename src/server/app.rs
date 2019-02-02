@@ -21,8 +21,8 @@ impl<S: 'static> App<S> {
 
     pub fn service<F, U: 'static>(mut self, address: &str, service: F) -> Self
     where
-        F: IntoNewService<U, OpenLink<S>>,
-        U: NewService<OpenLink<S>, Response = ()>,
+        F: IntoNewService<U>,
+        U: NewService<Request = OpenLink<S>, Response = ()>,
         U::Error: Into<Error>,
         U::InitError: Into<Error> + fmt::Display,
     {
@@ -37,7 +37,8 @@ impl<S: 'static> App<S> {
 
     pub fn finish(
         self,
-    ) -> impl NewService<OpenLink<S>, Response = (), Error = Error, InitError = Error> {
+    ) -> impl NewService<Request = OpenLink<S>, Response = (), Error = Error, InitError = Error>
+    {
         let routes = Cell::new(self.0);
 
         move || {
@@ -64,7 +65,8 @@ struct AppService<S> {
     router: Router<BoxedHandle<S>>,
 }
 
-impl<S: 'static> Service<OpenLink<S>> for AppService<S> {
+impl<S: 'static> Service for AppService<S> {
+    type Request = OpenLink<S>;
     type Response = ();
     type Error = Error;
     type Future = Either<FutureResult<(), Error>, Box<Future<Item = (), Error = Error>>>;
@@ -99,7 +101,7 @@ impl<S: 'static> Service<OpenLink<S>> for AppService<S> {
 
 type BoxedHandle<S> = Box<
     Service<
-        OpenLink<S>,
+        Request = OpenLink<S>,
         Response = (),
         Error = Error,
         Future = Box<Future<Item = (), Error = Error>>,
@@ -111,11 +113,12 @@ struct Handle<T, S> {
     _t: PhantomData<(S,)>,
 }
 
-impl<T, S: 'static> Service<OpenLink<S>> for Handle<T, S>
+impl<T, S: 'static> Service for Handle<T, S>
 where
-    T: Service<OpenLink<S>, Response = (), Error = Error>,
+    T: Service<Request = OpenLink<S>, Response = (), Error = Error>,
     T::Future: 'static,
 {
+    type Request = OpenLink<S>;
     type Response = ();
     type Error = Error;
     type Future = Box<Future<Item = (), Error = Error>>;
@@ -131,7 +134,7 @@ where
 
 type BoxedNewHandle<S> = Box<
     NewService<
-        OpenLink<S>,
+        Request = OpenLink<S>,
         Response = (),
         Error = Error,
         InitError = Error,
@@ -145,14 +148,15 @@ struct NewHandle<T, S> {
     _t: PhantomData<(S,)>,
 }
 
-impl<T, S: 'static> NewService<OpenLink<S>> for NewHandle<T, S>
+impl<T, S: 'static> NewService for NewHandle<T, S>
 where
-    T: NewService<OpenLink<S>, Response = ()>,
+    T: NewService<Request = OpenLink<S>, Response = ()>,
     T::Service: 'static,
     T::Error: Into<Error>,
     T::InitError: Into<Error> + fmt::Display,
     T::Future: 'static,
 {
+    type Request = OpenLink<S>;
     type Response = ();
     type Error = Error;
     type InitError = Error;
