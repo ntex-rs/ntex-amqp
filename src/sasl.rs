@@ -58,7 +58,7 @@ where
         ok::<_, either::Either<SaslConnectError, T::Error>>((connect, config, auth, time))
     })
     // connect to host
-    .apply(
+    .apply_fn(
         connector.map_err(|e| either::Right(e)),
         |(connect, config, auth, time), srv| {
             srv.call(connect)
@@ -66,7 +66,7 @@ where
         },
     )
     // sasl protocol negotiation
-    .apply(
+    .apply_fn(
         ProtocolNegotiation::new(ProtocolId::AmqpSasl)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
         |(io, connect, config, auth, time): (Io, Connect, Configuration, SaslAuth, _), srv| {
@@ -76,7 +76,7 @@ where
         },
     )
     // sasl auth
-    .apply(
+    .apply_fn(
         sasl_connect.into_service().map_err(Either::Left),
         |(framed, connect, config, auth, time), srv| {
             srv.call((framed, auth))
@@ -84,7 +84,7 @@ where
         },
     )
     // protocol negotiation
-    .apply(
+    .apply_fn(
         ProtocolNegotiation::new(ProtocolId::Amqp)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
         |(connect, config, framed, time): (
