@@ -8,7 +8,7 @@ edition = "2018"
 amqp-codec = { git = "https://github.com/fafhrd91/amqp-codec.git" }
 
 actix-codec = "0.1.0"
-actix-service = "0.2.0"
+actix-service = "0.2.1"
 actix-connector = "0.2.0"
 actix-router = { git = "https://github.com/actix/actix-net.git" }
 actix-utils = "0.2.0"
