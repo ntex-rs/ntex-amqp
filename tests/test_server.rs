@@ -1,10 +1,10 @@
 use actix_connector::{Connect, Connector};
-use actix_service::{NewService, Service};
+use actix_service::{IntoNewService, NewService, Service};
 use actix_test_server::TestServer;
 use amqp_transport::server::{self, errors};
 use amqp_transport::{self, client, sasl, Configuration};
-use futures::future::err;
-use futures::{Future, Sink};
+use futures::future::{err, lazy};
+use futures::Future;
 
 fn server(link: server::OpenLink<()>) -> impl Future<Item = (), Error = errors::LinkError> {
     println!("OPEN LINK");
@@ -24,14 +24,25 @@ fn test_simple() -> std::io::Result<()> {
         server::ServerFactory::new(
             Configuration::default(),
             server::ServiceFactory::service(
-                server::App::<()>::new().service("test", server).finish(),
+                server::App::<()>::new()
+                    .service(
+                        "test",
+                        server
+                            .into_new_service()
+                            .map_init_err(|_| errors::LinkError::force_detach()),
+                    )
+                    .finish(),
             ),
         )
         .map_err(|_| ())
         .and_then(server::ServerDispatcher::default())
     });
 
-    let mut sasl_srv = sasl::connect_service(Connector::default());
+    let mut sasl_srv = srv
+        .block_on(lazy(|| {
+            Ok::<_, ()>(sasl::connect_service(Connector::default()))
+        }))
+        .unwrap();
     let req = sasl::SaslConnect {
         connect: Connect::new(srv.host(), srv.port()),
         config: Configuration::default(),
@@ -74,14 +85,26 @@ fn test_sasl() -> std::io::Result<()> {
     let mut srv = TestServer::with(|| {
         server::ServerFactory::new(
             Configuration::default(),
-            server::ServiceFactory::sasl(sasl_auth)
-                .service(server::App::<()>::new().service("test", server).finish()),
+            server::ServiceFactory::sasl(sasl_auth).service(
+                server::App::<()>::new()
+                    .service(
+                        "test",
+                        server
+                            .into_new_service()
+                            .map_init_err(|_| errors::LinkError::force_detach()),
+                    )
+                    .finish(),
+            ),
         )
         .map_err(|_| ())
         .and_then(server::ServerDispatcher::default())
     });
 
-    let mut sasl_srv = sasl::connect_service(Connector::default());
+    let mut sasl_srv = srv
+        .block_on(lazy(|| {
+            Ok::<_, ()>(sasl::connect_service(Connector::default()))
+        }))
+        .unwrap();
     let req = sasl::SaslConnect {
         connect: Connect::new(srv.host(), srv.port()),
         config: Configuration::default(),

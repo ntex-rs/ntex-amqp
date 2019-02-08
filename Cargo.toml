@@ -11,7 +11,7 @@ actix-codec = "0.1.0"
 actix-service = "0.2.1"
 actix-connector = "0.2.0"
 actix-router = { git = "https://github.com/actix/actix-net.git" }
-actix-utils = "0.2.0"
+actix-utils = "0.2.1"
 derive_more = "0.14"
 either = "1.5"
 futures = "0.1"
