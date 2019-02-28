@@ -2,7 +2,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use actix_router::Router;
-use actix_service::{IntoNewService, NewService, Service, ServiceExt};
+use actix_service::{fn_factory, IntoNewService, NewService, Service, ServiceExt};
 use amqp_codec::protocol::Error;
 use futures::future::{err, join_all, ok, Either, FutureResult};
 use futures::{Async, Future, Poll};
@@ -41,11 +41,11 @@ impl<S: 'static> App<S> {
     {
         let routes = Cell::new(self.0);
 
-        move || {
+        fn_factory(move || {
             let mut fut = Vec::new();
             for (addr, hnd) in routes.clone().get_mut().iter_mut() {
                 let addr = addr.clone();
-                fut.push(hnd.new_service().map(move |srv| (addr, srv)))
+                fut.push(hnd.new_service(&()).map(move |srv| (addr, srv)))
             }
 
             join_all(fut).and_then(move |services| {
@@ -57,7 +57,7 @@ impl<S: 'static> App<S> {
                     router: router.finish(),
                 })
             })
-        }
+        })
     }
 }
 
@@ -163,10 +163,10 @@ where
     type Service = BoxedHandle<S>;
     type Future = Box<Future<Item = Self::Service, Error = Self::InitError>>;
 
-    fn new_service(&self) -> Self::Future {
+    fn new_service(&self, cfg: &()) -> Self::Future {
         Box::new(
             self.service
-                .new_service()
+                .new_service(cfg)
                 .map_err(|e| {
                     error!("Can not create new service: {}", e);
                     e.into()

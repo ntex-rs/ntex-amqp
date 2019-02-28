@@ -185,9 +185,9 @@ where
     fn call(&mut self, req: Option<SaslAuth>) -> Self::Future {
         let inner = self.inner.get_mut();
         if let Some(auth) = req {
-            Box::new(inner.sasl.call(auth).join(inner.service.new_service()))
+            Box::new(inner.sasl.call(auth).join(inner.service.new_service(&())))
         } else {
-            Box::new(inner.state.call(()).join(inner.service.new_service()))
+            Box::new(inner.state.call(()).join(inner.service.new_service(&())))
         }
     }
 }

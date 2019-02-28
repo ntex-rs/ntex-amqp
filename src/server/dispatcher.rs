@@ -40,7 +40,7 @@ where
     type Service = ServerDispatcherImpl<Io, St, S>;
     type Future = FutureResult<Self::Service, Self::Error>;
 
-    fn new_service(&self) -> Self::Future {
+    fn new_service(&self, _: &()) -> Self::Future {
         ok(ServerDispatcherImpl::default())
     }
 }
