@@ -1,3 +1,3 @@
-# AMQP 1.0 Protocol Transport in Rust
+# AMQP 1.0 Server Framework
 
-[![Build Status](https://travis-ci.org/fafhrd91/amqp-transport.svg?branch=master)](https://travis-ci.org/fafhrd91/amqp-transport)
+[![Build Status](https://travis-ci.org/fafhrd91/actix-amqp.svg?branch=master)](https://travis-ci.org/fafhrd91/actix-amqp)
