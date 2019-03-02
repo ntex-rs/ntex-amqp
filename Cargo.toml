@@ -8,14 +8,10 @@ edition = "2018"
 amqp-codec = { git = "https://github.com/fafhrd91/amqp-codec.git" }
 
 actix-codec = "0.1.0"
-#actix-service = "0.2.1"
-#actix-connector = "0.2.0"
-#actix-service = { path = "../../actix/actix-net/actix-service" }
-#actix-connector = { path = "../../actix/actix-net/actix-connector" }
-actix-service = { git = "https://github.com/actix/actix-net.git" }
-actix-connector = { git = "https://github.com/actix/actix-net.git" }
+actix-service = "0.3.0"
+actix-connector = "0.3.0"
 actix-router = { git = "https://github.com/actix/actix-net.git" }
-actix-utils = "0.2.1"
+actix-utils = "0.3.0"
 
 derive_more = "0.14"
 either = "1.5"
@@ -30,4 +26,4 @@ tokio-timer = "0.2"
 
 [dev-dependencies]
 env_logger = "0.6"
-actix-test-server = { git = "https://github.com/actix/actix-net.git" }
+actix-test-server = "0.1.0"
