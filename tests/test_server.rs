@@ -1,8 +1,8 @@
+use actix_amqp::server::{self, errors};
+use actix_amqp::{self, client, sasl, Configuration};
 use actix_connector::{Connect, Connector};
 use actix_service::{IntoNewService, NewService, Service};
 use actix_test_server::TestServer;
-use amqp_transport::server::{self, errors};
-use amqp_transport::{self, client, sasl, Configuration};
 use futures::future::{err, lazy};
 use futures::Future;
 
