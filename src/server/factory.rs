@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
+use actix_server_config::ServerConfig;
 use actix_service::{NewService, Service};
 use amqp_codec::protocol::{Error, Frame, ProtocolId};
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
@@ -52,7 +53,7 @@ impl<Io, F, St, S> Clone for ServerFactory<Io, F, St, S> {
     }
 }
 
-impl<Io, F, St, S> NewService for ServerFactory<Io, F, St, S>
+impl<Io, F, St, S> NewService<ServerConfig> for ServerFactory<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
@@ -66,7 +67,7 @@ where
     type InitError = ();
     type Future = FutureResult<Self::Service, Self::InitError>;
 
-    fn new_service(&self, _: &()) -> Self::Future {
+    fn new_service(&self, _: &ServerConfig) -> Self::Future {
         ok(Server {
             inner: self.inner.clone(),
         })

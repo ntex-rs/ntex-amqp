@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite};
+use actix_server_config::ServerConfig;
 use actix_service::{NewService, Service};
 use amqp_codec::protocol::{Error, Frame, Role};
 use futures::future::{ok, FutureResult};
@@ -28,7 +29,7 @@ where
     }
 }
 
-impl<Io, St, S> NewService for ServerDispatcher<Io, St, S>
+impl<Io, St, S> NewService<ServerConfig> for ServerDispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
     S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
@@ -40,7 +41,7 @@ where
     type Service = ServerDispatcherImpl<Io, St, S>;
     type Future = FutureResult<Self::Service, Self::Error>;
 
-    fn new_service(&self, _: &()) -> Self::Future {
+    fn new_service(&self, _: &ServerConfig) -> Self::Future {
         ok(ServerDispatcherImpl::default())
     }
 }
