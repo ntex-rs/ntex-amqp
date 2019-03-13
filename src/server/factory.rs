@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_server_config::ServerConfig;
+use actix_server_config::{Io, ServerConfig};
 use actix_service::{NewService, Service};
 use amqp_codec::protocol::{Error, Frame, ProtocolId};
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
@@ -53,17 +53,17 @@ impl<Io, F, St, S> Clone for ServerFactory<Io, F, St, S> {
     }
 }
 
-impl<Io, F, St, S> NewService<ServerConfig> for ServerFactory<Io, F, St, S>
+impl<T, F, St, S> NewService<ServerConfig> for ServerFactory<T, F, St, S>
 where
-    Io: AsyncRead + AsyncWrite + 'static,
+    T: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
     S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
-    type Request = Io;
-    type Response = (St, S, Connection<Io>);
+    type Request = Io<T>;
+    type Response = (St, S, Connection<T>);
     type Error = HandshakeError;
-    type Service = Server<Io, F, St, S>;
+    type Service = Server<T, F, St, S>;
     type InitError = ();
     type Future = FutureResult<Self::Service, Self::InitError>;
 
@@ -79,15 +79,15 @@ pub struct Server<Io, F, St, S> {
     inner: Cell<Inner<Io, F, St, S>>,
 }
 
-impl<Io, F, St, S> Service for Server<Io, F, St, S>
+impl<T, F, St, S> Service for Server<T, F, St, S>
 where
-    Io: AsyncRead + AsyncWrite + 'static,
+    T: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
     S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
-    type Request = Io;
-    type Response = (St, S, Connection<Io>);
+    type Request = Io<T>;
+    type Response = (St, S, Connection<T>);
     type Error = HandshakeError;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
@@ -95,7 +95,9 @@ where
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, req: Io) -> Self::Future {
+    fn call(&mut self, req: Self::Request) -> Self::Future {
+        let req = req.into_parts().0;
+
         let inner = self.inner.clone();
         Box::new(
             Framed::new(req, ProtocolIdCodec)
