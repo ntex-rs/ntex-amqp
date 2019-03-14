@@ -1,14 +1,15 @@
 use actix_amqp::server::{self, errors};
 use actix_amqp::{self, client, sasl, Configuration};
-use actix_connector::{Connect, Connector};
+use actix_connect::{default_connector, Connector};
 use actix_service::{IntoNewService, NewService, Service};
 use actix_test_server::TestServer;
 use futures::future::{err, lazy};
 use futures::Future;
+use http::{HttpTryFrom, Uri};
 
 fn server(link: server::OpenLink<()>) -> impl Future<Item = (), Error = errors::LinkError> {
     println!("OPEN LINK");
-    let link = link.open(10);
+    let _link = link.open(10);
     err(errors::LinkError::force_detach().description("unimplemented"))
 }
 
@@ -38,13 +39,14 @@ fn test_simple() -> std::io::Result<()> {
         .and_then(server::ServerDispatcher::default())
     });
 
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.host(), srv.port())).unwrap();
     let mut sasl_srv = srv
         .block_on(lazy(|| {
-            Ok::<_, ()>(sasl::connect_service(Connector::default()))
+            Ok::<_, ()>(sasl::connect_service(default_connector()))
         }))
         .unwrap();
     let req = sasl::SaslConnect {
-        connect: Connect::new(srv.host(), srv.port()),
+        uri,
         config: Configuration::default(),
         time: None,
         auth: sasl::SaslAuth {
@@ -100,13 +102,14 @@ fn test_sasl() -> std::io::Result<()> {
         .and_then(server::ServerDispatcher::default())
     });
 
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.host(), srv.port())).unwrap();
     let mut sasl_srv = srv
         .block_on(lazy(|| {
-            Ok::<_, ()>(sasl::connect_service(Connector::default()))
+            Ok::<_, ()>(sasl::connect_service(Connector::new()))
         }))
         .unwrap();
     let req = sasl::SaslConnect {
-        connect: Connect::new(srv.host(), srv.port()),
+        uri,
         config: Configuration::default(),
         time: None,
         auth: sasl::SaslAuth {

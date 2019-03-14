@@ -1,10 +1,11 @@
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_connector::{Connect, RequestHost};
+use actix_connect::{Connect as TcpConnect, Connection as TcpConnection};
 use actix_service::{FnService, IntoService, Service, ServiceExt};
 use actix_utils::time::LowResTimeService;
 use either::Either;
 use futures::future::{ok, Future};
 use futures::{Sink, Stream};
+use http::Uri;
 
 use amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use amqp_codec::types::Symbol;
@@ -19,7 +20,7 @@ pub use crate::errors::SaslConnectError;
 #[derive(Debug)]
 /// Sasl connect request
 pub struct SaslConnect {
-    pub connect: Connect,
+    pub uri: Uri,
     pub config: Configuration,
     pub auth: SaslAuth,
     pub time: Option<LowResTimeService>,
@@ -44,70 +45,61 @@ pub fn connect_service<T, Io>(
     Error = either::Either<SaslConnectError, T::Error>,
 >
 where
-    T: Service<Request = Connect, Response = (Connect, Io)>,
+    T: Service<Request = TcpConnect<Uri>, Response = TcpConnection<Uri, Io>>,
     T::Error: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
     FnService::new(|connect: SaslConnect| {
         let SaslConnect {
-            connect,
+            uri,
             config,
             auth,
             time,
         } = connect;
-        ok::<_, either::Either<SaslConnectError, T::Error>>((connect, config, auth, time))
+        ok::<_, either::Either<SaslConnectError, T::Error>>((uri, config, auth, time))
     })
     // connect to host
     .apply_fn(
         connector.map_err(|e| either::Right(e)),
-        |(connect, config, auth, time), srv| {
-            srv.call(connect)
-                .map(|(connect, io)| (io, connect, config, auth, time))
+        |(uri, config, auth, time), srv| {
+            srv.call(uri.into()).map(|stream| {
+                let (io, uri) = stream.into_parts();
+                (io, uri, config, auth, time)
+            })
         },
     )
     // sasl protocol negotiation
     .apply_fn(
         ProtocolNegotiation::new(ProtocolId::AmqpSasl)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
-        |(io, connect, config, auth, time): (Io, Connect, Configuration, SaslAuth, _), srv| {
+        |(io, uri, config, auth, time): (Io, _, _, _, _), srv| {
             let framed = Framed::new(io, ProtocolIdCodec);
             srv.call(framed)
-                .map(move |framed| (framed, connect, config, auth, time))
+                .map(move |framed| (framed, uri, config, auth, time))
         },
     )
     // sasl auth
     .apply_fn(
         sasl_connect.into_service().map_err(Either::Left),
-        |(framed, connect, config, auth, time), srv| {
+        |(framed, uri, config, auth, time), srv| {
             srv.call((framed, auth))
-                .map(move |framed| (connect, config, framed, time))
+                .map(move |framed| (uri, config, framed, time))
         },
     )
     // protocol negotiation
     .apply_fn(
         ProtocolNegotiation::new(ProtocolId::Amqp)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
-        |(connect, config, framed, time): (
-            Connect,
-            Configuration,
-            Framed<Io, ProtocolIdCodec>,
-            _,
-        ),
-         srv| {
+        |(uri, config, framed, time): (_, _, Framed<Io, ProtocolIdCodec>, _), srv| {
             srv.call(framed)
-                .map(move |framed| (connect, config, framed, time))
+                .map(move |framed| (uri, config, framed, time))
         },
     )
     // open connection
     .and_then(
-        |(connect, config, framed, time): (
-            Connect,
-            Configuration,
-            Framed<Io, ProtocolIdCodec>,
-            _,
-        )| {
+        |(uri, config, framed, time): (Uri, Configuration, Framed<Io, ProtocolIdCodec>, _)| {
             let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
-            let open = config.to_open(Some(connect.host()));
+            let open = config.to_open(uri.host());
             trace!("Open connection: {:?}", open);
             framed
                 .send(AmqpFrame::new(0, Frame::Open(open)))
