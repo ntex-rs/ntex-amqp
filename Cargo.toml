@@ -9,7 +9,7 @@ amqp-codec = { git = "https://github.com/fafhrd91/amqp-codec.git" }
 
 actix-codec = "0.1.1"
 actix-service = "0.3.4"
-actix-connect = { git = "https://github.com/actix/actix-net.git" }
+actix-connect = "0.1.0"
 actix-router = "0.1.0"
 actix-utils = "0.3.4"
 actix-server-config = "0.1.0"
