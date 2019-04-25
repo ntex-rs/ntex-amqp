@@ -147,8 +147,9 @@ impl InMessage {
 
     /// Create new message and set `correlation_id` property
     pub fn reply_message(&self) -> OutMessage {
-        OutMessage::default().if_some(&self.properties, |msg, data| {
-            msg.set_properties(|props| props.correlation_id = data.message_id.clone())
+        OutMessage::default().if_some(&self.properties, |mut msg, data| {
+            msg.set_properties(|props| props.correlation_id = data.message_id.clone());
+            msg
         })
     }
 }

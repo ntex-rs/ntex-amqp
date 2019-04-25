@@ -44,7 +44,7 @@ impl OutMessage {
     }
 
     /// Set message header
-    pub fn set_header(mut self, header: Header) -> Self {
+    pub fn set_header(&mut self, header: Header) -> &mut Self {
         self.header = Some(header);
         self.size.set(0);
         self
@@ -56,7 +56,7 @@ impl OutMessage {
     }
 
     /// Add property
-    pub fn set_properties<F>(mut self, f: F) -> Self
+    pub fn set_properties<F>(&mut self, f: F) -> &mut Self
     where
         F: Fn(&mut Properties),
     {
@@ -77,7 +77,11 @@ impl OutMessage {
     }
 
     /// Add application property
-    pub fn set_app_property<K: Into<Str>, V: Into<Variant>>(mut self, key: K, value: V) -> Self {
+    pub fn set_app_property<K: Into<Str>, V: Into<Variant>>(
+        &mut self,
+        key: K,
+        value: V,
+    ) -> &mut Self {
         if let Some(ref mut props) = self.application_properties {
             props.push((key.into(), value.into()));
         } else {
@@ -122,13 +126,13 @@ impl OutMessage {
     }
 
     /// Set message body value
-    pub fn set_value<V: Into<Variant>>(mut self, v: V) -> Self {
+    pub fn set_value<V: Into<Variant>>(&mut self, v: V) -> &mut Self {
         self.body.value = Some(v.into());
         self
     }
 
     /// Set message body
-    pub fn set_body<F>(mut self, f: F) -> Self
+    pub fn set_body<F>(&mut self, f: F) -> &mut Self
     where
         F: Fn(&mut MessageBody),
     {
@@ -139,8 +143,9 @@ impl OutMessage {
 
     /// Create new message and set `correlation_id` property
     pub fn reply_message(&self) -> OutMessage {
-        OutMessage::default().if_some(&self.properties, |msg, data| {
-            msg.set_properties(|props| props.correlation_id = data.message_id.clone())
+        OutMessage::default().if_some(&self.properties, |mut msg, data| {
+            msg.set_properties(|props| props.correlation_id = data.message_id.clone());
+            msg
         })
     }
 }
