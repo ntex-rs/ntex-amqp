@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use ordered_float::OrderedFloat;
+use string::TryFrom;
 use uuid::Uuid;
 
 use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Str, Symbol};
@@ -87,6 +88,12 @@ pub enum Variant {
 impl From<ByteStr> for Variant {
     fn from(s: ByteStr) -> Self {
         Str::from(s).into()
+    }
+}
+
+impl From<String> for Variant {
+    fn from(s: String) -> Self {
+        Str::from(string::String::try_from(Bytes::from(s)).unwrap()).into()
     }
 }
 

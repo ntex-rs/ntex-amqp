@@ -122,6 +122,12 @@ impl From<String<Bytes>> for Str {
     }
 }
 
+impl From<std::string::String> for Str {
+    fn from(s: std::string::String) -> Str {
+        Str::ByteStr(String::try_from(Bytes::from(s)).unwrap())
+    }
+}
+
 impl hash::Hash for Str {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {

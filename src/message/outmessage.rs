@@ -15,7 +15,7 @@ pub struct OutMessage {
     pub message_format: Option<MessageFormat>,
     header: Option<Header>,
     delivery_annotations: Option<Annotations>,
-    message_annotations: Option<Annotations>,
+    message_annotations: Option<VecVariantMap>,
     properties: Option<Properties>,
     application_properties: Option<VecVariantMap>,
     footer: Option<Annotations>,
@@ -55,6 +55,16 @@ impl OutMessage {
         self.properties.as_ref()
     }
 
+    /// Mutable reference to properties
+    pub fn properties_mut(&mut self) -> &mut Properties {
+        if self.properties.is_none() {
+            self.properties = Some(Properties::default());
+        }
+
+        self.size.set(0);
+        self.properties.as_mut().unwrap()
+    }
+
     /// Add property
     pub fn set_properties<F>(&mut self, f: F) -> &mut Self
     where
@@ -77,17 +87,34 @@ impl OutMessage {
     }
 
     /// Add application property
-    pub fn set_app_property<K: Into<Str>, V: Into<Variant>>(
-        &mut self,
-        key: K,
-        value: V,
-    ) -> &mut Self {
+    pub fn set_app_property<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: Into<Str>,
+        V: Into<Variant>,
+    {
         if let Some(ref mut props) = self.application_properties {
             props.push((key.into(), value.into()));
         } else {
             let mut props = VecVariantMap::default();
             props.push((key.into(), value.into()));
             self.application_properties = Some(props);
+        }
+        self.size.set(0);
+        self
+    }
+
+    /// Add message annotation
+    pub fn add_message_annotation<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: Into<Str>,
+        V: Into<Variant>,
+    {
+        if let Some(ref mut props) = self.message_annotations {
+            props.push((key.into(), value.into()));
+        } else {
+            let mut props = VecVariantMap::default();
+            props.push((key.into(), value.into()));
+            self.message_annotations = Some(props);
         }
         self.size.set(0);
         self
@@ -164,7 +191,9 @@ impl Decode for OutMessage {
                     message.delivery_annotations = Some(val);
                 }
                 Section::MessageAnnotations(val) => {
-                    message.message_annotations = Some(val);
+                    message.message_annotations = Some(VecVariantMap(
+                        val.into_iter().map(|(k, v)| (k.0, v)).collect(),
+                    ));
                 }
                 Section::ApplicationProperties(val) => {
                     message.application_properties = Some(VecVariantMap(val.into_iter().collect()));
@@ -285,7 +314,8 @@ mod tests {
 
     #[test]
     fn test_properties() -> Result<(), AmqpCodecError> {
-        let msg = OutMessage::default().set_properties(|props| props.message_id = Some(1.into()));
+        let mut msg = OutMessage::default();
+        msg.set_properties(|props| props.message_id = Some(1.into()));
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
@@ -298,7 +328,8 @@ mod tests {
 
     #[test]
     fn test_app_properties() -> Result<(), AmqpCodecError> {
-        let msg = OutMessage::default().set_app_property(string::String::from_str("test"), 1);
+        let mut msg = OutMessage::default();
+        msg.set_app_property(string::String::from_str("test"), 1);
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
@@ -320,7 +351,8 @@ mod tests {
             delivery_count: 1,
         };
 
-        let msg = OutMessage::default().set_header(hdr.clone());
+        let mut msg = OutMessage::default();
+        msg.set_header(hdr.clone());
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
@@ -333,7 +365,8 @@ mod tests {
     fn test_data() -> Result<(), AmqpCodecError> {
         let data = Bytes::from_static(b"test data");
 
-        let msg = OutMessage::default().set_body(|body| body.set_data(data.clone()));
+        let mut msg = OutMessage::default();
+        msg.set_body(|body| body.set_data(data.clone()));
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
@@ -355,10 +388,13 @@ mod tests {
 
     #[test]
     fn test_messages() -> Result<(), AmqpCodecError> {
-        let msg1 = OutMessage::default().set_properties(|props| props.message_id = Some(1.into()));
-        let msg2 = OutMessage::default().set_properties(|props| props.message_id = Some(2.into()));
+        let mut msg1 = OutMessage::default();
+        msg1.set_properties(|props| props.message_id = Some(1.into()));
+        let mut msg2 = OutMessage::default();
+        msg2.set_properties(|props| props.message_id = Some(2.into()));
 
-        let msg = OutMessage::default().set_body(|body| {
+        let mut msg = OutMessage::default();
+        msg.set_body(|body| {
             body.messages.push(msg1.clone().into());
             body.messages.push(msg2.clone().into());
         });
