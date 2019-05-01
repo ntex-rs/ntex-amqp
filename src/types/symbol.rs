@@ -5,7 +5,7 @@ use string::String;
 
 use super::Str;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Display)]
 pub struct Symbol(pub Str);
 
 impl Symbol {
@@ -54,7 +54,7 @@ impl PartialEq<str> for Symbol {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
 pub struct StaticSymbol(pub &'static str);
 
 impl From<&'static str> for StaticSymbol {

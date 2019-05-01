@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Str, Symbol};
 
 /// Represents an AMQP type for use in polymorphic collections
-#[derive(Debug, Eq, PartialEq, Hash, Clone, From)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Display, From)]
 pub enum Variant {
     /// Indicates an empty value.
     Null,
@@ -64,6 +64,7 @@ pub enum Variant {
     Uuid(Uuid),
 
     /// A sequence of octets.
+    #[display(fmt = "Binary({:?})", _0)]
     Binary(Bytes),
 
     /// A sequence of Unicode characters
@@ -76,12 +77,14 @@ pub enum Variant {
     StaticSymbol(StaticSymbol),
 
     /// List
+    #[display(fmt = "List({:?})", _0)]
     List(List),
 
     /// Map
     Map(VariantMap),
 
     /// Described value
+    #[display(fmt = "Described{:?}", _0)]
     Described((Descriptor, Box<Variant>)),
 }
 
@@ -131,7 +134,8 @@ impl Variant {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Display)]
+#[display(fmt = "{:?}", map)]
 pub struct VariantMap {
     pub map: HashMap<Variant, Variant>,
 }
@@ -148,7 +152,8 @@ impl Hash for VariantMap {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Display)]
+#[display(fmt = "{:?}", _0)]
 pub struct VecVariantMap(pub Vec<(Str, Variant)>);
 
 impl Default for VecVariantMap {

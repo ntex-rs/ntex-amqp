@@ -84,6 +84,15 @@ impl InMessage {
         }
     }
 
+    /// Get message annotation
+    pub fn message_annotation(&self, key: &str) -> Option<&Variant> {
+        if let Some(ref props) = self.message_annotations {
+            props.get(key)
+        } else {
+            None
+        }
+    }
+
     /// Add application property
     pub fn set_app_property<K: Into<Str>, V: Into<Variant>>(mut self, key: K, value: V) -> Self {
         if let Some(ref mut props) = self.application_properties {

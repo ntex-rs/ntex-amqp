@@ -10,7 +10,7 @@ pub type ByteStr = String<Bytes>;
 pub use self::symbol::{StaticSymbol, Symbol};
 pub use self::variant::{Variant, VariantMap, VecVariantMap};
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Display)]
 pub enum Descriptor {
     Ulong(u64),
     Symbol(Symbol),
@@ -70,7 +70,7 @@ impl List {
     }
 }
 
-#[derive(Clone, Eq, Ord, PartialOrd)]
+#[derive(Display, Clone, Eq, Ord, PartialOrd)]
 pub enum Str {
     ByteStr(String<Bytes>),
     Static(&'static str),
