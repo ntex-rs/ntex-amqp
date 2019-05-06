@@ -8,7 +8,7 @@ use futures::Future;
 use http::{HttpTryFrom, Uri};
 
 fn server(
-    link: &server::OpenLink<()>,
+    link: &server::Link<()>,
 ) -> impl Future<
     Item = Box<
         dyn Service<
