@@ -43,12 +43,11 @@ impl Session {
         future::ok(())
     }
 
-    pub fn get_sender_link(&mut self, name: &str) -> Option<&mut SenderLink> {
-        let inner = self.inner.get_mut();
+    pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
+        let inner = self.inner.get_ref();
 
         if let Some(id) = inner.sender_links.get(name) {
-            if let Some(Either::Left(SenderLinkState::Established(ref mut link))) =
-                inner.links.get_mut(*id)
+            if let Some(Either::Left(SenderLinkState::Established(ref link))) = inner.links.get(*id)
             {
                 return Some(link);
             }
@@ -465,10 +464,7 @@ impl SessionInner {
         let remove = if let Some(link) = self.links.get_mut(idx) {
             match link {
                 Either::Left(link) => match link {
-                    SenderLinkState::Opening(tx) => {
-                        println!("sender-link: opening");
-                        true
-                    }
+                    SenderLinkState::Opening(tx) => true,
                     SenderLinkState::Established(link) => {
                         // detach from remote endpoint
                         let detach = Detach {
@@ -486,20 +482,11 @@ impl SessionInner {
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
                         true
                     }
-                    SenderLinkState::Closing(link) => {
-                        println!("sender-link: closing");
-                        true
-                    }
+                    SenderLinkState::Closing(link) => true,
                 },
                 Either::Right(link) => match link {
-                    ReceiverLinkState::Opening(link) => {
-                        println!("receiver-link: opening");
-                        false
-                    }
-                    ReceiverLinkState::Established(link) => {
-                        println!("receiver-link: established");
-                        false
-                    }
+                    ReceiverLinkState::Opening(link) => false,
+                    ReceiverLinkState::Established(link) => false,
                     ReceiverLinkState::Closing(tx) => {
                         // detach confirmation
                         if let Some(tx) = tx.take() {

@@ -12,12 +12,13 @@ use crate::cell::Cell;
 use crate::connection::Connection;
 use crate::Configuration;
 
+use super::dispatcher::Dispatcher;
 use super::errors::HandshakeError;
-use super::link::OpenLink;
+use super::link::Link;
 use super::sasl::{Sasl, SaslAuth};
 
 /// Server dispatcher factory
-pub struct ServerFactory<Io, F, St, S> {
+pub struct Server<Io, F, St, S> {
     inner: Cell<Inner<Io, F, St, S>>,
 }
 
@@ -27,11 +28,11 @@ pub(super) struct Inner<Io, F, St, S> {
     _t: PhantomData<(Io, St, S)>,
 }
 
-impl<Io, F, St, S> ServerFactory<Io, F, St, S>
+impl<Io, F, St, S> Server<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = Link<St>, Response = (), Error = Error>,
 {
     /// Create server dispatcher factory
     pub fn new(config: Configuration, factory: F) -> Self {
@@ -45,50 +46,50 @@ where
     }
 }
 
-impl<Io, F, St, S> Clone for ServerFactory<Io, F, St, S> {
+impl<Io, F, St, S> Clone for Server<Io, F, St, S> {
     fn clone(&self) -> Self {
-        ServerFactory {
+        Server {
             inner: self.inner.clone(),
         }
     }
 }
 
-impl<T, F, St, S> NewService<ServerConfig> for ServerFactory<T, F, St, S>
+impl<T, F, St, S> NewService<ServerConfig> for Server<T, F, St, S>
 where
     T: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
+    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     type Request = Io<T>;
-    type Response = (St, S, Connection<T>);
-    type Error = HandshakeError;
-    type Service = Server<T, F, St, S>;
+    type Response = ();
+    type Error = ();
+    type Service = ServerService<T, F, St, S>;
     type InitError = ();
     type Future = FutureResult<Self::Service, Self::InitError>;
 
     fn new_service(&self, _: &ServerConfig) -> Self::Future {
-        ok(Server {
+        ok(ServerService {
             inner: self.inner.clone(),
         })
     }
 }
 
 /// Server dispatcher
-pub struct Server<Io, F, St, S> {
+pub struct ServerService<Io, F, St, S> {
     inner: Cell<Inner<Io, F, St, S>>,
 }
 
-impl<T, F, St, S> Service for Server<T, F, St, S>
+impl<T, F, St, S> Service for ServerService<T, F, St, S>
 where
     T: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
+    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     type Request = Io<T>;
-    type Response = (St, S, Connection<T>);
-    type Error = HandshakeError;
+    type Response = ();
+    type Error = ();
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
@@ -105,7 +106,7 @@ where
                 .map_err(|e| HandshakeError::from(e.0))
                 .and_then(move |(protocol, framed)| match protocol {
                     Some(ProtocolId::Amqp) => {
-                        let mut inner = inner;
+                        let inner = inner;
                         Either::A(
                             framed
                                 .send(ProtocolId::Amqp)
@@ -153,7 +154,9 @@ where
                         },
                     )))),
                     None => Either::B(Either::B(err(HandshakeError::Disconnected.into()))),
-                }),
+                })
+                .map_err(|_| ())
+                .and_then(|(st, srv, conn)| Dispatcher::new(conn, st, srv)),
         )
     }
 }

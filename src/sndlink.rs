@@ -45,10 +45,10 @@ impl SenderLink {
         SenderLink { inner }
     }
 
-    pub fn send<T: Into<TransferBody>>(
-        &mut self,
-        body: T,
-    ) -> impl Future<Item = Outcome, Error = AmqpTransportError> {
+    pub fn send<T>(&self, body: T) -> impl Future<Item = Outcome, Error = AmqpTransportError>
+    where
+        T: Into<TransferBody>,
+    {
         self.inner.get_mut().send(body)
     }
 }

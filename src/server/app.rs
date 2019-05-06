@@ -1,18 +1,19 @@
-use std::fmt;
-use std::marker::PhantomData;
-
 use actix_router::Router;
-use actix_service::{fn_factory, IntoNewService, NewService, Service, ServiceExt};
-use amqp_codec::protocol::Error;
-use futures::future::{err, join_all, ok, Either, FutureResult};
-use futures::{Async, Future, Poll};
+use actix_service::{boxed, fn_factory, IntoNewService, NewService, Service};
+use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
+use futures::future::{err, ok, Either, FutureResult};
+use futures::{Async, Future, Poll, Stream};
 
 use crate::cell::Cell;
+use crate::rcvlink::ReceiverLink;
 
 use super::errors::LinkError;
-use super::link::OpenLink;
+use super::link::Link;
+use super::message::{Message, Outcome};
 
-pub struct App<S = ()>(Vec<(String, BoxedNewHandle<S>)>);
+type Handle<S> = boxed::BoxedNewService<Link<S>, Message<S>, Outcome, Error, Error>;
+
+pub struct App<S = ()>(Vec<(String, Handle<S>)>);
 
 impl<S: 'static> App<S> {
     pub fn new() -> App<S> {
@@ -21,61 +22,56 @@ impl<S: 'static> App<S> {
 
     pub fn service<F, U: 'static>(mut self, address: &str, service: F) -> Self
     where
-        F: IntoNewService<U>,
-        U: NewService<Request = OpenLink<S>, Response = ()>,
+        F: IntoNewService<U, Link<S>>,
+        U: NewService<Link<S>, Request = Message<S>, Response = Outcome>,
         U::Error: Into<Error>,
-        U::InitError: Into<Error> + fmt::Display,
+        U::InitError: Into<Error>,
     {
-        let hnd = NewHandle {
-            service: service.into_new_service(),
-            _t: PhantomData,
-        };
-        self.0.push((address.to_string(), Box::new(hnd)));
+        self.0.push((
+            address.to_string(),
+            boxed::new_service(
+                service
+                    .into_new_service()
+                    .map_init_err(|e| e.into())
+                    .map_err(|e| e.into()),
+            ),
+        ));
 
         self
     }
 
     pub fn finish(
         self,
-    ) -> impl NewService<Request = OpenLink<S>, Response = (), Error = Error, InitError = Error>
-    {
-        let routes = Cell::new(self.0);
+    ) -> impl NewService<Request = Link<S>, Response = (), Error = Error, InitError = Error> {
+        let mut router = Router::build();
+        for (addr, hnd) in self.0 {
+            router.path(&addr, hnd);
+        }
+        let router = Cell::new(router.finish());
 
         fn_factory(move || {
-            let mut fut = Vec::new();
-            for (addr, hnd) in routes.clone().get_mut().iter_mut() {
-                let addr = addr.clone();
-                fut.push(hnd.new_service(&()).map(move |srv| (addr, srv)))
-            }
-
-            join_all(fut).and_then(move |services| {
-                let mut router = Router::build();
-                for (addr, hnd) in services {
-                    router.path(&addr, hnd);
-                }
-                ok(AppService {
-                    router: router.finish(),
-                })
+            ok(AppService {
+                router: router.clone(),
             })
         })
     }
 }
 
 struct AppService<S> {
-    router: Router<BoxedHandle<S>>,
+    router: Cell<Router<Handle<S>>>,
 }
 
 impl<S: 'static> Service for AppService<S> {
-    type Request = OpenLink<S>;
+    type Request = Link<S>;
     type Response = ();
     type Error = Error;
-    type Future = Either<FutureResult<(), Error>, Box<Future<Item = (), Error = Error>>>;
+    type Future = Either<FutureResult<(), Error>, AppServiceResponse<S>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, mut link: OpenLink<S>) -> Self::Future {
+    fn call(&mut self, mut link: Link<S>) -> Self::Future {
         let path = link
             .frame()
             .target
@@ -84,11 +80,20 @@ impl<S: 'static> Service for AppService<S> {
 
         if let Some(path) = path {
             link.path_mut().set(path);
-            if let Some((hnd, _info)) = self.router.recognize_mut(link.path_mut()) {
-                Either::B(Box::new(hnd.call(link)))
+            if let Some((hnd, _info)) = self.router.recognize(link.path_mut()) {
+                let fut = hnd.new_service(&link);
+                Either::B(AppServiceResponse {
+                    link: link.link.clone(),
+                    app_state: link.state.clone(),
+                    has_credit: true,
+                    state: AppServiceResponseState::NewService(fut),
+                })
             } else {
                 Either::A(err(LinkError::force_detach()
-                    .description("Target address is not supported")
+                    .description(format!(
+                        "Target address is not supported: {}",
+                        link.path().get_ref()
+                    ))
                     .into()))
             }
         } else {
@@ -99,85 +104,143 @@ impl<S: 'static> Service for AppService<S> {
     }
 }
 
-type BoxedHandle<S> = Box<
-    Service<
-        Request = OpenLink<S>,
-        Response = (),
-        Error = Error,
-        Future = Box<Future<Item = (), Error = Error>>,
-    >,
->;
-
-struct Handle<T, S> {
-    service: T,
-    _t: PhantomData<(S,)>,
+struct AppServiceResponse<S> {
+    link: ReceiverLink,
+    app_state: Cell<S>,
+    has_credit: bool,
+    state: AppServiceResponseState<S>,
 }
 
-impl<T, S: 'static> Service for Handle<T, S>
-where
-    T: Service<Request = OpenLink<S>, Response = (), Error = Error>,
-    T::Future: 'static,
-{
-    type Request = OpenLink<S>;
-    type Response = ();
+enum AppServiceResponseState<S> {
+    Service(boxed::BoxedService<Message<S>, Outcome, Error>),
+    NewService(Box<Future<Item = boxed::BoxedService<Message<S>, Outcome, Error>, Error = Error>>),
+}
+
+impl<S> Future for AppServiceResponse<S> {
+    type Item = ();
     type Error = Error;
-    type Future = Box<Future<Item = (), Error = Error>>;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
-    }
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            match self.state {
+                AppServiceResponseState::Service(ref mut srv) => {
+                    // check readiness
+                    match srv.poll_ready() {
+                        Ok(Async::Ready(_)) => (),
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Err(e) => {
+                            self.link.close_with_error(
+                                LinkError::force_detach()
+                                    .description("delivery_id MUST be set")
+                                    .into(),
+                            );
+                            return Ok(Async::Ready(()));
+                        }
+                    }
 
-    fn call(&mut self, link: OpenLink<S>) -> Self::Future {
-        Box::new(self.service.call(link))
+                    match self.link.poll() {
+                        Ok(Async::Ready(Some(transfer))) => {
+                            // #2.7.5 delivery_id MUST be set. batching is not supported atm
+                            if transfer.delivery_id.is_none() {
+                                self.link.close_with_error(
+                                    LinkError::force_detach()
+                                        .description("delivery_id MUST be set")
+                                        .into(),
+                                );
+                                return Ok(Async::Ready(()));
+                            }
+                            self.has_credit = self.link.credit() != 0;
+                            self.link.set_link_credit(50);
+
+                            let delivery_id = transfer.delivery_id.unwrap();
+                            let msg =
+                                Message::new(self.app_state.clone(), transfer, self.link.clone());
+
+                            let mut fut = srv.call(msg);
+                            match fut.poll() {
+                                Ok(Async::Ready(outcome)) => settle(
+                                    &mut self.link,
+                                    delivery_id,
+                                    outcome.into_delivery_state(),
+                                ),
+                                Ok(Async::NotReady) => {
+                                    tokio_current_thread::spawn(HandleMessage {
+                                        fut,
+                                        delivery_id,
+                                        link: self.link.clone(),
+                                    });
+                                }
+                                Err(e) => settle(
+                                    &mut self.link,
+                                    delivery_id,
+                                    DeliveryState::Rejected(Rejected { error: Some(e) }),
+                                ),
+                            }
+                        }
+                        Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Err(_e) => {
+                            self.link.close_with_error(LinkError::force_detach().into());
+                            return Ok(Async::Ready(()));
+                        }
+                    }
+                }
+                AppServiceResponseState::NewService(ref mut fut) => match fut.poll() {
+                    Ok(Async::Ready(srv)) => {
+                        self.link.open();
+                        self.link.set_link_credit(50);
+                        self.state = AppServiceResponseState::Service(srv);
+                        continue;
+                    }
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                    Err(e) => return Err(e),
+                },
+            }
+        }
     }
 }
 
-type BoxedNewHandle<S> = Box<
-    NewService<
-        Request = OpenLink<S>,
-        Response = (),
-        Error = Error,
-        InitError = Error,
-        Service = BoxedHandle<S>,
-        Future = Box<Future<Item = BoxedHandle<S>, Error = Error>>,
-    >,
->;
-
-struct NewHandle<T, S> {
-    service: T,
-    _t: PhantomData<(S,)>,
+struct HandleMessage {
+    link: ReceiverLink,
+    delivery_id: DeliveryNumber,
+    fut: Either<FutureResult<Outcome, Error>, Box<Future<Item = Outcome, Error = Error>>>,
 }
 
-impl<T, S: 'static> NewService for NewHandle<T, S>
-where
-    T: NewService<Request = OpenLink<S>, Response = ()>,
-    T::Service: 'static,
-    T::Error: Into<Error>,
-    T::InitError: Into<Error> + fmt::Display,
-    T::Future: 'static,
-{
-    type Request = OpenLink<S>;
-    type Response = ();
-    type Error = Error;
-    type InitError = Error;
-    type Service = BoxedHandle<S>;
-    type Future = Box<Future<Item = Self::Service, Error = Self::InitError>>;
+impl Future for HandleMessage {
+    type Item = ();
+    type Error = ();
 
-    fn new_service(&self, cfg: &()) -> Self::Future {
-        Box::new(
-            self.service
-                .new_service(cfg)
-                .map_err(|e| {
-                    error!("Can not create new service: {}", e);
-                    e.into()
-                })
-                .map(|srv| {
-                    let srv: BoxedHandle<S> = Box::new(Handle {
-                        service: srv.map_err(|e| e.into()),
-                        _t: PhantomData,
-                    });
-                    srv
-                }),
-        )
+    fn poll(&mut self) -> Poll<(), ()> {
+        match self.fut.poll() {
+            Ok(Async::Ready(outcome)) => {
+                settle(
+                    &mut self.link,
+                    self.delivery_id,
+                    outcome.into_delivery_state(),
+                );
+                Ok(Async::Ready(()))
+            }
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(e) => {
+                settle(
+                    &mut self.link,
+                    self.delivery_id,
+                    DeliveryState::Rejected(Rejected { error: Some(e) }),
+                );
+                Ok(Async::Ready(()))
+            }
+        }
     }
+}
+
+fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
+    let disposition = Disposition {
+        state: Some(state),
+        role: Role::Receiver,
+        first: id,
+        last: None,
+        settled: true,
+        batchable: false,
+    };
+    link.send_disposition(disposition);
 }

@@ -1,23 +1,21 @@
+use std::fmt;
+
 use actix_router::Path;
 use amqp_codec::{protocol::Attach, types::ByteStr};
-use futures::{Async, Poll, Stream};
 
 use crate::cell::Cell;
-use crate::errors::AmqpTransportError;
 use crate::rcvlink::ReceiverLink;
+use crate::session::Session;
 
-use super::errors::LinkError;
-use super::proto::{Flow, Frame, Message};
-
-pub struct OpenLink<S> {
+pub struct Link<S> {
     pub(crate) state: Cell<S>,
     pub(crate) link: ReceiverLink,
     pub(crate) path: Path<ByteStr>,
 }
 
-impl<S> OpenLink<S> {
+impl<S> Link<S> {
     pub(crate) fn new(link: ReceiverLink, state: Cell<S>) -> Self {
-        OpenLink {
+        Link {
             state,
             link,
             path: Path::new(ByteStr::from_str("")),
@@ -44,64 +42,33 @@ impl<S> OpenLink<S> {
         self.state.get_mut()
     }
 
-    pub fn open(mut self, credit: u32) -> Link<S> {
-        self.link.open();
+    pub fn session(&self) -> &Session {
+        self.link.session()
+    }
+
+    pub fn session_mut(&mut self) -> &mut Session {
+        self.link.session_mut()
+    }
+
+    pub fn link_credit(mut self, credit: u32) {
         self.link.set_link_credit(credit);
+    }
+}
 
-        Link {
-            state: self.state,
-            link: self.link,
-            has_credit: credit != 0,
+impl<S> Clone for Link<S> {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            link: self.link.clone(),
+            path: self.path.clone(),
         }
     }
 }
 
-pub struct Link<S> {
-    pub(crate) state: Cell<S>,
-    pub(crate) link: ReceiverLink,
-    has_credit: bool,
-}
-
-impl<S> Link<S> {
-    pub fn state(&self) -> &S {
-        self.state.get_ref()
-    }
-
-    pub fn state_mut(&mut self) -> &mut S {
-        self.state.get_mut()
-    }
-}
-
-impl<S> Stream for Link<S> {
-    type Item = Frame<S>;
-    type Error = AmqpTransportError;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if !self.has_credit {
-            self.has_credit = true;
-            Ok(Async::Ready(Some(
-                Flow::new(self.state.clone(), self.link.clone()).into(),
-            )))
-        } else {
-            match self.link.poll()? {
-                Async::Ready(Some(transfer)) => {
-                    // #2.7.5 delivery_id MUST be set. batching is not supported atm
-                    if transfer.delivery_id.is_none() {
-                        self.link.close_with_error(
-                            LinkError::force_detach()
-                                .description("delivery_id MUST be set")
-                                .into(),
-                        );
-                    }
-
-                    self.has_credit = self.link.credit() != 0;
-                    Ok(Async::Ready(Some(
-                        Message::new(self.state.clone(), transfer, self.link.clone()).into(),
-                    )))
-                }
-                Async::Ready(None) => Ok(Async::Ready(None)),
-                Async::NotReady => Ok(Async::NotReady),
-            }
-        }
+impl<S> fmt::Debug for Link<S> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("Link<S>")
+            .field("frame", self.link.frame())
+            .finish()
     }
 }

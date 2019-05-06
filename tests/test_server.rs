@@ -1,15 +1,26 @@
 use actix_amqp::server::{self, errors};
-use actix_amqp::{self, client, sasl, Configuration};
-use actix_connect::{default_connector, Connector};
-use actix_service::{IntoNewService, NewService, Service};
+use actix_amqp::{self, sasl, Configuration};
+use actix_connect::{default_connector, TcpConnector};
+use actix_service::{fn_cfg_factory, Service};
 use actix_test_server::TestServer;
-use futures::future::{err, lazy};
+use futures::future::{err, lazy, FutureResult};
 use futures::Future;
 use http::{HttpTryFrom, Uri};
 
-fn server(link: server::OpenLink<()>) -> impl Future<Item = (), Error = errors::LinkError> {
-    println!("OPEN LINK");
-    let _link = link.open(10);
+fn server(
+    link: &server::OpenLink<()>,
+) -> impl Future<
+    Item = Box<
+        dyn Service<
+                Request = server::Message<()>,
+                Response = server::Outcome,
+                Error = errors::AmqpError,
+                Future = FutureResult<server::Message<()>, server::Outcome>,
+            > + 'static,
+    >,
+    Error = errors::LinkError,
+> {
+    println!("OPEN LINK: {:?}", link);
     err(errors::LinkError::force_detach().description("unimplemented"))
 }
 
@@ -22,21 +33,14 @@ fn test_simple() -> std::io::Result<()> {
     env_logger::init();
 
     let mut srv = TestServer::with(|| {
-        server::ServerFactory::new(
+        server::Server::new(
             Configuration::default(),
             server::ServiceFactory::service(
                 server::App::<()>::new()
-                    .service(
-                        "test",
-                        server
-                            .into_new_service()
-                            .map_init_err(|_| errors::LinkError::force_detach()),
-                    )
+                    .service("test", fn_cfg_factory(server))
                     .finish(),
             ),
         )
-        .map_err(|_| ())
-        .and_then(server::ServerDispatcher::default())
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.host(), srv.port())).unwrap();
@@ -85,27 +89,20 @@ fn sasl_auth(
 #[test]
 fn test_sasl() -> std::io::Result<()> {
     let mut srv = TestServer::with(|| {
-        server::ServerFactory::new(
+        server::Server::new(
             Configuration::default(),
             server::ServiceFactory::sasl(sasl_auth).service(
                 server::App::<()>::new()
-                    .service(
-                        "test",
-                        server
-                            .into_new_service()
-                            .map_init_err(|_| errors::LinkError::force_detach()),
-                    )
+                    .service("test", fn_cfg_factory(server))
                     .finish(),
             ),
         )
-        .map_err(|_| ())
-        .and_then(server::ServerDispatcher::default())
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.host(), srv.port())).unwrap();
     let mut sasl_srv = srv
         .block_on(lazy(|| {
-            Ok::<_, ()>(sasl::connect_service(Connector::new()))
+            Ok::<_, ()>(sasl::connect_service(TcpConnector::new()))
         }))
         .unwrap();
     let req = sasl::SaslConnect {

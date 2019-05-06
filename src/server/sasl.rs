@@ -15,7 +15,7 @@ use crate::cell::Cell;
 
 use super::errors::{AmqpError, HandshakeError, SaslError};
 use super::factory::Inner;
-use super::link::OpenLink;
+use super::link::Link;
 
 pub struct SaslAuth {
     sender: mpsc::UnboundedSender<(SaslFrame, oneshot::Sender<SaslFrame>)>,
@@ -206,7 +206,7 @@ pub(crate) struct Sasl<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
+    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     fut: F::Future,
@@ -286,7 +286,7 @@ impl<Io, F, St, S> Sasl<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
+    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     pub(super) fn new(
@@ -311,7 +311,7 @@ impl<Io, F, St, S> Future for Sasl<Io, F, St, S>
 where
     Io: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error> + 'static,
+    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     type Item = (St, S, Framed<Io, AmqpCodec<SaslFrame>>);

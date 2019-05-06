@@ -1,10 +1,6 @@
-use std::marker::PhantomData;
-
 use actix_codec::{AsyncRead, AsyncWrite};
-use actix_server_config::ServerConfig;
-use actix_service::{NewService, Service};
+use actix_service::Service;
 use amqp_codec::protocol::{Error, Frame, Role};
-use futures::future::{ok, FutureResult};
 use futures::{Async, Future, Poll};
 use slab::Slab;
 
@@ -12,79 +8,13 @@ use crate::cell::Cell;
 use crate::connection::{ChannelState, Connection};
 use crate::rcvlink::ReceiverLink;
 
-use super::link::OpenLink;
-
-/// Sasl server dispatcher service factory
-pub struct ServerDispatcher<Io, St, S> {
-    _t: PhantomData<(Io, St, S)>,
-}
-
-impl<Io, St, S> Default for ServerDispatcher<Io, St, S>
-where
-    Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
-{
-    fn default() -> Self {
-        ServerDispatcher { _t: PhantomData }
-    }
-}
-
-impl<Io, St, S> NewService<ServerConfig> for ServerDispatcher<Io, St, S>
-where
-    Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
-{
-    type Request = (St, S, Connection<Io>);
-    type Response = ();
-    type Error = ();
-    type InitError = ();
-    type Service = ServerDispatcherImpl<Io, St, S>;
-    type Future = FutureResult<Self::Service, Self::Error>;
-
-    fn new_service(&self, _: &ServerConfig) -> Self::Future {
-        ok(ServerDispatcherImpl::default())
-    }
-}
-
-/// Sasl server dispatcher service
-pub struct ServerDispatcherImpl<Io, St, S> {
-    _t: PhantomData<(Io, St, S)>,
-}
-
-impl<Io, St, S> Default for ServerDispatcherImpl<Io, St, S>
-where
-    Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
-{
-    fn default() -> Self {
-        ServerDispatcherImpl { _t: PhantomData }
-    }
-}
-
-impl<Io, St, S> Service for ServerDispatcherImpl<Io, St, S>
-where
-    Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
-{
-    type Request = (St, S, Connection<Io>);
-    type Response = ();
-    type Error = ();
-    type Future = Dispatcher<Io, St, S>;
-
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
-    }
-
-    fn call(&mut self, (st, srv, conn): (St, S, Connection<Io>)) -> Self::Future {
-        Dispatcher::new(conn, st, srv)
-    }
-}
+use super::link::Link;
 
 /// Amqp server connection dispatcher.
 pub struct Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = Link<St>, Response = (), Error = Error>,
 {
     conn: Connection<Io>,
     state: Cell<St>,
@@ -96,7 +26,7 @@ where
 impl<Io, St, S> Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = Link<St>, Response = (), Error = Error>,
 {
     pub fn new(conn: Connection<Io>, state: St, service: S) -> Self {
         Dispatcher {
@@ -112,7 +42,7 @@ where
 impl<Io, St, S> Future for Dispatcher<Io, St, S>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<Request = OpenLink<St>, Response = (), Error = Error>,
+    S: Service<Request = Link<St>, Response = (), Error = Error>,
 {
     type Item = ();
     type Error = ();
@@ -132,18 +62,18 @@ where
                         Frame::Attach(attach) => match attach.role {
                             Role::Receiver => {
                                 // remotly opened sender link
-                                let mut session = self.conn.get_session(channel_id);
+                                let session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 session.get_mut().confirm_sender_link(cell, attach);
                             }
                             Role::Sender => {
                                 // receiver link
-                                let mut session = self.conn.get_session(channel_id);
+                                let session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 let link = session.get_mut().open_receiver_link(cell, attach);
                                 let fut = self
                                     .service
-                                    .call(OpenLink::new(link.clone(), self.state.clone()));
+                                    .call(Link::new(link.clone(), self.state.clone()));
                                 self.links.push((link, fut));
                             }
                         },
