@@ -179,6 +179,10 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         self.inner.get_mut().post_frame(frame)
     }
 
+    pub(crate) fn register_write_task(&self) {
+        self.inner.write_task.register();
+    }
+
     pub(crate) fn poll_outgoing(&mut self) -> Poll<(), AmqpCodecError> {
         let inner = self.inner.get_mut();
         let mut update = false;
@@ -204,7 +208,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         inner.set_error(e.clone().into());
                         return Err(e);
                     }
-                    Ok(Async::Ready(_)) => inner.write_task.register(),
+                    Ok(Async::Ready(_)) => (),
                 }
             } else {
                 break;
@@ -387,6 +391,15 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
             }
         }
         let _ = self.poll_outgoing()?;
+        self.register_write_task();
+
+        match self.poll_incoming()? {
+            Async::Ready(None) => return Ok(Async::Ready(())),
+            Async::Ready(Some(frame)) => {
+                warn!("Unexpected frame: {:?}", frame);
+            }
+            Async::NotReady => (),
+        }
 
         Ok(Async::NotReady)
     }

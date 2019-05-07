@@ -105,6 +105,8 @@ where
             }
         }
 
-        self.conn.poll_outgoing().map_err(|_| ())
+        let res = self.conn.poll_outgoing().map_err(|_| ());
+        self.conn.register_write_task();
+        res
     }
 }
