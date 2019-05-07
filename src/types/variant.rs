@@ -127,14 +127,14 @@ impl Variant {
 
     pub fn as_long(&self) -> Option<i64> {
         match self {
-            Variant::Ubyte(v) => Some(v as i64),
-            Variant::Ushort(v) => Some(v as i64),
-            Variant::Uint(v) => Some(v as i64),
-            Variant::Ulong(v) => Some(v as i64),
-            Variant::Byte(v) => Some(v as i64),
-            Variant::Short(v) => Some(v as i64),
-            Variant::Int(v) => Some(v as i64),
-            Variant::Long(v) => Some(v as i64),
+            Variant::Ubyte(v) => Some(*v as i64),
+            Variant::Ushort(v) => Some(*v as i64),
+            Variant::Uint(v) => Some(*v as i64),
+            Variant::Ulong(v) => Some(*v as i64),
+            Variant::Byte(v) => Some(*v as i64),
+            Variant::Short(v) => Some(*v as i64),
+            Variant::Int(v) => Some(*v as i64),
+            Variant::Long(v) => Some(*v as i64),
             _ => None,
         }
     }
