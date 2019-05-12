@@ -1,7 +1,7 @@
 use actix_amqp::server::{self, errors};
 use actix_amqp::{self, sasl, Configuration};
 use actix_connect::{default_connector, TcpConnector};
-use actix_service::{fn_cfg_factory, Service};
+use actix_service::{new_service_cfg, Service};
 use actix_test_server::TestServer;
 use futures::future::{err, lazy, FutureResult};
 use futures::Future;
@@ -37,7 +37,7 @@ fn test_simple() -> std::io::Result<()> {
             Configuration::default(),
             server::ServiceFactory::service(
                 server::App::<()>::new()
-                    .service("test", fn_cfg_factory(server))
+                    .service("test", new_service_cfg(server))
                     .finish(),
             ),
         )
@@ -93,7 +93,7 @@ fn test_sasl() -> std::io::Result<()> {
             Configuration::default(),
             server::ServiceFactory::sasl(sasl_auth).service(
                 server::App::<()>::new()
-                    .service("test", fn_cfg_factory(server))
+                    .service("test", new_service_cfg(server))
                     .finish(),
             ),
         )

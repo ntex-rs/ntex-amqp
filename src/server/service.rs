@@ -58,13 +58,19 @@ impl ServiceFactory {
         st: F,
     ) -> ServiceFactoryService<
         (),
-        impl NewService<Request = Link<()>, Response = (), Error = Error, InitError = Error>,
+        impl NewService<
+            Config = (),
+            Request = Link<()>,
+            Response = (),
+            Error = Error,
+            InitError = Error,
+        >,
         impl Service<Request = (), Response = (), Error = Error>,
         impl Service<Request = SaslAuth, Response = (), Error = Error>,
     >
     where
         F: IntoNewService<S>,
-        S: NewService<Request = Link<()>, Response = ()>,
+        S: NewService<Config = (), Request = Link<()>, Response = ()>,
         S::Error: Into<Error>,
         S::InitError: Into<Error>,
     {
@@ -100,13 +106,19 @@ where
         st: F,
     ) -> ServiceFactoryService<
         State,
-        impl NewService<Request = Link<State>, Response = (), Error = Error, InitError = Error>,
+        impl NewService<
+            Config = (),
+            Request = Link<State>,
+            Response = (),
+            Error = Error,
+            InitError = Error,
+        >,
         StateSrv,
         SaslSrv,
     >
     where
         F: IntoNewService<Srv>,
-        Srv: NewService<Request = Link<State>, Response = (), InitError = Error>,
+        Srv: NewService<Config = (), Request = Link<State>, Response = (), InitError = Error>,
         Srv::InitError: Into<Error>,
         Srv::Error: Into<Error>,
     {
@@ -166,7 +178,7 @@ impl<State, Srv, StateSrv, SaslSrv> Clone for ServiceFactoryService<State, Srv, 
 
 impl<State, Srv, StateSrv, SaslSrv> Service for ServiceFactoryService<State, Srv, StateSrv, SaslSrv>
 where
-    Srv: NewService<Request = Link<State>, Response = (), InitError = Error>,
+    Srv: NewService<Config = (), Request = Link<State>, Response = (), InitError = Error>,
     Srv::Future: 'static,
     StateSrv: Service<Request = (), Response = State, Error = Error>,
     StateSrv::Future: 'static,

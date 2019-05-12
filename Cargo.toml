@@ -9,10 +9,10 @@ amqp-codec = { git = "https://github.com/fafhrd91/amqp-codec.git" }
 # amqp-codec = { path = "../rust-amqp" }
 
 actix-codec = "0.1.2"
-actix-service = "0.3.6"
-actix-connect = "0.1.2"
+actix-service = "0.4.0"
+actix-connect = "0.2.0"
 actix-router = "0.1.2"
-actix-utils = "0.3.5"
+actix-utils = "0.4.0"
 actix-server-config = "0.1.1"
 
 derive_more = "0.14"
@@ -30,4 +30,4 @@ tokio-current-thread = "0.1.5"
 
 [dev-dependencies]
 env_logger = "0.6"
-actix-test-server = "0.2.0"
+actix-test-server = "0.2.2"

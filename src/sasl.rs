@@ -1,6 +1,6 @@
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_connect::{Connect as TcpConnect, Connection as TcpConnection};
-use actix_service::{FnService, IntoService, Service, ServiceExt};
+use actix_service::{IntoService, Service, ServiceExt};
 use actix_utils::time::LowResTimeService;
 use either::Either;
 use futures::future::{ok, Future};
@@ -49,7 +49,7 @@ where
     T::Error: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
-    FnService::new(|connect: SaslConnect| {
+    (|connect: SaslConnect| {
         let SaslConnect {
             uri,
             config,
@@ -58,6 +58,7 @@ where
         } = connect;
         ok::<_, either::Either<SaslConnectError, T::Error>>((uri, config, auth, time))
     })
+    .into_service()
     // connect to host
     .apply_fn(
         connector.map_err(|e| either::Right(e)),

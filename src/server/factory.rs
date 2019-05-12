@@ -54,13 +54,14 @@ impl<Io, F, St, S> Clone for Server<Io, F, St, S> {
     }
 }
 
-impl<T, F, St, S> NewService<ServerConfig> for Server<T, F, St, S>
+impl<T, F, St, S> NewService for Server<T, F, St, S>
 where
     T: AsyncRead + AsyncWrite + 'static,
     F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
+    type Config = ServerConfig;
     type Request = Io<T>;
     type Response = ();
     type Error = ();
