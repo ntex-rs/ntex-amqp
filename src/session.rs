@@ -242,7 +242,7 @@ impl SessionInner {
         let attach = Attach {
             name: attach.name.clone(),
             handle: token as Handle,
-            role: Role::Receiver,
+            role: Role::Sender,
             snd_settle_mode: SenderSettleMode::Mixed,
             rcv_settle_mode: ReceiverSettleMode::First,
             source: attach.source.clone(),
