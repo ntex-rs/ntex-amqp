@@ -202,10 +202,10 @@ pub(crate) fn no_sasl_auth<S>(sasl: SaslAuth) -> impl Future<Item = S, Error = E
     err(AmqpError::not_implemented().into())
 }
 
-pub(crate) struct Sasl<Io, F, St, S>
+pub(crate) struct Sasl<Io, F, St, S, P>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
@@ -282,15 +282,16 @@ impl SaslState {
     }
 }
 
-impl<Io, F, St, S> Sasl<Io, F, St, S>
+impl<Io, F, St, S, P> Sasl<Io, F, St, S, P>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {
     pub(super) fn new(
-        cell: &mut Cell<Inner<Io, F, St, S>>,
+        param: P,
+        cell: &mut Cell<Inner<Io, F, St, S, P>>,
         framed: Framed<Io, AmqpCodec<SaslFrame>>,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded();
@@ -300,17 +301,17 @@ where
             rx,
             tx: None,
             framed: Some(framed),
-            fut: cell.get_mut().factory.call(Some(auth)),
+            fut: cell.get_mut().factory.call((Some(auth), param)),
             state: SaslState::New,
             outcome: None,
         }
     }
 }
 
-impl<Io, F, St, S> Future for Sasl<Io, F, St, S>
+impl<Io, F, St, S, P> Future for Sasl<Io, F, St, S, P>
 where
     Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
 {

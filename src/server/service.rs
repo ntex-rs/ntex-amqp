@@ -13,17 +13,17 @@ pub struct ServiceFactory;
 
 impl ServiceFactory {
     /// Set state factory
-    pub fn state<F, State, S>(
+    pub fn state<F, State, S, Param>(
         state: F,
     ) -> ServiceFactoryBuilder<
         State,
-        impl Service<Request = (), Response = State, Error = Error>,
+        impl Service<Request = Param, Response = State, Error = Error>,
         impl Service<Request = SaslAuth, Response = State, Error = Error>,
     >
     where
         F: IntoService<S>,
         State: 'static,
-        S: Service<Request = (), Response = State>,
+        S: Service<Request = Param, Response = State>,
         S::Error: Into<Error>,
     {
         ServiceFactoryBuilder {
@@ -97,7 +97,7 @@ pub struct ServiceFactoryBuilder<State, StateSrv, SaslSrv> {
 impl<State, StateSrv, SaslSrv> ServiceFactoryBuilder<State, StateSrv, SaslSrv>
 where
     State: 'static,
-    StateSrv: Service<Request = (), Response = State, Error = Error>,
+    StateSrv: Service<Response = State, Error = Error>,
     SaslSrv: Service<Request = SaslAuth, Response = State, Error = Error>,
 {
     /// Set service factory
@@ -180,12 +180,12 @@ impl<State, Srv, StateSrv, SaslSrv> Service for ServiceFactoryService<State, Srv
 where
     Srv: NewService<Config = (), Request = Link<State>, Response = (), InitError = Error>,
     Srv::Future: 'static,
-    StateSrv: Service<Request = (), Response = State, Error = Error>,
+    StateSrv: Service<Response = State, Error = Error>,
     StateSrv::Future: 'static,
     SaslSrv: Service<Request = SaslAuth, Response = State, Error = Error>,
     SaslSrv::Future: 'static,
 {
-    type Request = Option<SaslAuth>;
+    type Request = (Option<SaslAuth>, StateSrv::Request);
     type Response = (State, Srv::Service);
     type Error = Error;
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
@@ -194,12 +194,12 @@ where
         Ok(Async::Ready(()))
     }
 
-    fn call(&mut self, req: Option<SaslAuth>) -> Self::Future {
+    fn call(&mut self, (req, param): (Option<SaslAuth>, StateSrv::Request)) -> Self::Future {
         let inner = self.inner.get_mut();
         if let Some(auth) = req {
             Box::new(inner.sasl.call(auth).join(inner.service.new_service(&())))
         } else {
-            Box::new(inner.state.call(()).join(inner.service.new_service(&())))
+            Box::new(inner.state.call(param).join(inner.service.new_service(&())))
         }
     }
 }

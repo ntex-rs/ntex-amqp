@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_server_config::{Io, ServerConfig};
+use actix_server_config::{Io as IoStream, ServerConfig};
 use actix_service::{NewService, Service};
 use amqp_codec::protocol::{Error, Frame, ProtocolId};
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
@@ -18,20 +18,20 @@ use super::link::Link;
 use super::sasl::{Sasl, SaslAuth};
 
 /// Server dispatcher factory
-pub struct Server<Io, F, St, S> {
-    inner: Cell<Inner<Io, F, St, S>>,
+pub struct Server<Io, F, St, S, P> {
+    inner: Cell<Inner<Io, F, St, S, P>>,
 }
 
-pub(super) struct Inner<Io, F, St, S> {
+pub(super) struct Inner<Io, F, St, S, P> {
     pub factory: F,
     config: Configuration,
-    _t: PhantomData<(Io, St, S)>,
+    _t: PhantomData<(Io, St, S, P)>,
 }
 
-impl<Io, F, St, S> Server<Io, F, St, S>
+impl<Io, F, St, S, P> Server<Io, F, St, S, P>
 where
     Io: AsyncRead + AsyncWrite,
-    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error>,
 {
     /// Create server dispatcher factory
@@ -46,7 +46,7 @@ where
     }
 }
 
-impl<Io, F, St, S> Clone for Server<Io, F, St, S> {
+impl<Io, F, St, S, P> Clone for Server<Io, F, St, S, P> {
     fn clone(&self) -> Self {
         Server {
             inner: self.inner.clone(),
@@ -54,18 +54,19 @@ impl<Io, F, St, S> Clone for Server<Io, F, St, S> {
     }
 }
 
-impl<T, F, St, S> NewService for Server<T, F, St, S>
+impl<Io, F, St, S, P> NewService for Server<Io, F, St, S, P>
 where
-    T: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
+    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
+    P: 'static,
 {
     type Config = ServerConfig;
-    type Request = Io<T>;
+    type Request = IoStream<Io, P>;
     type Response = ();
     type Error = ();
-    type Service = ServerService<T, F, St, S>;
+    type Service = ServerService<Io, F, St, S, P>;
     type InitError = ();
     type Future = FutureResult<Self::Service, Self::InitError>;
 
@@ -77,18 +78,19 @@ where
 }
 
 /// Server dispatcher
-pub struct ServerService<Io, F, St, S> {
-    inner: Cell<Inner<Io, F, St, S>>,
+pub struct ServerService<Io, F, St, S, P> {
+    inner: Cell<Inner<Io, F, St, S, P>>,
 }
 
-impl<T, F, St, S> Service for ServerService<T, F, St, S>
+impl<Io, F, St, S, P> Service for ServerService<Io, F, St, S, P>
 where
-    T: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = Option<SaslAuth>, Response = (St, S), Error = Error> + 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
+    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
     S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
     St: 'static,
+    P: 'static,
 {
-    type Request = Io<T>;
+    type Request = IoStream<Io, P>;
     type Response = ();
     type Error = ();
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
@@ -98,7 +100,7 @@ where
     }
 
     fn call(&mut self, req: Self::Request) -> Self::Future {
-        let req = req.into_parts().0;
+        let (req, param, _) = req.into_parts();
 
         let inner = self.inner.clone();
         Box::new(
@@ -119,7 +121,7 @@ where
                                             inner
                                                 .get_mut()
                                                 .factory
-                                                .call(None)
+                                                .call((None, param))
                                                 .map_err(|_| HandshakeError::Service)
                                                 .map(move |(st, srv)| (st, srv, conn))
                                         },
@@ -135,6 +137,7 @@ where
                                 .map_err(|e| HandshakeError::from(e))
                                 .and_then(move |framed| {
                                     Sasl::new(
+                                        param,
                                         &mut inner,
                                         framed.into_framed(AmqpCodec::<SaslFrame>::new()),
                                     )
