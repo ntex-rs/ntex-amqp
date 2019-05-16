@@ -190,7 +190,6 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
                     trace!("outgoing: {:#?}", frame);
-                    println!("outgoing: {:#?}", frame);
                     update = true;
                     if let Err(e) = self.framed.force_send(frame) {
                         inner.set_error(e.clone().into());
@@ -235,7 +234,6 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
             match self.framed.poll() {
                 Ok(Async::Ready(Some(frame))) => {
                     trace!("incoming: {:#?}", frame);
-                    println!("incoming: {:#?}", frame);
 
                     update = true;
 
