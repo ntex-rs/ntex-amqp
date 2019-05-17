@@ -60,6 +60,12 @@ pub enum MessageId {
     String(ByteStr),
 }
 
+impl From<usize> for MessageId {
+    fn from(id: usize) -> MessageId {
+        MessageId::Ulong(u64::from(id))
+    }
+}
+
 impl DecodeFormatted for MessageId {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
