@@ -62,7 +62,7 @@ pub enum MessageId {
 
 impl From<usize> for MessageId {
     fn from(id: usize) -> MessageId {
-        MessageId::Ulong(u64::from(id))
+        MessageId::Ulong(id as u64)
     }
 }
 
