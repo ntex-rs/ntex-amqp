@@ -139,10 +139,10 @@ impl Variant {
         }
     }
 
-    pub fn as_bytes_str(&self) -> Option<ByteStr> {
+    pub fn to_bytes_str(&self) -> Option<ByteStr> {
         match self {
-            Variant::String(s) => Some(s.as_bytes_str()),
-            Variant::Symbol(s) => Some(s.as_bytes_str()),
+            Variant::String(s) => Some(s.to_bytes_str()),
+            Variant::Symbol(s) => Some(s.to_bytes_str()),
             _ => None,
         }
     }

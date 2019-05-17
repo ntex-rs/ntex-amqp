@@ -72,6 +72,7 @@ impl List {
 
 #[derive(Display, Clone, Eq, Ord, PartialOrd)]
 pub enum Str {
+    String(std::string::String),
     ByteStr(String<Bytes>),
     Static(&'static str),
 }
@@ -83,6 +84,7 @@ impl Str {
 
     pub fn as_bytes(&self) -> &[u8] {
         match self {
+            Str::String(s) => s.as_ref(),
             Str::ByteStr(s) => s.as_ref(),
             Str::Static(s) => s.as_bytes(),
         }
@@ -90,13 +92,15 @@ impl Str {
 
     pub fn as_str(&self) -> &str {
         match self {
+            Str::String(s) => s.as_str(),
             Str::ByteStr(s) => s.as_ref(),
             Str::Static(s) => s,
         }
     }
 
-    pub fn as_bytes_str(&self) -> String<Bytes> {
+    pub fn to_bytes_str(&self) -> String<Bytes> {
         match self {
+            Str::String(s) => String::try_from(Bytes::from(s.as_bytes())).unwrap(),
             Str::ByteStr(s) => s.clone(),
             Str::Static(s) => String::try_from(Bytes::from_static(s.as_bytes())).unwrap(),
         }
@@ -104,6 +108,7 @@ impl Str {
 
     pub fn len(&self) -> usize {
         match self {
+            Str::String(s) => s.len(),
             Str::ByteStr(s) => s.len(),
             Str::Static(s) => s.len(),
         }
@@ -124,13 +129,14 @@ impl From<String<Bytes>> for Str {
 
 impl From<std::string::String> for Str {
     fn from(s: std::string::String) -> Str {
-        Str::ByteStr(String::try_from(Bytes::from(s)).unwrap())
+        Str::String(s)
     }
 }
 
 impl hash::Hash for Str {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {
+            Str::String(s) => (&*s).hash(state),
             Str::ByteStr(s) => (&*s).hash(state),
             Str::Static(s) => s.hash(state),
         }
@@ -146,11 +152,18 @@ impl borrow::Borrow<str> for Str {
 impl PartialEq<Str> for Str {
     fn eq(&self, other: &Str) -> bool {
         match self {
+            Str::String(s) => match other {
+                Str::String(o) => s == o,
+                Str::ByteStr(o) => o == s.as_str(),
+                Str::Static(o) => s == *o,
+            },
             Str::ByteStr(s) => match other {
+                Str::String(o) => s == o.as_str(),
                 Str::ByteStr(o) => s == o,
                 Str::Static(o) => s == *o,
             },
             Str::Static(s) => match other {
+                Str::String(o) => o == s,
                 Str::ByteStr(o) => o == *s,
                 Str::Static(o) => s == o,
             },
@@ -161,6 +174,7 @@ impl PartialEq<Str> for Str {
 impl PartialEq<str> for Str {
     fn eq(&self, other: &str) -> bool {
         match self {
+            Str::String(ref s) => s == other,
             Str::ByteStr(ref s) => {
                 // workaround for possible compiler bug
                 let t: &str = &*s;
@@ -174,6 +188,7 @@ impl PartialEq<str> for Str {
 impl fmt::Debug for Str {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Str::String(s) => write!(f, "ST:\"{}\"", s),
             Str::ByteStr(s) => write!(f, "B:\"{}\"", &*s),
             Str::Static(s) => write!(f, "S:\"{}\"", s),
         }

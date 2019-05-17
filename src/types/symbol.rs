@@ -21,8 +21,8 @@ impl Symbol {
         self.0.as_str()
     }
 
-    pub fn as_bytes_str(&self) -> String<Bytes> {
-        self.0.as_bytes_str()
+    pub fn to_bytes_str(&self) -> String<Bytes> {
+        self.0.to_bytes_str()
     }
 
     pub fn len(&self) -> usize {
@@ -39,6 +39,12 @@ impl From<&'static str> for Symbol {
 impl From<Str> for Symbol {
     fn from(s: Str) -> Symbol {
         Symbol(s)
+    }
+}
+
+impl From<std::string::String> for Symbol {
+    fn from(s: std::string::String) -> Symbol {
+        Symbol(Str::from(s))
     }
 }
 
