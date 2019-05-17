@@ -168,7 +168,7 @@ impl Hash for VariantMap {
 
 #[derive(PartialEq, Clone, Debug, Display)]
 #[display(fmt = "{:?}", _0)]
-pub struct VecVariantMap(pub Vec<(Str, Variant)>);
+pub struct VecVariantMap(pub Vec<(Symbol, Variant)>);
 
 impl Default for VecVariantMap {
     fn default() -> Self {
@@ -177,7 +177,7 @@ impl Default for VecVariantMap {
 }
 
 impl std::ops::Deref for VecVariantMap {
-    type Target = Vec<(Str, Variant)>;
+    type Target = Vec<(Symbol, Variant)>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

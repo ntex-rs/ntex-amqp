@@ -36,6 +36,12 @@ impl From<&'static str> for Symbol {
     }
 }
 
+impl From<Str> for Symbol {
+    fn from(s: Str) -> Symbol {
+        Symbol(s)
+    }
+}
+
 impl From<String<Bytes>> for Symbol {
     fn from(s: String<Bytes>) -> Symbol {
         Symbol(Str::ByteStr(s))

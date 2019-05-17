@@ -5,7 +5,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crate::codec::{Decode, Encode, FORMATCODE_BINARY8};
 use crate::errors::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, TransferBody};
-use crate::types::{Descriptor, Str, Variant, VecVariantMap};
+use crate::types::{Descriptor, Symbol, Variant, VecVariantMap};
 
 use super::body::MessageBody;
 use super::SECTION_PREFIX_LENGTH;
@@ -89,7 +89,7 @@ impl OutMessage {
     /// Add application property
     pub fn set_app_property<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
-        K: Into<Str>,
+        K: Into<Symbol>,
         V: Into<Variant>,
     {
         if let Some(ref mut props) = self.application_properties {
@@ -106,7 +106,7 @@ impl OutMessage {
     /// Add message annotation
     pub fn add_message_annotation<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
-        K: Into<Str>,
+        K: Into<Symbol>,
         V: Into<Variant>,
     {
         if let Some(ref mut props) = self.message_annotations {
@@ -192,11 +192,13 @@ impl Decode for OutMessage {
                 }
                 Section::MessageAnnotations(val) => {
                     message.message_annotations = Some(VecVariantMap(
-                        val.into_iter().map(|(k, v)| (k.0, v)).collect(),
+                        val.into_iter().map(|(k, v)| (k.0.into(), v)).collect(),
                     ));
                 }
                 Section::ApplicationProperties(val) => {
-                    message.application_properties = Some(VecVariantMap(val.into_iter().collect()));
+                    message.application_properties = Some(VecVariantMap(
+                        val.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+                    ));
                 }
                 Section::Footer(val) => {
                     message.footer = Some(val);

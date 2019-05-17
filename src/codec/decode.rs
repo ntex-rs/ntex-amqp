@@ -290,7 +290,7 @@ impl DecodeFormatted for VecVariantMap {
         let count = header.count / 2;
         let mut map = Vec::with_capacity(count as usize);
         for _ in 0..count {
-            let (input1, key) = Str::decode(map_input)?;
+            let (input1, key) = Symbol::decode(map_input)?;
             let (input2, value) = Variant::decode(input1)?;
             map_input = input2;
             map.push((key, value)); // todo: ensure None returned?
