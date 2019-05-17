@@ -8,7 +8,7 @@ mod variant;
 
 pub type ByteStr = String<Bytes>;
 pub use self::symbol::{StaticSymbol, Symbol};
-pub use self::variant::{Variant, VariantMap, VecVariantMap};
+pub use self::variant::{Variant, VariantMap, VecStringMap, VecSymbolMap};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Display)]
 pub enum Descriptor {

@@ -5,7 +5,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crate::codec::{Decode, Encode, FORMATCODE_BINARY8};
 use crate::errors::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, TransferBody};
-use crate::types::{Descriptor, Symbol, Variant, VecVariantMap};
+use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap};
 
 use super::body::MessageBody;
 use super::SECTION_PREFIX_LENGTH;
@@ -15,9 +15,9 @@ pub struct OutMessage {
     pub message_format: Option<MessageFormat>,
     header: Option<Header>,
     delivery_annotations: Option<Annotations>,
-    message_annotations: Option<VecVariantMap>,
+    message_annotations: Option<VecSymbolMap>,
     properties: Option<Properties>,
-    application_properties: Option<VecVariantMap>,
+    application_properties: Option<VecStringMap>,
     footer: Option<Annotations>,
     body: MessageBody,
     size: Cell<usize>,
@@ -82,20 +82,20 @@ impl OutMessage {
     }
 
     /// Get application property
-    pub fn app_properties(&self) -> Option<&VecVariantMap> {
+    pub fn app_properties(&self) -> Option<&VecStringMap> {
         self.application_properties.as_ref()
     }
 
     /// Add application property
     pub fn set_app_property<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
-        K: Into<Symbol>,
+        K: Into<Str>,
         V: Into<Variant>,
     {
         if let Some(ref mut props) = self.application_properties {
             props.push((key.into(), value.into()));
         } else {
-            let mut props = VecVariantMap::default();
+            let mut props = VecStringMap::default();
             props.push((key.into(), value.into()));
             self.application_properties = Some(props);
         }
@@ -112,7 +112,7 @@ impl OutMessage {
         if let Some(ref mut props) = self.message_annotations {
             props.push((key.into(), value.into()));
         } else {
-            let mut props = VecVariantMap::default();
+            let mut props = VecSymbolMap::default();
             props.push((key.into(), value.into()));
             self.message_annotations = Some(props);
         }
@@ -191,12 +191,12 @@ impl Decode for OutMessage {
                     message.delivery_annotations = Some(val);
                 }
                 Section::MessageAnnotations(val) => {
-                    message.message_annotations = Some(VecVariantMap(
+                    message.message_annotations = Some(VecSymbolMap(
                         val.into_iter().map(|(k, v)| (k.0.into(), v)).collect(),
                     ));
                 }
                 Section::ApplicationProperties(val) => {
-                    message.application_properties = Some(VecVariantMap(
+                    message.application_properties = Some(VecStringMap(
                         val.into_iter().map(|(k, v)| (k.into(), v)).collect(),
                     ));
                 }

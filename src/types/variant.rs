@@ -168,15 +168,15 @@ impl Hash for VariantMap {
 
 #[derive(PartialEq, Clone, Debug, Display)]
 #[display(fmt = "{:?}", _0)]
-pub struct VecVariantMap(pub Vec<(Symbol, Variant)>);
+pub struct VecSymbolMap(pub Vec<(Symbol, Variant)>);
 
-impl Default for VecVariantMap {
+impl Default for VecSymbolMap {
     fn default() -> Self {
-        VecVariantMap(Vec::with_capacity(8))
+        VecSymbolMap(Vec::with_capacity(8))
     }
 }
 
-impl std::ops::Deref for VecVariantMap {
+impl std::ops::Deref for VecSymbolMap {
     type Target = Vec<(Symbol, Variant)>;
 
     fn deref(&self) -> &Self::Target {
@@ -184,7 +184,31 @@ impl std::ops::Deref for VecVariantMap {
     }
 }
 
-impl std::ops::DerefMut for VecVariantMap {
+impl std::ops::DerefMut for VecSymbolMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(PartialEq, Clone, Debug, Display)]
+#[display(fmt = "{:?}", _0)]
+pub struct VecStringMap(pub Vec<(Str, Variant)>);
+
+impl Default for VecStringMap {
+    fn default() -> Self {
+        VecStringMap(Vec::with_capacity(8))
+    }
+}
+
+impl std::ops::Deref for VecStringMap {
+    type Target = Vec<(Str, Variant)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for VecStringMap {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
