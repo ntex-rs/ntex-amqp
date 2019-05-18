@@ -66,6 +66,12 @@ impl From<usize> for MessageId {
     }
 }
 
+impl From<i32> for MessageId {
+    fn from(id: i32) -> MessageId {
+        MessageId::Ulong(id as u64)
+    }
+}
+
 impl DecodeFormatted for MessageId {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {

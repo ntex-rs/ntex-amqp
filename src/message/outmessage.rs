@@ -28,6 +28,7 @@ impl OutMessage {
     pub fn with_body(body: Bytes) -> OutMessage {
         let mut msg = OutMessage::default();
         msg.body.data.push(body);
+        msg.message_format = Some(0);
         msg
     }
 
@@ -35,6 +36,7 @@ impl OutMessage {
     pub fn with_messages(messages: Vec<TransferBody>) -> OutMessage {
         let mut msg = OutMessage::default();
         msg.body.messages = messages;
+        msg.message_format = Some(0);
         msg
     }
 

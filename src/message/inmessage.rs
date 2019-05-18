@@ -156,10 +156,12 @@ impl InMessage {
 
     /// Create new message and set `correlation_id` property
     pub fn reply_message(&self) -> OutMessage {
-        OutMessage::default().if_some(&self.properties, |mut msg, data| {
+        let mut msg = OutMessage::default().if_some(&self.properties, |mut msg, data| {
             msg.set_properties(|props| props.correlation_id = data.message_id.clone());
             msg
-        })
+        });
+        msg.message_format = self.message_format;
+        msg
     }
 }
 
