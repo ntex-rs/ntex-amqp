@@ -125,6 +125,13 @@ impl Variant {
         }
     }
 
+    pub fn as_int(&self) -> Option<i32> {
+        match self {
+            Variant::Int(v) => Some(*v as i32),
+            _ => None,
+        }
+    }
+
     pub fn as_long(&self) -> Option<i64> {
         match self {
             Variant::Ubyte(v) => Some(*v as i64),
