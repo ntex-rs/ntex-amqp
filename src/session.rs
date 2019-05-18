@@ -21,7 +21,7 @@ use crate::rcvlink::{ReceiverLink, ReceiverLinkInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::DeliveryPromise;
 
-const INITIAL_OUTGOING_ID: TransferNumber = 1;
+const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
 #[derive(Clone)]
 pub struct Session {
@@ -573,7 +573,8 @@ impl SessionInner {
                 }
                 _ => warn!("Received flow frame"),
             }
-        } else if flow.echo() {
+        }
+        if flow.echo() {
             self.send_flow();
         }
     }
@@ -663,7 +664,7 @@ impl SessionInner {
         let transfer = Transfer {
             handle: link_handle,
             delivery_id: Some(delivery_id),
-            delivery_tag: None, // Some(delivery_tag.clone()),
+            delivery_tag: Some(buf.freeze()),
             message_format: body.message_format(),
             settled: Some(false),
             more: false,

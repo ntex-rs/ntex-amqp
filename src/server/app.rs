@@ -150,8 +150,10 @@ impl<S> Future for AppServiceResponse<S> {
                                 );
                                 return Ok(Async::Ready(()));
                             }
-                            self.has_credit = self.link.credit() != 0;
-                            self.link.set_link_credit(50);
+                            if self.link.credit() == 0 {
+                                // self.has_credit = self.link.credit() != 0;
+                                self.link.set_link_credit(50);
+                            }
 
                             let delivery_id = transfer.delivery_id.unwrap();
                             let msg =

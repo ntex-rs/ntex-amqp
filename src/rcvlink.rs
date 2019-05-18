@@ -46,13 +46,7 @@ impl ReceiverLink {
     }
 
     pub fn set_link_credit(&mut self, credit: u32) {
-        let inner = self.inner.get_mut();
-        inner.credit += credit;
-        inner.session.inner.get_mut().rcv_link_flow(
-            inner.handle as u32,
-            inner.delivery_count,
-            credit,
-        );
+        self.inner.get_mut().set_link_credit(credit);
     }
 
     /// Send disposition frame
@@ -148,6 +142,14 @@ impl ReceiverLinkInner {
             Ok(Err(e)) => Err(e),
             Err(_) => Err(AmqpTransportError::Disconnected),
         })
+    }
+
+    pub fn set_link_credit(&mut self, credit: u32) {
+        self.credit += credit;
+        self.session
+            .inner
+            .get_mut()
+            .rcv_link_flow(self.handle as u32, self.delivery_count, credit);
     }
 
     pub fn handle_transfer(&mut self, transfer: Transfer) {
