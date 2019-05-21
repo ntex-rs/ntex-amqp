@@ -2,10 +2,10 @@ use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_server_config::{Io as IoStream, ServerConfig};
-use actix_service::{NewService, Service};
+use actix_service::{boxed, boxed::BoxedService, IntoService, NewService, Service};
 use amqp_codec::protocol::{Error, Frame, ProtocolId};
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
-use futures::future::{err, ok, Either, FutureResult};
+use futures::future::{err, ok, Either, FutureResult, IntoFuture};
 use futures::{Async, Future, Poll, Sink, Stream};
 
 use crate::cell::Cell;
@@ -16,6 +16,7 @@ use super::dispatcher::Dispatcher;
 use super::errors::HandshakeError;
 use super::link::Link;
 use super::sasl::{Sasl, SaslAuth};
+use super::state::State;
 
 /// Server dispatcher factory
 pub struct Server<Io, F, St, S, P> {
@@ -25,6 +26,7 @@ pub struct Server<Io, F, St, S, P> {
 pub(super) struct Inner<Io, F, St, S, P> {
     pub factory: F,
     config: Configuration,
+    disconnect: Option<BoxedService<State<St>, (), ()>>,
     _t: PhantomData<(Io, St, S, P)>,
 }
 
@@ -40,9 +42,20 @@ where
             inner: Cell::new(Inner {
                 factory,
                 config,
+                disconnect: None,
                 _t: PhantomData,
             }),
         }
+    }
+
+    /// Service to call on disconnect
+    pub fn disconnect<UF, U>(self, srv: UF) -> Self
+    where
+        UF: IntoService<U>,
+        U: Service<Request = State<St>, Response = (), Error = ()> + 'static,
+    {
+        self.inner.get_mut().disconnect = Some(boxed::service(srv.into_service()));
+        self
     }
 }
 
@@ -103,6 +116,7 @@ where
         let (req, param, _) = req.into_parts();
 
         let inner = self.inner.clone();
+        let inner2 = self.inner.clone();
         Box::new(
             Framed::new(req, ProtocolIdCodec)
                 .into_future()
@@ -160,7 +174,26 @@ where
                     None => Either::B(Either::B(err(HandshakeError::Disconnected.into()))),
                 })
                 .map_err(|_| ())
-                .and_then(|(st, srv, conn)| Dispatcher::new(conn, st, srv)),
+                .and_then(move |(st, srv, conn)| {
+                    let st = Cell::new(st);
+                    let state = State::new(st.clone());
+                    let inner = inner2.clone();
+                    Dispatcher::new(conn, st, srv).then(move |res| {
+                        if inner.disconnect.is_some() {
+                            Either::A(
+                                inner
+                                    .get_mut()
+                                    .disconnect
+                                    .as_mut()
+                                    .unwrap()
+                                    .call(state)
+                                    .then(move |_| res),
+                            )
+                        } else {
+                            Either::B(res.into_future())
+                        }
+                    })
+                }),
         )
     }
 }
@@ -206,8 +239,6 @@ pub fn open_connection<Io>(
 where
     Io: AsyncRead + AsyncWrite + 'static,
 {
-    // let time = time.clone();
-
     // read Open frame
     framed
         .into_future()

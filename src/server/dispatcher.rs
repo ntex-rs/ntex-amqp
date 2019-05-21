@@ -28,12 +28,12 @@ where
     Io: AsyncRead + AsyncWrite,
     S: Service<Request = Link<St>, Response = (), Error = Error>,
 {
-    pub fn new(conn: Connection<Io>, state: St, service: S) -> Self {
+    pub(crate) fn new(conn: Connection<Io>, state: Cell<St>, service: S) -> Self {
         Dispatcher {
             conn,
             service,
+            state,
             links: Vec::with_capacity(16),
-            state: Cell::new(state),
             channels: Slab::with_capacity(16),
         }
     }
