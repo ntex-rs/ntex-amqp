@@ -101,6 +101,24 @@ impl Session {
         inner.post_frame(Frame::Attach(attach));
         rx.map_err(|_e| AmqpTransportError::Disconnected)
     }
+
+    pub fn detach_receiver_link(
+        &mut self,
+        handle: usize,
+        error: Option<Error>,
+    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+        let (tx, rx) = oneshot::channel();
+
+        self.inner
+            .get_mut()
+            .detach_receiver_link(handle, false, error, tx);
+
+        rx.then(|res| match res {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(AmqpTransportError::Disconnected),
+        })
+    }
 }
 
 enum SenderLinkState {

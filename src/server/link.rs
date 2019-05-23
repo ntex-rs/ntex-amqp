@@ -42,6 +42,10 @@ impl<S> Link<S> {
         self.state.get_mut()
     }
 
+    pub fn handle(&self) -> usize {
+        self.link.handle()
+    }
+
     pub fn session(&self) -> &Session {
         self.link.session()
     }

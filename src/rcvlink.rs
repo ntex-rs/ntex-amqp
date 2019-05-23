@@ -20,6 +20,10 @@ impl ReceiverLink {
         ReceiverLink { inner }
     }
 
+    pub fn handle(&self) -> usize {
+        self.inner.get_ref().handle
+    }
+
     pub fn credit(&self) -> u32 {
         self.inner.get_ref().credit
     }

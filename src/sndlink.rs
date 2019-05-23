@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use amqp_codec::protocol::{Flow, Outcome, SequenceNo, TransferBody};
+use amqp_codec::protocol::{Error, Flow, Outcome, SequenceNo, TransferBody};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Future};
 
@@ -32,6 +32,7 @@ pub(crate) struct SenderLinkInner {
     link_credit: u32,
     pending_transfers: VecDeque<PendingTransfer>,
     error: Option<AmqpTransportError>,
+    closed: bool,
 }
 
 struct PendingTransfer {
@@ -51,6 +52,17 @@ impl SenderLink {
     {
         self.inner.get_mut().send(body)
     }
+
+    // pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
+    //     self.inner.get_mut().close(None)
+    // }
+
+    // pub fn close_with_error(
+    //     &mut self,
+    //     error: Error,
+    // ) -> impl Future<Item = (), Error = AmqpTransportError> {
+    //     self.inner.get_mut().close(Some(error))
+    // }
 }
 
 impl SenderLinkInner {
@@ -71,6 +83,7 @@ impl SenderLinkInner {
             link_credit: 0,
             pending_transfers: VecDeque::new(),
             error: None,
+            closed: false,
         }
     }
 
@@ -90,6 +103,26 @@ impl SenderLinkInner {
 
         self.error = Some(err);
     }
+
+    // pub fn close(
+    //     &mut self,
+    //     error: Option<Error>,
+    // ) -> impl Future<Item = (), Error = AmqpTransportError> {
+    //     let (tx, rx) = oneshot::channel();
+    //     if self.closed {
+    //         let _ = tx.send(Ok(()));
+    //     } else {
+    //         self.session
+    //             .inner
+    //             .get_mut()
+    //             .detach_receiver_link(self.handle, true, error, tx);
+    //     }
+    //     rx.then(|res| match res {
+    //         Ok(Ok(_)) => Ok(()),
+    //         Ok(Err(e)) => Err(e),
+    //         Err(_) => Err(AmqpTransportError::Disconnected),
+    //     })
+    // }
 
     pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
         // drop pending transfers
