@@ -7,5 +7,5 @@ trait IntoFramed<T, U: Default> {
 }
 
 pub struct Handshake {
-    cfg: Configuration,
+    _cfg: Configuration,
 }

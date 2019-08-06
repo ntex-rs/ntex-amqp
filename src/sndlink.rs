@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use amqp_codec::protocol::{Error, Flow, Outcome, SequenceNo, TransferBody};
+use amqp_codec::protocol::{Flow, Outcome, SequenceNo, TransferBody};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Future};
 
@@ -32,7 +32,7 @@ pub(crate) struct SenderLinkInner {
     link_credit: u32,
     pending_transfers: VecDeque<PendingTransfer>,
     error: Option<AmqpTransportError>,
-    closed: bool,
+    _closed: bool,
 }
 
 struct PendingTransfer {
@@ -83,7 +83,7 @@ impl SenderLinkInner {
             link_credit: 0,
             pending_transfers: VecDeque::new(),
             error: None,
-            closed: false,
+            _closed: false,
         }
     }
 
@@ -149,7 +149,7 @@ impl SenderLinkInner {
             while self.link_credit > 0 {
                 if let Some(transfer) = self.pending_transfers.pop_front() {
                     self.link_credit -= 1;
-                    self.delivery_count.saturating_add(1);
+                    let _ = self.delivery_count.saturating_add(1);
                     session.send_transfer(
                         self.remote_handle,
                         transfer.idx,
@@ -179,10 +179,10 @@ impl SenderLinkInner {
         } else {
             let session = self.session.get_mut();
             self.link_credit -= 1;
-            self.delivery_count.saturating_add(1);
+            let _ = self.delivery_count.saturating_add(1);
             session.send_transfer(self.remote_handle, self.idx, body, delivery_tx);
         }
-        self.idx.saturating_add(1);
+        let _ = self.idx.saturating_add(1);
         Delivery::Pending(delivery_rx)
     }
 }

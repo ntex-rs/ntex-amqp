@@ -1,19 +1,19 @@
 mod app;
+mod connect;
 mod dispatcher;
 pub mod errors;
-mod factory;
 mod flow;
+mod handshake;
 mod link;
 mod message;
-mod sasl;
+pub mod sasl;
 mod service;
-mod state;
 
 pub use self::app::App;
-pub use self::factory::Server;
+pub use self::connect::{Connect, ConnectAck};
 pub use self::flow::Flow;
+pub use self::handshake::Handshake;
 pub use self::link::Link;
 pub use self::message::{Message, Outcome};
-pub use self::sasl::SaslAuth;
-pub use self::service::ServiceFactory;
-pub use self::state::State;
+pub use self::sasl::Sasl;
+pub use self::service::Server;

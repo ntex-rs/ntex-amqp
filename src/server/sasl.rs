@@ -1,28 +1,25 @@
 use std::fmt;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_service::Service;
+use actix_service::{NewService, Service};
 use amqp_codec::protocol::{
-    self, Error, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
+    self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
-use amqp_codec::{AmqpCodec, SaslFrame};
+use amqp_codec::{AmqpCodec, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 use bytes::Bytes;
-use futures::unsync::{mpsc, oneshot};
-use futures::{future::err, Async, Future, Poll, Sink, Stream};
+use futures::future::{err, ok, FutureResult};
+use futures::{Async, Future, Poll, Sink, Stream};
 use string::{self, TryFrom};
 
-use crate::cell::Cell;
+use super::connect::ConnectAck;
+use super::errors::{AmqpError, SaslError};
 
-use super::errors::{AmqpError, HandshakeError, SaslError};
-use super::factory::Inner;
-use super::link::Link;
-
-pub struct SaslAuth {
-    sender: mpsc::UnboundedSender<(SaslFrame, oneshot::Sender<SaslFrame>)>,
+pub struct Sasl<Io> {
+    framed: Framed<Io, ProtocolIdCodec>,
     mechanisms: Symbols,
 }
 
-impl fmt::Debug for SaslAuth {
+impl<Io> fmt::Debug for Sasl<Io> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("SaslAuth")
             .field("mechanisms", &self.mechanisms)
@@ -30,18 +27,29 @@ impl fmt::Debug for SaslAuth {
     }
 }
 
-impl SaslAuth {
-    pub(crate) fn new(
-        sender: mpsc::UnboundedSender<(SaslFrame, oneshot::Sender<SaslFrame>)>,
-    ) -> Self {
-        SaslAuth {
-            sender,
+impl<Io> Sasl<Io> {
+    pub(crate) fn new(framed: Framed<Io, ProtocolIdCodec>) -> Self {
+        Sasl {
+            framed,
             mechanisms: Symbols::default(),
         }
     }
 }
 
-impl SaslAuth {
+impl<Io> Sasl<Io>
+where
+    Io: AsyncRead + AsyncWrite,
+{
+    /// Returns reference to io object
+    pub fn get_ref(&self) -> &Io {
+        self.framed.get_ref()
+    }
+
+    /// Returns mutable reference to io object
+    pub fn get_mut(&mut self) -> &mut Io {
+        self.framed.get_mut()
+    }
+
     /// Add supported sasl mechanism
     pub fn mechanism<U: Into<String>>(mut self, symbol: U) -> Self {
         self.mechanisms.push(
@@ -52,38 +60,43 @@ impl SaslAuth {
         self
     }
 
-    pub fn send(self) -> impl Future<Item = SaslInit, Error = SaslError> {
-        let SaslAuth {
-            sender, mechanisms, ..
+    /// Initialize sasl auth procedure
+    pub fn init(self) -> impl Future<Item = Init<Io>, Error = SaslError> {
+        let Sasl {
+            framed, mechanisms, ..
         } = self;
 
+        let framed = framed.into_framed(AmqpCodec::<SaslFrame>::new());
         let frame = SaslMechanisms {
             sasl_server_mechanisms: mechanisms,
         }
         .into();
 
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send((frame, tx))
-            .map_err(|_| SaslError::Disconnected)
-            .and_then(move |sender| {
-                rx.then(move |res| match res {
-                    Ok(frame) => match frame.body {
-                        SaslFrameBody::SaslInit(frame) => Ok(SaslInit { frame, sender }),
-                        body => Err(SaslError::Unexpected(body)),
-                    },
-                    Err(_) => Err(SaslError::Disconnected),
-                })
+        framed
+            .send(frame)
+            .map_err(SaslError::from)
+            .and_then(move |framed| {
+                framed
+                    .into_future()
+                    .map_err(|res| SaslError::from(res.0))
+                    .and_then(|(res, framed)| match res {
+                        Some(frame) => match frame.body {
+                            SaslFrameBody::SaslInit(frame) => Ok(Init { frame, framed }),
+                            body => Err(SaslError::Unexpected(body)),
+                        },
+                        None => Err(SaslError::Disconnected),
+                    })
             })
     }
 }
 
-pub struct SaslInit {
+/// Initialization stage of sasl negotiation
+pub struct Init<Io> {
     frame: protocol::SaslInit,
-    sender: mpsc::UnboundedSender<(SaslFrame, oneshot::Sender<SaslFrame>)>,
+    framed: Framed<Io, AmqpCodec<SaslFrame>>,
 }
 
-impl fmt::Debug for SaslInit {
+impl<Io> fmt::Debug for Init<Io> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("SaslInit")
             .field("frame", &self.frame)
@@ -91,7 +104,10 @@ impl fmt::Debug for SaslInit {
     }
 }
 
-impl SaslInit {
+impl<Io> Init<Io>
+where
+    Io: AsyncRead + AsyncWrite,
+{
     /// Sasl mechanism
     pub fn mechanism(&self) -> &str {
         self.frame.mechanism.as_str()
@@ -108,7 +124,7 @@ impl SaslInit {
     }
 
     /// Initiate sasl challenge
-    pub fn challenge(self) -> impl Future<Item = SaslResponse, Error = SaslError> {
+    pub fn challenge(self) -> impl Future<Item = Response<Io>, Error = SaslError> {
         self.challenge_with(Bytes::new())
     }
 
@@ -116,28 +132,30 @@ impl SaslInit {
     pub fn challenge_with(
         self,
         challenge: Bytes,
-    ) -> impl Future<Item = SaslResponse, Error = SaslError> {
-        let sender = self.sender;
+    ) -> impl Future<Item = Response<Io>, Error = SaslError> {
+        let framed = self.framed;
         let frame = SaslChallenge { challenge }.into();
 
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send((frame, tx))
-            .map_err(|_| SaslError::Disconnected)
-            .and_then(move |sender| {
-                rx.then(move |res| match res {
-                    Ok(frame) => match frame.body {
-                        SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse { frame, sender }),
-                        body => Err(SaslError::Unexpected(body)),
-                    },
-                    Err(_) => Err(SaslError::Disconnected),
-                })
+        framed
+            .send(frame)
+            .map_err(SaslError::from)
+            .and_then(move |framed| {
+                framed
+                    .into_future()
+                    .map_err(|res| SaslError::from(res.0))
+                    .and_then(|(res, framed)| match res {
+                        Some(frame) => match frame.body {
+                            SaslFrameBody::SaslResponse(frame) => Ok(Response { frame, framed }),
+                            body => Err(SaslError::Unexpected(body)),
+                        },
+                        None => Err(SaslError::Disconnected),
+                    })
             })
     }
 
     /// Sasl challenge outcome
-    pub fn outcome(self, code: SaslCode) -> impl Future<Item = (), Error = SaslError> {
-        let sender = self.sender;
+    pub fn outcome(self, code: SaslCode) -> impl Future<Item = Success<Io>, Error = SaslError> {
+        let framed = self.framed;
 
         let frame = SaslOutcome {
             code,
@@ -145,25 +163,27 @@ impl SaslInit {
         }
         .into();
 
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send((frame, tx))
-            .map_err(|_| SaslError::Disconnected)
-            .and_then(move |sender| {
-                rx.then(move |res| match res {
-                    Ok(frame) => Ok(()),
-                    Err(_) => Err(SaslError::Disconnected),
-                })
+        framed
+            .send(frame)
+            .map_err(SaslError::from)
+            .and_then(move |framed| {
+                framed
+                    .into_future()
+                    .map_err(|res| SaslError::from(res.0))
+                    .and_then(|(res, framed)| match res {
+                        Some(_) => Ok(Success { framed }),
+                        None => Err(SaslError::Disconnected),
+                    })
             })
     }
 }
 
-pub struct SaslResponse {
+pub struct Response<Io> {
     frame: protocol::SaslResponse,
-    sender: mpsc::UnboundedSender<(SaslFrame, oneshot::Sender<SaslFrame>)>,
+    framed: Framed<Io, AmqpCodec<SaslFrame>>,
 }
 
-impl fmt::Debug for SaslResponse {
+impl<Io> fmt::Debug for Response<Io> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("SaslResponse")
             .field("frame", &self.frame)
@@ -171,220 +191,116 @@ impl fmt::Debug for SaslResponse {
     }
 }
 
-impl SaslResponse {
+impl<Io> Response<Io>
+where
+    Io: AsyncRead + AsyncWrite,
+{
+    /// Client response payload
     pub fn response(&self) -> &[u8] {
         &self.frame.response[..]
     }
 
-    pub fn outcome(self, code: SaslCode) -> impl Future<Item = (), Error = SaslError> {
-        let sender = self.sender;
-
+    /// Sasl challenge outcome
+    pub fn outcome(self, code: SaslCode) -> impl Future<Item = Success<Io>, Error = SaslError> {
+        let framed = self.framed;
         let frame = SaslOutcome {
             code,
             additional_data: None,
         }
         .into();
 
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send((frame, tx))
-            .map_err(|_| SaslError::Disconnected)
-            .and_then(move |sender| {
-                rx.then(move |res| match res {
-                    Ok(frame) => Ok(()),
-                    Err(_) => Err(SaslError::Disconnected),
-                })
+        framed
+            .send(frame)
+            .map_err(SaslError::from)
+            .and_then(move |framed| {
+                framed
+                    .into_future()
+                    .map_err(|res| SaslError::from(res.0))
+                    .and_then(|(res, framed)| match res {
+                        Some(_) => Ok(Success { framed }),
+                        None => Err(SaslError::Disconnected),
+                    })
             })
     }
 }
 
-pub(crate) fn no_sasl_auth<S>(sasl: SaslAuth) -> impl Future<Item = S, Error = Error> {
-    err(AmqpError::not_implemented().into())
+pub struct Success<Io> {
+    framed: Framed<Io, AmqpCodec<SaslFrame>>,
 }
 
-pub(crate) struct Sasl<Io, F, St, S, P>
+impl<Io> Success<Io>
 where
-    Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
-    St: 'static,
+    Io: AsyncRead + AsyncWrite,
 {
-    fut: F::Future,
-    framed: Option<Framed<Io, AmqpCodec<SaslFrame>>>,
-    rx: mpsc::UnboundedReceiver<(SaslFrame, oneshot::Sender<SaslFrame>)>,
-    tx: Option<oneshot::Sender<SaslFrame>>,
-    state: SaslState,
-    outcome: Option<SaslOutcome>,
-}
-
-#[derive(PartialEq, Debug)]
-enum SaslState {
-    New,
-    Mechanisms,
-    Init,
-    Challenge,
-    Response,
-    Success,
-    Error,
-}
-
-impl SaslState {
-    fn is_completed(&self) -> bool {
-        *self == SaslState::Success
+    /// Returns reference to io object
+    pub fn get_ref(&self) -> &Io {
+        self.framed.get_ref()
     }
 
-    fn next(&mut self, frame: &SaslFrameBody) -> bool {
-        match self {
-            SaslState::New => {
-                if let SaslFrameBody::SaslMechanisms(_) = frame {
-                    *self = SaslState::Mechanisms;
-                    true
-                } else {
-                    false
+    /// Returns mutable reference to io object
+    pub fn get_mut(&mut self) -> &mut Io {
+        self.framed.get_mut()
+    }
+
+    /// Ack connect message and set state
+    pub fn ack<St>(self, st: St) -> impl Future<Item = ConnectAck<Io, St>, Error = SaslError> {
+        let framed = self.framed.into_framed(ProtocolIdCodec);
+
+        framed
+            .into_future()
+            .map_err(|res| SaslError::from(res.0))
+            .and_then(|(protocol, framed)| match protocol {
+                Some(ProtocolId::Amqp) => {
+                    Ok(ConnectAck::new(st, framed.into_framed(AmqpCodec::new())))
                 }
-            }
-            SaslState::Mechanisms => {
-                if let SaslFrameBody::SaslInit(_) = frame {
-                    *self = SaslState::Init;
-                    true
-                } else {
-                    false
+                Some(proto) => Err(ProtocolIdError::Unexpected {
+                    exp: ProtocolId::Amqp,
+                    got: proto,
                 }
-            }
-            SaslState::Init => match frame {
-                SaslFrameBody::SaslChallenge(_) => {
-                    *self = SaslState::Challenge;
-                    true
-                }
-                SaslFrameBody::SaslOutcome(_) => {
-                    *self = SaslState::Response;
-                    true
-                }
-                _ => false,
-            },
-            SaslState::Challenge => {
-                if let SaslFrameBody::SaslResponse(_) = frame {
-                    *self = SaslState::Response;
-                    true
-                } else {
-                    false
-                }
-            }
-            SaslState::Response => {
-                if let SaslFrameBody::SaslOutcome(ref out) = frame {
-                    true
-                } else {
-                    false
-                }
-            }
-            SaslState::Success | SaslState::Error => false,
-        }
+                .into()),
+                None => Err(ProtocolIdError::Disconnected.into()),
+            })
     }
 }
 
-impl<Io, F, St, S, P> Sasl<Io, F, St, S, P>
-where
-    Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
-    St: 'static,
-{
-    pub(super) fn new(
-        param: P,
-        cell: &mut Cell<Inner<Io, F, St, S, P>>,
-        framed: Framed<Io, AmqpCodec<SaslFrame>>,
-    ) -> Self {
-        let (tx, rx) = mpsc::unbounded();
-        let auth = SaslAuth::new(tx);
+/// Create service factory with disabled sasl support
+pub fn no_sasl<Io, St, E>() -> NoSaslService<Io, St, E> {
+    NoSaslService::default()
+}
 
-        Sasl {
-            rx,
-            tx: None,
-            framed: Some(framed),
-            fut: cell.get_mut().factory.call((Some(auth), param)),
-            state: SaslState::New,
-            outcome: None,
-        }
+pub struct NoSaslService<Io, St, E>(std::marker::PhantomData<(Io, St, E)>);
+
+impl<Io, St, E> Default for NoSaslService<Io, St, E> {
+    fn default() -> Self {
+        NoSaslService(std::marker::PhantomData)
     }
 }
 
-impl<Io, F, St, S, P> Future for Sasl<Io, F, St, S, P>
-where
-    Io: AsyncRead + AsyncWrite + 'static,
-    F: Service<Request = (Option<SaslAuth>, P), Response = (St, S), Error = Error> + 'static,
-    S: Service<Request = Link<St>, Response = (), Error = Error> + 'static,
-    St: 'static,
-{
-    type Item = (St, S, Framed<Io, AmqpCodec<SaslFrame>>);
-    type Error = HandshakeError;
+impl<Io, St, E> NewService for NoSaslService<Io, St, E> {
+    type Config = ();
+    type Request = Sasl<Io>;
+    type Response = ConnectAck<Io, St>;
+    type Error = AmqpError;
+    type InitError = E;
+    type Service = NoSaslService<Io, St, E>;
+    type Future = FutureResult<Self::Service, Self::InitError>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.fut.poll() {
-            Ok(Async::Ready((st, srv))) => {
-                return Ok(Async::Ready((st, srv, self.framed.take().unwrap())));
-            }
-            Ok(Async::NotReady) => (),
-            Err(e) => {
-                trace!("Error during sasl handling: {}", e);
-                return Err(HandshakeError::Sasl);
-            }
-        }
+    fn new_service(&self, _: &()) -> Self::Future {
+        ok(NoSaslService(std::marker::PhantomData))
+    }
+}
 
-        if self.tx.is_some() {
-            match self.framed.as_mut().unwrap().poll() {
-                Ok(Async::Ready(Some(frame))) => {
-                    if !self.state.next(&frame.body) {
-                        return Err(HandshakeError::UnexpectedSasl(frame));
-                    }
-                    if self.tx.take().unwrap().send(frame).is_err() {
-                        return Err(HandshakeError::Disconnected);
-                    }
-                }
-                Ok(Async::Ready(None)) => return Err(HandshakeError::Disconnected),
-                Ok(Async::NotReady) => (),
-                Err(e) => return Err(e.into()),
-            }
-        } else {
-            match self.rx.poll() {
-                Ok(Async::NotReady) => (),
-                Ok(Async::Ready(Some((frame, tx)))) => {
-                    if !self.state.next(&frame.body) {
-                        return Err(HandshakeError::UnexpectedSasl(frame));
-                    }
-                    if let SaslFrameBody::SaslOutcome(ref frame) = frame.body {
-                        self.outcome = Some(frame.clone());
-                    }
-                    let _ = self.framed.as_mut().unwrap().force_send(frame);
-                    self.tx = Some(tx);
-                    return self.poll();
-                }
-                Ok(Async::Ready(None)) => return Err(HandshakeError::Disconnected),
-                Err(e) => return Err(HandshakeError::Sasl),
-            }
-        }
+impl<Io, St, E> Service for NoSaslService<Io, St, E> {
+    type Request = Sasl<Io>;
+    type Response = ConnectAck<Io, St>;
+    type Error = AmqpError;
+    type Future = FutureResult<Self::Response, Self::Error>;
 
-        if !self.framed.as_mut().unwrap().is_write_buf_empty() {
-            match self.framed.as_mut().unwrap().poll_complete() {
-                Ok(Async::NotReady) => (),
-                Err(e) => {
-                    trace!("error sending data: {}", e);
-                    return Err(e.into());
-                }
-                Ok(Async::Ready(_)) => {
-                    if let Some(outcome) = self.outcome.take() {
-                        if outcome.code == SaslCode::Ok {
-                            self.state = SaslState::Success;
-                        } else {
-                            self.state = SaslState::Error;
-                        }
-                        if self.tx.take().unwrap().send(outcome.into()).is_err() {
-                            return Err(HandshakeError::Disconnected);
-                        }
-                    }
-                }
-            }
-        }
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
 
-        Ok(Async::NotReady)
+    fn call(&mut self, _: Self::Request) -> Self::Future {
+        err(AmqpError::not_implemented())
     }
 }

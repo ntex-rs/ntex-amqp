@@ -90,10 +90,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         future::ok(())
     }
 
+    // TODO: implement
     /// Close connection with error
     pub fn close_with_error(
         &mut self,
-        err: Error,
+        _err: Error,
     ) -> impl Future<Item = (), Error = AmqpTransportError> {
         future::ok(())
     }
@@ -282,7 +283,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                     // handle session frames
                     if let Some(channel) = inner.sessions.get_mut(channel_id) {
                         match channel {
-                            ChannelState::Opening(ref mut tx, _) => {
+                            ChannelState::Opening(_, _) => {
                                 error!("Unexpected opening state: {}", channel_id);
                             }
                             ChannelState::Established(ref mut session) => {
@@ -313,7 +314,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                 }
                             }
                             ChannelState::Closing(ref mut tx) => match frame.performative() {
-                                Frame::End(remote_end) => {
+                                Frame::End(_) => {
                                     if let Some(tx) = tx.take() {
                                         let _ = tx.send(Ok(()));
                                     }
@@ -416,7 +417,7 @@ impl ConnectionController {
         self.0.get_mut().post_frame(frame)
     }
 
-    pub(crate) fn drop_session_copy(&mut self, id: usize) {}
+    pub(crate) fn drop_session_copy(&mut self, _id: usize) {}
 }
 
 impl ConnectionInner {

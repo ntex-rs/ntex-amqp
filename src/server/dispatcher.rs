@@ -1,6 +1,9 @@
+use std::fmt;
+
 use actix_codec::{AsyncRead, AsyncWrite};
 use actix_service::Service;
 use amqp_codec::protocol::{Error, Frame, Role};
+use amqp_codec::AmqpCodecError;
 use futures::{Async, Future, Poll};
 use slab::Slab;
 
@@ -11,24 +14,25 @@ use crate::rcvlink::ReceiverLink;
 use super::link::Link;
 
 /// Amqp server connection dispatcher.
-pub struct Dispatcher<Io, St, S>
+pub struct Dispatcher<Io, St, Sr>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<Request = Link<St>, Response = (), Error = Error>,
+    Sr: Service<Request = Link<St>, Response = ()>,
 {
     conn: Connection<Io>,
     state: Cell<St>,
-    service: S,
-    links: Vec<(ReceiverLink, S::Future)>,
+    service: Sr,
+    links: Vec<(ReceiverLink, Sr::Future)>,
     channels: slab::Slab<ChannelState>,
 }
 
-impl<Io, St, S> Dispatcher<Io, St, S>
+impl<Io, St, Sr> Dispatcher<Io, St, Sr>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<Request = Link<St>, Response = (), Error = Error>,
+    Sr: Service<Request = Link<St>, Response = ()>,
+    Sr::Error: fmt::Display + Into<Error>,
 {
-    pub(crate) fn new(conn: Connection<Io>, state: Cell<St>, service: S) -> Self {
+    pub(crate) fn new(conn: Connection<Io>, state: Cell<St>, service: Sr) -> Self {
         Dispatcher {
             conn,
             service,
@@ -39,13 +43,14 @@ where
     }
 }
 
-impl<Io, St, S> Future for Dispatcher<Io, St, S>
+impl<Io, St, Sr> Future for Dispatcher<Io, St, Sr>
 where
     Io: AsyncRead + AsyncWrite,
-    S: Service<Request = Link<St>, Response = (), Error = Error>,
+    Sr: Service<Request = Link<St>, Response = ()>,
+    Sr::Error: fmt::Display + Into<Error>,
 {
     type Item = ();
-    type Error = ();
+    type Error = AmqpCodecError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
@@ -84,7 +89,7 @@ where
                 }
                 Ok(Async::NotReady) => break,
                 Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
-                Err(_) => return Err(()),
+                Err(e) => return Err(e),
             }
         }
 
@@ -92,7 +97,7 @@ where
         let mut idx = 0;
         while idx < self.links.len() {
             match self.links[idx].1.poll() {
-                Ok(Async::Ready(detach)) => {
+                Ok(Async::Ready(_detach)) => {
                     let (mut link, _) = self.links.swap_remove(idx);
                     link.close();
                 }
@@ -105,7 +110,7 @@ where
             }
         }
 
-        let res = self.conn.poll_outgoing().map_err(|_| ());
+        let res = self.conn.poll_outgoing();
         self.conn.register_write_task();
         res
     }

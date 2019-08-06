@@ -86,8 +86,8 @@ impl<S: 'static> Service for AppService<S> {
                 Either::B(AppServiceResponse {
                     link: link.link.clone(),
                     app_state: link.state.clone(),
-                    has_credit: true,
                     state: AppServiceResponseState::NewService(fut),
+                    // has_credit: true,
                 })
             } else {
                 Either::A(err(LinkError::force_detach()
@@ -108,8 +108,8 @@ impl<S: 'static> Service for AppService<S> {
 struct AppServiceResponse<S> {
     link: ReceiverLink,
     app_state: Cell<S>,
-    has_credit: bool,
     state: AppServiceResponseState<S>,
+    // has_credit: bool,
 }
 
 enum AppServiceResponseState<S> {
@@ -132,7 +132,7 @@ impl<S> Future for AppServiceResponse<S> {
                         Err(e) => {
                             self.link.close_with_error(
                                 LinkError::force_detach()
-                                    .description("delivery_id MUST be set")
+                                    .description(format!("error: {}", e))
                                     .into(),
                             );
                             return Ok(Async::Ready(()));

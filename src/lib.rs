@@ -1,5 +1,3 @@
-#![allow(unused_variables, dead_code)]
-
 #[macro_use]
 extern crate derive_more;
 #[macro_use]

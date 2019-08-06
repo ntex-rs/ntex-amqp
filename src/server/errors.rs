@@ -1,24 +1,59 @@
+use std::io;
+
 use amqp_codec::types::ByteStr;
 use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 use derive_more::{Display, From};
 use string::TryFrom;
 
-#[derive(Debug, Display, From)]
-pub enum HandshakeError {
+pub use amqp_codec::protocol::Error;
+
+/// Errors which can occur when attempting to handle amqp connection.
+#[derive(Debug, Display)]
+pub enum ServerError<E> {
+    #[display(fmt = "Message handler service error")]
+    /// Message handler service error
+    Service(E),
     #[display(fmt = "Protocol negotiation error: {}", _0)]
-    Protocol(ProtocolIdError),
+    /// Amqp protocol negotiation error
+    Handshake(ProtocolIdError),
+    /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
-    Codec(AmqpCodecError),
+    Protocol(AmqpCodecError),
+    #[display(fmt = "Protocol error: {}", _0)]
+    /// Amqp protocol error
+    ProtocolError(Error),
     #[display(fmt = "Expected open frame, got: {:?}", _0)]
     Unexpected(protocol::Frame),
     #[display(fmt = "Unexpected sals frame: {:?}", _0)]
-    UnexpectedSasl(SaslFrame),
-    #[display(fmt = "Disconnected during handshake")]
+    UnexpectedSaslFrame(SaslFrame),
+    /// Peer disconnect
     Disconnected,
-    #[display(fmt = "Service error")]
-    Sasl,
-    #[display(fmt = "Service error")]
-    Service,
+    /// Unexpected io error
+    Io(io::Error),
+}
+
+impl<E> From<AmqpCodecError> for ServerError<E> {
+    fn from(err: AmqpCodecError) -> Self {
+        ServerError::Protocol(err)
+    }
+}
+
+impl<E> From<ProtocolIdError> for ServerError<E> {
+    fn from(err: ProtocolIdError) -> Self {
+        ServerError::Handshake(err)
+    }
+}
+
+impl<E> From<SaslFrame> for ServerError<E> {
+    fn from(err: SaslFrame) -> Self {
+        ServerError::UnexpectedSaslFrame(err)
+    }
+}
+
+impl<E> From<io::Error> for ServerError<E> {
+    fn from(err: io::Error) -> Self {
+        ServerError::Io(err)
+    }
 }
 
 #[derive(Debug, Display, From)]

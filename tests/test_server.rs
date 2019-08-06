@@ -1,9 +1,10 @@
 use actix_amqp::server::{self, errors};
 use actix_amqp::{self, sasl, Configuration};
+use actix_codec::{AsyncRead, AsyncWrite};
 use actix_connect::{default_connector, TcpConnector};
-use actix_service::{new_service_cfg, Service};
+use actix_service::{new_service_cfg, IntoNewService, NewService, Service};
 use actix_test_server::TestServer;
-use futures::future::{err, lazy, FutureResult};
+use futures::future::{err, lazy, Either, FutureResult};
 use futures::Future;
 use http::{HttpTryFrom, Uri};
 
@@ -34,12 +35,15 @@ fn test_simple() -> std::io::Result<()> {
 
     let mut srv = TestServer::with(|| {
         server::Server::new(
-            Configuration::default(),
-            server::ServiceFactory::service(
-                server::App::<()>::new()
-                    .service("test", new_service_cfg(server))
-                    .finish(),
-            ),
+            server::Handshake::new(|conn: server::Connect<_>| {
+                Ok::<_, errors::AmqpError>(conn.ack(()))
+            })
+            .sasl(server::no_sasl()),
+        )
+        .finish(
+            server::App::<()>::new()
+                .service("test", new_service_cfg(server))
+                .finish(),
         )
     });
 
@@ -65,23 +69,29 @@ fn test_simple() -> std::io::Result<()> {
     Ok(())
 }
 
-fn sasl_auth(
-    auth: server::SaslAuth,
-) -> impl Future<Item = (), Error = amqp_codec::protocol::Error> {
+fn sasl_auth<Io: AsyncRead + AsyncWrite>(
+    auth: server::Sasl<Io>,
+) -> impl Future<Item = server::ConnectAck<Io, ()>, Error = server::errors::SaslError> {
     auth.mechanism("PLAIN")
         .mechanism("ANONYMOUS")
         .mechanism("MSSBCBS")
         .mechanism("AMQPCBS")
-        .send()
+        .init()
         .and_then(|init| {
             if init.mechanism() == "PLAIN" {
                 if let Some(resp) = init.initial_response() {
                     if resp == b"\0user1\0password1" {
-                        return init.outcome(amqp_codec::protocol::SaslCode::Ok);
+                        return Either::A(
+                            init.outcome(amqp_codec::protocol::SaslCode::Ok)
+                                .and_then(|succ| succ.ack(())),
+                        );
                     }
                 }
             }
-            init.outcome(amqp_codec::protocol::SaslCode::Auth)
+            Either::B(
+                init.outcome(amqp_codec::protocol::SaslCode::Auth)
+                    .and_then(|succ| succ.ack(())),
+            )
         })
         .map_err(|e| e.into())
 }
@@ -90,12 +100,13 @@ fn sasl_auth(
 fn test_sasl() -> std::io::Result<()> {
     let mut srv = TestServer::with(|| {
         server::Server::new(
-            Configuration::default(),
-            server::ServiceFactory::sasl(sasl_auth).service(
-                server::App::<()>::new()
-                    .service("test", new_service_cfg(server))
-                    .finish(),
-            ),
+            server::Handshake::new(|conn: server::Connect<_>| Ok::<_, errors::Error>(conn.ack(())))
+                .sasl(sasl_auth.into_new_service().map_err(|e| e.into())),
+        )
+        .finish(
+            server::App::<()>::new()
+                .service("test", new_service_cfg(server))
+                .finish(),
         )
     });
 
