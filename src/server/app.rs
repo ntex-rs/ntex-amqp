@@ -1,5 +1,5 @@
 use actix_router::Router;
-use actix_service::{boxed, new_service_fn, IntoNewService, NewService, Service};
+use actix_service::{boxed, new_service_cfg, IntoNewService, NewService, Service};
 use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use futures::future::{err, ok, Either, FutureResult};
 use futures::{Async, Future, Poll, Stream};
@@ -42,7 +42,7 @@ impl<S: 'static> App<S> {
 
     pub fn finish(
         self,
-    ) -> impl NewService<Config = (), Request = Link<S>, Response = (), Error = Error, InitError = Error>
+    ) -> impl NewService<Config = S, Request = Link<S>, Response = (), Error = Error, InitError = Error>
     {
         let mut router = Router::build();
         for (addr, hnd) in self.0 {
@@ -50,7 +50,7 @@ impl<S: 'static> App<S> {
         }
         let router = Cell::new(router.finish());
 
-        new_service_fn(move || {
+        new_service_cfg(move |_: &S| {
             ok(AppService {
                 router: router.clone(),
             })

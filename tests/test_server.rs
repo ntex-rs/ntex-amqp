@@ -38,7 +38,7 @@ fn test_simple() -> std::io::Result<()> {
             server::Handshake::new(|conn: server::Connect<_>| {
                 Ok::<_, errors::AmqpError>(conn.ack(()))
             })
-            .sasl(server::no_sasl()),
+            .sasl(server::sasl::no_sasl()),
         )
         .finish(
             server::App::<()>::new()
