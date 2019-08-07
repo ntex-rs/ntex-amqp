@@ -12,7 +12,7 @@ mod service;
 pub use self::app::App;
 pub use self::connect::{Connect, ConnectAck};
 pub use self::flow::Flow;
-pub use self::handshake::Handshake;
+pub use self::handshake::{handshake, Handshake};
 pub use self::link::Link;
 pub use self::message::{Message, Outcome};
 pub use self::sasl::Sasl;
