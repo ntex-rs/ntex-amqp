@@ -169,15 +169,11 @@ where
     }
 
     fn call(&mut self, req: Self::Request) -> Self::Future {
-        Box::new(connect_service(
-            self.connect.clone(),
-            self.inner.clone(),
-            req,
-        ))
+        Box::new(handshake(self.connect.clone(), self.inner.clone(), req))
     }
 }
 
-fn connect_service<Io, St, Cn: NewService, Pb, I>(
+fn handshake<Io, St, Cn: NewService, Pb, I>(
     connect: Cell<Cn::Service>,
     inner: Cell<ServerInner<St, Cn, Pb>>,
     stream: IoStream<Io, I>,
@@ -197,41 +193,49 @@ where
     framed
         .into_future()
         .map_err(|e| ServerError::Handshake(e.0))
-        .and_then(move |(protocol, framed)| match protocol {
-            // start amqp processing
-            Some(ProtocolId::Amqp) | Some(ProtocolId::AmqpSasl) => Either::A(
-                connect
-                    .get_mut()
-                    .call(if protocol == Some(ProtocolId::Amqp) {
-                        either::Either::Left(Connect::new(framed))
-                    } else {
-                        either::Either::Right(Sasl::new(framed))
-                    })
-                    .map_err(|e| ServerError::Service(e))
-                    .and_then(move |ack| {
-                        let (st, framed) = ack.into_inner();
-                        let st = Cell::new(st);
-                        open_connection(inner.get_ref().config.clone(), framed).and_then(
-                            move |conn| {
-                                inner
-                                    .publish
-                                    .new_service(st.get_ref())
-                                    .map_err(|e| {
-                                        error!("Can not construct app service");
-                                        ServerError::ProtocolError(e.into())
-                                    })
-                                    .map(move |srv| (st, srv, conn))
-                            },
-                        )
-                    }),
-            ),
-            Some(ProtocolId::AmqpTls) => {
-                Either::B(err(ServerError::from(ProtocolIdError::Unexpected {
-                    exp: ProtocolId::Amqp,
-                    got: ProtocolId::AmqpTls,
-                })))
+        .and_then(move |(protocol, mut framed)| {
+            match protocol {
+                // start amqp processing
+                Some(ProtocolId::Amqp) | Some(ProtocolId::AmqpSasl) => {
+                    if let Err(e) = framed.force_send(protocol.unwrap()) {
+                        return Either::B(err(ServerError::from(e)));
+                    }
+
+                    Either::A(
+                        connect
+                            .get_mut()
+                            .call(if protocol == Some(ProtocolId::Amqp) {
+                                either::Either::Left(Connect::new(framed))
+                            } else {
+                                either::Either::Right(Sasl::new(framed))
+                            })
+                            .map_err(|e| ServerError::Service(e))
+                            .and_then(move |ack| {
+                                let (st, framed) = ack.into_inner();
+                                let st = Cell::new(st);
+                                open_connection(inner.get_ref().config.clone(), framed).and_then(
+                                    move |conn| {
+                                        inner
+                                            .publish
+                                            .new_service(st.get_ref())
+                                            .map_err(|e| {
+                                                error!("Can not construct app service");
+                                                ServerError::ProtocolError(e.into())
+                                            })
+                                            .map(move |srv| (st, srv, conn))
+                                    },
+                                )
+                            }),
+                    )
+                }
+                Some(ProtocolId::AmqpTls) => {
+                    Either::B(err(ServerError::from(ProtocolIdError::Unexpected {
+                        exp: ProtocolId::Amqp,
+                        got: ProtocolId::AmqpTls,
+                    })))
+                }
+                None => Either::B(err(ServerError::Disconnected.into())),
             }
-            None => Either::B(err(ServerError::Disconnected.into())),
         })
         .map_err(|_| ())
         .and_then(move |(st, srv, conn)| {
