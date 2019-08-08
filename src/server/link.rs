@@ -6,6 +6,7 @@ use amqp_codec::{protocol::Attach, types::ByteStr};
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
+use crate::Configuration;
 
 pub struct Link<S> {
     pub(crate) state: Cell<S>,
@@ -56,6 +57,12 @@ impl<S> Link<S> {
 
     pub fn link_credit(mut self, credit: u32) {
         self.link.set_link_credit(credit);
+    }
+
+    #[inline]
+    /// Get remote connection configuration
+    pub fn remote_config(&self) -> &Configuration {
+        &self.link.remote_config()
     }
 }
 

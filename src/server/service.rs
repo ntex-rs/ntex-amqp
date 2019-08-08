@@ -281,7 +281,7 @@ where
         })
         .and_then(move |(open, framed)| {
             // confirm Open
-            let local = cfg.to_open(None);
+            let local = cfg.to_open();
             framed
                 .send(AmqpFrame::new(0, local.into()))
                 .map_err(ServerError::from)

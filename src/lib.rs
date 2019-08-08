@@ -64,9 +64,10 @@ impl Future for Delivery {
 /// Amqp1 transport configuration.
 #[derive(Debug, Clone)]
 pub struct Configuration {
-    max_frame_size: u32,
-    channel_max: usize,
-    idle_time_out: Option<Milliseconds>,
+    pub max_frame_size: u32,
+    pub channel_max: usize,
+    pub idle_time_out: Option<Milliseconds>,
+    pub hostname: Option<String<Bytes>>,
 }
 
 impl Default for Configuration {
@@ -82,6 +83,7 @@ impl Configuration {
             max_frame_size: std::u16::MAX as u32,
             channel_max: 1024,
             idle_time_out: Some(120000),
+            hostname: None,
         }
     }
 
@@ -116,14 +118,22 @@ impl Configuration {
         self
     }
 
+    /// Set connection hostname
+    ///
+    /// Hostname is not set by default
+    pub fn hostname(&mut self, hostname: &str) -> &mut Self {
+        self.hostname = Some(String::<Bytes>::from_str(hostname));
+        self
+    }
+
     /// Create `Open` performative for this configuration.
-    pub fn to_open(&self, hostname: Option<&str>) -> Open {
+    pub fn to_open(&self) -> Open {
         Open {
             container_id: String::<Bytes>::try_from(Bytes::from(
                 Uuid::new_v4().to_simple().to_string(),
             ))
             .unwrap(),
-            hostname: hostname.map(|h| String::<Bytes>::from_str(h)),
+            hostname: self.hostname.clone(),
             max_frame_size: self.max_frame_size,
             channel_max: self.channel_max as u16,
             idle_time_out: self.idle_time_out,
@@ -147,6 +157,7 @@ impl<'a> From<&'a Open> for Configuration {
             max_frame_size: open.max_frame_size,
             channel_max: open.channel_max as usize,
             idle_time_out: open.idle_time_out,
+            hostname: open.hostname.clone(),
         }
     }
 }

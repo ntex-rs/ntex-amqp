@@ -9,6 +9,7 @@ use futures::{unsync::oneshot, Async, Future, Poll, Stream};
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
 use crate::session::{Session, SessionInner};
+use crate::Configuration;
 
 #[derive(Clone)]
 pub struct ReceiverLink {
@@ -72,6 +73,12 @@ impl ReceiverLink {
         error: Error,
     ) -> impl Future<Item = (), Error = AmqpTransportError> {
         self.inner.get_mut().close(Some(error))
+    }
+
+    #[inline]
+    /// Get remote connection configuration
+    pub fn remote_config(&self) -> &Configuration {
+        &self.inner.session.remote_config()
     }
 }
 

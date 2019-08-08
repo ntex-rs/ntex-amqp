@@ -98,9 +98,12 @@ where
     )
     // open connection
     .and_then(
-        |(uri, config, framed, time): (Uri, Configuration, Framed<Io, ProtocolIdCodec>, _)| {
+        |(uri, mut config, framed, time): (Uri, Configuration, Framed<Io, ProtocolIdCodec>, _)| {
             let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
-            let open = config.to_open(uri.host());
+            if let Some(hostname) = uri.host() {
+                config.hostname(hostname);
+            }
+            let open = config.to_open();
             trace!("Open connection: {:?}", open);
             framed
                 .send(AmqpFrame::new(0, Frame::Open(open)))

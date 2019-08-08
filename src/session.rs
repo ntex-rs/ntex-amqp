@@ -19,7 +19,7 @@ use crate::connection::ConnectionController;
 use crate::errors::AmqpTransportError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::DeliveryPromise;
+use crate::{Configuration, DeliveryPromise};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
@@ -37,6 +37,12 @@ impl Drop for Session {
 impl Session {
     pub(crate) fn new(inner: Cell<SessionInner>) -> Session {
         Session { inner }
+    }
+
+    #[inline]
+    /// Get remote connection configuration
+    pub fn remote_config(&self) -> &Configuration {
+        &self.inner.connection.remote_config()
     }
 
     pub fn close(&self) -> impl Future<Item = (), Error = AmqpTransportError> {

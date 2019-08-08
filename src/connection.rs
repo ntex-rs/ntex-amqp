@@ -409,6 +409,12 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
 pub struct ConnectionController(Cell<ConnectionInner>);
 
 impl ConnectionController {
+    #[inline]
+    /// Get remote connection configuration
+    pub fn remote_config(&self) -> &Configuration {
+        &self.0.get_ref().remote
+    }
+
     pub fn close_session(&mut self) {
         unimplemented!()
     }
