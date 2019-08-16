@@ -5,14 +5,14 @@ use actix_service::{NewService, Service};
 use amqp_codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
-use amqp_codec::{AmqpCodec, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 use bytes::Bytes;
-use futures::future::{err, ok, FutureResult};
+use futures::future::{err, ok, Either, FutureResult};
 use futures::{Async, Future, Poll, Sink, Stream};
 use string::{self, TryFrom};
 
-use super::connect::ConnectAck;
-use super::errors::{AmqpError, SaslError};
+use super::connect::{ConnectAck, ConnectOpened};
+use super::errors::{AmqpError, SaslError, ServerError};
 
 pub struct Sasl<Io> {
     framed: Framed<Io, ProtocolIdCodec>,
@@ -242,23 +242,44 @@ where
         self.framed.get_mut()
     }
 
-    /// Ack connect message and set state
-    pub fn ack<St>(self, st: St) -> impl Future<Item = ConnectAck<Io, St>, Error = SaslError> {
+    /// Wait for connection open frame
+    pub fn open(self) -> impl Future<Item = ConnectOpened<Io>, Error = ServerError<()>> {
         let framed = self.framed.into_framed(ProtocolIdCodec);
 
         framed
             .into_future()
-            .map_err(|res| SaslError::from(res.0))
+            .map_err(|res| ServerError::from(res.0))
             .and_then(|(protocol, framed)| match protocol {
                 Some(ProtocolId::Amqp) => {
-                    Ok(ConnectAck::new(st, framed.into_framed(AmqpCodec::new())))
+                    // Wait for connection open frame
+                    let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
+
+                    Either::A(
+                        framed
+                            .into_future()
+                            .map_err(|(err, _)| ServerError::from(err))
+                            .and_then(|(frame, framed)| {
+                                if let Some(frame) = frame {
+                                    let frame = frame.into_parts().1;
+                                    match frame {
+                                        protocol::Frame::Open(frame) => {
+                                            trace!("Got open frame: {:?}", frame);
+                                            Ok(ConnectOpened::new(frame, framed))
+                                        }
+                                        frame => Err(ServerError::Unexpected(frame)),
+                                    }
+                                } else {
+                                    Err(ServerError::Disconnected)
+                                }
+                            }),
+                    )
                 }
-                Some(proto) => Err(ProtocolIdError::Unexpected {
+                Some(proto) => Either::B(err(ProtocolIdError::Unexpected {
                     exp: ProtocolId::Amqp,
                     got: proto,
                 }
-                .into()),
-                None => Err(ProtocolIdError::Disconnected.into()),
+                .into())),
+                None => Either::B(err(ProtocolIdError::Disconnected.into())),
             })
     }
 }

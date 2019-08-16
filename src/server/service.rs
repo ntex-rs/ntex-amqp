@@ -4,8 +4,8 @@ use std::marker::PhantomData;
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_server_config::{Io as IoStream, ServerConfig};
 use actix_service::{IntoNewService, NewService, Service};
-use amqp_codec::protocol::{Error, Frame, ProtocolId};
-use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
+use amqp_codec::protocol::{Error, ProtocolId};
+use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use futures::future::{err, Either};
 use futures::{Async, Future, Poll, Sink, Stream};
 
@@ -211,10 +211,20 @@ where
                             })
                             .map_err(|e| ServerError::Service(e))
                             .and_then(move |ack| {
-                                let (st, framed) = ack.into_inner();
+                                let (st, open, framed) = ack.into_inner();
                                 let st = Cell::new(st);
-                                open_connection(inner.get_ref().config.clone(), framed).and_then(
-                                    move |conn| {
+                                let cfg = inner.get_ref().config.clone();
+
+                                // confirm Open
+                                let local = cfg.to_open();
+                                framed
+                                    .send(AmqpFrame::new(0, local.into()))
+                                    .map_err(ServerError::from)
+                                    .map(move |framed| {
+                                        Connection::new(framed, cfg.clone(), (&open).into(), None)
+                                    })
+                                    .and_then(move |conn| {
+                                        // create publish service
                                         inner
                                             .publish
                                             .new_service(st.get_ref())
@@ -223,8 +233,7 @@ where
                                                 ServerError::ProtocolError(e.into())
                                             })
                                             .map(move |srv| (st, srv, conn))
-                                    },
-                                )
+                                    })
                             }),
                     )
                 }
@@ -251,40 +260,5 @@ where
                     res
                 })
                 .map_err(|_| ())
-        })
-}
-
-fn open_connection<Io, E>(
-    cfg: Configuration,
-    framed: Framed<Io, AmqpCodec<AmqpFrame>>,
-) -> impl Future<Item = Connection<Io>, Error = ServerError<E>>
-where
-    Io: AsyncRead + AsyncWrite + 'static,
-{
-    // read Open frame
-    framed
-        .into_future()
-        .map_err(|res| ServerError::from(res.0))
-        .and_then(|(frame, framed)| {
-            if let Some(frame) = frame {
-                let frame = frame.into_parts().1;
-                match frame {
-                    Frame::Open(open) => {
-                        trace!("Got open: {:?}", open);
-                        Ok((open, framed))
-                    }
-                    frame => Err(ServerError::Unexpected(frame)),
-                }
-            } else {
-                Err(ServerError::Disconnected)
-            }
-        })
-        .and_then(move |(open, framed)| {
-            // confirm Open
-            let local = cfg.to_open();
-            framed
-                .send(AmqpFrame::new(0, local.into()))
-                .map_err(ServerError::from)
-                .map(move |framed| Connection::new(framed, cfg.clone(), (&open).into(), None))
         })
 }

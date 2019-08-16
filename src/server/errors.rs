@@ -26,6 +26,8 @@ pub enum ServerError<E> {
     Unexpected(protocol::Frame),
     #[display(fmt = "Unexpected sals frame: {:?}", _0)]
     UnexpectedSaslFrame(SaslFrame),
+    #[display(fmt = "{}", _0)]
+    Sasl(SaslError),
     /// Peer disconnect
     Disconnected,
     /// Unexpected io error
