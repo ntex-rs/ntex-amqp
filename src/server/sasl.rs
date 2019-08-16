@@ -12,7 +12,7 @@ use futures::{Async, Future, Poll, Sink, Stream};
 use string::{self, TryFrom};
 
 use super::connect::{ConnectAck, ConnectOpened};
-use super::errors::{AmqpError, SaslError, ServerError};
+use super::errors::{AmqpError, ServerError};
 
 pub struct Sasl<Io> {
     framed: Framed<Io, ProtocolIdCodec>,
@@ -61,7 +61,7 @@ where
     }
 
     /// Initialize sasl auth procedure
-    pub fn init(self) -> impl Future<Item = Init<Io>, Error = SaslError> {
+    pub fn init(self) -> impl Future<Item = Init<Io>, Error = ServerError<()>> {
         let Sasl {
             framed, mechanisms, ..
         } = self;
@@ -74,17 +74,17 @@ where
 
         framed
             .send(frame)
-            .map_err(SaslError::from)
+            .map_err(ServerError::from)
             .and_then(move |framed| {
                 framed
                     .into_future()
-                    .map_err(|res| SaslError::from(res.0))
+                    .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
                         Some(frame) => match frame.body {
                             SaslFrameBody::SaslInit(frame) => Ok(Init { frame, framed }),
-                            body => Err(SaslError::Unexpected(body)),
+                            body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
                         },
-                        None => Err(SaslError::Disconnected),
+                        None => Err(ServerError::Disconnected),
                     })
             })
     }
@@ -124,7 +124,7 @@ where
     }
 
     /// Initiate sasl challenge
-    pub fn challenge(self) -> impl Future<Item = Response<Io>, Error = SaslError> {
+    pub fn challenge(self) -> impl Future<Item = Response<Io>, Error = ServerError<()>> {
         self.challenge_with(Bytes::new())
     }
 
@@ -132,29 +132,32 @@ where
     pub fn challenge_with(
         self,
         challenge: Bytes,
-    ) -> impl Future<Item = Response<Io>, Error = SaslError> {
+    ) -> impl Future<Item = Response<Io>, Error = ServerError<()>> {
         let framed = self.framed;
         let frame = SaslChallenge { challenge }.into();
 
         framed
             .send(frame)
-            .map_err(SaslError::from)
+            .map_err(ServerError::from)
             .and_then(move |framed| {
                 framed
                     .into_future()
-                    .map_err(|res| SaslError::from(res.0))
+                    .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
                         Some(frame) => match frame.body {
                             SaslFrameBody::SaslResponse(frame) => Ok(Response { frame, framed }),
-                            body => Err(SaslError::Unexpected(body)),
+                            body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
                         },
-                        None => Err(SaslError::Disconnected),
+                        None => Err(ServerError::Disconnected),
                     })
             })
     }
 
     /// Sasl challenge outcome
-    pub fn outcome(self, code: SaslCode) -> impl Future<Item = Success<Io>, Error = SaslError> {
+    pub fn outcome(
+        self,
+        code: SaslCode,
+    ) -> impl Future<Item = Success<Io>, Error = ServerError<()>> {
         let framed = self.framed;
 
         let frame = SaslOutcome {
@@ -165,14 +168,14 @@ where
 
         framed
             .send(frame)
-            .map_err(SaslError::from)
+            .map_err(ServerError::from)
             .and_then(move |framed| {
                 framed
                     .into_future()
-                    .map_err(|res| SaslError::from(res.0))
+                    .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
                         Some(_) => Ok(Success { framed }),
-                        None => Err(SaslError::Disconnected),
+                        None => Err(ServerError::Disconnected),
                     })
             })
     }
@@ -201,7 +204,10 @@ where
     }
 
     /// Sasl challenge outcome
-    pub fn outcome(self, code: SaslCode) -> impl Future<Item = Success<Io>, Error = SaslError> {
+    pub fn outcome(
+        self,
+        code: SaslCode,
+    ) -> impl Future<Item = Success<Io>, Error = ServerError<()>> {
         let framed = self.framed;
         let frame = SaslOutcome {
             code,
@@ -211,14 +217,14 @@ where
 
         framed
             .send(frame)
-            .map_err(SaslError::from)
+            .map_err(ServerError::from)
             .and_then(move |framed| {
                 framed
                     .into_future()
-                    .map_err(|res| SaslError::from(res.0))
+                    .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
                         Some(_) => Ok(Success { framed }),
-                        None => Err(SaslError::Disconnected),
+                        None => Err(ServerError::Disconnected),
                     })
             })
     }

@@ -2,7 +2,7 @@ use std::io;
 
 use amqp_codec::types::ByteStr;
 use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
-use derive_more::{Display, From};
+use derive_more::Display;
 use string::TryFrom;
 
 pub use amqp_codec::protocol::Error;
@@ -24,14 +24,24 @@ pub enum ServerError<E> {
     ProtocolError(Error),
     #[display(fmt = "Expected open frame, got: {:?}", _0)]
     Unexpected(protocol::Frame),
-    #[display(fmt = "Unexpected sals frame: {:?}", _0)]
+    #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
     UnexpectedSaslFrame(SaslFrame),
-    #[display(fmt = "{}", _0)]
-    Sasl(SaslError),
+    #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
+    UnexpectedSaslBodyFrame(protocol::SaslFrameBody),
     /// Peer disconnect
     Disconnected,
     /// Unexpected io error
     Io(io::Error),
+}
+
+impl<E> Into<protocol::Error> for ServerError<E> {
+    fn into(self) -> protocol::Error {
+        protocol::Error {
+            condition: protocol::AmqpError::InternalError.into(),
+            description: Some(string::String::try_from(format!("{}", self).into()).unwrap()),
+            info: None,
+        }
+    }
 }
 
 impl<E> From<AmqpCodecError> for ServerError<E> {
@@ -55,28 +65,6 @@ impl<E> From<SaslFrame> for ServerError<E> {
 impl<E> From<io::Error> for ServerError<E> {
     fn from(err: io::Error) -> Self {
         ServerError::Io(err)
-    }
-}
-
-#[derive(Debug, Display, From)]
-pub enum SaslError {
-    #[display(fmt = "Protocol negotiation error: {}", _0)]
-    Protocol(ProtocolIdError),
-    #[display(fmt = "Amqp codec error: {:?}", _0)]
-    Codec(AmqpCodecError),
-    #[display(fmt = "Expected open frame, got: {:?}", _0)]
-    Unexpected(protocol::SaslFrameBody),
-    #[display(fmt = "Disconnected during handshake")]
-    Disconnected,
-}
-
-impl Into<protocol::Error> for SaslError {
-    fn into(self) -> protocol::Error {
-        protocol::Error {
-            condition: protocol::AmqpError::InternalError.into(),
-            description: Some(string::String::try_from(format!("{}", self).into()).unwrap()),
-            info: None,
-        }
     }
 }
 

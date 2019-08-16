@@ -36,7 +36,9 @@ fn test_simple() -> std::io::Result<()> {
     let mut srv = TestServer::with(|| {
         server::Server::new(
             server::Handshake::new(|conn: server::Connect<_>| {
-                Ok::<_, errors::AmqpError>(conn.ack(()))
+                conn.open()
+                    .map_err(|_| panic!())
+                    .and_then(|conn| Ok::<_, errors::AmqpError>(conn.ack(())))
             })
             .sasl(server::sasl::no_sasl()),
         )
@@ -71,7 +73,7 @@ fn test_simple() -> std::io::Result<()> {
 
 fn sasl_auth<Io: AsyncRead + AsyncWrite>(
     auth: server::Sasl<Io>,
-) -> impl Future<Item = server::ConnectAck<Io, ()>, Error = server::errors::SaslError> {
+) -> impl Future<Item = server::ConnectAck<Io, ()>, Error = server::errors::ServerError<()>> {
     auth.mechanism("PLAIN")
         .mechanism("ANONYMOUS")
         .mechanism("MSSBCBS")
@@ -83,14 +85,14 @@ fn sasl_auth<Io: AsyncRead + AsyncWrite>(
                     if resp == b"\0user1\0password1" {
                         return Either::A(
                             init.outcome(amqp_codec::protocol::SaslCode::Ok)
-                                .and_then(|succ| succ.ack(())),
+                                .and_then(|succ| succ.open().map(|f| f.ack(()))),
                         );
                     }
                 }
             }
             Either::B(
                 init.outcome(amqp_codec::protocol::SaslCode::Auth)
-                    .and_then(|succ| succ.ack(())),
+                    .and_then(|succ| succ.open().map(|f| f.ack(()))),
             )
         })
         .map_err(|e| e.into())
@@ -100,8 +102,12 @@ fn sasl_auth<Io: AsyncRead + AsyncWrite>(
 fn test_sasl() -> std::io::Result<()> {
     let mut srv = TestServer::with(|| {
         server::Server::new(
-            server::Handshake::new(|conn: server::Connect<_>| Ok::<_, errors::Error>(conn.ack(())))
-                .sasl(sasl_auth.into_new_service().map_err(|e| e.into())),
+            server::Handshake::new(|conn: server::Connect<_>| {
+                conn.open()
+                    .map_err(|_| panic!())
+                    .and_then(|conn| Ok::<_, errors::Error>(conn.ack(())))
+            })
+            .sasl(sasl_auth.into_new_service().map_err(|e| e.into())),
         )
         .finish(
             server::App::<()>::new()
