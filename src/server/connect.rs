@@ -67,6 +67,16 @@ impl<Io> ConnectOpened<Io> {
         &self.frame
     }
 
+    /// Returns reference to io object
+    pub fn get_ref(&self) -> &Io {
+        self.framed.get_ref()
+    }
+
+    /// Returns mutable reference to io object
+    pub fn get_mut(&mut self) -> &mut Io {
+        self.framed.get_mut()
+    }
+
     /// Ack connect message and set state
     pub fn ack<St>(self, state: St) -> ConnectAck<Io, St> {
         ConnectAck {
