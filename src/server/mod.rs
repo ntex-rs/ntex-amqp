@@ -10,7 +10,7 @@ pub mod sasl;
 mod service;
 
 pub use self::app::App;
-pub use self::connect::{Connect, ConnectAck};
+pub use self::connect::{Connect, ConnectAck, ConnectOpened};
 pub use self::flow::Flow;
 pub use self::handshake::{handshake, Handshake};
 pub use self::link::Link;
