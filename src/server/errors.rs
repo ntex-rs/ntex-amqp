@@ -13,6 +13,10 @@ pub enum ServerError<E> {
     #[display(fmt = "Message handler service error")]
     /// Message handler service error
     Service(E),
+
+    #[display(fmt = "Amqp error: {}", _0)]
+    /// Amqp error
+    Amqp(AmqpError),
     #[display(fmt = "Protocol negotiation error: {}", _0)]
     /// Amqp protocol negotiation error
     Handshake(ProtocolIdError),
@@ -41,6 +45,12 @@ impl<E> Into<protocol::Error> for ServerError<E> {
             description: Some(string::String::try_from(format!("{}", self).into()).unwrap()),
             info: None,
         }
+    }
+}
+
+impl<E> From<AmqpError> for ServerError<E> {
+    fn from(err: AmqpError) -> Self {
+        ServerError::Amqp(err)
     }
 }
 
