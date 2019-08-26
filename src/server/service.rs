@@ -7,7 +7,7 @@ use actix_service::{IntoNewService, NewService, Service};
 use amqp_codec::protocol::{Error, ProtocolId};
 use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use futures::future::{err, Either};
-use futures::{Async, Future, Poll, Sink, Stream};
+use futures::{Future, Poll, Sink, Stream};
 
 use crate::cell::Cell;
 use crate::connection::Connection;
@@ -165,7 +165,7 @@ where
     type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
+        self.connect.get_mut().poll_ready().map_err(|_| ())
     }
 
     fn call(&mut self, req: Self::Request) -> Self::Future {
