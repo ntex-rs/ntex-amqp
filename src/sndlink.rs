@@ -91,6 +91,10 @@ impl SenderLinkInner {
         self.id as u32
     }
 
+    pub fn remote_handle(&self) -> Handle {
+        self.remote_handle
+    }
+
     pub(crate) fn name(&self) -> &string::String<Bytes> {
         &self.name
     }
@@ -168,21 +172,25 @@ impl SenderLinkInner {
     }
 
     pub fn send<T: Into<TransferBody>>(&mut self, body: T) -> Delivery {
-        let body = body.into();
-        let (delivery_tx, delivery_rx) = oneshot::channel();
-        if self.link_credit == 0 {
-            self.pending_transfers.push_back(PendingTransfer {
-                body,
-                idx: self.idx,
-                promise: delivery_tx,
-            });
+        if let Some(ref err) = self.error {
+            Delivery::Resolved(Err(err.clone()))
         } else {
-            let session = self.session.get_mut();
-            self.link_credit -= 1;
-            let _ = self.delivery_count.saturating_add(1);
-            session.send_transfer(self.remote_handle, self.idx, body, delivery_tx);
+            let body = body.into();
+            let (delivery_tx, delivery_rx) = oneshot::channel();
+            if self.link_credit == 0 {
+                self.pending_transfers.push_back(PendingTransfer {
+                    body,
+                    idx: self.idx,
+                    promise: delivery_tx,
+                });
+            } else {
+                let session = self.session.get_mut();
+                self.link_credit -= 1;
+                let _ = self.delivery_count.saturating_add(1);
+                session.send_transfer(self.remote_handle, self.idx, body, delivery_tx);
+            }
+            let _ = self.idx.saturating_add(1);
+            Delivery::Pending(delivery_rx)
         }
-        let _ = self.idx.saturating_add(1);
-        Delivery::Pending(delivery_rx)
     }
 }

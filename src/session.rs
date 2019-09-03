@@ -492,14 +492,27 @@ impl SessionInner {
                         let detach = Detach {
                             handle: link.inner.get_ref().id(),
                             closed: true,
-                            error: None,
+                            error: detach.error.clone(),
                         };
+                        let err = AmqpTransportError::LinkDetached(detach.error.clone());
+
                         // remove name
                         self.sender_links.remove(link.inner.name());
 
-                        link.inner
-                            .get_mut()
-                            .detached(AmqpTransportError::LinkDetached(detach.error.clone()));
+                        // drop pending transfers
+                        let mut idx = 0;
+                        let handle = link.inner.get_ref().remote_handle();
+                        while idx < self.pending_transfers.len() {
+                            if self.pending_transfers[idx].link_handle == handle {
+                                let tr = self.pending_transfers.remove(idx).unwrap();
+                                let _ = tr.promise.send(Err(err.clone()));
+                            } else {
+                                idx += 1;
+                            }
+                        }
+
+                        // detach snd link
+                        link.inner.get_mut().detached(err);
                         self.connection
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
                         true
@@ -664,21 +677,20 @@ impl SessionInner {
             });
             return;
         }
-        let frame = self.prepare_transfer(link_handle, idx, body, promise);
+        let frame = self.prepare_transfer(link_handle, body, promise);
         self.post_frame(frame);
     }
 
     pub fn prepare_transfer(
         &mut self,
         link_handle: Handle,
-        idx: u32,
         body: TransferBody,
         promise: DeliveryPromise,
     ) -> Frame {
         let delivery_id = self.next_outgoing_id;
 
         let mut buf = BytesMut::new();
-        buf.put_u32_be(idx);
+        buf.put_u32_be(delivery_id);
 
         self.next_outgoing_id += 1;
         self.remote_incoming_window -= 1;

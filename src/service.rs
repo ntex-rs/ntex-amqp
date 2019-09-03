@@ -37,7 +37,7 @@ where
     type Request = Framed<T, ProtocolIdCodec>;
     type Response = Framed<T, ProtocolIdCodec>;
     type Error = ProtocolIdError;
-    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
+    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
         Ok(Async::Ready(()))

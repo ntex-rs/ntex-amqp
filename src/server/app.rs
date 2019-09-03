@@ -114,7 +114,9 @@ struct AppServiceResponse<S> {
 
 enum AppServiceResponseState<S> {
     Service(boxed::BoxedService<Message<S>, Outcome, Error>),
-    NewService(Box<Future<Item = boxed::BoxedService<Message<S>, Outcome, Error>, Error = Error>>),
+    NewService(
+        Box<dyn Future<Item = boxed::BoxedService<Message<S>, Outcome, Error>, Error = Error>>,
+    ),
 }
 
 impl<S> Future for AppServiceResponse<S> {
@@ -206,7 +208,7 @@ impl<S> Future for AppServiceResponse<S> {
 struct HandleMessage {
     link: ReceiverLink,
     delivery_id: DeliveryNumber,
-    fut: Either<FutureResult<Outcome, Error>, Box<Future<Item = Outcome, Error = Error>>>,
+    fut: Either<FutureResult<Outcome, Error>, Box<dyn Future<Item = Outcome, Error = Error>>>,
 }
 
 impl Future for HandleMessage {
