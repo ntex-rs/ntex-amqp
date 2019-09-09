@@ -62,7 +62,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
 
                     // read frame size
                     let size = BigEndian::read_u32(src.as_ref()) as usize;
-                    if size > self.max_size {
+                    if self.max_size != 0 && size > self.max_size {
                         return Err(AmqpCodecError::MaxSizeExceeded);
                     }
                     self.state = DecodeState::Frame(size - 4);
