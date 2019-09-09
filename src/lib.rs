@@ -27,7 +27,7 @@ pub use self::connection::Connection;
 pub use self::errors::AmqpTransportError;
 pub use self::rcvlink::ReceiverLink;
 pub use self::session::Session;
-pub use self::sndlink::SenderLink;
+pub use self::sndlink::{SenderLink, SenderLinkBuilder};
 
 pub enum Delivery {
     Resolved(Result<Outcome, AmqpTransportError>),

@@ -9,8 +9,8 @@ use string::{self, TryFrom};
 
 use amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
-    Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Target, TerminusDurability,
-    TerminusExpiryPolicy, Transfer, TransferBody, TransferNumber,
+    Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody,
+    TransferNumber,
 };
 use amqp_codec::AmqpFrame;
 
@@ -18,7 +18,7 @@ use crate::cell::Cell;
 use crate::connection::ConnectionController;
 use crate::errors::AmqpTransportError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkInner};
-use crate::sndlink::{SenderLink, SenderLinkInner};
+use crate::sndlink::{SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{Configuration, DeliveryPromise};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
@@ -62,49 +62,14 @@ impl Session {
     }
 
     /// Open sender link
-    pub fn open_sender_link<T: Into<String>, U: Into<String>>(
+    pub fn build_sender_link<T: Into<String>, U: Into<String>>(
         &mut self,
         address: T,
         name: U,
-    ) -> impl Future<Item = SenderLink, Error = AmqpTransportError> {
-        let inner = self.inner.get_mut();
-        let (tx, rx) = oneshot::channel();
-
-        let entry = inner.links.vacant_entry();
-        let token = entry.key();
-        entry.insert(Either::Left(SenderLinkState::Opening(tx)));
-
+    ) -> SenderLinkBuilder {
         let name = string::String::try_from(Bytes::from(name.into())).unwrap();
         let address = string::String::try_from(Bytes::from(address.into())).unwrap();
-
-        let target = Target {
-            address: Some(address),
-            durable: TerminusDurability::None,
-            expiry_policy: TerminusExpiryPolicy::SessionEnd,
-            timeout: 0,
-            dynamic: false,
-            dynamic_node_properties: None,
-            capabilities: None,
-        };
-        let attach = Attach {
-            name: name.clone(),
-            handle: token as Handle,
-            role: Role::Sender,
-            snd_settle_mode: SenderSettleMode::Mixed,
-            rcv_settle_mode: ReceiverSettleMode::First,
-            source: None,
-            target: Some(target),
-            unsettled: None,
-            incomplete_unsettled: false,
-            initial_delivery_count: None,
-            max_message_size: Some(65536),
-            offered_capabilities: None,
-            desired_capabilities: None,
-            properties: None,
-        };
-        inner.sender_links.insert(name, token);
-        inner.post_frame(Frame::Attach(attach));
-        rx.map_err(|_e| AmqpTransportError::Disconnected)
+        SenderLinkBuilder::new(name, address, self.inner.clone())
     }
 
     pub fn detach_receiver_link(
@@ -659,6 +624,20 @@ impl SessionInner {
     pub fn post_frame(&mut self, frame: Frame) {
         self.connection
             .post_frame(AmqpFrame::new(self.remote_channel_id, frame));
+    }
+
+    pub(crate) fn open_sender_link(&mut self, mut frame: Attach) -> oneshot::Receiver<SenderLink> {
+        let (tx, rx) = oneshot::channel();
+
+        let entry = self.links.vacant_entry();
+        let token = entry.key();
+        entry.insert(Either::Left(SenderLinkState::Opening(tx)));
+
+        frame.handle = token as Handle;
+
+        self.sender_links.insert(frame.name.clone(), token);
+        self.post_frame(Frame::Attach(frame));
+        rx
     }
 
     pub fn send_transfer(

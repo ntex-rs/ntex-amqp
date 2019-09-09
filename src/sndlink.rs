@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use amqp_codec::protocol::{Flow, Outcome, SequenceNo, TransferBody};
+use amqp_codec::protocol::{
+    Attach, Flow, Outcome, ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target,
+    TerminusDurability, TerminusExpiryPolicy, TransferBody,
+};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Future};
 
@@ -192,5 +195,58 @@ impl SenderLinkInner {
             let _ = self.idx.saturating_add(1);
             Delivery::Pending(delivery_rx)
         }
+    }
+}
+
+pub struct SenderLinkBuilder {
+    frame: Attach,
+    session: Cell<SessionInner>,
+}
+
+impl SenderLinkBuilder {
+    pub(crate) fn new(
+        name: string::String<Bytes>,
+        address: string::String<Bytes>,
+        session: Cell<SessionInner>,
+    ) -> Self {
+        let target = Target {
+            address: Some(address),
+            durable: TerminusDurability::None,
+            expiry_policy: TerminusExpiryPolicy::SessionEnd,
+            timeout: 0,
+            dynamic: false,
+            dynamic_node_properties: None,
+            capabilities: None,
+        };
+        let frame = Attach {
+            name,
+            handle: 0 as Handle,
+            role: Role::Sender,
+            snd_settle_mode: SenderSettleMode::Mixed,
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: None,
+            target: Some(target),
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: None,
+            max_message_size: Some(65536 * 4),
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        };
+
+        SenderLinkBuilder { frame, session }
+    }
+
+    pub fn max_message_size(mut self, size: u64) -> Self {
+        self.frame.max_message_size = Some(size);
+        self
+    }
+
+    pub fn open(self) -> impl Future<Item = SenderLink, Error = AmqpTransportError> {
+        self.session
+            .get_mut()
+            .open_sender_link(self.frame)
+            .map_err(|_e| AmqpTransportError::Disconnected)
     }
 }
