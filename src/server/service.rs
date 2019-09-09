@@ -27,6 +27,7 @@ pub struct Server<Io, St, Cn> {
     connect: Cn,
     config: Configuration,
     disconnect: Option<Box<dyn Fn(&mut St, Option<&AmqpCodecError>)>>,
+    max_size: usize,
     _t: PhantomData<(Io, St)>,
 }
 
@@ -35,6 +36,7 @@ pub(super) struct ServerInner<St, Cn, Pb> {
     publish: Pb,
     config: Configuration,
     disconnect: Option<Box<dyn Fn(&mut St, Option<&AmqpCodecError>)>>,
+    max_size: usize,
 }
 
 impl<Io, St, Cn> Server<Io, St, Cn>
@@ -53,6 +55,7 @@ where
             connect: connect.into_new_service(),
             config: Configuration::default(),
             disconnect: None,
+            max_size: 0,
             _t: PhantomData,
         }
     }
@@ -60,6 +63,15 @@ where
     /// Provide connection configuration
     pub fn config(mut self, config: Configuration) -> Self {
         self.config = config;
+        self
+    }
+
+    /// Set max inbound frame size.
+    ///
+    /// If max size is set to `0`, size is unlimited.
+    /// By default max size is set to `0`
+    pub fn max_size(mut self, size: usize) -> Self {
+        self.max_size = size;
         self
     }
 
@@ -79,6 +91,7 @@ where
                 let fut = disconnect(st, err).into_future();
                 tokio_current_thread::spawn(fut.map_err(|_| ()).map(|_| ()));
             })),
+            max_size: self.max_size,
             _t: PhantomData,
         }
     }
@@ -100,6 +113,7 @@ where
                 config: self.config,
                 publish: service.into_new_service(),
                 disconnect: self.disconnect,
+                max_size: self.max_size,
             }),
             _t: PhantomData,
         }
@@ -169,11 +183,17 @@ where
     }
 
     fn call(&mut self, req: Self::Request) -> Self::Future {
-        Box::new(handshake(self.connect.clone(), self.inner.clone(), req))
+        Box::new(handshake(
+            self.inner.max_size,
+            self.connect.clone(),
+            self.inner.clone(),
+            req,
+        ))
     }
 }
 
 fn handshake<Io, St, Cn: NewService, Pb, I>(
+    max_size: usize,
     connect: Cell<Cn::Service>,
     inner: Cell<ServerInner<St, Cn, Pb>>,
     stream: IoStream<Io, I>,
@@ -211,9 +231,10 @@ where
                             })
                             .map_err(|e| ServerError::Service(e))
                             .and_then(move |ack| {
-                                let (st, open, framed) = ack.into_inner();
+                                let (st, open, mut framed) = ack.into_inner();
                                 let st = Cell::new(st);
                                 let cfg = inner.get_ref().config.clone();
+                                framed.get_codec_mut().max_size(max_size);
 
                                 // confirm Open
                                 let local = cfg.to_open();
