@@ -13,6 +13,7 @@ const SIZE_HIGH_WM: usize = 32768;
 
 pub struct AmqpCodec<T: Decode + Encode> {
     state: DecodeState,
+    max_size: usize,
     phantom: PhantomData<T>,
 }
 
@@ -32,8 +33,17 @@ impl<T: Decode + Encode> AmqpCodec<T> {
     pub fn new() -> AmqpCodec<T> {
         AmqpCodec {
             state: DecodeState::FrameHeader,
+            max_size: 0,
             phantom: PhantomData,
         }
+    }
+
+    /// Set max inbound frame size.
+    ///
+    /// If max size is set to `0`, size is unlimited.
+    /// By default max size is set to `0`
+    pub fn max_size(&mut self, size: usize) {
+        self.max_size = size;
     }
 }
 
@@ -49,9 +59,12 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     if len < HEADER_LEN {
                         return Ok(None);
                     }
-                    let size = BigEndian::read_u32(src.as_ref()) as usize;
 
-                    // todo: max frame size check
+                    // read frame size
+                    let size = BigEndian::read_u32(src.as_ref()) as usize;
+                    if size > self.max_size {
+                        return Err(AmqpCodecError::MaxSizeExceeded);
+                    }
                     self.state = DecodeState::Frame(size - 4);
                     src.split_to(4);
 
