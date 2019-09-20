@@ -87,7 +87,7 @@ where
                 .map(move |framed| (uri, config, framed, time))
         },
     )
-    // protocol negotiation
+    // re-negotiate amqp protocol negotiation
     .apply_fn(
         ProtocolNegotiation::new(ProtocolId::Amqp)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),

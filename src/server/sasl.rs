@@ -169,15 +169,7 @@ where
         framed
             .send(frame)
             .map_err(ServerError::from)
-            .and_then(move |framed| {
-                framed
-                    .into_future()
-                    .map_err(|res| ServerError::from(res.0))
-                    .and_then(|(res, framed)| match res {
-                        Some(_) => Ok(Success { framed }),
-                        None => Err(ServerError::Disconnected),
-                    })
-            })
+            .map(move |framed| Success { framed })
     }
 }
 
@@ -257,26 +249,31 @@ where
             .map_err(|res| ServerError::from(res.0))
             .and_then(|(protocol, framed)| match protocol {
                 Some(ProtocolId::Amqp) => {
-                    // Wait for connection open frame
-                    let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
-
                     Either::A(
+                        // confirm protocol
                         framed
-                            .into_future()
-                            .map_err(|(err, _)| ServerError::from(err))
-                            .and_then(|(frame, framed)| {
-                                if let Some(frame) = frame {
-                                    let frame = frame.into_parts().1;
-                                    match frame {
-                                        protocol::Frame::Open(frame) => {
-                                            trace!("Got open frame: {:?}", frame);
-                                            Ok(ConnectOpened::new(frame, framed))
+                            .send(ProtocolId::Amqp)
+                            .map_err(ServerError::from)
+                            .and_then(move |framed| {
+                                // Wait for connection open frame
+                                let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
+                                framed
+                                    .into_future()
+                                    .map_err(|(err, _)| ServerError::from(err))
+                                    .and_then(|(frame, framed)| {
+                                        if let Some(frame) = frame {
+                                            let frame = frame.into_parts().1;
+                                            match frame {
+                                                protocol::Frame::Open(frame) => {
+                                                    trace!("Got open frame: {:?}", frame);
+                                                    Ok(ConnectOpened::new(frame, framed))
+                                                }
+                                                frame => Err(ServerError::Unexpected(frame)),
+                                            }
+                                        } else {
+                                            Err(ServerError::Disconnected)
                                         }
-                                        frame => Err(ServerError::Unexpected(frame)),
-                                    }
-                                } else {
-                                    Err(ServerError::Disconnected)
-                                }
+                                    })
                             }),
                     )
                 }
