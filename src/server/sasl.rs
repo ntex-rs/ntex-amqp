@@ -13,10 +13,12 @@ use string::{self, TryFrom};
 
 use super::connect::{ConnectAck, ConnectOpened};
 use super::errors::{AmqpError, ServerError};
+use crate::connection::ConnectionController;
 
 pub struct Sasl<Io> {
     framed: Framed<Io, ProtocolIdCodec>,
     mechanisms: Symbols,
+    controller: ConnectionController,
 }
 
 impl<Io> fmt::Debug for Sasl<Io> {
@@ -28,9 +30,13 @@ impl<Io> fmt::Debug for Sasl<Io> {
 }
 
 impl<Io> Sasl<Io> {
-    pub(crate) fn new(framed: Framed<Io, ProtocolIdCodec>) -> Self {
+    pub(crate) fn new(
+        framed: Framed<Io, ProtocolIdCodec>,
+        controller: ConnectionController,
+    ) -> Self {
         Sasl {
             framed,
+            controller,
             mechanisms: Symbols::default(),
         }
     }
@@ -63,7 +69,10 @@ where
     /// Initialize sasl auth procedure
     pub fn init(self) -> impl Future<Item = Init<Io>, Error = ServerError<()>> {
         let Sasl {
-            framed, mechanisms, ..
+            framed,
+            mechanisms,
+            controller,
+            ..
         } = self;
 
         let framed = framed.into_framed(AmqpCodec::<SaslFrame>::new());
@@ -81,7 +90,11 @@ where
                     .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
                         Some(frame) => match frame.body {
-                            SaslFrameBody::SaslInit(frame) => Ok(Init { frame, framed }),
+                            SaslFrameBody::SaslInit(frame) => Ok(Init {
+                                frame,
+                                framed,
+                                controller,
+                            }),
                             body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
                         },
                         None => Err(ServerError::Disconnected),
@@ -94,6 +107,7 @@ where
 pub struct Init<Io> {
     frame: protocol::SaslInit,
     framed: Framed<Io, AmqpCodec<SaslFrame>>,
+    controller: ConnectionController,
 }
 
 impl<Io> fmt::Debug for Init<Io> {
@@ -134,6 +148,7 @@ where
         challenge: Bytes,
     ) -> impl Future<Item = Response<Io>, Error = ServerError<()>> {
         let framed = self.framed;
+        let controller = self.controller;
         let frame = SaslChallenge { challenge }.into();
 
         framed
@@ -145,7 +160,11 @@ where
                     .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
                         Some(frame) => match frame.body {
-                            SaslFrameBody::SaslResponse(frame) => Ok(Response { frame, framed }),
+                            SaslFrameBody::SaslResponse(frame) => Ok(Response {
+                                frame,
+                                framed,
+                                controller,
+                            }),
                             body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
                         },
                         None => Err(ServerError::Disconnected),
@@ -159,6 +178,7 @@ where
         code: SaslCode,
     ) -> impl Future<Item = Success<Io>, Error = ServerError<()>> {
         let framed = self.framed;
+        let controller = self.controller;
 
         let frame = SaslOutcome {
             code,
@@ -169,13 +189,14 @@ where
         framed
             .send(frame)
             .map_err(ServerError::from)
-            .map(move |framed| Success { framed })
+            .map(move |framed| Success { framed, controller })
     }
 }
 
 pub struct Response<Io> {
     frame: protocol::SaslResponse,
     framed: Framed<Io, AmqpCodec<SaslFrame>>,
+    controller: ConnectionController,
 }
 
 impl<Io> fmt::Debug for Response<Io> {
@@ -201,6 +222,7 @@ where
         code: SaslCode,
     ) -> impl Future<Item = Success<Io>, Error = ServerError<()>> {
         let framed = self.framed;
+        let controller = self.controller;
         let frame = SaslOutcome {
             code,
             additional_data: None,
@@ -215,7 +237,7 @@ where
                     .into_future()
                     .map_err(|res| ServerError::from(res.0))
                     .and_then(|(res, framed)| match res {
-                        Some(_) => Ok(Success { framed }),
+                        Some(_) => Ok(Success { framed, controller }),
                         None => Err(ServerError::Disconnected),
                     })
             })
@@ -224,6 +246,7 @@ where
 
 pub struct Success<Io> {
     framed: Framed<Io, AmqpCodec<SaslFrame>>,
+    controller: ConnectionController,
 }
 
 impl<Io> Success<Io>
@@ -243,6 +266,7 @@ where
     /// Wait for connection open frame
     pub fn open(self) -> impl Future<Item = ConnectOpened<Io>, Error = ServerError<()>> {
         let framed = self.framed.into_framed(ProtocolIdCodec);
+        let mut controller = self.controller;
 
         framed
             .into_future()
@@ -266,7 +290,10 @@ where
                                             match frame {
                                                 protocol::Frame::Open(frame) => {
                                                     trace!("Got open frame: {:?}", frame);
-                                                    Ok(ConnectOpened::new(frame, framed))
+                                                    controller.set_remote((&frame).into());
+                                                    Ok(ConnectOpened::new(
+                                                        frame, framed, controller,
+                                                    ))
                                                 }
                                                 frame => Err(ServerError::Unexpected(frame)),
                                             }

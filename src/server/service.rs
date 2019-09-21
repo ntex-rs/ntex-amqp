@@ -10,7 +10,7 @@ use futures::future::{err, Either};
 use futures::{Future, Poll, Sink, Stream};
 
 use crate::cell::Cell;
-use crate::connection::Connection;
+use crate::connection::{Connection, ConnectionController};
 use crate::Configuration;
 
 use super::connect::{Connect, ConnectAck};
@@ -220,20 +220,21 @@ where
                     if let Err(e) = framed.force_send(protocol.unwrap()) {
                         return Either::B(err(ServerError::from(e)));
                     }
+                    let cfg = inner.get_ref().config.clone();
+                    let controller = ConnectionController::new(cfg.clone());
 
                     Either::A(
                         connect
                             .get_mut()
                             .call(if protocol == Some(ProtocolId::Amqp) {
-                                either::Either::Left(Connect::new(framed))
+                                either::Either::Left(Connect::new(framed, controller))
                             } else {
-                                either::Either::Right(Sasl::new(framed))
+                                either::Either::Right(Sasl::new(framed, controller))
                             })
                             .map_err(|e| ServerError::Service(e))
                             .and_then(move |ack| {
-                                let (st, open, mut framed) = ack.into_inner();
+                                let (st, mut framed, controller) = ack.into_inner();
                                 let st = Cell::new(st);
-                                let cfg = inner.get_ref().config.clone();
                                 framed.get_codec_mut().max_size(max_size);
 
                                 // confirm Open
@@ -242,7 +243,7 @@ where
                                     .send(AmqpFrame::new(0, local.into()))
                                     .map_err(ServerError::from)
                                     .map(move |framed| {
-                                        Connection::new(framed, cfg.clone(), (&open).into(), None)
+                                        Connection::new_server(framed, controller.0, None)
                                     })
                                     .and_then(move |conn| {
                                         // create publish service

@@ -42,7 +42,7 @@ impl Session {
     #[inline]
     /// Get remote connection configuration
     pub fn remote_config(&self) -> &Configuration {
-        &self.inner.connection.remote_config()
+        self.inner.connection.remote_config()
     }
 
     pub fn close(&self) -> impl Future<Item = (), Error = AmqpTransportError> {

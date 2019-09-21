@@ -23,7 +23,7 @@ mod service;
 mod session;
 mod sndlink;
 
-pub use self::connection::Connection;
+pub use self::connection::{Connection, ConnectionController};
 pub use self::errors::AmqpTransportError;
 pub use self::rcvlink::ReceiverLink;
 pub use self::session::Session;

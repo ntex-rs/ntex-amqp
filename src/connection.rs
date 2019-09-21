@@ -55,6 +55,7 @@ enum State {
     Normal,
     Closing,
     RemoteClose,
+    Drop,
 }
 
 impl<T: AsyncRead + AsyncWrite> Connection<T> {
@@ -72,6 +73,24 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                 time.unwrap_or_else(|| LowResTimeService::with(Duration::from_secs(1))),
             ),
             inner: Cell::new(ConnectionInner::new(local, remote)),
+        }
+    }
+
+    pub(crate) fn new_server(
+        framed: Framed<T, AmqpCodec<AmqpFrame>>,
+        inner: Cell<ConnectionInner>,
+        time: Option<LowResTimeService>,
+    ) -> Connection<T> {
+        let l_timeout = inner.get_ref().local.timeout().unwrap();
+        let r_timeout = inner.get_ref().remote.timeout();
+        Connection {
+            framed,
+            inner,
+            hb: Heartbeat::new(
+                l_timeout,
+                r_timeout,
+                time.unwrap_or_else(|| LowResTimeService::with(Duration::from_secs(1))),
+            ),
         }
     }
 
@@ -217,7 +236,9 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         }
         self.hb.update_remote(update);
 
-        if inner.state == State::RemoteClose
+        if inner.state == State::Drop {
+            Ok(Async::Ready(()))
+        } else if inner.state == State::RemoteClose
             && inner.write_queue.is_empty()
             && self.framed.is_write_buf_empty()
         {
@@ -406,17 +427,39 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
     }
 }
 
-pub struct ConnectionController(Cell<ConnectionInner>);
+#[derive(Clone)]
+pub struct ConnectionController(pub(crate) Cell<ConnectionInner>);
 
 impl ConnectionController {
+    pub(crate) fn new(local: Configuration) -> ConnectionController {
+        ConnectionController(Cell::new(ConnectionInner {
+            local,
+            remote: Configuration::default(),
+            write_queue: VecDeque::new(),
+            write_task: AtomicTask::new(),
+            sessions: slab::Slab::with_capacity(8),
+            sessions_map: HashMap::new(),
+            error: None,
+            state: State::Normal,
+        }))
+    }
+
+    pub(crate) fn set_remote(&mut self, remote: Configuration) {
+        self.0.get_mut().remote = remote;
+    }
+
     #[inline]
     /// Get remote connection configuration
     pub fn remote_config(&self) -> &Configuration {
         &self.0.get_ref().remote
     }
 
-    pub fn close_session(&mut self) {
-        unimplemented!()
+    #[inline]
+    /// Drop connection
+    pub fn drop_connection(&mut self) {
+        let inner = self.0.get_mut();
+        inner.state = State::Drop;
+        inner.write_task.notify()
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
@@ -427,7 +470,7 @@ impl ConnectionController {
 }
 
 impl ConnectionInner {
-    pub fn new(local: Configuration, remote: Configuration) -> ConnectionInner {
+    pub(crate) fn new(local: Configuration, remote: Configuration) -> ConnectionInner {
         ConnectionInner {
             local,
             remote,
