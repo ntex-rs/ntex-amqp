@@ -15,6 +15,7 @@ pub struct Message<S> {
     link: ReceiverLink,
 }
 
+#[derive(Debug)]
 pub enum Outcome {
     Accept,
     Reject,
