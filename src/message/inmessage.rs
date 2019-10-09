@@ -84,6 +84,11 @@ impl InMessage {
         }
     }
 
+    /// Get application properties
+    pub fn app_properties(&self) -> Option<&StringVariantMap> {
+        self.application_properties.as_ref()
+    }
+
     /// Get message annotation
     pub fn message_annotation(&self, key: &str) -> Option<&Variant> {
         if let Some(ref props) = self.message_annotations {
@@ -300,14 +305,24 @@ mod tests {
 
     #[test]
     fn test_properties() -> Result<(), AmqpCodecError> {
-        let msg = InMessage::default().set_properties(|props| props.message_id = Some(1.into()));
+        let msg =
+            InMessage::with_body(Bytes::from_static(b"Hello world")).set_properties(|props| {
+                props.message_id = Some(Bytes::from_static(b"msg1").into());
+                props.content_type = Some("text".to_string().into());
+                props.correlation_id = Some(Bytes::from_static(b"no1").into());
+                props.content_encoding = Some("utf8+1".to_string().into());
+            });
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
         let msg2 = InMessage::decode(&buf)?.1;
         let props = msg2.properties.as_ref().unwrap();
-        assert_eq!(props.message_id, Some(1.into()));
+        assert_eq!(props.message_id, Some(Bytes::from_static(b"msg1").into()));
+        assert_eq!(
+            props.correlation_id,
+            Some(Bytes::from_static(b"no1").into())
+        );
         Ok(())
     }
 
