@@ -61,6 +61,10 @@ impl Session {
         None
     }
 
+    pub fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+        self.inner.get_ref().get_sender_link_by_handle(hnd)
+    }
+
     /// Open sender link
     pub fn build_sender_link<T: Into<String>, U: Into<String>>(
         &mut self,
@@ -200,7 +204,7 @@ impl SessionInner {
     }
 
     /// Register remote sender link
-    pub(crate) fn confirm_sender_link(&mut self, cell: Cell<SessionInner>, attach: Attach) {
+    pub(crate) fn confirm_sender_link(&mut self, cell: Cell<SessionInner>, attach: &Attach) {
         trace!("Remote sender link opened: {:?}", attach.name());
         let entry = self.links.vacant_entry();
         let token = entry.key();
@@ -347,11 +351,21 @@ impl SessionInner {
         }
     }
 
+    pub(crate) fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+        if let Some(id) = self.remote_handles.get(&hnd) {
+            if let Some(Either::Left(SenderLinkState::Established(ref link))) = self.links.get(*id)
+            {
+                return Some(link);
+            }
+        }
+        None
+    }
+
     pub fn handle_frame(&mut self, frame: AmqpFrame) {
         if self.error.is_none() {
             match frame.into_parts().1 {
                 Frame::Disposition(disp) => self.settle_deliveries(disp),
-                Frame::Flow(flow) => self.apply_flow(flow),
+                Frame::Flow(flow) => self.apply_flow(&flow),
                 Frame::Transfer(transfer) => {
                     let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
                         *idx
@@ -540,7 +554,7 @@ impl SessionInner {
         }
     }
 
-    fn apply_flow(&mut self, flow: Flow) {
+    pub(crate) fn apply_flow(&mut self, flow: &Flow) {
         // # AMQP1.0 2.5.6
         self.next_incoming_id = flow.next_outgoing_id();
         self.remote_outgoing_window = flow.outgoing_window();

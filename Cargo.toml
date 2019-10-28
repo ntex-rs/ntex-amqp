@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 amqp-codec = { git = "https://github.com/fafhrd91/amqp-codec.git" }
-# amqp-codec = { path = "../rust-amqp" }
+#amqp-codec = { path = "../rust-amqp-codec" }
 
 actix-codec = "0.1.2"
 actix-service = "0.4.0"

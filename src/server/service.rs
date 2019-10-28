@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_server_config::{Io as IoStream, ServerConfig};
-use actix_service::{IntoNewService, NewService, Service};
+use actix_service::{boxed, IntoNewService, NewService, Service};
 use amqp_codec::protocol::{Error, ProtocolId};
 use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use futures::future::{err, Either};
@@ -14,8 +14,9 @@ use crate::connection::{Connection, ConnectionController};
 use crate::Configuration;
 
 use super::connect::{Connect, ConnectAck};
+use super::control::{ControlFrame, ControlFrameNewService};
 use super::dispatcher::Dispatcher;
-use super::errors::ServerError;
+use super::errors::{LinkError, ServerError};
 use super::link::Link;
 use super::sasl::Sasl;
 
@@ -26,6 +27,7 @@ pub type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;
 pub struct Server<Io, St, Cn> {
     connect: Cn,
     config: Configuration,
+    control: Option<ControlFrameNewService<St>>,
     disconnect: Option<Box<dyn Fn(&mut St, Option<&AmqpCodecError>)>>,
     max_size: usize,
     _t: PhantomData<(Io, St)>,
@@ -35,6 +37,7 @@ pub(super) struct ServerInner<St, Cn, Pb> {
     connect: Cn,
     publish: Pb,
     config: Configuration,
+    control: Option<ControlFrameNewService<St>>,
     disconnect: Option<Box<dyn Fn(&mut St, Option<&AmqpCodecError>)>>,
     max_size: usize,
 }
@@ -54,6 +57,7 @@ where
         Self {
             connect: connect.into_new_service(),
             config: Configuration::default(),
+            control: None,
             disconnect: None,
             max_size: 0,
             _t: PhantomData,
@@ -75,6 +79,28 @@ where
         self
     }
 
+    /// Service to call with control frames
+    pub fn control<F, S>(self, f: F) -> Self
+    where
+        F: IntoNewService<S>,
+        S: NewService<Config = (), Request = ControlFrame<St>, Response = (), InitError = ()>
+            + 'static,
+        S::Error: Into<LinkError>,
+    {
+        Server {
+            connect: self.connect,
+            config: self.config,
+            disconnect: self.disconnect,
+            control: Some(boxed::new_service(
+                f.into_new_service()
+                    .map_err(|e| e.into())
+                    .map_init_err(|e| e.into()),
+            )),
+            max_size: self.max_size,
+            _t: PhantomData,
+        }
+    }
+
     /// Callback to execute on disconnect
     ///
     /// Second parameter indicates error occured during disconnect.
@@ -87,6 +113,7 @@ where
         Server {
             connect: self.connect,
             config: self.config,
+            control: self.control,
             disconnect: Some(Box::new(move |st, err| {
                 let fut = disconnect(st, err).into_future();
                 tokio_current_thread::spawn(fut.map_err(|_| ()).map(|_| ()));
@@ -112,6 +139,7 @@ where
                 connect: self.connect,
                 config: self.config,
                 publish: service.into_new_service(),
+                control: self.control,
                 disconnect: self.disconnect,
                 max_size: self.max_size,
             }),
@@ -199,6 +227,7 @@ fn handshake<Io, St, Cn: NewService, Pb, I>(
     stream: IoStream<Io, I>,
 ) -> impl Future<Item = (), Error = ()>
 where
+    St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: NewService<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
     Pb: NewService<Config = St, Request = Link<St>, Response = ()> + 'static,
@@ -271,16 +300,39 @@ where
         .map_err(|_| ())
         .and_then(move |(st, srv, conn)| {
             let st2 = st.clone();
-            Dispatcher::new(conn, st, srv)
-                .then(move |res| {
-                    if inner2.disconnect.is_some() {
-                        (*inner2.get_mut().disconnect.as_mut().unwrap())(
-                            st2.get_mut(),
-                            res.as_ref().err(),
-                        )
-                    }
-                    res
-                })
-                .map_err(|_| ())
+            if let Some(ref control_srv) = inner2.control {
+                Either::A(
+                    control_srv
+                        .new_service(&())
+                        .map_err(|_e| ())
+                        .and_then(move |control| {
+                            Dispatcher::new(conn, st, srv, Some(control))
+                                .then(move |res| {
+                                    if inner2.disconnect.is_some() {
+                                        (*inner2.get_mut().disconnect.as_mut().unwrap())(
+                                            st2.get_mut(),
+                                            res.as_ref().err(),
+                                        )
+                                    }
+                                    res
+                                })
+                                .map_err(|_| ())
+                        }),
+                )
+            } else {
+                Either::B(
+                    Dispatcher::new(conn, st, srv, None)
+                        .then(move |res| {
+                            if inner2.disconnect.is_some() {
+                                (*inner2.get_mut().disconnect.as_mut().unwrap())(
+                                    st2.get_mut(),
+                                    res.as_ref().err(),
+                                )
+                            }
+                            res
+                        })
+                        .map_err(|_| ()),
+                )
+            }
         })
 }

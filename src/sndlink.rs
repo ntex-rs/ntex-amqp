@@ -9,7 +9,7 @@ use futures::{unsync::oneshot, Future};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
-use crate::session::SessionInner;
+use crate::session::{Session, SessionInner};
 use crate::{Delivery, DeliveryPromise, Handle};
 
 #[derive(Clone)]
@@ -29,7 +29,8 @@ pub(crate) struct SenderLinkInner {
     id: usize,
     idx: u32,
     name: string::String<Bytes>,
-    session: Cell<SessionInner>,
+    session: Session,
+    // session: Cell<SessionInner>,
     remote_handle: Handle,
     delivery_count: SequenceNo,
     link_credit: u32,
@@ -47,6 +48,26 @@ struct PendingTransfer {
 impl SenderLink {
     pub(crate) fn new(inner: Cell<SenderLinkInner>) -> SenderLink {
         SenderLink { inner }
+    }
+
+    pub fn id(&self) -> u32 {
+        self.inner.id as u32
+    }
+
+    pub fn remote_handle(&self) -> Handle {
+        self.inner.remote_handle
+    }
+
+    pub(crate) fn name(&self) -> &string::String<Bytes> {
+        &self.inner.name
+    }
+
+    pub fn session(&self) -> &Session {
+        &self.inner.get_ref().session
+    }
+
+    pub fn session_mut(&mut self) -> &mut Session {
+        &mut self.inner.get_mut().session
     }
 
     pub fn send<T>(&self, body: T) -> impl Future<Item = Outcome, Error = AmqpTransportError>
@@ -79,9 +100,9 @@ impl SenderLinkInner {
         SenderLinkInner {
             id,
             name,
-            session,
             delivery_count,
             idx: 0,
+            session: Session::new(session),
             remote_handle: handle,
             link_credit: 0,
             pending_transfers: VecDeque::new(),
@@ -149,7 +170,7 @@ impl SenderLinkInner {
                 .saturating_add(credit)
                 .saturating_sub(self.delivery_count);
 
-            let session = self.session.get_mut();
+            let session = self.session.inner.get_mut();
 
             // credit became available => drain pending_transfers
             self.link_credit += delta;
@@ -187,7 +208,7 @@ impl SenderLinkInner {
                     promise: delivery_tx,
                 });
             } else {
-                let session = self.session.get_mut();
+                let session = self.session.inner.get_mut();
                 self.link_credit -= 1;
                 let _ = self.delivery_count.saturating_add(1);
                 session.send_transfer(self.remote_handle, self.idx, body, delivery_tx);

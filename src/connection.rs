@@ -315,6 +315,9 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                             return Ok(Async::Ready(Some(frame)));
                                         }
                                     }
+                                    Frame::Flow(_) => {
+                                        return Ok(Async::Ready(Some(frame)));
+                                    }
                                     Frame::Detach(detach) => {
                                         session.get_mut().handle_detach(detach);
                                     }
