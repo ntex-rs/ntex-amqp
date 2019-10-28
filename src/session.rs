@@ -138,8 +138,10 @@ pub(crate) struct SessionInner {
 struct PendingTransfer {
     link_handle: Handle,
     idx: u32,
-    body: TransferBody,
+    body: Option<TransferBody>,
     promise: DeliveryPromise,
+    tag: Option<Bytes>,
+    settled: Option<bool>,
 }
 
 impl SessionInner {
@@ -347,7 +349,7 @@ impl SessionInner {
             }
         } else {
             let _ = tx.send(Ok(()));
-            error!("Receiver link does not exist: {}", id);
+            error!("Receiver link does not exist while detaching: {}", id);
         }
     }
 
@@ -525,7 +527,9 @@ impl SessionInner {
     }
 
     fn settle_deliveries(&mut self, disposition: Disposition) {
-        assert!(disposition.settled()); // we can only work with settled for now
+        trace!("settle delivery: {:#?}", disposition);
+        // assert!(disposition.settled()); // we can only work with settled for now
+
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
         let actionable = self
@@ -572,7 +576,7 @@ impl SessionInner {
         );
 
         while let Some(t) = self.pending_transfers.pop_front() {
-            self.send_transfer(t.link_handle, t.idx, t.body, t.promise);
+            self.send_transfer(t.link_handle, t.idx, t.body, t.promise, t.tag, t.settled);
             if self.remote_outgoing_window == 0 {
                 break;
             }
@@ -658,8 +662,10 @@ impl SessionInner {
         &mut self,
         link_handle: Handle,
         idx: u32,
-        body: TransferBody,
+        body: Option<TransferBody>,
         promise: DeliveryPromise,
+        tag: Option<Bytes>,
+        settled: Option<bool>,
     ) {
         if self.remote_incoming_window == 0 {
             self.pending_transfers.push_back(PendingTransfer {
@@ -667,42 +673,67 @@ impl SessionInner {
                 idx,
                 body,
                 promise,
+                tag,
+                settled,
             });
             return;
         }
-        let frame = self.prepare_transfer(link_handle, body, promise);
+        let frame = self.prepare_transfer(link_handle, body, promise, tag, settled);
         self.post_frame(frame);
     }
 
     pub fn prepare_transfer(
         &mut self,
         link_handle: Handle,
-        body: TransferBody,
+        body: Option<TransferBody>,
         promise: DeliveryPromise,
+        delivery_tag: Option<Bytes>,
+        settled: Option<bool>,
     ) -> Frame {
         let delivery_id = self.next_outgoing_id;
 
-        let mut buf = BytesMut::new();
-        buf.put_u32_be(delivery_id);
+        let tag = if let Some(tag) = delivery_tag {
+            tag
+        } else {
+            let mut buf = BytesMut::new();
+            buf.put_u32_be(delivery_id);
+            buf.freeze()
+        };
 
         self.next_outgoing_id += 1;
         self.remote_incoming_window -= 1;
 
+        let message_format = if let Some(ref body) = body {
+            body.message_format()
+        } else {
+            None
+        };
+
+        let settled2 = settled.clone().unwrap_or(false);
+        let state = if settled2 {
+            Some(DeliveryState::Accepted(Accepted {}))
+        } else {
+            None
+        };
+
         let transfer = Transfer {
+            settled,
+            message_format,
             handle: link_handle,
             delivery_id: Some(delivery_id),
-            delivery_tag: Some(buf.freeze()),
-            message_format: body.message_format(),
-            settled: Some(false),
+            delivery_tag: Some(tag),
             more: false,
             rcv_settle_mode: None,
-            state: None,
+            state, //: Some(DeliveryState::Accepted(Accepted {})),
             resume: false,
             aborted: false,
             batchable: false,
-            body: Some(body),
+            body: body,
         };
+        //let settled = settled.unwrap_or(false);
+        //if !settled {
         self.unsettled_deliveries.insert(delivery_id, promise);
+        //}
         Frame::Transfer(transfer)
     }
 }

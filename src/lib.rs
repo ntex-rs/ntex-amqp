@@ -46,7 +46,10 @@ impl Future for Delivery {
             return match receiver.poll() {
                 Ok(Async::Ready(r)) => r.map(|state| Async::Ready(state)),
                 Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(_) => Err(AmqpTransportError::Disconnected),
+                Err(e) => {
+                    trace!("delivery oneshot is gone: {:?}", e);
+                    Err(AmqpTransportError::Disconnected)
+                }
             };
         }
 
