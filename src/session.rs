@@ -730,10 +730,11 @@ impl SessionInner {
             batchable: false,
             body: body,
         };
-        //let settled = settled.unwrap_or(false);
-        //if !settled {
-        self.unsettled_deliveries.insert(delivery_id, promise);
-        //}
+        if !settled.unwrap_or(false) {
+            self.unsettled_deliveries.insert(delivery_id, promise);
+        } else {
+            let _ = promise.send(Ok(Outcome::Accepted(Accepted {})));
+        }
         Frame::Transfer(transfer)
     }
 }

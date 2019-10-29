@@ -32,6 +32,12 @@ where
     _channels: slab::Slab<ChannelState>,
 }
 
+enum IncomingResult {
+    Control,
+    Done,
+    Disconnect,
+}
+
 impl<Io, St, Sr> Dispatcher<Io, St, Sr>
 where
     Io: AsyncRead + AsyncWrite,
@@ -98,6 +104,76 @@ where
             }
         }
     }
+
+    fn poll_incoming(&mut self) -> Result<IncomingResult, AmqpCodecError> {
+        loop {
+            // handle remote begin and attach
+            match self.conn.poll_incoming() {
+                Ok(Async::Ready(Some(frame))) => {
+                    let (channel_id, frame) = frame.into_parts();
+                    let channel_id = channel_id as usize;
+
+                    match frame {
+                        Frame::Begin(frm) => {
+                            self.conn.register_remote_session(channel_id as u16, &frm);
+                        }
+                        Frame::Flow(frm) => {
+                            // apply flow to specific link
+                            let session = self.conn.get_session(channel_id);
+                            if self.control_srv.is_some() {
+                                if let Some(link) =
+                                    session.get_sender_link_by_handle(frm.handle.unwrap())
+                                {
+                                    self.control_frame = Some(ControlFrame::new(
+                                        self.state.clone(),
+                                        Session::new(session.clone()),
+                                        ControlFrameKind::Flow(frm, link.clone()),
+                                    ));
+                                    return Ok(IncomingResult::Control);
+                                }
+                            }
+                            session.get_mut().apply_flow(&frm);
+                        }
+                        Frame::Attach(attach) => match attach.role {
+                            Role::Receiver => {
+                                // remotly opened sender link
+                                let session = self.conn.get_session(channel_id);
+                                let cell = session.clone();
+                                if self.control_srv.is_some() {
+                                    self.control_frame = Some(ControlFrame::new(
+                                        self.state.clone(),
+                                        Session::new(cell.clone()),
+                                        ControlFrameKind::Attach(attach),
+                                    ));
+                                    return Ok(IncomingResult::Control);
+                                } else {
+                                    session.get_mut().confirm_sender_link(cell, &attach);
+                                }
+                            }
+                            Role::Sender => {
+                                // receiver link
+                                let session = self.conn.get_session(channel_id);
+                                let cell = session.clone();
+                                let link = session.get_mut().open_receiver_link(cell, attach);
+                                let fut = self
+                                    .service
+                                    .call(Link::new(link.clone(), self.state.clone()));
+                                self.receivers.push((link, fut));
+                            }
+                        },
+                        _ => {
+                            trace!("Unexpected frame {:#?}", frame);
+                        }
+                    }
+                }
+                Ok(Async::NotReady) => break,
+                Ok(Async::Ready(None)) => return Ok(IncomingResult::Disconnect),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(IncomingResult::Done)
+    }
 }
 
 impl<Io, St, Sr> Future for Dispatcher<Io, St, Sr>
@@ -133,70 +209,10 @@ where
             }
         }
 
-        loop {
-            // handle remote begin and attach
-            match self.conn.poll_incoming() {
-                Ok(Async::Ready(Some(frame))) => {
-                    let (channel_id, frame) = frame.into_parts();
-                    let channel_id = channel_id as usize;
-
-                    match frame {
-                        Frame::Begin(frm) => {
-                            self.conn.register_remote_session(channel_id as u16, &frm);
-                        }
-                        Frame::Flow(frm) => {
-                            // apply flow to specific link
-                            let session = self.conn.get_session(channel_id);
-                            if self.control_srv.is_some() {
-                                if let Some(link) =
-                                    session.get_sender_link_by_handle(frm.handle.unwrap())
-                                {
-                                    self.control_frame = Some(ControlFrame::new(
-                                        self.state.clone(),
-                                        Session::new(session.clone()),
-                                        ControlFrameKind::Flow(frm, link.clone()),
-                                    ));
-                                    return self.poll();
-                                }
-                            }
-                            session.get_mut().apply_flow(&frm);
-                        }
-                        Frame::Attach(attach) => match attach.role {
-                            Role::Receiver => {
-                                // remotly opened sender link
-                                let session = self.conn.get_session(channel_id);
-                                let cell = session.clone();
-                                if self.control_srv.is_some() {
-                                    self.control_frame = Some(ControlFrame::new(
-                                        self.state.clone(),
-                                        Session::new(cell.clone()),
-                                        ControlFrameKind::Attach(attach),
-                                    ));
-                                    return self.poll();
-                                } else {
-                                    session.get_mut().confirm_sender_link(cell, &attach);
-                                }
-                            }
-                            Role::Sender => {
-                                // receiver link
-                                let session = self.conn.get_session(channel_id);
-                                let cell = session.clone();
-                                let link = session.get_mut().open_receiver_link(cell, attach);
-                                let fut = self
-                                    .service
-                                    .call(Link::new(link.clone(), self.state.clone()));
-                                self.receivers.push((link, fut));
-                            }
-                        },
-                        _ => {
-                            println!("===== {:?}", frame);
-                        }
-                    }
-                }
-                Ok(Async::NotReady) => break,
-                Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
-                Err(e) => return Err(e),
-            }
+        match self.poll_incoming()? {
+            IncomingResult::Control => return self.poll(),
+            IncomingResult::Disconnect => return Ok(Async::Ready(())),
+            IncomingResult::Done => (),
         }
 
         // process service responses

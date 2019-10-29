@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 
 use amqp_codec::protocol::{
-    Attach, Flow, Outcome, ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target,
-    TerminusDurability, TerminusExpiryPolicy, TransferBody,
+    Attach, Flow, Outcome, ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
+    TerminusExpiryPolicy, TransferBody,
 };
 use bytes::Bytes;
 use futures::{unsync::oneshot, Future};
@@ -78,22 +78,19 @@ impl SenderLink {
         self.inner.get_mut().send(body, None)
     }
 
-    pub fn send_with_tag<T>(
-        &self,
-        body: T,
-        tag: Bytes,
-    ) -> impl Future<Item = Outcome, Error = AmqpTransportError>
+    pub fn send_with_tag<T>(&self, body: T, tag: Bytes) -> impl Future<Item = Outcome, Error = AmqpTransportError>
     where
         T: Into<TransferBody>,
     {
         self.inner.get_mut().send(body, Some(tag))
     }
 
-    pub fn settle_message(
+    pub fn settle_message<T: Into<TransferBody>>(
         &self,
+        body: T,
         tag: Bytes,
     ) -> impl Future<Item = Outcome, Error = AmqpTransportError> {
-        self.inner.get_mut().settle_message(tag)
+        self.inner.get_mut().settle_message(body, tag)
     }
 
     // pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
@@ -234,29 +231,23 @@ impl SenderLinkInner {
                 let session = self.session.inner.get_mut();
                 self.link_credit -= 1;
                 let _ = self.delivery_count.saturating_add(1);
-                session.send_transfer(
-                    self.remote_handle,
-                    self.idx,
-                    Some(body),
-                    delivery_tx,
-                    tag,
-                    Some(false),
-                );
+                session.send_transfer(self.remote_handle, self.idx, Some(body), delivery_tx, tag, Some(false));
             }
             let _ = self.idx.saturating_add(1);
             Delivery::Pending(delivery_rx)
         }
     }
 
-    pub fn settle_message(&mut self, tag: Bytes) -> Delivery {
+    pub fn settle_message<T: Into<TransferBody>>(&mut self, body: T, tag: Bytes) -> Delivery {
         if let Some(ref err) = self.error {
             Delivery::Resolved(Err(err.clone()))
         } else {
+            let body = body.into();
             let (delivery_tx, delivery_rx) = oneshot::channel();
             if self.link_credit == 0 {
                 self.pending_transfers.push_back(PendingTransfer {
                     tag: Some(tag),
-                    body: None,
+                    body: Some(body),
                     idx: self.idx,
                     promise: delivery_tx,
                     settle: Some(true),
@@ -268,7 +259,7 @@ impl SenderLinkInner {
                 session.send_transfer(
                     self.remote_handle,
                     self.idx,
-                    None,
+                    Some(body),
                     delivery_tx,
                     Some(tag),
                     Some(true),
