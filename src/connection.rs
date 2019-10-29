@@ -410,6 +410,12 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
             match self.poll_incoming()? {
                 Async::Ready(None) => return Ok(Async::Ready(())),
                 Async::Ready(Some(frame)) => {
+                    if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
+                        if let ChannelState::Established(ref session) = channel {
+                            session.get_mut().handle_frame(frame);
+                            continue;
+                        }
+                    }
                     warn!("Unexpected frame: {:?}", frame);
                 }
                 Async::NotReady => break,

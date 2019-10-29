@@ -225,7 +225,7 @@ impl SenderLinkInner {
             if self.link_credit == 0 {
                 self.pending_transfers.push_back(PendingTransfer {
                     tag,
-                    settle: None,
+                    settle: Some(false),
                     body: Some(body),
                     idx: self.idx,
                     promise: delivery_tx,
@@ -240,7 +240,7 @@ impl SenderLinkInner {
                     Some(body),
                     delivery_tx,
                     tag,
-                    Some(true),
+                    Some(false),
                 );
             }
             let _ = self.idx.saturating_add(1);
