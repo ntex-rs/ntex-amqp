@@ -5,7 +5,7 @@ extern crate log;
 
 use std::time::Duration;
 
-use amqp_codec::protocol::{Handle, Milliseconds, Open, Outcome};
+use amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use bytes::Bytes;
 use futures::{unsync::oneshot, Async, Future, Poll};
 use string::{String, TryFrom};
@@ -30,15 +30,15 @@ pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};
 
 pub enum Delivery {
-    Resolved(Result<Outcome, AmqpTransportError>),
-    Pending(oneshot::Receiver<Result<Outcome, AmqpTransportError>>),
+    Resolved(Result<Disposition, AmqpTransportError>),
+    Pending(oneshot::Receiver<Result<Disposition, AmqpTransportError>>),
     Gone,
 }
 
-type DeliveryPromise = oneshot::Sender<Result<Outcome, AmqpTransportError>>;
+type DeliveryPromise = oneshot::Sender<Result<Disposition, AmqpTransportError>>;
 
 impl Future for Delivery {
-    type Item = Outcome;
+    type Item = Disposition;
     type Error = AmqpTransportError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use amqp_codec::protocol::{
-    Accepted, Attach, DeliveryState, Disposition, Flow, Outcome, ReceiverSettleMode, Role,
+    Attach, DeliveryNumber, DeliveryState, Disposition, Flow, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 use bytes::Bytes;
@@ -71,7 +71,7 @@ impl SenderLink {
         &mut self.inner.get_mut().session
     }
 
-    pub fn send<T>(&self, body: T) -> impl Future<Item = Outcome, Error = AmqpTransportError>
+    pub fn send<T>(&self, body: T) -> impl Future<Item = Disposition, Error = AmqpTransportError>
     where
         T: Into<TransferBody>,
     {
@@ -82,15 +82,15 @@ impl SenderLink {
         &self,
         body: T,
         tag: Bytes,
-    ) -> impl Future<Item = Outcome, Error = AmqpTransportError>
+    ) -> impl Future<Item = Disposition, Error = AmqpTransportError>
     where
         T: Into<TransferBody>,
     {
         self.inner.get_mut().send(body, Some(tag))
     }
 
-    pub fn settle_message(&self, tag: Bytes) {
-        self.inner.get_mut().settle_message(tag)
+    pub fn settle_message(&self, id: DeliveryNumber, state: DeliveryState) {
+        self.inner.get_mut().settle_message(id, state)
     }
 
     // pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
@@ -245,16 +245,15 @@ impl SenderLinkInner {
         }
     }
 
-    pub fn settle_message(&mut self, tag: Bytes) {
-        let session = self.session.inner.get_mut();
+    pub fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
         let _ = self.delivery_count.saturating_add(1);
 
         let disp = Disposition {
             role: Role::Sender,
-            first: 0, //DeliveryNumber,
+            first: id,
             last: None,
             settled: true,
-            state: Some(DeliveryState::Accepted(Accepted {})),
+            state: Some(state),
             batchable: false,
         };
         self.session.inner.get_mut().post_frame(disp.into());

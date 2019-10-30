@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
@@ -9,8 +9,7 @@ use string::{self, TryFrom};
 
 use amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
-    Handle, Outcome, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody,
-    TransferNumber,
+    Handle, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody, TransferNumber,
 };
 use amqp_codec::AmqpFrame;
 
@@ -127,7 +126,7 @@ pub(crate) struct SessionInner {
     remote_outgoing_window: u32,
     remote_incoming_window: u32,
 
-    unsettled_deliveries: BTreeMap<DeliveryNumber, DeliveryPromise>,
+    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
     sender_links: HashMap<string::String<Bytes>, usize>,
     remote_handles: HashMap<Handle, usize>,
@@ -163,7 +162,7 @@ impl SessionInner {
             remote_incoming_window,
             remote_outgoing_window,
             next_outgoing_id: INITIAL_OUTGOING_ID,
-            unsettled_deliveries: BTreeMap::new(),
+            unsettled_deliveries: HashMap::new(),
             links: Slab::new(),
             sender_links: HashMap::new(),
             remote_handles: HashMap::new(),
@@ -528,33 +527,24 @@ impl SessionInner {
 
     fn settle_deliveries(&mut self, disposition: Disposition) {
         trace!("settle delivery: {:#?}", disposition);
-        // assert!(disposition.settled()); // we can only work with settled for now
 
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
-        let actionable = self
-            .unsettled_deliveries
-            .range(from..to + 1)
-            .map(|(k, _)| k.clone())
-            .collect::<Vec<_>>();
-        let outcome: Outcome;
-        match disposition.state().map(|s| s.clone()) {
-            Some(DeliveryState::Received(_v)) => {
-                return;
-            } // todo: apply more thinking
-            Some(DeliveryState::Accepted(v)) => outcome = Outcome::Accepted(v.clone()),
-            Some(DeliveryState::Rejected(v)) => outcome = Outcome::Rejected(v.clone()),
-            Some(DeliveryState::Released(v)) => outcome = Outcome::Released(v.clone()),
-            Some(DeliveryState::Modified(v)) => outcome = Outcome::Modified(v.clone()),
-            None => outcome = Outcome::Accepted(Accepted {}),
-        }
-        // let state = disposition.state().map(|s| s.clone()).unwrap_or(DeliveryState::Accepted(Accepted {})).clone(); // todo: honor Source.default_outcome()
-        for k in actionable {
+
+        if from == to {
             let _ = self
                 .unsettled_deliveries
-                .remove(&k)
+                .remove(&from)
                 .unwrap()
-                .send(Ok(outcome.clone()));
+                .send(Ok(disposition));
+        } else {
+            for k in from..=to {
+                let _ = self
+                    .unsettled_deliveries
+                    .remove(&k)
+                    .unwrap()
+                    .send(Ok(disposition.clone()));
+            }
         }
     }
 
@@ -730,11 +720,8 @@ impl SessionInner {
             batchable: false,
             body: body,
         };
-        if !settled.unwrap_or(false) {
-            self.unsettled_deliveries.insert(delivery_id, promise);
-        } else {
-            let _ = promise.send(Ok(Outcome::Accepted(Accepted {})));
-        }
+        self.unsettled_deliveries.insert(delivery_id, promise);
+
         Frame::Transfer(transfer)
     }
 }
