@@ -6,6 +6,7 @@ use either::Either;
 use futures::future::{ok, Future};
 use futures::{Sink, Stream};
 use http::Uri;
+use string::TryFrom;
 
 use amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use amqp_codec::types::Symbol;
@@ -83,7 +84,7 @@ where
     .apply_fn(
         sasl_connect.into_service().map_err(Either::Left),
         |(framed, uri, config, auth, time), srv| {
-            srv.call((framed, auth))
+            srv.call((framed, uri.clone(), auth))
                 .map(move |framed| (uri, config, framed, time))
         },
     )
@@ -134,7 +135,7 @@ where
 }
 
 fn sasl_connect<Io: AsyncRead + AsyncWrite>(
-    (framed, auth): (Framed<Io, ProtocolIdCodec>, SaslAuth),
+    (framed, uri, auth): (Framed<Io, ProtocolIdCodec>, Uri, SaslAuth),
 ) -> impl Future<Item = Framed<Io, ProtocolIdCodec>, Error = SaslConnectError> {
     let sasl_io = framed.into_framed(AmqpCodec::<SaslFrame>::new());
     // processing sasl-mechanisms
@@ -144,10 +145,15 @@ fn sasl_connect<Io: AsyncRead + AsyncWrite>(
         .and_then(move |(_sasl_frame, sasl_io)| {
             let initial_response =
                 SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+
+            let hostname = uri
+                .host()
+                .map(|host| string::String::try_from(bytes::Bytes::from(host.as_bytes())).unwrap());
+
             let sasl_init = SaslInit {
+                hostname,
                 mechanism: Symbol::from("PLAIN"),
                 initial_response: Some(initial_response),
-                hostname: None,
             };
             sasl_io
                 .send(sasl_init.into())
