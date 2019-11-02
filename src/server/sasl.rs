@@ -137,6 +137,16 @@ where
         self.frame.hostname.as_ref().map(|b| b.as_ref())
     }
 
+    /// Returns reference to io object
+    pub fn get_ref(&self) -> &Io {
+        self.framed.get_ref()
+    }
+
+    /// Returns mutable reference to io object
+    pub fn get_mut(&mut self) -> &mut Io {
+        self.framed.get_mut()
+    }
+
     /// Initiate sasl challenge
     pub fn challenge(self) -> impl Future<Item = Response<Io>, Error = ServerError<()>> {
         self.challenge_with(Bytes::new())

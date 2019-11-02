@@ -64,8 +64,8 @@ where
     .apply_fn(
         connector.map_err(|e| either::Right(e)),
         |(uri, config, auth, time), srv| {
-            srv.call(uri.into()).map(|stream| {
-                let (io, uri) = stream.into_parts();
+            srv.call(uri.clone().into()).map(move |stream| {
+                let (io, _) = stream.into_parts();
                 (io, uri, config, auth, time)
             })
         },
