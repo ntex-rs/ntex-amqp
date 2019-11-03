@@ -17,14 +17,14 @@ use super::SECTION_PREFIX_LENGTH;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InMessage {
     pub message_format: Option<MessageFormat>,
-    header: Option<Header>,
-    delivery_annotations: Option<Annotations>,
-    message_annotations: Option<Annotations>,
-    properties: Option<Properties>,
-    application_properties: Option<StringVariantMap>,
-    footer: Option<Annotations>,
-    body: MessageBody,
-    size: Cell<usize>,
+    pub(super) header: Option<Header>,
+    pub(super) delivery_annotations: Option<Annotations>,
+    pub(super) message_annotations: Option<Annotations>,
+    pub(super) properties: Option<Properties>,
+    pub(super) application_properties: Option<StringVariantMap>,
+    pub(super) footer: Option<Annotations>,
+    pub(super) body: MessageBody,
+    pub(super) size: Cell<usize>,
 }
 
 impl InMessage {

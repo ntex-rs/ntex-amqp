@@ -11,6 +11,7 @@ use crate::protocol::ProtocolId;
 const SIZE_LOW_WM: usize = 4096;
 const SIZE_HIGH_WM: usize = 32768;
 
+#[derive(Debug)]
 pub struct AmqpCodec<T: Decode + Encode> {
     state: DecodeState,
     max_size: usize,

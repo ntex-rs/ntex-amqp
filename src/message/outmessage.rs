@@ -8,6 +8,7 @@ use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, T
 use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap};
 
 use super::body::MessageBody;
+use super::inmessage::InMessage;
 use super::SECTION_PREFIX_LENGTH;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -176,6 +177,28 @@ impl OutMessage {
             msg.set_properties(|props| props.correlation_id = data.message_id.clone());
             msg
         })
+    }
+}
+
+impl From<InMessage> for OutMessage {
+    fn from(from: InMessage) -> Self {
+        let mut msg = OutMessage {
+            message_format: from.message_format,
+            header: from.header,
+            properties: from.properties,
+            delivery_annotations: from.delivery_annotations,
+            message_annotations: from.message_annotations.map(|v| v.into()),
+            application_properties: from.application_properties.map(|v| v.into()),
+            footer: from.footer,
+            body: from.body,
+            size: Cell::new(0),
+        };
+
+        if let Some(ref mut props) = msg.properties {
+            props.correlation_id = props.message_id.clone();
+        };
+
+        msg
     }
 }
 

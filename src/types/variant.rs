@@ -7,6 +7,7 @@ use ordered_float::OrderedFloat;
 use string::TryFrom;
 use uuid::Uuid;
 
+use crate::protocol::Annotations;
 use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Str, Symbol};
 
 /// Represents an AMQP type for use in polymorphic collections
@@ -183,6 +184,12 @@ impl Default for VecSymbolMap {
     }
 }
 
+impl From<Annotations> for VecSymbolMap {
+    fn from(anns: Annotations) -> VecSymbolMap {
+        VecSymbolMap(anns.into_iter().collect())
+    }
+}
+
 impl std::ops::Deref for VecSymbolMap {
     type Target = Vec<(Symbol, Variant)>;
 
@@ -204,6 +211,12 @@ pub struct VecStringMap(pub Vec<(Str, Variant)>);
 impl Default for VecStringMap {
     fn default() -> Self {
         VecStringMap(Vec::with_capacity(8))
+    }
+}
+
+impl From<HashMap<Str, Variant>> for VecStringMap {
+    fn from(map: HashMap<Str, Variant>) -> VecStringMap {
+        VecStringMap(map.into_iter().collect())
     }
 }
 
