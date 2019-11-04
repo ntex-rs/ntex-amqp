@@ -25,7 +25,7 @@ mod sndlink;
 
 pub use self::connection::{Connection, ConnectionController};
 pub use self::errors::AmqpTransportError;
-pub use self::rcvlink::ReceiverLink;
+pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};
 

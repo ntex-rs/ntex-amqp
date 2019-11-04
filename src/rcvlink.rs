@@ -1,8 +1,12 @@
 use std::collections::VecDeque;
 use std::u32;
 
-use amqp_codec::protocol::{Attach, Disposition, Error, LinkError, Transfer};
+use amqp_codec::protocol::{
+    Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role, SenderSettleMode,
+    Target, TerminusDurability, TerminusExpiryPolicy, Transfer,
+};
 use amqp_codec::types::ByteStr;
+use bytes::Bytes;
 use futures::task::AtomicTask;
 use futures::{unsync::oneshot, Async, Future, Poll, Stream};
 
@@ -103,6 +107,7 @@ impl Stream for ReceiverLink {
 }
 
 pub(crate) struct ReceiverLinkInner {
+    id: usize,
     handle: usize,
     attach: Attach,
     session: Session,
@@ -115,18 +120,20 @@ pub(crate) struct ReceiverLinkInner {
 
 impl ReceiverLinkInner {
     pub(crate) fn new(
+        id: usize,
         session: Cell<SessionInner>,
         handle: usize,
         attach: Attach,
     ) -> ReceiverLinkInner {
         ReceiverLinkInner {
+            id,
+            handle,
             session: Session::new(session),
             closed: false,
             reader_task: AtomicTask::new(),
             queue: VecDeque::with_capacity(4),
             credit: 0,
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
-            handle,
             attach,
         }
     }
@@ -180,5 +187,63 @@ impl ReceiverLinkInner {
                 self.reader_task.notify()
             }
         }
+    }
+}
+
+pub struct ReceiverLinkBuilder {
+    frame: Attach,
+    session: Cell<SessionInner>,
+}
+
+impl ReceiverLinkBuilder {
+    pub(crate) fn new(
+        name: string::String<Bytes>,
+        address: string::String<Bytes>,
+        session: Cell<SessionInner>,
+    ) -> Self {
+        let target = Target {
+            address: Some(address),
+            durable: TerminusDurability::None,
+            expiry_policy: TerminusExpiryPolicy::SessionEnd,
+            timeout: 0,
+            dynamic: false,
+            dynamic_node_properties: None,
+            capabilities: None,
+        };
+        let frame = Attach {
+            name,
+            handle: 0 as Handle,
+            role: Role::Receiver,
+            snd_settle_mode: SenderSettleMode::Mixed,
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: None,
+            target: Some(target),
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: None,
+            max_message_size: Some(65536 * 4),
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        };
+
+        ReceiverLinkBuilder { frame, session }
+    }
+
+    pub fn max_message_size(mut self, size: u64) -> Self {
+        self.frame.max_message_size = Some(size);
+        self
+    }
+
+    pub fn open(self) -> impl Future<Item = ReceiverLink, Error = AmqpTransportError> {
+        let cell = self.session.clone();
+        self.session
+            .get_mut()
+            .open_local_receiver_link(cell, self.frame)
+            .then(|res| match res {
+                Ok(Ok(res)) => Ok(res),
+                Ok(Err(err)) => Err(err),
+                Err(_) => Err(AmqpTransportError::Disconnected),
+            })
     }
 }

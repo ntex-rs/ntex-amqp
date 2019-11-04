@@ -55,12 +55,12 @@ impl SenderLink {
         self.inner.id as u32
     }
 
-    pub fn remote_handle(&self) -> Handle {
-        self.inner.remote_handle
+    pub fn name(&self) -> &string::String<Bytes> {
+        &self.inner.name
     }
 
-    pub(crate) fn name(&self) -> &string::String<Bytes> {
-        &self.inner.name
+    pub fn remote_handle(&self) -> Handle {
+        self.inner.remote_handle
     }
 
     pub fn session(&self) -> &Session {
