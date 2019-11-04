@@ -3,7 +3,7 @@ use std::u32;
 
 use amqp_codec::protocol::{
     Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role, SenderSettleMode,
-    Target, TerminusDurability, TerminusExpiryPolicy, Transfer,
+    Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
 };
 use amqp_codec::types::ByteStr;
 use bytes::Bytes;
@@ -201,13 +201,17 @@ impl ReceiverLinkBuilder {
         address: string::String<Bytes>,
         session: Cell<SessionInner>,
     ) -> Self {
-        let target = Target {
+        let source = Source {
             address: Some(address),
             durable: TerminusDurability::None,
             expiry_policy: TerminusExpiryPolicy::SessionEnd,
             timeout: 0,
             dynamic: false,
             dynamic_node_properties: None,
+            distribution_mode: None,
+            filter: None,
+            default_outcome: None,
+            outcomes: None,
             capabilities: None,
         };
         let frame = Attach {
@@ -216,8 +220,8 @@ impl ReceiverLinkBuilder {
             role: Role::Receiver,
             snd_settle_mode: SenderSettleMode::Mixed,
             rcv_settle_mode: ReceiverSettleMode::First,
-            source: None,
-            target: Some(target),
+            source: Some(source),
+            target: None,
             unsettled: None,
             incomplete_unsettled: false,
             initial_delivery_count: None,
