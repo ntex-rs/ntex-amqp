@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use amqp_codec::protocol::{
-    Attach, DeliveryNumber, DeliveryState, Disposition, Flow, ReceiverSettleMode, Role,
+    Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 use bytes::Bytes;
@@ -97,12 +97,12 @@ impl SenderLink {
     //     self.inner.get_mut().close(None)
     // }
 
-    // pub fn close_with_error(
-    //     &mut self,
-    //     error: Error,
-    // ) -> impl Future<Item = (), Error = AmqpTransportError> {
-    //     self.inner.get_mut().close(Some(error))
-    // }
+    pub fn close_with_error(
+        &self,
+        error: Error,
+    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+        self.inner.get_mut().close(Some(error))
+    }
 }
 
 impl SenderLinkInner {
@@ -148,25 +148,25 @@ impl SenderLinkInner {
         self.error = Some(err);
     }
 
-    // pub fn close(
-    //     &mut self,
-    //     error: Option<Error>,
-    // ) -> impl Future<Item = (), Error = AmqpTransportError> {
-    //     let (tx, rx) = oneshot::channel();
-    //     if self.closed {
-    //         let _ = tx.send(Ok(()));
-    //     } else {
-    //         self.session
-    //             .inner
-    //             .get_mut()
-    //             .detach_receiver_link(self.handle, true, error, tx);
-    //     }
-    //     rx.then(|res| match res {
-    //         Ok(Ok(_)) => Ok(()),
-    //         Ok(Err(e)) => Err(e),
-    //         Err(_) => Err(AmqpTransportError::Disconnected),
-    //     })
-    // }
+    pub fn close(
+        &self,
+        error: Option<Error>,
+    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+        let (tx, rx) = oneshot::channel();
+        //if self.closed {
+        //    let _ = tx.send(Ok(()));
+        //} else {
+        self.session
+            .inner
+            .get_mut()
+            .detach_sender_link(self.id, true, error, tx);
+        //}
+        rx.then(|res| match res {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(AmqpTransportError::Disconnected),
+        })
+    }
 
     pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
         // drop pending transfers

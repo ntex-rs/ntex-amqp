@@ -22,7 +22,7 @@ pub(super) struct FrameInner<St> {
 pub enum ControlFrameKind {
     Attach(protocol::Attach),
     Flow(protocol::Flow, SenderLink),
-    Detach(protocol::Detach),
+    Detach(protocol::Detach, SenderLink),
 }
 
 impl<St> ControlFrame<St> {

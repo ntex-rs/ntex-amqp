@@ -85,7 +85,6 @@ where
     fn handle_control_frame(&self, frame: &ControlFrame<St>, err: Option<LinkError>) {
         if let Some(e) = err {
             error!("Error in link handler: {}", e);
-        // link.close_with_error(e.into());
         } else {
             match frame.0.kind {
                 ControlFrameKind::Attach(ref frm) => {
@@ -97,10 +96,25 @@ where
                         .get_mut()
                         .confirm_sender_link(cell, &frm);
                 }
-                ControlFrameKind::Flow(ref frm, ref _link) => {
-                    frame.0.session.inner.get_mut().apply_flow(frm);
+                ControlFrameKind::Flow(ref frm, ref link) => {
+                    if let Some(err) = err {
+                        link.close_with_error(err.into());
+                    } else {
+                        frame.0.session.inner.get_mut().apply_flow(frm);
+                    }
                 }
-                ControlFrameKind::Detach(ref _frm) => {}
+                ControlFrameKind::Detach(ref frm, ref link) => {
+                    if let Some(err) = err {
+                        link.close_with_error(err.into());
+                    } else {
+                        frame
+                            .0
+                            .session
+                            .inner
+                            .get_mut()
+                            .handle_frame(Frame::Detach(frm.clone()));
+                    }
+                }
             }
         }
     }
@@ -161,6 +175,23 @@ where
                                 self.receivers.push((link, fut));
                             }
                         },
+                        Frame::Detach(frm) => {
+                            let session = self.conn.get_session(channel_id);
+                            let cell = session.clone();
+
+                            if self.control_srv.is_some() {
+                                if let Some(link) = session.get_sender_link_by_handle(frm.handle) {
+                                    self.control_frame = Some(ControlFrame::new(
+                                        self.state.clone(),
+                                        Session::new(cell.clone()),
+                                        ControlFrameKind::Detach(frm, link.clone()),
+                                    ));
+
+                                    return Ok(IncomingResult::Control);
+                                }
+                            }
+                            session.get_mut().handle_frame(Frame::Detach(frm));
+                        }
                         _ => {
                             trace!("Unexpected frame {:#?}", frame);
                         }

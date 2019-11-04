@@ -315,11 +315,8 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                             return Ok(Async::Ready(Some(frame)));
                                         }
                                     }
-                                    Frame::Flow(_) => {
+                                    Frame::Flow(_) | Frame::Detach(_) => {
                                         return Ok(Async::Ready(Some(frame)));
-                                    }
-                                    Frame::Detach(detach) => {
-                                        session.get_mut().handle_detach(detach);
                                     }
                                     Frame::End(remote_end) => {
                                         trace!("Remote session end: {}", frame.channel_id());
@@ -334,7 +331,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                         inner.sessions.remove(channel_id);
                                         inner.sessions_map.remove(&frame.channel_id());
                                     }
-                                    _ => session.get_mut().handle_frame(frame),
+                                    _ => session.get_mut().handle_frame(frame.into_parts().1),
                                 }
                             }
                             ChannelState::Closing(ref mut tx) => match frame.performative() {
@@ -412,7 +409,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
                 Async::Ready(Some(frame)) => {
                     if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
                         if let ChannelState::Established(ref session) = channel {
-                            session.get_mut().handle_frame(frame);
+                            session.get_mut().handle_frame(frame.into_parts().1);
                             continue;
                         }
                     }
@@ -429,7 +426,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
             Async::Ready(Some(frame)) => {
                 if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
                     if let ChannelState::Established(ref session) = channel {
-                        session.get_mut().handle_frame(frame);
+                        session.get_mut().handle_frame(frame.into_parts().1);
                         return Ok(Async::NotReady);
                     }
                 }
