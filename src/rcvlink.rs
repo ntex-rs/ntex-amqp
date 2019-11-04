@@ -15,7 +15,7 @@ use crate::errors::AmqpTransportError;
 use crate::session::{Session, SessionInner};
 use crate::Configuration;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ReceiverLink {
     inner: Cell<ReceiverLinkInner>,
 }
@@ -106,8 +106,8 @@ impl Stream for ReceiverLink {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ReceiverLinkInner {
-    id: usize,
     handle: usize,
     attach: Attach,
     session: Session,
@@ -120,13 +120,11 @@ pub(crate) struct ReceiverLinkInner {
 
 impl ReceiverLinkInner {
     pub(crate) fn new(
-        id: usize,
         session: Cell<SessionInner>,
         handle: usize,
         attach: Attach,
     ) -> ReceiverLinkInner {
         ReceiverLinkInner {
-            id,
             handle,
             session: Session::new(session),
             closed: false,

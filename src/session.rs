@@ -33,6 +33,12 @@ impl Drop for Session {
     }
 }
 
+impl std::fmt::Debug for Session {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("Session").finish()
+    }
+}
+
 impl Session {
     pub(crate) fn new(inner: Cell<SessionInner>) -> Session {
         Session { inner }
@@ -286,7 +292,7 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(token, cell, token, attach));
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token, attach));
         entry.insert(Either::Right(ReceiverLinkState::Opening(Some(
             inner.clone(),
         ))));
@@ -304,7 +310,7 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(token, cell, token, frame.clone()));
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token, frame.clone()));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
             inner.clone(),
             tx,
