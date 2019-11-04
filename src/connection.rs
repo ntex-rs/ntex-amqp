@@ -442,6 +442,7 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct ConnectionController(pub(crate) Cell<ConnectionInner>);
 
 impl ConnectionController {
