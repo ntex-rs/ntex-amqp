@@ -310,7 +310,7 @@ impl SessionInner {
             tx,
         )))));
 
-        frame.handle = (token + 10) as Handle;
+        frame.handle = token as Handle;
 
         self.links_by_name.insert(frame.name.clone(), token);
         self.post_frame(Frame::Attach(frame));
