@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 use std::u32;
 
 use amqp_codec::protocol::{
-    Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role, SenderSettleMode,
-    Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
+    Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
+    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
 };
 use amqp_codec::types::ByteStr;
 use bytes::Bytes;
@@ -66,6 +66,14 @@ impl ReceiverLink {
             .inner
             .get_mut()
             .post_frame(disp.into());
+    }
+
+    /// Wait for disposition with specified number
+    pub fn wait_disposition(
+        &mut self,
+        id: DeliveryNumber,
+    ) -> impl Future<Item = Disposition, Error = AmqpTransportError> {
+        self.inner.get_mut().session.wait_disposition(id)
     }
 
     pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {

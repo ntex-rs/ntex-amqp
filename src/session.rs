@@ -109,6 +109,13 @@ impl Session {
             Err(_) => Err(AmqpTransportError::Disconnected),
         })
     }
+
+    pub fn wait_disposition(
+        &mut self,
+        id: DeliveryNumber,
+    ) -> impl Future<Item = Disposition, Error = AmqpTransportError> {
+        self.inner.get_mut().wait_disposition(id)
+    }
 }
 
 enum SenderLinkState {
@@ -159,10 +166,12 @@ pub(crate) struct SessionInner {
     remote_incoming_window: u32,
 
     unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
+
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
     links_by_name: HashMap<string::String<Bytes>, usize>,
     remote_handles: HashMap<Handle, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
+    disposition_subscribers: HashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
     error: Option<AmqpTransportError>,
 }
 
@@ -199,6 +208,7 @@ impl SessionInner {
             links_by_name: HashMap::new(),
             remote_handles: HashMap::new(),
             pending_transfers: VecDeque::new(),
+            disposition_subscribers: HashMap::new(),
             error: None,
         }
     }
@@ -234,6 +244,15 @@ impl SessionInner {
 
     fn drop_session(&mut self) {
         self.connection.drop_session_copy(self.id);
+    }
+
+    fn wait_disposition(
+        &mut self,
+        id: DeliveryNumber,
+    ) -> impl Future<Item = Disposition, Error = AmqpTransportError> {
+        let (tx, rx) = oneshot::channel();
+        self.disposition_subscribers.insert(id, tx);
+        rx.map_err(|_| AmqpTransportError::Disconnected)
     }
 
     /// Register remote sender link
@@ -421,8 +440,14 @@ impl SessionInner {
     pub fn handle_frame(&mut self, frame: AmqpFrame) {
         if self.error.is_none() {
             match frame.into_parts().1 {
-                Frame::Disposition(disp) => self.settle_deliveries(disp),
                 Frame::Flow(flow) => self.apply_flow(&flow),
+                Frame::Disposition(disp) => {
+                    if let Some(sender) = self.disposition_subscribers.remove(&disp.first) {
+                        let _ = sender.send(disp);
+                    } else {
+                        self.settle_deliveries(disp);
+                    }
+                }
                 Frame::Transfer(transfer) => {
                     let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
                         *idx
