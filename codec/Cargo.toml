@@ -1,0 +1,30 @@
+[package]
+name = "amqp-codec"
+version = "0.1.0"
+description = "AMQP 1.0 Protocol Codec"
+authors = ["Nikolay Kim <fafhrd91@gmail.com>", "Max Gortman <mgortman@microsoft.com>", "Mike Yagley <myagley@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+bytes = "0.4"
+chrono = "0.4"
+derive_more = "0.15"
+hashbrown = "0.5.0"
+ordered-float = "1.0"
+string = "0.2.0"
+tokio-io = "0.1"
+tokio-codec = "0.1"
+uuid = { version = "0.7", features = ["v4"] }
+
+[build-dependencies]
+handlebars = { version = "0.27", optional = true }
+serde        = { version = "1.0", optional = true }
+serde_derive = { version = "1.0", optional = true }
+serde_json   = { version = "1.0", optional = true }
+lazy_static  = { version = "1.0", optional = true }
+regex = { version = "1.0", optional = true }
+
+[features]
+default = []
+
+from-spec = ["handlebars", "serde", "serde_derive", "serde_json", "lazy_static", "regex"]
