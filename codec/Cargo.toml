@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "AMQP 1.0 Protocol Codec"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>", "Max Gortman <mgortman@microsoft.com>", "Mike Yagley <myagley@gmail.com>"]
 edition = "2018"
+workspace = ".."
 
 [dependencies]
 bytes = "0.4"
