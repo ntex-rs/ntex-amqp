@@ -1,10 +1,10 @@
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_connect::{Connect as TcpConnect, Connection as TcpConnection};
-use actix_service::{IntoService, Service, ServiceExt};
+use actix_service::{apply_fn, pipeline, IntoService, Service};
 use actix_utils::time::LowResTimeService;
 use either::Either;
 use futures::future::{ok, Future};
-use futures::{Sink, Stream};
+use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::Uri;
 use string::TryFrom;
 
@@ -50,7 +50,7 @@ where
     T::Error: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
-    (|connect: SaslConnect| {
+    pipeline(|connect: SaslConnect| {
         let SaslConnect {
             uri,
             config,
@@ -59,123 +59,134 @@ where
         } = connect;
         ok::<_, either::Either<SaslConnectError, T::Error>>((uri, config, auth, time))
     })
-    .into_service()
     // connect to host
-    .apply_fn(
+    .and_then(apply_fn(
         connector.map_err(|e| either::Right(e)),
-        |(uri, config, auth, time), srv| {
-            srv.call(uri.clone().into()).map(move |stream| {
-                let (io, _) = stream.into_parts();
-                (io, uri, config, auth, time)
-            })
+        |(uri, config, auth, time): (Uri, Configuration, _, _), srv| {
+            let fut = srv.call(uri.clone().into());
+            async move {
+                fut.await.map(|stream| {
+                    let (io, _) = stream.into_parts();
+                    (io, uri, config, auth, time)
+                })
+            }
         },
-    )
+    ))
     // sasl protocol negotiation
-    .apply_fn(
+    .and_then(apply_fn(
         ProtocolNegotiation::new(ProtocolId::AmqpSasl)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
         |(io, uri, config, auth, time): (Io, _, _, _, _), srv| {
             let framed = Framed::new(io, ProtocolIdCodec);
-            srv.call(framed)
-                .map(move |framed| (framed, uri, config, auth, time))
+            let fut = srv.call(framed);
+            async move {
+                fut.await
+                    .map(move |framed| (framed, uri, config, auth, time))
+            }
         },
-    )
+    ))
     // sasl auth
-    .apply_fn(
+    .and_then(apply_fn(
         sasl_connect.into_service().map_err(Either::Left),
-        |(framed, uri, config, auth, time), srv| {
-            srv.call((framed, uri.clone(), auth))
-                .map(move |framed| (uri, config, framed, time))
+        |(framed, uri, config, auth, time): (_, Uri, _, _, _), srv| {
+            let fut = srv.call((framed, uri.clone(), auth));
+            async move { fut.await.map(move |framed| (uri, config, framed, time)) }
         },
-    )
+    ))
     // re-negotiate amqp protocol negotiation
-    .apply_fn(
+    .and_then(apply_fn(
         ProtocolNegotiation::new(ProtocolId::Amqp)
             .map_err(|e| Either::Left(SaslConnectError::from(e))),
         |(uri, config, framed, time): (_, _, Framed<Io, ProtocolIdCodec>, _), srv| {
-            srv.call(framed)
-                .map(move |framed| (uri, config, framed, time))
+            let fut = srv.call(framed);
+            async move { fut.await.map(move |framed| (uri, config, framed, time)) }
         },
-    )
+    ))
     // open connection
     .and_then(
         |(uri, mut config, framed, time): (Uri, Configuration, Framed<Io, ProtocolIdCodec>, _)| {
-            let framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
-            if let Some(hostname) = uri.host() {
-                config.hostname(hostname);
+            async move {
+                let mut framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
+                if let Some(hostname) = uri.host() {
+                    config.hostname(hostname);
+                }
+                let open = config.to_open();
+                trace!("Open connection: {:?}", open);
+                framed
+                    .send(AmqpFrame::new(0, Frame::Open(open)))
+                    .await
+                    .map_err(|e| Either::Left(SaslConnectError::from(e)))
+                    .map(move |_| (config, framed, time))
             }
-            let open = config.to_open();
-            trace!("Open connection: {:?}", open);
-            framed
-                .send(AmqpFrame::new(0, Frame::Open(open)))
-                .map_err(|e| Either::Left(SaslConnectError::from(e)))
-                .map(move |framed| (config, framed, time))
         },
     )
     // read open frame
     .and_then(
-        move |(config, framed, time): (Configuration, Framed<_, AmqpCodec<AmqpFrame>>, _)| {
-            framed
-                .into_future()
-                .map_err(|e| Either::Left(SaslConnectError::from(e.0)))
-                .and_then(move |(frame, framed)| {
-                    if let Some(frame) = frame {
-                        if let Frame::Open(open) = frame.performative() {
-                            trace!("Open confirmed: {:?}", open);
-                            Ok(Connection::new(framed, config, open.into(), time))
-                        } else {
-                            Err(Either::Left(SaslConnectError::ExpectedOpenFrame))
-                        }
-                    } else {
-                        Err(Either::Left(SaslConnectError::Disconnected))
-                    }
-                })
+        move |(config, mut framed, time): (Configuration, Framed<_, AmqpCodec<AmqpFrame>>, _)| {
+            async move {
+                let frame = framed
+                    .next()
+                    .await
+                    .ok_or(Either::Left(SaslConnectError::Disconnected))?
+                    .map_err(|e| Either::Left(SaslConnectError::from(e)))?;
+
+                if let Frame::Open(open) = frame.performative() {
+                    trace!("Open confirmed: {:?}", open);
+                    Ok(Connection::new(framed, config, open.into(), time))
+                } else {
+                    Err(Either::Left(SaslConnectError::ExpectedOpenFrame))
+                }
+            }
         },
     )
 }
 
-fn sasl_connect<Io: AsyncRead + AsyncWrite>(
+async fn sasl_connect<Io: AsyncRead + AsyncWrite>(
     (framed, uri, auth): (Framed<Io, ProtocolIdCodec>, Uri, SaslAuth),
-) -> impl Future<Item = Framed<Io, ProtocolIdCodec>, Error = SaslConnectError> {
-    let sasl_io = framed.into_framed(AmqpCodec::<SaslFrame>::new());
+) -> Result<Framed<Io, ProtocolIdCodec>, SaslConnectError> {
+    let mut sasl_io = framed.into_framed(AmqpCodec::<SaslFrame>::new());
+
     // processing sasl-mechanisms
+    let _ = sasl_io
+        .next()
+        .await
+        .ok_or(SaslConnectError::Disconnected)?
+        .map_err(SaslConnectError::from)?;
+
+    let initial_response =
+        SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+
+    let hostname = uri
+        .host()
+        .map(|host| string::String::try_from(bytes::Bytes::from(host.as_bytes())).unwrap());
+
+    let sasl_init = SaslInit {
+        hostname,
+        mechanism: Symbol::from("PLAIN"),
+        initial_response: Some(initial_response),
+    };
+
     sasl_io
-        .into_future()
-        .map_err(|e| SaslConnectError::from(e.0))
-        .and_then(move |(_sasl_frame, sasl_io)| {
-            let initial_response =
-                SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+        .send(sasl_init.into())
+        .await
+        .map_err(SaslConnectError::from)?;
 
-            let hostname = uri
-                .host()
-                .map(|host| string::String::try_from(bytes::Bytes::from(host.as_bytes())).unwrap());
+    // processing sasl-outcome
+    let sasl_frame = sasl_io
+        .next()
+        .await
+        .ok_or(SaslConnectError::Disconnected)?
+        .map_err(SaslConnectError::from)?;
 
-            let sasl_init = SaslInit {
-                hostname,
-                mechanism: Symbol::from("PLAIN"),
-                initial_response: Some(initial_response),
-            };
-            sasl_io
-                .send(sasl_init.into())
-                .map_err(SaslConnectError::from)
-                .and_then(|sasl_io| {
-                    // processing sasl-outcome
-                    sasl_io
-                        .into_future()
-                        .map_err(|e| SaslConnectError::from(e.0))
-                        .and_then(|(sasl_frame, framed)| {
-                            if let Some(SaslFrame {
-                                body: SaslFrameBody::SaslOutcome(outcome),
-                            }) = sasl_frame
-                            {
-                                if outcome.code() != SaslCode::Ok {
-                                    return Err(SaslConnectError::Sasl(outcome.code()));
-                                }
-                            } else {
-                                return Err(SaslConnectError::Disconnected);
-                            }
-                            Ok(framed.into_framed(ProtocolIdCodec))
-                        })
-                })
-        })
+    if let SaslFrame {
+        body: SaslFrameBody::SaslOutcome(outcome),
+    } = sasl_frame
+    {
+        if outcome.code() != SaslCode::Ok {
+            return Err(SaslConnectError::Sasl(outcome.code()));
+        }
+    } else {
+        return Err(SaslConnectError::Disconnected);
+    }
+    Ok(sasl_io.into_framed(ProtocolIdCodec))
 }

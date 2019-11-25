@@ -1,13 +1,18 @@
+#![allow(unused_imports, dead_code)]
+
 #[macro_use]
 extern crate derive_more;
 #[macro_use]
 extern crate log;
 
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
+use actix_utils::oneshot;
 use amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use bytes::Bytes;
-use futures::{unsync::oneshot, Async, Future, Poll};
 use string::{String, TryFrom};
 use uuid::Uuid;
 
@@ -38,26 +43,25 @@ pub enum Delivery {
 type DeliveryPromise = oneshot::Sender<Result<Disposition, AmqpTransportError>>;
 
 impl Future for Delivery {
-    type Item = Disposition;
-    type Error = AmqpTransportError;
+    type Output = Result<Disposition, AmqpTransportError>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         if let Delivery::Pending(ref mut receiver) = *self {
-            return match receiver.poll() {
-                Ok(Async::Ready(r)) => r.map(|state| Async::Ready(state)),
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => {
+            return match Pin::new(receiver).poll(cx) {
+                Poll::Ready(Ok(r)) => Poll::Ready(r.map(|state| state)),
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(Err(e)) => {
                     trace!("delivery oneshot is gone: {:?}", e);
-                    Err(AmqpTransportError::Disconnected)
+                    Poll::Ready(Err(AmqpTransportError::Disconnected))
                 }
             };
         }
 
-        let old_v = ::std::mem::replace(self, Delivery::Gone);
+        let old_v = ::std::mem::replace(&mut *self, Delivery::Gone);
         if let Delivery::Resolved(r) = old_v {
             return match r {
-                Ok(state) => Ok(Async::Ready(state)),
-                Err(e) => Err(e),
+                Ok(state) => Poll::Ready(Ok(state)),
+                Err(e) => Poll::Ready(Err(e)),
             };
         }
         panic!("Polling Delivery after it was polled as ready is an error.");

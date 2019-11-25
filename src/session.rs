@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
+use std::future::Future;
 
+use actix_utils::oneshot;
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use futures::{future, unsync::oneshot, Future};
 use hashbrown::HashMap;
 use slab::Slab;
 use string::{self, TryFrom};
@@ -50,8 +51,8 @@ impl Session {
         self.inner.connection.remote_config()
     }
 
-    pub fn close(&self) -> impl Future<Item = (), Error = AmqpTransportError> {
-        future::ok(())
+    pub async fn close(&self) -> Result<(), AmqpTransportError> {
+        Ok(())
     }
 
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
@@ -92,28 +93,28 @@ impl Session {
         ReceiverLinkBuilder::new(name, address, self.inner.clone())
     }
 
-    pub fn detach_receiver_link(
+    pub async fn detach_receiver_link(
         &mut self,
         handle: usize,
         error: Option<Error>,
-    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+    ) -> Result<(), AmqpTransportError> {
         let (tx, rx) = oneshot::channel();
 
         self.inner
             .get_mut()
             .detach_receiver_link(handle, false, error, tx);
 
-        rx.then(|res| match res {
+        match rx.await {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(AmqpTransportError::Disconnected),
-        })
+        }
     }
 
     pub fn wait_disposition(
         &mut self,
         id: DeliveryNumber,
-    ) -> impl Future<Item = Disposition, Error = AmqpTransportError> {
+    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
         self.inner.get_mut().wait_disposition(id)
     }
 }
@@ -253,10 +254,10 @@ impl SessionInner {
     fn wait_disposition(
         &mut self,
         id: DeliveryNumber,
-    ) -> impl Future<Item = Disposition, Error = AmqpTransportError> {
+    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
         let (tx, rx) = oneshot::channel();
         self.disposition_subscribers.insert(id, tx);
-        rx.map_err(|_| AmqpTransportError::Disconnected)
+        async move { rx.await.map_err(|_| AmqpTransportError::Disconnected) }
     }
 
     /// Register remote sender link

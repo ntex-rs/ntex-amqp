@@ -7,14 +7,13 @@ edition = "2018"
 workspace = ".."
 
 [dependencies]
+actix-codec = "0.2.0-alpha.1"
 bytes = "0.4"
 chrono = "0.4"
 derive_more = "0.15"
 hashbrown = "0.5.0"
 ordered-float = "1.0"
 string = "0.2.0"
-tokio-io = "0.1"
-tokio-codec = "0.1"
 uuid = { version = "0.7", features = ["v4"] }
 
 [build-dependencies]

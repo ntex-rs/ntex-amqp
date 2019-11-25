@@ -13,6 +13,8 @@ pub enum ServerError<E> {
     #[display(fmt = "Message handler service error")]
     /// Message handler service error
     Service(E),
+    /// Control service init error
+    ControlServiceInit,
     #[display(fmt = "Amqp error: {}", _0)]
     /// Amqp error
     Amqp(AmqpError),

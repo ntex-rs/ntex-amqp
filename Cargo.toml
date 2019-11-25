@@ -19,29 +19,30 @@ members = [
 [dependencies]
 amqp-codec = "0.1.0"
 
-actix-codec = "0.1.2"
-actix-service = "0.4.0"
-actix-connect = "0.2.0"
+actix-codec = "0.2.0-alpha.1"
+actix-service = "1.0.0-alpha.1"
+actix-connect = "1.0.0-alpha.1"
 actix-router = "0.1.2"
-actix-utils = "0.4.0"
-actix-server-config = "0.1.1"
+actix-utils = "0.5.0-alpha.1"
+actix-server-config = "0.3.0-alpha.1"
+actix-rt = "1.0.0-alpha.1"
 
 derive_more = "0.15"
 either = "1.5.2"
-futures = "0.1.26"
-hashbrown = "0.5.0"
+futures = "0.3.1"
+hashbrown = "0.6.3"
 http = "0.1.16"
 log = "0.4"
 bytes = "0.4"
+pin-project = "0.4.6"
 uuid = { version = "0.7", features = ["v4"] }
 slab = "0.4"
 string = "0.2.1"
-tokio-timer = "0.2.8"
-tokio-current-thread = "0.1.5"
+tokio-timer = "0.3.0-alpha.1"
 
 [dev-dependencies]
 env_logger = "0.6"
-actix-test-server = "0.2.2"
+actix-testing = "0.3.0-alpha.1"
 
 [patch.crates-io]
 actix-amqp = { path = "." }

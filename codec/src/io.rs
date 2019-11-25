@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
+use actix_codec::{Decoder, Encoder};
 use bytes::{BigEndian, BufMut, ByteOrder, BytesMut};
-use tokio_io::codec::{Decoder, Encoder};
 
 use super::errors::{AmqpCodecError, ProtocolIdError};
 use super::framing::HEADER_LEN;

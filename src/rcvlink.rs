@@ -1,14 +1,18 @@
 use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::u32;
 
+use actix_utils::oneshot;
+use actix_utils::task::LocalWaker;
 use amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
 };
 use amqp_codec::types::ByteStr;
 use bytes::Bytes;
-use futures::task::AtomicTask;
-use futures::{unsync::oneshot, Async, Future, Poll, Stream};
+use futures::Stream;
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
@@ -72,18 +76,18 @@ impl ReceiverLink {
     pub fn wait_disposition(
         &mut self,
         id: DeliveryNumber,
-    ) -> impl Future<Item = Disposition, Error = AmqpTransportError> {
+    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
         self.inner.get_mut().session.wait_disposition(id)
     }
 
-    pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
+    pub fn close(&mut self) -> impl Future<Output = Result<(), AmqpTransportError>> {
         self.inner.get_mut().close(None)
     }
 
     pub fn close_with_error(
         &mut self,
         error: Error,
-    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         self.inner.get_mut().close(Some(error))
     }
 
@@ -95,20 +99,19 @@ impl ReceiverLink {
 }
 
 impl Stream for ReceiverLink {
-    type Item = Transfer;
-    type Error = AmqpTransportError;
+    type Item = Result<Transfer, AmqpTransportError>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let inner = self.inner.get_mut();
 
         if let Some(tr) = inner.queue.pop_front() {
-            Ok(Async::Ready(Some(tr)))
+            Poll::Ready(Some(Ok(tr)))
         } else {
             if inner.closed {
-                Ok(Async::Ready(None))
+                Poll::Ready(None)
             } else {
-                inner.reader_task.register();
-                Ok(Async::NotReady)
+                inner.reader_task.register(cx.waker());
+                Poll::Pending
             }
         }
     }
@@ -120,7 +123,7 @@ pub(crate) struct ReceiverLinkInner {
     attach: Attach,
     session: Session,
     closed: bool,
-    reader_task: AtomicTask,
+    reader_task: LocalWaker,
     queue: VecDeque<Transfer>,
     credit: u32,
     delivery_count: u32,
@@ -136,7 +139,7 @@ impl ReceiverLinkInner {
             handle,
             session: Session::new(session),
             closed: false,
-            reader_task: AtomicTask::new(),
+            reader_task: LocalWaker::new(),
             queue: VecDeque::with_capacity(4),
             credit: 0,
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
@@ -151,7 +154,7 @@ impl ReceiverLinkInner {
     pub fn close(
         &mut self,
         error: Option<Error>,
-    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         let (tx, rx) = oneshot::channel();
         if self.closed {
             let _ = tx.send(Ok(()));
@@ -161,11 +164,13 @@ impl ReceiverLinkInner {
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }
-        rx.then(|res| match res {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AmqpTransportError::Disconnected),
-        })
+        async move {
+            match rx.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(AmqpTransportError::Disconnected),
+            }
+        }
     }
 
     pub fn set_link_credit(&mut self, credit: u32) {
@@ -190,7 +195,7 @@ impl ReceiverLinkInner {
             self.delivery_count += 1;
             self.queue.push_back(transfer);
             if self.queue.len() == 1 {
-                self.reader_task.notify()
+                self.reader_task.wake()
             }
         }
     }
@@ -245,15 +250,18 @@ impl ReceiverLinkBuilder {
         self
     }
 
-    pub fn open(self) -> impl Future<Item = ReceiverLink, Error = AmqpTransportError> {
+    pub async fn open(self) -> Result<ReceiverLink, AmqpTransportError> {
         let cell = self.session.clone();
-        self.session
+        let res = self
+            .session
             .get_mut()
             .open_local_receiver_link(cell, self.frame)
-            .then(|res| match res {
-                Ok(Ok(res)) => Ok(res),
-                Ok(Err(err)) => Err(err),
-                Err(_) => Err(AmqpTransportError::Disconnected),
-            })
+            .await;
+
+        match res {
+            Ok(Ok(res)) => Ok(res),
+            Ok(Err(err)) => Err(err),
+            Err(_) => Err(AmqpTransportError::Disconnected),
+        }
     }
 }

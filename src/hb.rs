@@ -1,8 +1,10 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use actix_utils::time::LowResTimeService;
-use futures::{Async, Future};
-use tokio_timer::Delay;
+use tokio_timer::{delay, Delay};
 
 use crate::errors::AmqpTransportError;
 
@@ -25,9 +27,9 @@ impl Heartbeat {
     pub(crate) fn new(local: Duration, remote: Option<Duration>, time: LowResTimeService) -> Self {
         let now = time.now();
         let delay = if let Some(remote) = remote {
-            Delay::new(now + std::cmp::min(local, remote))
+            delay(now + std::cmp::min(local, remote))
         } else {
-            Delay::new(now + local)
+            delay(now + local)
         };
 
         Heartbeat {
@@ -60,9 +62,9 @@ impl Heartbeat {
         }
     }
 
-    pub(crate) fn poll(&mut self) -> Result<HeartbeatAction, AmqpTransportError> {
-        match self.delay.poll() {
-            Ok(Async::Ready(_)) => {
+    pub(crate) fn poll(&mut self, cx: &mut Context) -> Result<HeartbeatAction, AmqpTransportError> {
+        match Pin::new(&mut self.delay).poll(cx) {
+            Poll::Ready(_) => {
                 let mut act = HeartbeatAction::None;
                 let dl = self.delay.deadline();
                 if dl >= self.expire_local + self.local {
@@ -76,14 +78,10 @@ impl Heartbeat {
                     }
                 }
                 self.delay.reset(self.next_expire());
-                let _ = self.delay.poll();
+                let _ = Pin::new(&mut self.delay).poll(cx);
                 Ok(act)
             }
-            Ok(Async::NotReady) => Ok(HeartbeatAction::None),
-            Err(e) => {
-                error!("Tokio timer error: {}", e);
-                Err(AmqpTransportError::Timeout)
-            }
+            Poll::Pending => Ok(HeartbeatAction::None),
         }
     }
 }

@@ -1,8 +1,10 @@
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::Service;
-use futures::{Async, Future, Poll, Sink, Stream};
+use futures::{Future, SinkExt, StreamExt};
 
 use amqp_codec::protocol::ProtocolId;
 use amqp_codec::{ProtocolIdCodec, ProtocolIdError};
@@ -37,32 +39,27 @@ where
     type Request = Framed<T, ProtocolIdCodec>;
     type Response = Framed<T, ProtocolIdCodec>;
     type Error = ProtocolIdError;
-    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
+    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Framed<T, ProtocolIdCodec>) -> Self::Future {
+    fn call(&mut self, mut framed: Framed<T, ProtocolIdCodec>) -> Self::Future {
         let proto = self.proto;
-        Box::new(
-            req.send(proto)
-                .from_err()
-                .and_then(|framed| framed.into_future().map_err(|e| e.0))
-                .and_then(move |(protocol, framed)| {
-                    if let Some(protocol) = protocol {
-                        if proto == protocol {
-                            Ok(framed)
-                        } else {
-                            Err(ProtocolIdError::Unexpected {
-                                exp: proto,
-                                got: protocol,
-                            })
-                        }
-                    } else {
-                        Err(ProtocolIdError::Disconnected)
-                    }
-                }),
-        )
+
+        Box::pin(async move {
+            framed.send(proto).await?;
+
+            let protocol = framed.next().await.ok_or(ProtocolIdError::Disconnected)??;
+            if proto == protocol {
+                Ok(framed)
+            } else {
+                Err(ProtocolIdError::Unexpected {
+                    exp: proto,
+                    got: protocol,
+                })
+            }
+        })
     }
 }

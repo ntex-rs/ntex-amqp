@@ -1,12 +1,15 @@
 use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
+use actix_utils::oneshot;
+use actix_utils::task::LocalWaker;
 use actix_utils::time::LowResTimeService;
 use futures::future::{err, Either};
-use futures::task::AtomicTask;
-use futures::unsync::oneshot;
-use futures::{future, Async, Future, Poll, Sink, Stream};
+use futures::{future, Sink, Stream};
 use hashbrown::HashMap;
 
 use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
@@ -43,7 +46,7 @@ pub(crate) struct ConnectionInner {
     local: Configuration,
     remote: Configuration,
     write_queue: VecDeque<AmqpFrame>,
-    write_task: AtomicTask,
+    write_task: LocalWaker,
     sessions: slab::Slab<ChannelState>,
     sessions_map: HashMap<u16, usize>,
     error: Option<AmqpTransportError>,
@@ -105,7 +108,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
     }
 
     /// Gracefully close connection
-    pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
+    pub fn close(&mut self) -> impl Future<Output = Result<(), AmqpTransportError>> {
         future::ok(())
     }
 
@@ -114,40 +117,45 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
     pub fn close_with_error(
         &mut self,
         _err: Error,
-    ) -> impl Future<Item = (), Error = AmqpTransportError> {
+    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         future::ok(())
     }
 
     /// Opens the session
-    pub fn open_session(&mut self) -> impl Future<Item = Session, Error = AmqpTransportError> {
+    pub fn open_session(&mut self) -> impl Future<Output = Result<Session, AmqpTransportError>> {
         let cell = self.inner.downgrade();
-        let inner = self.inner.get_mut();
+        let inner = self.inner.clone();
 
-        if let Some(ref e) = inner.error {
-            Either::A(err(e.clone()))
-        } else {
-            let (tx, rx) = oneshot::channel();
+        async move {
+            let inner = inner.get_mut();
 
-            let entry = inner.sessions.vacant_entry();
-            let token = entry.key();
-
-            if token >= inner.local.channel_max {
-                Either::A(err(AmqpTransportError::TooManyChannels))
+            if let Some(ref e) = inner.error {
+                Err(e.clone())
             } else {
-                entry.insert(ChannelState::Opening(Some(tx), cell));
+                let (tx, rx) = oneshot::channel();
 
-                let begin = Begin {
-                    remote_channel: None,
-                    next_outgoing_id: 1,
-                    incoming_window: std::u32::MAX,
-                    outgoing_window: std::u32::MAX,
-                    handle_max: std::u32::MAX,
-                    offered_capabilities: None,
-                    desired_capabilities: None,
-                    properties: None,
-                };
-                inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
-                Either::B(rx.map_err(|_e| AmqpTransportError::Disconnected))
+                let entry = inner.sessions.vacant_entry();
+                let token = entry.key();
+
+                if token >= inner.local.channel_max {
+                    Err(AmqpTransportError::TooManyChannels)
+                } else {
+                    entry.insert(ChannelState::Opening(Some(tx), cell));
+
+                    let begin = Begin {
+                        remote_channel: None,
+                        next_outgoing_id: 1,
+                        incoming_window: std::u32::MAX,
+                        outgoing_window: std::u32::MAX,
+                        handle_max: std::u32::MAX,
+                        offered_capabilities: None,
+                        desired_capabilities: None,
+                        properties: None,
+                    };
+                    inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
+
+                    rx.await.map_err(|_| AmqpTransportError::Disconnected)
+                }
             }
         }
     }
@@ -199,11 +207,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         self.inner.get_mut().post_frame(frame)
     }
 
-    pub(crate) fn register_write_task(&self) {
-        self.inner.write_task.register();
+    pub(crate) fn register_write_task(&self, cx: &mut Context) {
+        self.inner.write_task.register(cx.waker());
     }
 
-    pub(crate) fn poll_outgoing(&mut self) -> Poll<(), AmqpCodecError> {
+    pub(crate) fn poll_outgoing(&mut self, cx: &mut Context) -> Poll<Result<(), AmqpCodecError>> {
         let inner = self.inner.get_mut();
         let mut update = false;
         loop {
@@ -211,9 +219,9 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                 if let Some(frame) = inner.pop_next_frame() {
                     trace!("outgoing: {:#?}", frame);
                     update = true;
-                    if let Err(e) = self.framed.force_send(frame) {
+                    if let Err(e) = self.framed.write(frame) {
                         inner.set_error(e.clone().into());
-                        return Err(e);
+                        return Poll::Ready(Err(e));
                     }
                 } else {
                     break;
@@ -221,14 +229,14 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
             }
 
             if !self.framed.is_write_buf_empty() {
-                match self.framed.poll_complete() {
-                    Ok(Async::NotReady) => break,
-                    Err(e) => {
+                match self.framed.flush(cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(Err(e)) => {
                         trace!("error sending data: {}", e);
                         inner.set_error(e.clone().into());
-                        return Err(e);
+                        return Poll::Ready(Err(e));
                     }
-                    Ok(Async::Ready(_)) => (),
+                    Poll::Ready(_) => (),
                 }
             } else {
                 break;
@@ -237,24 +245,27 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
         self.hb.update_remote(update);
 
         if inner.state == State::Drop {
-            Ok(Async::Ready(()))
+            Poll::Ready(Ok(()))
         } else if inner.state == State::RemoteClose
             && inner.write_queue.is_empty()
             && self.framed.is_write_buf_empty()
         {
-            Ok(Async::Ready(()))
+            Poll::Ready(Ok(()))
         } else {
-            Ok(Async::NotReady)
+            Poll::Pending
         }
     }
 
-    pub(crate) fn poll_incoming(&mut self) -> Poll<Option<AmqpFrame>, AmqpCodecError> {
+    pub(crate) fn poll_incoming(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Option<Result<AmqpFrame, AmqpCodecError>>> {
         let inner = self.inner.get_mut();
 
         let mut update = false;
         loop {
-            match self.framed.poll() {
-                Ok(Async::Ready(Some(frame))) => {
+            match Pin::new(&mut self.framed).poll_next(cx) {
+                Poll::Ready(Some(Ok(frame))) => {
                     trace!("incoming: {:#?}", frame);
 
                     update = true;
@@ -270,7 +281,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
                         if inner.state == State::Closing {
                             inner.sessions.clear();
-                            return Ok(Async::Ready(None));
+                            return Poll::Ready(None);
                         } else {
                             let close = Close { error: None };
                             inner.post_frame(AmqpFrame::new(0, close.into()));
@@ -280,7 +291,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
                     if inner.error.is_some() {
                         error!("connection closed but new framed is received: {:?}", frame);
-                        return Ok(Async::Ready(None));
+                        return Poll::Ready(None);
                     }
 
                     // get local session id
@@ -293,7 +304,7 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                 if begin.remote_channel().is_some() {
                                     inner.complete_session_creation(frame.channel_id(), begin);
                                 } else {
-                                    return Ok(Async::Ready(Some(frame)));
+                                    return Poll::Ready(Some(Ok(frame)));
                                 }
                             } else {
                                 warn!("Unexpected frame: {:#?}", frame);
@@ -312,11 +323,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                                     Frame::Attach(attach) => {
                                         let cell = session.clone();
                                         if !session.get_mut().handle_attach(attach, cell) {
-                                            return Ok(Async::Ready(Some(frame)));
+                                            return Poll::Ready(Some(Ok(frame)));
                                         }
                                     }
                                     Frame::Flow(_) | Frame::Detach(_) => {
-                                        return Ok(Async::Ready(Some(frame)));
+                                        return Poll::Ready(Some(Ok(frame)));
                                     }
                                     Frame::End(remote_end) => {
                                         trace!("Remote session end: {}", frame.channel_id());
@@ -350,23 +361,23 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         continue;
                     }
                 }
-                Ok(Async::Ready(None)) => {
+                Poll::Ready(None) => {
                     inner.set_error(AmqpTransportError::Disconnected);
-                    return Ok(Async::Ready(None));
+                    return Poll::Ready(None);
                 }
-                Ok(Async::NotReady) => {
+                Poll::Pending => {
                     self.hb.update_local(update);
                     break;
                 }
-                Err(e) => {
+                Poll::Ready(Some(Err(e))) => {
                     trace!("error reading: {:?}", e);
                     inner.set_error(e.clone().into());
-                    return Err(e.into());
+                    return Poll::Ready(Some(Err(e.into())));
                 }
             }
         }
 
-        Ok(Async::NotReady)
+        Poll::Pending
     }
 }
 
@@ -379,34 +390,34 @@ impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
-    type Item = ();
-    type Error = AmqpCodecError;
+    type Output = Result<(), AmqpCodecError>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let inner = self.inner.get_mut();
-
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         // connection heartbeat
-        match self.hb.poll() {
+        match self.hb.poll(cx) {
             Ok(act) => match act {
                 HeartbeatAction::None => (),
                 HeartbeatAction::Close => {
-                    inner.set_error(AmqpTransportError::Timeout);
-                    return Ok(Async::Ready(()));
+                    self.inner.get_mut().set_error(AmqpTransportError::Timeout);
+                    return Poll::Ready(Ok(()));
                 }
                 HeartbeatAction::Heartbeat => {
-                    inner.write_queue.push_back(AmqpFrame::new(0, Frame::Empty));
+                    self.inner
+                        .get_mut()
+                        .write_queue
+                        .push_back(AmqpFrame::new(0, Frame::Empty));
                 }
             },
             Err(e) => {
-                inner.set_error(e);
-                return Ok(Async::Ready(()));
+                self.inner.get_mut().set_error(e);
+                return Poll::Ready(Ok(()));
             }
         }
 
         loop {
-            match self.poll_incoming()? {
-                Async::Ready(None) => return Ok(Async::Ready(())),
-                Async::Ready(Some(frame)) => {
+            match self.poll_incoming(cx) {
+                Poll::Ready(None) => return Poll::Ready(Ok(())),
+                Poll::Ready(Some(Ok(frame))) => {
                     if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
                         if let ChannelState::Established(ref session) = channel {
                             session.get_mut().handle_frame(frame.into_parts().1);
@@ -415,27 +426,29 @@ impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
                     }
                     warn!("Unexpected frame: {:?}", frame);
                 }
-                Async::NotReady => break,
+                Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e)),
+                Poll::Pending => break,
             }
         }
-        let _ = self.poll_outgoing()?;
-        self.register_write_task();
+        let _ = self.poll_outgoing(cx)?;
+        self.register_write_task(cx);
 
-        match self.poll_incoming()? {
-            Async::Ready(None) => return Ok(Async::Ready(())),
-            Async::Ready(Some(frame)) => {
+        match self.poll_incoming(cx) {
+            Poll::Ready(None) => return Poll::Ready(Ok(())),
+            Poll::Ready(Some(Ok(frame))) => {
                 if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
                     if let ChannelState::Established(ref session) = channel {
                         session.get_mut().handle_frame(frame.into_parts().1);
-                        return Ok(Async::NotReady);
+                        return Poll::Pending;
                     }
                 }
                 warn!("Unexpected frame: {:?}", frame);
             }
-            Async::NotReady => (),
+            Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e)),
+            Poll::Pending => (),
         }
 
-        Ok(Async::NotReady)
+        Poll::Pending
     }
 }
 
@@ -448,7 +461,7 @@ impl ConnectionController {
             local,
             remote: Configuration::default(),
             write_queue: VecDeque::new(),
-            write_task: AtomicTask::new(),
+            write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::new(),
             error: None,
@@ -471,7 +484,7 @@ impl ConnectionController {
     pub fn drop_connection(&mut self) {
         let inner = self.0.get_mut();
         inner.state = State::Drop;
-        inner.write_task.notify()
+        inner.write_task.wake()
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
@@ -487,7 +500,7 @@ impl ConnectionInner {
             local,
             remote,
             write_queue: VecDeque::new(),
-            write_task: AtomicTask::new(),
+            write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::new(),
             error: None,
@@ -517,7 +530,7 @@ impl ConnectionInner {
     fn post_frame(&mut self, frame: AmqpFrame) {
         // trace!("POST-FRAME: {:#?}", frame.performative());
         self.write_queue.push_back(frame);
-        self.write_task.notify();
+        self.write_task.wake();
     }
 
     fn complete_session_creation(&mut self, channel_id: u16, begin: &Begin) {

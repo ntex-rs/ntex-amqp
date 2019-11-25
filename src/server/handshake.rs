@@ -1,11 +1,11 @@
-use actix_service::{IntoNewService, NewService};
+use actix_service::{IntoServiceFactory, ServiceFactory};
 
 use super::connect::ConnectAck;
 
 pub fn handshake<Io, St, A, F>(srv: F) -> Handshake<Io, St, A>
 where
-    F: IntoNewService<A>,
-    A: NewService<Config = (), Response = ConnectAck<Io, St>>,
+    F: IntoServiceFactory<A>,
+    A: ServiceFactory<Config = (), Response = ConnectAck<Io, St>>,
 {
     Handshake::new(srv)
 }
@@ -17,14 +17,14 @@ pub struct Handshake<Io, St, A> {
 
 impl<Io, St, A> Handshake<Io, St, A>
 where
-    A: NewService<Config = ()>,
+    A: ServiceFactory<Config = ()>,
 {
     pub fn new<F>(srv: F) -> Handshake<Io, St, A>
     where
-        F: IntoNewService<A>,
+        F: IntoServiceFactory<A>,
     {
         Handshake {
-            a: srv.into_new_service(),
+            a: srv.into_factory(),
             _t: std::marker::PhantomData,
         }
     }
@@ -32,12 +32,12 @@ where
 
 impl<Io, St, A> Handshake<Io, St, A>
 where
-    A: NewService<Config = (), Response = ConnectAck<Io, St>>,
+    A: ServiceFactory<Config = (), Response = ConnectAck<Io, St>>,
 {
     pub fn sasl<F, B>(self, srv: F) -> actix_utils::either::Either<A, B>
     where
-        F: IntoNewService<B>,
-        B: NewService<
+        F: IntoServiceFactory<B>,
+        B: ServiceFactory<
             Config = (),
             Response = A::Response,
             Error = A::Error,
@@ -45,6 +45,6 @@ where
         >,
         B::Error: Into<amqp_codec::protocol::Error>,
     {
-        actix_utils::either::Either::new(self.a, srv.into_new_service())
+        actix_utils::either::Either::new(self.a, srv.into_factory())
     }
 }

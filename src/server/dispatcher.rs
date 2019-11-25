@@ -1,10 +1,12 @@
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite};
 use actix_service::Service;
 use amqp_codec::protocol::{Error, Frame, Role};
 use amqp_codec::AmqpCodecError;
-use futures::{Async, Future, Poll};
 use slab::Slab;
 
 use crate::cell::Cell;
@@ -17,6 +19,7 @@ use super::errors::LinkError;
 use super::Link;
 
 /// Amqp server connection dispatcher.
+#[pin_project::pin_project]
 pub struct Dispatcher<Io, St, Sr>
 where
     Io: AsyncRead + AsyncWrite,
@@ -27,6 +30,7 @@ where
     service: Sr,
     control_srv: Option<ControlFrameService<St>>,
     control_frame: Option<ControlFrame<St>>,
+    #[pin]
     control_fut: Option<<ControlFrameService<St> as Service>::Future>,
     receivers: Vec<(ReceiverLink, Sr::Future)>,
     _channels: slab::Slab<ChannelState>,
@@ -62,17 +66,17 @@ where
         }
     }
 
-    fn handle_control_fut(&mut self) -> bool {
+    fn handle_control_fut(&mut self, cx: &mut Context) -> bool {
         // process control frame
         if let Some(ref mut fut) = self.control_fut {
-            match fut.poll() {
-                Ok(Async::Ready(_)) => {
+            match Pin::new(fut).poll(cx) {
+                Poll::Ready(Ok(_)) => {
                     self.control_fut.take();
                     let frame = self.control_frame.take().unwrap();
                     self.handle_control_frame(&frame, None);
                 }
-                Ok(Async::NotReady) => return false,
-                Err(e) => {
+                Poll::Pending => return false,
+                Poll::Ready(Err(e)) => {
                     let _ = self.control_fut.take();
                     let frame = self.control_frame.take().unwrap();
                     self.handle_control_frame(&frame, Some(e));
@@ -119,11 +123,11 @@ where
         }
     }
 
-    fn poll_incoming(&mut self) -> Result<IncomingResult, AmqpCodecError> {
+    fn poll_incoming(&mut self, cx: &mut Context) -> Result<IncomingResult, AmqpCodecError> {
         loop {
             // handle remote begin and attach
-            match self.conn.poll_incoming() {
-                Ok(Async::Ready(Some(frame))) => {
+            match self.conn.poll_incoming(cx) {
+                Poll::Ready(Some(Ok(frame))) => {
                     let (channel_id, frame) = frame.into_parts();
                     let channel_id = channel_id as usize;
 
@@ -197,9 +201,9 @@ where
                         }
                     }
                 }
-                Ok(Async::NotReady) => break,
-                Ok(Async::Ready(None)) => return Ok(IncomingResult::Disconnect),
-                Err(e) => return Err(e),
+                Poll::Pending => break,
+                Poll::Ready(None) => return Ok(IncomingResult::Disconnect),
+                Poll::Ready(Some(Err(e))) => return Err(e),
             }
         }
 
@@ -213,49 +217,50 @@ where
     Sr: Service<Request = Link<St>, Response = ()>,
     Sr::Error: fmt::Display + Into<Error>,
 {
-    type Item = ();
-    type Error = AmqpCodecError;
+    type Output = Result<(), AmqpCodecError>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         // process control frame
-        if !self.handle_control_fut() {
-            return Ok(Async::NotReady);
+        if !self.handle_control_fut(cx) {
+            return Poll::Pending;
         }
 
         // check control frames service
         if self.control_frame.is_some() {
             let srv = self.control_srv.as_mut().unwrap();
-            match srv.poll_ready() {
-                Ok(Async::Ready(_)) => {
-                    self.control_fut = Some(srv.call(self.control_frame.as_ref().unwrap().clone()));
-                    if !self.handle_control_fut() {
-                        return Ok(Async::NotReady);
+            match srv.poll_ready(cx) {
+                Poll::Ready(Ok(_)) => {
+                    let frame = self.control_frame.as_ref().unwrap().clone();
+                    let srv = self.control_srv.as_mut().unwrap();
+                    self.control_fut = Some(srv.call(frame));
+                    if !self.handle_control_fut(cx) {
+                        return Poll::Pending;
                     }
                 }
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => {
                     let frame = self.control_frame.take().unwrap();
                     self.handle_control_frame(&frame, Some(e));
                 }
             }
         }
 
-        match self.poll_incoming()? {
-            IncomingResult::Control => return self.poll(),
-            IncomingResult::Disconnect => return Ok(Async::Ready(())),
+        match self.poll_incoming(cx)? {
+            IncomingResult::Control => return self.poll(cx),
+            IncomingResult::Disconnect => return Poll::Ready(Ok(())),
             IncomingResult::Done => (),
         }
 
         // process service responses
         let mut idx = 0;
         while idx < self.receivers.len() {
-            match self.receivers[idx].1.poll() {
-                Ok(Async::Ready(_detach)) => {
+            match unsafe { Pin::new_unchecked(&mut self.receivers[idx].1) }.poll(cx) {
+                Poll::Ready(Ok(_detach)) => {
                     let (mut link, _) = self.receivers.swap_remove(idx);
                     let _ = link.close();
                 }
-                Ok(Async::NotReady) => idx += 1,
-                Err(e) => {
+                Poll::Pending => idx += 1,
+                Poll::Ready(Err(e)) => {
                     let (mut link, _) = self.receivers.swap_remove(idx);
                     error!("Error in link handler: {}", e);
                     let _ = link.close_with_error(e.into());
@@ -263,8 +268,8 @@ where
             }
         }
 
-        let res = self.conn.poll_outgoing();
-        self.conn.register_write_task();
+        let res = self.conn.poll_outgoing(cx);
+        self.conn.register_write_task(cx);
         res
     }
 }

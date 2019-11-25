@@ -1,7 +1,7 @@
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use amqp_codec::protocol::{Frame, Open};
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec};
-use futures::{Future, Stream};
+use futures::{Future, StreamExt};
 
 use super::errors::ServerError;
 use crate::connection::ConnectionController;
@@ -30,32 +30,29 @@ impl<Io> Connect<Io> {
 
 impl<Io: AsyncRead + AsyncWrite> Connect<Io> {
     /// Wait for connection open frame
-    pub fn open(self) -> impl Future<Item = ConnectOpened<Io>, Error = ServerError<()>> {
-        let framed = self.conn.into_framed(AmqpCodec::<AmqpFrame>::new());
+    pub async fn open(self) -> Result<ConnectOpened<Io>, ServerError<()>> {
+        let mut framed = self.conn.into_framed(AmqpCodec::<AmqpFrame>::new());
         let mut controller = self.controller;
 
-        framed
-            .into_future()
-            .map_err(|(err, _)| ServerError::from(err))
-            .and_then(|(frame, framed)| {
-                if let Some(frame) = frame {
-                    let frame = frame.into_parts().1;
-                    match frame {
-                        Frame::Open(frame) => {
-                            trace!("Got open frame: {:?}", frame);
-                            controller.set_remote((&frame).into());
-                            Ok(ConnectOpened {
-                                frame,
-                                framed,
-                                controller,
-                            })
-                        }
-                        frame => Err(ServerError::Unexpected(frame)),
-                    }
-                } else {
-                    Err(ServerError::Disconnected)
-                }
-            })
+        let frame = framed
+            .next()
+            .await
+            .ok_or(ServerError::Disconnected)?
+            .map_err(ServerError::from)?;
+
+        let frame = frame.into_parts().1;
+        match frame {
+            Frame::Open(frame) => {
+                trace!("Got open frame: {:?}", frame);
+                controller.set_remote((&frame).into());
+                Ok(ConnectOpened {
+                    frame,
+                    framed,
+                    controller,
+                })
+            }
+            frame => Err(ServerError::Unexpected(frame)),
+        }
     }
 }
 

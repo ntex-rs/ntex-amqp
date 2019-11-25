@@ -1,8 +1,12 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use actix_router::Router;
-use actix_service::{boxed, new_service_cfg, IntoNewService, NewService, Service};
+use actix_service::{boxed, factory_fn_cfg, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
-use futures::future::{err, ok, Either, FutureResult};
-use futures::{Async, Future, Poll, Stream};
+use futures::future::{err, ok, Either, Ready};
+use futures::{Stream, StreamExt};
 
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
@@ -22,16 +26,16 @@ impl<S: 'static> App<S> {
 
     pub fn service<F, U: 'static>(mut self, address: &str, service: F) -> Self
     where
-        F: IntoNewService<U>,
-        U: NewService<Config = Link<S>, Request = Message<S>, Response = Outcome>,
+        F: IntoServiceFactory<U>,
+        U: ServiceFactory<Config = Link<S>, Request = Message<S>, Response = Outcome>,
         U::Error: Into<Error>,
         U::InitError: Into<Error>,
     {
         self.0.push((
             address.to_string(),
-            boxed::new_service(
+            boxed::factory(
                 service
-                    .into_new_service()
+                    .into_factory()
                     .map_init_err(|e| e.into())
                     .map_err(|e| e.into()),
             ),
@@ -42,15 +46,20 @@ impl<S: 'static> App<S> {
 
     pub fn finish(
         self,
-    ) -> impl NewService<Config = S, Request = Link<S>, Response = (), Error = Error, InitError = Error>
-    {
+    ) -> impl ServiceFactory<
+        Config = S,
+        Request = Link<S>,
+        Response = (),
+        Error = Error,
+        InitError = Error,
+    > {
         let mut router = Router::build();
         for (addr, hnd) in self.0 {
             router.path(&addr, hnd);
         }
         let router = Cell::new(router.finish());
 
-        new_service_cfg(move |_: &S| {
+        factory_fn_cfg(move |_: &S| {
             ok(AppService {
                 router: router.clone(),
             })
@@ -66,10 +75,10 @@ impl<S: 'static> Service for AppService<S> {
     type Request = Link<S>;
     type Response = ();
     type Error = Error;
-    type Future = Either<FutureResult<(), Error>, AppServiceResponse<S>>;
+    type Future = Either<Ready<Result<(), Error>>, AppServiceResponse<S>>;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
+    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, mut link: Link<S>) -> Self::Future {
@@ -83,14 +92,14 @@ impl<S: 'static> Service for AppService<S> {
             link.path_mut().set(path);
             if let Some((hnd, _info)) = self.router.recognize(link.path_mut()) {
                 let fut = hnd.new_service(&link);
-                Either::B(AppServiceResponse {
+                Either::Right(AppServiceResponse {
                     link: link.link.clone(),
                     app_state: link.state.clone(),
                     state: AppServiceResponseState::NewService(fut),
                     // has_credit: true,
                 })
             } else {
-                Either::A(err(LinkError::force_detach()
+                Either::Left(err(LinkError::force_detach()
                     .description(format!(
                         "Target address is not supported: {}",
                         link.path().get_ref()
@@ -98,7 +107,7 @@ impl<S: 'static> Service for AppService<S> {
                     .into()))
             }
         } else {
-            Either::A(err(LinkError::force_detach()
+            Either::Left(err(LinkError::force_detach()
                 .description("Target address is required")
                 .into()))
         }
@@ -115,90 +124,96 @@ struct AppServiceResponse<S> {
 enum AppServiceResponseState<S> {
     Service(boxed::BoxedService<Message<S>, Outcome, Error>),
     NewService(
-        Box<dyn Future<Item = boxed::BoxedService<Message<S>, Outcome, Error>, Error = Error>>,
+        Pin<
+            Box<
+                dyn Future<Output = Result<boxed::BoxedService<Message<S>, Outcome, Error>, Error>>,
+            >,
+        >,
     ),
 }
 
 impl<S> Future for AppServiceResponse<S> {
-    type Item = ();
-    type Error = Error;
+    type Output = Result<(), Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let mut this = self.as_mut();
+        let mut link = this.link.clone();
+        let app_state = this.app_state.clone();
+
         loop {
-            match self.state {
+            match this.state {
                 AppServiceResponseState::Service(ref mut srv) => {
                     // check readiness
-                    match srv.poll_ready() {
-                        Ok(Async::Ready(_)) => (),
-                        Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Err(e) => {
-                            self.link.close_with_error(
+                    match srv.poll_ready(cx) {
+                        Poll::Ready(Ok(_)) => (),
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Err(e)) => {
+                            this.link.close_with_error(
                                 LinkError::force_detach()
                                     .description(format!("error: {}", e))
                                     .into(),
                             );
-                            return Ok(Async::Ready(()));
+                            return Poll::Ready(Ok(()));
                         }
                     }
 
-                    match self.link.poll() {
-                        Ok(Async::Ready(Some(transfer))) => {
+                    match Pin::new(&mut link).poll_next(cx) {
+                        Poll::Ready(Some(Ok(transfer))) => {
                             // #2.7.5 delivery_id MUST be set. batching is not supported atm
                             if transfer.delivery_id.is_none() {
-                                self.link.close_with_error(
+                                this.link.close_with_error(
                                     LinkError::force_detach()
                                         .description("delivery_id MUST be set")
                                         .into(),
                                 );
-                                return Ok(Async::Ready(()));
+                                return Poll::Ready(Ok(()));
                             }
-                            if self.link.credit() == 0 {
+                            if link.credit() == 0 {
                                 // self.has_credit = self.link.credit() != 0;
-                                self.link.set_link_credit(50);
+                                link.set_link_credit(50);
                             }
 
                             let delivery_id = transfer.delivery_id.unwrap();
-                            let msg =
-                                Message::new(self.app_state.clone(), transfer, self.link.clone());
+                            let msg = Message::new(app_state.clone(), transfer, link.clone());
 
                             let mut fut = srv.call(msg);
-                            match fut.poll() {
-                                Ok(Async::Ready(outcome)) => settle(
-                                    &mut self.link,
+                            match Pin::new(&mut fut).poll(cx) {
+                                Poll::Ready(Ok(outcome)) => settle(
+                                    &mut this.link,
                                     delivery_id,
                                     outcome.into_delivery_state(),
                                 ),
-                                Ok(Async::NotReady) => {
-                                    tokio_current_thread::spawn(HandleMessage {
+                                Poll::Pending => {
+                                    actix_rt::spawn(HandleMessage {
                                         fut,
                                         delivery_id,
-                                        link: self.link.clone(),
+                                        link: this.link.clone(),
                                     });
                                 }
-                                Err(e) => settle(
-                                    &mut self.link,
+                                Poll::Ready(Err(e)) => settle(
+                                    &mut this.link,
                                     delivery_id,
                                     DeliveryState::Rejected(Rejected { error: Some(e) }),
                                 ),
                             }
                         }
-                        Ok(Async::Ready(None)) => return Ok(Async::Ready(())),
-                        Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Err(_e) => {
-                            self.link.close_with_error(LinkError::force_detach().into());
-                            return Ok(Async::Ready(()));
+                        Poll::Ready(None) => return Poll::Ready(Ok(())),
+                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Some(Err(_))) => {
+                            this.link.close_with_error(LinkError::force_detach().into());
+                            return Poll::Ready(Ok(()));
                         }
                     }
                 }
-                AppServiceResponseState::NewService(ref mut fut) => match fut.poll() {
-                    Ok(Async::Ready(srv)) => {
-                        self.link.open();
-                        self.link.set_link_credit(50);
-                        self.state = AppServiceResponseState::Service(srv);
+                AppServiceResponseState::NewService(ref mut fut) => match Pin::new(fut).poll(cx) {
+                    Poll::Ready(Ok(srv)) => {
+                        this.link.open();
+                        this.link.set_link_credit(50);
+                        this.state = AppServiceResponseState::Service(srv);
                         continue;
                     }
-                    Ok(Async::NotReady) => return Ok(Async::NotReady),
-                    Err(e) => return Err(e),
+                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                    Poll::Pending => return Poll::Pending,
                 },
             }
         }
@@ -208,31 +223,30 @@ impl<S> Future for AppServiceResponse<S> {
 struct HandleMessage {
     link: ReceiverLink,
     delivery_id: DeliveryNumber,
-    fut: Either<FutureResult<Outcome, Error>, Box<dyn Future<Item = Outcome, Error = Error>>>,
+    fut: Pin<Box<dyn Future<Output = Result<Outcome, Error>>>>,
 }
 
 impl Future for HandleMessage {
-    type Item = ();
-    type Error = ();
+    type Output = ();
 
-    fn poll(&mut self) -> Poll<(), ()> {
-        match self.fut.poll() {
-            Ok(Async::Ready(outcome)) => {
-                settle(
-                    &mut self.link,
-                    self.delivery_id,
-                    outcome.into_delivery_state(),
-                );
-                Ok(Async::Ready(()))
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let mut this = self.as_mut();
+
+        match Pin::new(&mut this.fut).poll(cx) {
+            Poll::Ready(Ok(outcome)) => {
+                let delivery_id = this.delivery_id;
+                settle(&mut this.link, delivery_id, outcome.into_delivery_state());
+                Poll::Ready(())
             }
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(e)) => {
+                let delivery_id = this.delivery_id;
                 settle(
-                    &mut self.link,
-                    self.delivery_id,
+                    &mut this.link,
+                    delivery_id,
                     DeliveryState::Rejected(Rejected { error: Some(e) }),
                 );
-                Ok(Async::Ready(()))
+                Poll::Ready(())
             }
         }
     }

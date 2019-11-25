@@ -1,13 +1,16 @@
 use std::fmt;
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_server_config::{Io as IoStream, ServerConfig};
-use actix_service::{boxed, IntoNewService, NewService, Service};
+use actix_service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{Error, ProtocolId};
 use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use futures::future::{err, Either};
-use futures::{Future, Poll, Sink, Stream};
+use futures::{FutureExt, SinkExt, StreamExt};
 
 use crate::cell::Cell;
 use crate::connection::{Connection, ConnectionController};
@@ -24,21 +27,21 @@ use super::sasl::Sasl;
 pub type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;
 
 /// Server dispatcher factory
-pub struct Server<Io, St, Cn> {
+pub struct Server<Io, St, Cn: ServiceFactory> {
     connect: Cn,
     config: Configuration,
     control: Option<ControlFrameNewService<St>>,
-    disconnect: Option<Box<dyn Fn(&mut St, Option<&AmqpCodecError>)>>,
+    disconnect: Option<Box<dyn Fn(&mut St, Option<&ServerError<Cn::Error>>)>>,
     max_size: usize,
     _t: PhantomData<(Io, St)>,
 }
 
-pub(super) struct ServerInner<St, Cn, Pb> {
+pub(super) struct ServerInner<St, Cn: ServiceFactory, Pb> {
     connect: Cn,
     publish: Pb,
     config: Configuration,
     control: Option<ControlFrameNewService<St>>,
-    disconnect: Option<Box<dyn Fn(&mut St, Option<&AmqpCodecError>)>>,
+    disconnect: Option<Box<dyn Fn(&mut St, Option<&ServerError<Cn::Error>>)>>,
     max_size: usize,
 }
 
@@ -47,15 +50,16 @@ where
     Io: 'static,
     St: 'static,
     Io: AsyncRead + AsyncWrite,
-    Cn: NewService<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>> + 'static,
+    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
+        + 'static,
 {
     /// Create server factory and provide connect service
     pub fn new<F>(connect: F) -> Self
     where
-        F: IntoNewService<Cn>,
+        F: IntoServiceFactory<Cn>,
     {
         Self {
-            connect: connect.into_new_service(),
+            connect: connect.into_factory(),
             config: Configuration::default(),
             control: None,
             disconnect: None,
@@ -82,8 +86,8 @@ where
     /// Service to call with control frames
     pub fn control<F, S>(self, f: F) -> Self
     where
-        F: IntoNewService<S>,
-        S: NewService<Config = (), Request = ControlFrame<St>, Response = (), InitError = ()>
+        F: IntoServiceFactory<S>,
+        S: ServiceFactory<Config = (), Request = ControlFrame<St>, Response = (), InitError = ()>
             + 'static,
         S::Error: Into<LinkError>,
     {
@@ -91,8 +95,8 @@ where
             connect: self.connect,
             config: self.config,
             disconnect: self.disconnect,
-            control: Some(boxed::new_service(
-                f.into_new_service()
+            control: Some(boxed::factory(
+                f.into_factory()
                     .map_err(|e| e.into())
                     .map_init_err(|e| e.into()),
             )),
@@ -106,17 +110,16 @@ where
     /// Second parameter indicates error occured during disconnect.
     pub fn disconnect<F, Out>(self, disconnect: F) -> Self
     where
-        F: Fn(&mut St, Option<&AmqpCodecError>) -> Out + 'static,
-        Out: futures::IntoFuture,
-        Out::Future: 'static,
+        F: Fn(&mut St, Option<&ServerError<Cn::Error>>) -> Out + 'static,
+        Out: Future + 'static,
     {
         Server {
             connect: self.connect,
             config: self.config,
             control: self.control,
             disconnect: Some(Box::new(move |st, err| {
-                let fut = disconnect(st, err).into_future();
-                tokio_current_thread::spawn(fut.map_err(|_| ()).map(|_| ()));
+                let fut = disconnect(st, err);
+                actix_rt::spawn(fut.map(|_| ()));
             })),
             max_size: self.max_size,
             _t: PhantomData,
@@ -127,10 +130,15 @@ where
     pub fn finish<F, Pb>(
         self,
         service: F,
-    ) -> impl NewService<Config = ServerConfig, Request = IoStream<Io>, Response = (), Error = ()>
+    ) -> impl ServiceFactory<
+        Config = ServerConfig,
+        Request = IoStream<Io>,
+        Response = (),
+        Error = ServerError<Cn::Error>,
+    >
     where
-        F: IntoNewService<Pb>,
-        Pb: NewService<Config = St, Request = Link<St>, Response = ()> + 'static,
+        F: IntoServiceFactory<Pb>,
+        Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
         Pb::Error: fmt::Display + Into<Error>,
         Pb::InitError: fmt::Display + Into<Error>,
     {
@@ -138,7 +146,7 @@ where
             inner: Cell::new(ServerInner {
                 connect: self.connect,
                 config: self.config,
-                publish: service.into_new_service(),
+                publish: service.into_factory(),
                 control: self.control,
                 disconnect: self.disconnect,
                 max_size: self.max_size,
@@ -148,45 +156,47 @@ where
     }
 }
 
-struct ServerImpl<Io, St, Cn, Pb> {
+struct ServerImpl<Io, St, Cn: ServiceFactory, Pb> {
     inner: Cell<ServerInner<St, Cn, Pb>>,
     _t: PhantomData<(Io,)>,
 }
 
-impl<Io, St, Cn, Pb> NewService for ServerImpl<Io, St, Cn, Pb>
+impl<Io, St, Cn, Pb> ServiceFactory for ServerImpl<Io, St, Cn, Pb>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
-    Cn: NewService<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>> + 'static,
-    Pb: NewService<Config = St, Request = Link<St>, Response = ()> + 'static,
+    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
+        + 'static,
+    Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
     type Config = ServerConfig;
     type Request = IoStream<Io>;
     type Response = ();
-    type Error = ();
+    type Error = ServerError<Cn::Error>;
     type Service = ServerImplService<Io, St, Cn, Pb>;
     type InitError = Cn::InitError;
-    type Future = Box<dyn Future<Item = Self::Service, Error = Cn::InitError>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Cn::InitError>>>>;
 
     fn new_service(&self, _: &ServerConfig) -> Self::Future {
         let inner = self.inner.clone();
 
-        Box::new(
-            self.inner
+        Box::pin(async move {
+            inner
                 .connect
                 .new_service(&())
+                .await
                 .map(move |connect| ServerImplService {
                     inner,
                     connect: Cell::new(connect),
                     _t: PhantomData,
-                }),
-        )
+                })
+        })
     }
 }
 
-struct ServerImplService<Io, St, Cn: NewService, Pb> {
+struct ServerImplService<Io, St, Cn: ServiceFactory, Pb> {
     connect: Cell<Cn::Service>,
     inner: Cell<ServerInner<St, Cn, Pb>>,
     _t: PhantomData<(Io,)>,
@@ -196,22 +206,26 @@ impl<Io, St, Cn, Pb> Service for ServerImplService<Io, St, Cn, Pb>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
-    Cn: NewService<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>> + 'static,
-    Pb: NewService<Config = St, Request = Link<St>, Response = ()> + 'static,
+    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
+        + 'static,
+    Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
     type Request = IoStream<Io>;
     type Response = ();
-    type Error = ();
-    type Future = Box<dyn Future<Item = Self::Response, Error = Self::Error>>;
+    type Error = ServerError<Cn::Error>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        self.connect.get_mut().poll_ready().map_err(|_| ())
+    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        self.connect
+            .get_mut()
+            .poll_ready(cx)
+            .map(|res| res.map_err(|e| ServerError::Service(e)))
     }
 
     fn call(&mut self, req: Self::Request) -> Self::Future {
-        Box::new(handshake(
+        Box::pin(handshake(
             self.inner.max_size,
             self.connect.clone(),
             self.inner.clone(),
@@ -220,119 +234,103 @@ where
     }
 }
 
-fn handshake<Io, St, Cn: NewService, Pb, I>(
+async fn handshake<Io, St, Cn: ServiceFactory, Pb, I>(
     max_size: usize,
     connect: Cell<Cn::Service>,
     inner: Cell<ServerInner<St, Cn, Pb>>,
     stream: IoStream<Io, I>,
-) -> impl Future<Item = (), Error = ()>
+) -> Result<(), ServerError<Cn::Error>>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
-    Cn: NewService<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
-    Pb: NewService<Config = St, Request = Link<St>, Response = ()> + 'static,
+    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
+    Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
     let (io, _, _) = stream.into_parts();
 
     let inner2 = inner.clone();
-    let framed = Framed::new(io, ProtocolIdCodec);
+    let mut framed = Framed::new(io, ProtocolIdCodec);
 
-    framed
-        .into_future()
-        .map_err(|e| ServerError::Handshake(e.0))
-        .and_then(move |(protocol, mut framed)| {
-            match protocol {
-                // start amqp processing
-                Some(ProtocolId::Amqp) | Some(ProtocolId::AmqpSasl) => {
-                    if let Err(e) = framed.force_send(protocol.unwrap()) {
-                        return Either::B(err(ServerError::from(e)));
-                    }
-                    let cfg = inner.get_ref().config.clone();
-                    let controller = ConnectionController::new(cfg.clone());
+    let protocol = framed
+        .next()
+        .await
+        .ok_or(ServerError::Disconnected)?
+        .map_err(ServerError::Handshake)?;
 
-                    Either::A(
-                        connect
-                            .get_mut()
-                            .call(if protocol == Some(ProtocolId::Amqp) {
-                                either::Either::Left(Connect::new(framed, controller))
-                            } else {
-                                either::Either::Right(Sasl::new(framed, controller))
-                            })
-                            .map_err(|e| ServerError::Service(e))
-                            .and_then(move |ack| {
-                                let (st, mut framed, controller) = ack.into_inner();
-                                let st = Cell::new(st);
-                                framed.get_codec_mut().max_size(max_size);
-
-                                // confirm Open
-                                let local = cfg.to_open();
-                                framed
-                                    .send(AmqpFrame::new(0, local.into()))
-                                    .map_err(ServerError::from)
-                                    .map(move |framed| {
-                                        Connection::new_server(framed, controller.0, None)
-                                    })
-                                    .and_then(move |conn| {
-                                        // create publish service
-                                        inner
-                                            .publish
-                                            .new_service(st.get_ref())
-                                            .map_err(|e| {
-                                                error!("Can not construct app service");
-                                                ServerError::ProtocolError(e.into())
-                                            })
-                                            .map(move |srv| (st, srv, conn))
-                                    })
-                            }),
-                    )
-                }
-                Some(ProtocolId::AmqpTls) => {
-                    Either::B(err(ServerError::from(ProtocolIdError::Unexpected {
-                        exp: ProtocolId::Amqp,
-                        got: ProtocolId::AmqpTls,
-                    })))
-                }
-                None => Either::B(err(ServerError::Disconnected.into())),
+    let (st, srv, conn) = match protocol {
+        // start amqp processing
+        ProtocolId::Amqp | ProtocolId::AmqpSasl => {
+            if let Err(e) = framed.write(protocol) {
+                return Err(ServerError::from(e));
             }
-        })
-        .map_err(|_| ())
-        .and_then(move |(st, srv, conn)| {
-            let st2 = st.clone();
-            if let Some(ref control_srv) = inner2.control {
-                Either::A(
-                    control_srv
-                        .new_service(&())
-                        .map_err(|_e| ())
-                        .and_then(move |control| {
-                            Dispatcher::new(conn, st, srv, Some(control))
-                                .then(move |res| {
-                                    if inner2.disconnect.is_some() {
-                                        (*inner2.get_mut().disconnect.as_mut().unwrap())(
-                                            st2.get_mut(),
-                                            res.as_ref().err(),
-                                        )
-                                    }
-                                    res
-                                })
-                                .map_err(|_| ())
-                        }),
-                )
-            } else {
-                Either::B(
-                    Dispatcher::new(conn, st, srv, None)
-                        .then(move |res| {
-                            if inner2.disconnect.is_some() {
-                                (*inner2.get_mut().disconnect.as_mut().unwrap())(
-                                    st2.get_mut(),
-                                    res.as_ref().err(),
-                                )
-                            }
-                            res
-                        })
-                        .map_err(|_| ()),
-                )
-            }
-        })
+            let cfg = inner.get_ref().config.clone();
+            let controller = ConnectionController::new(cfg.clone());
+
+            let ack = connect
+                .get_mut()
+                .call(if protocol == ProtocolId::Amqp {
+                    either::Either::Left(Connect::new(framed, controller))
+                } else {
+                    either::Either::Right(Sasl::new(framed, controller))
+                })
+                .await
+                .map_err(|e| ServerError::Service(e))?;
+
+            let (st, mut framed, controller) = ack.into_inner();
+            let st = Cell::new(st);
+            framed.get_codec_mut().max_size(max_size);
+
+            // confirm Open
+            let local = cfg.to_open();
+            framed
+                .send(AmqpFrame::new(0, local.into()))
+                .await
+                .map_err(ServerError::from)?;
+
+            let conn = Connection::new_server(framed, controller.0, None);
+
+            // create publish service
+            let srv = inner.publish.new_service(st.get_ref()).await.map_err(|e| {
+                error!("Can not construct app service");
+                ServerError::ProtocolError(e.into())
+            })?;
+
+            (st, srv, conn)
+        }
+        ProtocolId::AmqpTls => {
+            return Err(ServerError::from(ProtocolIdError::Unexpected {
+                exp: ProtocolId::Amqp,
+                got: ProtocolId::AmqpTls,
+            }))
+        }
+    };
+
+    let st2 = st.clone();
+
+    if let Some(ref control_srv) = inner2.control {
+        let control = control_srv
+            .new_service(&())
+            .await
+            .map_err(|_| ServerError::ControlServiceInit)?;
+
+        let res = Dispatcher::new(conn, st, srv, Some(control))
+            .await
+            .map_err(ServerError::from);
+
+        if inner2.disconnect.is_some() {
+            (*inner2.get_mut().disconnect.as_mut().unwrap())(st2.get_mut(), res.as_ref().err())
+        }
+        res
+    } else {
+        let res = Dispatcher::new(conn, st, srv, None)
+            .await
+            .map_err(ServerError::from);
+
+        if inner2.disconnect.is_some() {
+            (*inner2.get_mut().disconnect.as_mut().unwrap())(st2.get_mut(), res.as_ref().err())
+        }
+        res
+    }
 }

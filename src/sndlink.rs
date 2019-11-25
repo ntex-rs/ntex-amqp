@@ -1,11 +1,12 @@
 use std::collections::VecDeque;
+use std::future::Future;
 
+use actix_utils::oneshot;
 use amqp_codec::protocol::{
     Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 use bytes::Bytes;
-use futures::{unsync::oneshot, Future};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
@@ -35,7 +36,7 @@ pub(crate) struct SenderLinkInner {
     link_credit: u32,
     pending_transfers: VecDeque<PendingTransfer>,
     error: Option<AmqpTransportError>,
-    _closed: bool,
+    closed: bool,
 }
 
 struct PendingTransfer {
@@ -71,22 +72,22 @@ impl SenderLink {
         &mut self.inner.get_mut().session
     }
 
-    pub fn send<T>(&self, body: T) -> impl Future<Item = Disposition, Error = AmqpTransportError>
+    pub async fn send<T>(&self, body: T) -> Result<Disposition, AmqpTransportError>
     where
         T: Into<TransferBody>,
     {
-        self.inner.get_mut().send(body, None)
+        self.inner.get_mut().send(body, None).await
     }
 
-    pub fn send_with_tag<T>(
+    pub async fn send_with_tag<T>(
         &self,
         body: T,
         tag: Bytes,
-    ) -> impl Future<Item = Disposition, Error = AmqpTransportError>
+    ) -> Result<Disposition, AmqpTransportError>
     where
         T: Into<TransferBody>,
     {
-        self.inner.get_mut().send(body, Some(tag))
+        self.inner.get_mut().send(body, Some(tag)).await
     }
 
     pub fn settle_message(&self, id: DeliveryNumber, state: DeliveryState) {
@@ -97,11 +98,8 @@ impl SenderLink {
     //     self.inner.get_mut().close(None)
     // }
 
-    pub fn close_with_error(
-        &self,
-        error: Error,
-    ) -> impl Future<Item = (), Error = AmqpTransportError> {
-        self.inner.get_mut().close(Some(error))
+    pub async fn close_with_error(&self, error: Error) -> Result<(), AmqpTransportError> {
+        self.inner.get_mut().close(Some(error)).await
     }
 }
 
@@ -123,7 +121,7 @@ impl SenderLinkInner {
             link_credit: 0,
             pending_transfers: VecDeque::new(),
             error: None,
-            _closed: false,
+            closed: false,
         }
     }
 
@@ -148,24 +146,23 @@ impl SenderLinkInner {
         self.error = Some(err);
     }
 
-    pub fn close(
-        &self,
-        error: Option<Error>,
-    ) -> impl Future<Item = (), Error = AmqpTransportError> {
-        let (tx, rx) = oneshot::channel();
-        //if self.closed {
-        //    let _ = tx.send(Ok(()));
-        //} else {
-        self.session
-            .inner
-            .get_mut()
-            .detach_sender_link(self.id, true, error, tx);
-        //}
-        rx.then(|res| match res {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AmqpTransportError::Disconnected),
-        })
+    pub async fn close(&self, error: Option<Error>) -> Result<(), AmqpTransportError> {
+        if self.closed {
+            Ok(())
+        } else {
+            let (tx, rx) = oneshot::channel();
+
+            self.session
+                .inner
+                .get_mut()
+                .detach_sender_link(self.id, true, error, tx);
+
+            match rx.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(AmqpTransportError::Disconnected),
+            }
+        }
     }
 
     pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
@@ -305,10 +302,11 @@ impl SenderLinkBuilder {
         self
     }
 
-    pub fn open(self) -> impl Future<Item = SenderLink, Error = AmqpTransportError> {
+    pub async fn open(self) -> Result<SenderLink, AmqpTransportError> {
         self.session
             .get_mut()
             .open_sender_link(self.frame)
+            .await
             .map_err(|_e| AmqpTransportError::Disconnected)
     }
 }
