@@ -15,7 +15,7 @@ use super::errors::LinkError;
 use super::link::Link;
 use super::message::{Message, Outcome};
 
-type Handle<S> = boxed::BoxedNewService<Link<S>, Message<S>, Outcome, Error, Error>;
+type Handle<S> = boxed::BoxServiceFactory<Link<S>, Message<S>, Outcome, Error, Error>;
 
 pub struct App<S = ()>(Vec<(String, Handle<S>)>);
 
@@ -122,13 +122,9 @@ struct AppServiceResponse<S> {
 }
 
 enum AppServiceResponseState<S> {
-    Service(boxed::BoxedService<Message<S>, Outcome, Error>),
+    Service(boxed::BoxService<Message<S>, Outcome, Error>),
     NewService(
-        Pin<
-            Box<
-                dyn Future<Output = Result<boxed::BoxedService<Message<S>, Outcome, Error>, Error>>,
-            >,
-        >,
+        Pin<Box<dyn Future<Output = Result<boxed::BoxService<Message<S>, Outcome, Error>, Error>>>>,
     ),
 }
 

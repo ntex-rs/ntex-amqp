@@ -1,4 +1,4 @@
-use actix_service::boxed::{BoxedNewService, BoxedService};
+use actix_service::boxed::{BoxService, BoxServiceFactory};
 use amqp_codec::protocol;
 
 use super::errors::LinkError;
@@ -6,9 +6,9 @@ use crate::cell::Cell;
 use crate::session::Session;
 use crate::sndlink::SenderLink;
 
-pub(crate) type ControlFrameService<St> = BoxedService<ControlFrame<St>, (), LinkError>;
+pub(crate) type ControlFrameService<St> = BoxService<ControlFrame<St>, (), LinkError>;
 pub(crate) type ControlFrameNewService<St> =
-    BoxedNewService<(), ControlFrame<St>, (), LinkError, ()>;
+    BoxServiceFactory<(), ControlFrame<St>, (), LinkError, ()>;
 
 pub struct ControlFrame<St>(pub(super) Cell<FrameInner<St>>);
 

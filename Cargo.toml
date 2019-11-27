@@ -27,7 +27,7 @@ actix-utils = "0.5.0-alpha.1"
 actix-server-config = "0.3.0-alpha.1"
 actix-rt = "1.0.0-alpha.1"
 
-derive_more = "0.15"
+derive_more = "0.99.2"
 either = "1.5.2"
 futures = "0.3.1"
 hashbrown = "0.6.3"
@@ -38,7 +38,6 @@ pin-project = "0.4.6"
 uuid = { version = "0.7", features = ["v4"] }
 slab = "0.4"
 string = "0.2.1"
-tokio-timer = "0.3.0-alpha.1"
 
 [dev-dependencies]
 env_logger = "0.6"
@@ -47,3 +46,12 @@ actix-testing = "0.3.0-alpha.1"
 [patch.crates-io]
 actix-amqp = { path = "." }
 amqp-codec = { path = "codec" }
+
+actix-codec = { git = "https://github.com/actix/actix-net.git" }
+actix-connect = { git = "https://github.com/actix/actix-net.git" }
+actix-rt = { git = "https://github.com/actix/actix-net.git" }
+actix-macros = { git = "https://github.com/actix/actix-net.git" }
+actix-server-config = { git = "https://github.com/actix/actix-net.git" }
+actix-service = { git = "https://github.com/actix/actix-net.git" }
+actix-testing = { git = "https://github.com/actix/actix-net.git" }
+actix-utils = {  git = "https://github.com/actix/actix-net.git" }
