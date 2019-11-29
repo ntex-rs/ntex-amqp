@@ -72,11 +72,11 @@ impl SenderLink {
         &mut self.inner.get_mut().session
     }
 
-    pub async fn send<T>(&self, body: T) -> Result<Disposition, AmqpTransportError>
+    pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpTransportError>>
     where
         T: Into<TransferBody>,
     {
-        self.inner.get_mut().send(body, None).await
+        self.inner.get_mut().send(body, None)
     }
 
     pub async fn send_with_tag<T>(
