@@ -321,7 +321,7 @@ impl<Io, St, E> ServiceFactory for NoSaslService<Io, St, E> {
     type Service = NoSaslService<Io, St, E>;
     type Future = Ready<Result<Self::Service, Self::InitError>>;
 
-    fn new_service(&self, _: &()) -> Self::Future {
+    fn new_service(&self, _: ()) -> Self::Future {
         ok(NoSaslService(std::marker::PhantomData))
     }
 }

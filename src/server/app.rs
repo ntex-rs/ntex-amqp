@@ -59,7 +59,7 @@ impl<S: 'static> App<S> {
         }
         let router = Cell::new(router.finish());
 
-        factory_fn_cfg(move |_: &S| {
+        factory_fn_cfg(move |_: S| {
             ok(AppService {
                 router: router.clone(),
             })
@@ -91,7 +91,7 @@ impl<S: 'static> Service for AppService<S> {
         if let Some(path) = path {
             link.path_mut().set(path);
             if let Some((hnd, _info)) = self.router.recognize(link.path_mut()) {
-                let fut = hnd.new_service(&link);
+                let fut = hnd.new_service(link.clone());
                 Either::Right(AppServiceResponse {
                     link: link.link.clone(),
                     app_state: link.state.clone(),

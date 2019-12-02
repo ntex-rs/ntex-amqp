@@ -5,7 +5,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_server_config::{Io as IoStream, ServerConfig};
 use actix_service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{Error, ProtocolId};
 use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
@@ -47,9 +46,8 @@ pub(super) struct ServerInner<St, Cn: ServiceFactory, Pb> {
 
 impl<Io, St, Cn> Server<Io, St, Cn>
 where
-    Io: 'static,
-    St: 'static,
-    Io: AsyncRead + AsyncWrite,
+    St: Clone + 'static,
+    Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
 {
@@ -130,12 +128,7 @@ where
     pub fn finish<F, Pb>(
         self,
         service: F,
-    ) -> impl ServiceFactory<
-        Config = ServerConfig,
-        Request = IoStream<Io>,
-        Response = (),
-        Error = ServerError<Cn::Error>,
-    >
+    ) -> impl ServiceFactory<Config = (), Request = Io, Response = (), Error = ServerError<Cn::Error>>
     where
         F: IntoServiceFactory<Pb>,
         Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
@@ -163,7 +156,7 @@ struct ServerImpl<Io, St, Cn: ServiceFactory, Pb> {
 
 impl<Io, St, Cn, Pb> ServiceFactory for ServerImpl<Io, St, Cn, Pb>
 where
-    St: 'static,
+    St: Clone + 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
@@ -171,21 +164,21 @@ where
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
-    type Config = ServerConfig;
-    type Request = IoStream<Io>;
+    type Config = ();
+    type Request = Io;
     type Response = ();
     type Error = ServerError<Cn::Error>;
     type Service = ServerImplService<Io, St, Cn, Pb>;
     type InitError = Cn::InitError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Cn::InitError>>>>;
 
-    fn new_service(&self, _: &ServerConfig) -> Self::Future {
+    fn new_service(&self, _: ()) -> Self::Future {
         let inner = self.inner.clone();
 
         Box::pin(async move {
             inner
                 .connect
-                .new_service(&())
+                .new_service(())
                 .await
                 .map(move |connect| ServerImplService {
                     inner,
@@ -204,7 +197,7 @@ struct ServerImplService<Io, St, Cn: ServiceFactory, Pb> {
 
 impl<Io, St, Cn, Pb> Service for ServerImplService<Io, St, Cn, Pb>
 where
-    St: 'static,
+    St: Clone + 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
@@ -212,7 +205,7 @@ where
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
-    type Request = IoStream<Io>;
+    type Request = Io;
     type Response = ();
     type Error = ServerError<Cn::Error>;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
@@ -234,22 +227,20 @@ where
     }
 }
 
-async fn handshake<Io, St, Cn: ServiceFactory, Pb, I>(
+async fn handshake<Io, St, Cn: ServiceFactory, Pb>(
     max_size: usize,
     connect: Cell<Cn::Service>,
     inner: Cell<ServerInner<St, Cn, Pb>>,
-    stream: IoStream<Io, I>,
+    io: Io,
 ) -> Result<(), ServerError<Cn::Error>>
 where
-    St: 'static,
+    St: Clone + 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
     Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
-    let (io, _, _) = stream.into_parts();
-
     let inner2 = inner.clone();
     let mut framed = Framed::new(io, ProtocolIdCodec);
 
@@ -292,10 +283,14 @@ where
             let conn = Connection::new_server(framed, controller.0, None);
 
             // create publish service
-            let srv = inner.publish.new_service(st.get_ref()).await.map_err(|e| {
-                error!("Can not construct app service");
-                ServerError::ProtocolError(e.into())
-            })?;
+            let srv = inner
+                .publish
+                .new_service(st.get_ref().clone())
+                .await
+                .map_err(|e| {
+                    error!("Can not construct app service");
+                    ServerError::ProtocolError(e.into())
+                })?;
 
             (st, srv, conn)
         }
@@ -311,7 +306,7 @@ where
 
     if let Some(ref control_srv) = inner2.control {
         let control = control_srv
-            .new_service(&())
+            .new_service(())
             .await
             .map_err(|_| ServerError::ControlServiceInit)?;
 

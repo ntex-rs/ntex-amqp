@@ -19,13 +19,12 @@ members = [
 [dependencies]
 amqp-codec = "0.1.0"
 
-actix-codec = "0.2.0-alpha.1"
-actix-service = "1.0.0-alpha.1"
-actix-connect = "1.0.0-alpha.1"
+actix-codec = "0.2.0-alpha.2"
+actix-service = "1.0.0-alpha.2"
+actix-connect = "1.0.0-alpha.2"
 actix-router = "0.1.2"
-actix-utils = "0.5.0-alpha.1"
-actix-server-config = "0.3.0-alpha.1"
-actix-rt = "1.0.0-alpha.1"
+actix-utils = "1.0.0-alpha.2"
+actix-rt = "1.0.0-alpha.2"
 
 derive_more = "0.99.2"
 either = "1.5.2"
@@ -41,17 +40,8 @@ string = "0.2.1"
 
 [dev-dependencies]
 env_logger = "0.6"
-actix-testing = "0.3.0-alpha.1"
+actix-testing = "1.0.0-alpha.2"
 
 [patch.crates-io]
 actix-amqp = { path = "." }
 amqp-codec = { path = "codec" }
-
-actix-codec = { git = "https://github.com/actix/actix-net.git" }
-actix-connect = { git = "https://github.com/actix/actix-net.git" }
-actix-rt = { git = "https://github.com/actix/actix-net.git" }
-actix-macros = { git = "https://github.com/actix/actix-net.git" }
-actix-server-config = { git = "https://github.com/actix/actix-net.git" }
-actix-service = { git = "https://github.com/actix/actix-net.git" }
-actix-testing = { git = "https://github.com/actix/actix-net.git" }
-actix-utils = {  git = "https://github.com/actix/actix-net.git" }
