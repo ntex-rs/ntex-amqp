@@ -14,6 +14,7 @@ use crate::rcvlink::ReceiverLink;
 use super::errors::LinkError;
 use super::link::Link;
 use super::message::{Message, Outcome};
+use super::State;
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Message<S>, Outcome, Error, Error>;
 
@@ -47,7 +48,7 @@ impl<S: 'static> App<S> {
     pub fn finish(
         self,
     ) -> impl ServiceFactory<
-        Config = S,
+        Config = State<S>,
         Request = Link<S>,
         Response = (),
         Error = Error,
@@ -59,7 +60,7 @@ impl<S: 'static> App<S> {
         }
         let router = Cell::new(router.finish());
 
-        factory_fn_cfg(move |_: S| {
+        factory_fn_cfg(move |_: State<S>| {
             ok(AppService {
                 router: router.clone(),
             })
@@ -116,7 +117,7 @@ impl<S: 'static> Service for AppService<S> {
 
 struct AppServiceResponse<S> {
     link: ReceiverLink,
-    app_state: Cell<S>,
+    app_state: State<S>,
     state: AppServiceResponseState<S>,
     // has_credit: bool,
 }

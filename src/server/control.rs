@@ -1,10 +1,12 @@
 use actix_service::boxed::{BoxService, BoxServiceFactory};
 use amqp_codec::protocol;
 
-use super::errors::LinkError;
 use crate::cell::Cell;
 use crate::session::Session;
 use crate::sndlink::SenderLink;
+
+use super::errors::LinkError;
+use super::State;
 
 pub(crate) type ControlFrameService<St> = BoxService<ControlFrame<St>, (), LinkError>;
 pub(crate) type ControlFrameNewService<St> =
@@ -14,7 +16,7 @@ pub struct ControlFrame<St>(pub(super) Cell<FrameInner<St>>);
 
 pub(super) struct FrameInner<St> {
     pub(super) kind: ControlFrameKind,
-    pub(super) state: Cell<St>,
+    pub(super) state: State<St>,
     pub(super) session: Session,
 }
 
@@ -26,7 +28,7 @@ pub enum ControlFrameKind {
 }
 
 impl<St> ControlFrame<St> {
-    pub(crate) fn new(state: Cell<St>, session: Session, kind: ControlFrameKind) -> Self {
+    pub(crate) fn new(state: State<St>, session: Session, kind: ControlFrameKind) -> Self {
         ControlFrame(Cell::new(FrameInner {
             state,
             session,
@@ -45,7 +47,7 @@ impl<St> ControlFrame<St> {
 
     #[inline]
     pub fn state_mut(&mut self) -> &mut St {
-        self.0.state.get_mut()
+        self.0.get_mut().state.get_mut()
     }
 
     #[inline]

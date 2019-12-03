@@ -21,6 +21,7 @@ use super::dispatcher::Dispatcher;
 use super::errors::{LinkError, ServerError};
 use super::link::Link;
 use super::sasl::Sasl;
+use super::State;
 
 /// Amqp connection type
 pub type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;
@@ -46,7 +47,7 @@ pub(super) struct ServerInner<St, Cn: ServiceFactory, Pb> {
 
 impl<Io, St, Cn> Server<Io, St, Cn>
 where
-    St: Clone + 'static,
+    St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
@@ -131,7 +132,7 @@ where
     ) -> impl ServiceFactory<Config = (), Request = Io, Response = (), Error = ServerError<Cn::Error>>
     where
         F: IntoServiceFactory<Pb>,
-        Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
+        Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
         Pb::Error: fmt::Display + Into<Error>,
         Pb::InitError: fmt::Display + Into<Error>,
     {
@@ -156,11 +157,11 @@ struct ServerImpl<Io, St, Cn: ServiceFactory, Pb> {
 
 impl<Io, St, Cn, Pb> ServiceFactory for ServerImpl<Io, St, Cn, Pb>
 where
-    St: Clone + 'static,
+    St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
-    Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
@@ -197,11 +198,11 @@ struct ServerImplService<Io, St, Cn: ServiceFactory, Pb> {
 
 impl<Io, St, Cn, Pb> Service for ServerImplService<Io, St, Cn, Pb>
 where
-    St: Clone + 'static,
+    St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
-    Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
@@ -234,10 +235,10 @@ async fn handshake<Io, St, Cn: ServiceFactory, Pb>(
     io: Io,
 ) -> Result<(), ServerError<Cn::Error>>
 where
-    St: Clone + 'static,
+    St: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
-    Pb: ServiceFactory<Config = St, Request = Link<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
 {
@@ -270,7 +271,7 @@ where
                 .map_err(|e| ServerError::Service(e))?;
 
             let (st, mut framed, controller) = ack.into_inner();
-            let st = Cell::new(st);
+            let st = State::new(st);
             framed.get_codec_mut().max_size(max_size);
 
             // confirm Open
@@ -283,14 +284,10 @@ where
             let conn = Connection::new_server(framed, controller.0, None);
 
             // create publish service
-            let srv = inner
-                .publish
-                .new_service(st.get_ref().clone())
-                .await
-                .map_err(|e| {
-                    error!("Can not construct app service");
-                    ServerError::ProtocolError(e.into())
-                })?;
+            let srv = inner.publish.new_service(st.clone()).await.map_err(|e| {
+                error!("Can not construct app service");
+                ServerError::ProtocolError(e.into())
+            })?;
 
             (st, srv, conn)
         }
@@ -302,7 +299,7 @@ where
         }
     };
 
-    let st2 = st.clone();
+    let mut st2 = st.clone();
 
     if let Some(ref control_srv) = inner2.control {
         let control = control_srv

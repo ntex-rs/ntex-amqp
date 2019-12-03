@@ -4,13 +4,14 @@ use amqp_codec::protocol::{Accepted, DeliveryState, Error, Rejected, Transfer, T
 use amqp_codec::Decode;
 use bytes::Bytes;
 
-use super::errors::AmqpError;
-use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
 
+use super::errors::AmqpError;
+use super::State;
+
 pub struct Message<S> {
-    state: Cell<S>,
+    state: State<S>,
     frame: Transfer,
     link: ReceiverLink,
 }
@@ -42,7 +43,7 @@ impl Outcome {
 }
 
 impl<S> Message<S> {
-    pub(crate) fn new(state: Cell<S>, frame: Transfer, link: ReceiverLink) -> Self {
+    pub(crate) fn new(state: State<S>, frame: Transfer, link: ReceiverLink) -> Self {
         Message { state, frame, link }
     }
 

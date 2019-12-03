@@ -79,15 +79,15 @@ impl SenderLink {
         self.inner.get_mut().send(body, None)
     }
 
-    pub async fn send_with_tag<T>(
+    pub fn send_with_tag<T>(
         &self,
         body: T,
         tag: Bytes,
-    ) -> Result<Disposition, AmqpTransportError>
+    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>>
     where
         T: Into<TransferBody>,
     {
-        self.inner.get_mut().send(body, Some(tag)).await
+        self.inner.get_mut().send(body, Some(tag))
     }
 
     pub fn settle_message(&self, id: DeliveryNumber, state: DeliveryState) {

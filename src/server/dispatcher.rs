@@ -16,7 +16,7 @@ use crate::session::Session;
 
 use super::control::{ControlFrame, ControlFrameKind, ControlFrameService};
 use super::errors::LinkError;
-use super::Link;
+use super::{Link, State};
 
 /// Amqp server connection dispatcher.
 #[pin_project::pin_project]
@@ -26,7 +26,7 @@ where
     Sr: Service<Request = Link<St>, Response = ()>,
 {
     conn: Connection<Io>,
-    state: Cell<St>,
+    state: State<St>,
     service: Sr,
     control_srv: Option<ControlFrameService<St>>,
     control_frame: Option<ControlFrame<St>>,
@@ -50,7 +50,7 @@ where
 {
     pub(crate) fn new(
         conn: Connection<Io>,
-        state: Cell<St>,
+        state: State<St>,
         service: Sr,
         control_srv: Option<ControlFrameService<St>>,
     ) -> Self {

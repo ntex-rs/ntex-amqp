@@ -5,17 +5,18 @@ use amqp_codec::{protocol::Attach, types::ByteStr};
 
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
+use crate::server::State;
 use crate::session::Session;
 use crate::Configuration;
 
 pub struct Link<S> {
-    pub(crate) state: Cell<S>,
+    pub(crate) state: State<S>,
     pub(crate) link: ReceiverLink,
     pub(crate) path: Path<ByteStr>,
 }
 
 impl<S> Link<S> {
-    pub(crate) fn new(link: ReceiverLink, state: Cell<S>) -> Self {
+    pub(crate) fn new(link: ReceiverLink, state: State<S>) -> Self {
         Link {
             state,
             link,
