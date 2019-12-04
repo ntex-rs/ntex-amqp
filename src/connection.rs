@@ -10,7 +10,7 @@ use actix_utils::task::LocalWaker;
 use actix_utils::time::LowResTimeService;
 use futures::future::{err, Either};
 use futures::{future, Sink, Stream};
-use hashbrown::HashMap;
+use fxhash::FxHashMap;
 
 use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
 use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
@@ -48,7 +48,7 @@ pub(crate) struct ConnectionInner {
     write_queue: VecDeque<AmqpFrame>,
     write_task: LocalWaker,
     sessions: slab::Slab<ChannelState>,
-    sessions_map: HashMap<u16, usize>,
+    sessions_map: FxHashMap<u16, usize>,
     error: Option<AmqpTransportError>,
     state: State,
 }
@@ -463,7 +463,7 @@ impl ConnectionController {
             write_queue: VecDeque::new(),
             write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
-            sessions_map: HashMap::new(),
+            sessions_map: FxHashMap::default(),
             error: None,
             state: State::Normal,
         }))
@@ -502,7 +502,7 @@ impl ConnectionInner {
             write_queue: VecDeque::new(),
             write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
-            sessions_map: HashMap::new(),
+            sessions_map: FxHashMap::default(),
             error: None,
             state: State::Normal,
         }

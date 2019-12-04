@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use hashbrown::HashMap;
+use fxhash::FxHashMap;
 
 use crate::codec::{Decode, Encode, FORMATCODE_BINARY8};
 use crate::errors::AmqpParseError;
@@ -103,7 +103,7 @@ impl InMessage {
         if let Some(ref mut props) = self.application_properties {
             props.insert(key.into(), value.into());
         } else {
-            let mut props = HashMap::new();
+            let mut props = FxHashMap::default();
             props.insert(key.into(), value.into());
             self.application_properties = Some(props);
         }

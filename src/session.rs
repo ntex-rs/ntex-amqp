@@ -4,7 +4,7 @@ use std::future::Future;
 use actix_utils::oneshot;
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use hashbrown::HashMap;
+use fxhash::FxHashMap;
 use slab::Slab;
 use string::{self, TryFrom};
 
@@ -166,13 +166,13 @@ pub(crate) struct SessionInner {
     remote_outgoing_window: u32,
     remote_incoming_window: u32,
 
-    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
+    unsettled_deliveries: FxHashMap<DeliveryNumber, DeliveryPromise>,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
-    links_by_name: HashMap<string::String<Bytes>, usize>,
-    remote_handles: HashMap<Handle, usize>,
+    links_by_name: FxHashMap<string::String<Bytes>, usize>,
+    remote_handles: FxHashMap<Handle, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
-    disposition_subscribers: HashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
+    disposition_subscribers: FxHashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
     error: Option<AmqpTransportError>,
 }
 
@@ -204,12 +204,12 @@ impl SessionInner {
             remote_incoming_window,
             remote_outgoing_window,
             next_outgoing_id: INITIAL_OUTGOING_ID,
-            unsettled_deliveries: HashMap::new(),
+            unsettled_deliveries: FxHashMap::default(),
             links: Slab::new(),
-            links_by_name: HashMap::new(),
-            remote_handles: HashMap::new(),
+            links_by_name: FxHashMap::default(),
+            remote_handles: FxHashMap::default(),
             pending_transfers: VecDeque::new(),
-            disposition_subscribers: HashMap::new(),
+            disposition_subscribers: FxHashMap::default(),
             error: None,
         }
     }

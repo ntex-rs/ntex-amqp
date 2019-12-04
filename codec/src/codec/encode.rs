@@ -1,9 +1,9 @@
+use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::{i8, u8};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
-use hashbrown::HashMap;
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};
@@ -484,6 +484,7 @@ impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, 
         }
     }
 }
+
 impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_MAP32;
     fn array_encoded_size(&self) -> usize {

@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::{char, str, u8};
 
 use bytes::{BigEndian, ByteOrder, Bytes};
 use chrono::{DateTime, TimeZone, Utc};
-use hashbrown::HashMap;
+use fxhash::FxHashMap;
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
@@ -433,10 +434,12 @@ impl DecodeFormatted for Variant {
             codec::FORMATCODE_LIST32 => {
                 List::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::List(o)))
             }
-            codec::FORMATCODE_MAP8 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
+            codec::FORMATCODE_MAP8 => FxHashMap::<Variant, Variant>::decode_with_format(input, fmt)
                 .map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
-            codec::FORMATCODE_MAP32 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
-                .map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
+            codec::FORMATCODE_MAP32 => {
+                FxHashMap::<Variant, Variant>::decode_with_format(input, fmt)
+                    .map(|(i, o)| (i, Variant::Map(VariantMap::new(o))))
+            }
             // codec::FORMATCODE_ARRAY8 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
             // codec::FORMATCODE_ARRAY32 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
             codec::FORMATCODE_DESCRIBED => {

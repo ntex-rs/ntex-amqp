@@ -1,8 +1,8 @@
-use hashbrown::HashMap;
 use std::hash::{Hash, Hasher};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use fxhash::FxHashMap;
 use ordered_float::OrderedFloat;
 use string::TryFrom;
 use uuid::Uuid;
@@ -159,11 +159,11 @@ impl Variant {
 #[derive(PartialEq, Eq, Clone, Debug, Display)]
 #[display(fmt = "{:?}", map)]
 pub struct VariantMap {
-    pub map: HashMap<Variant, Variant>,
+    pub map: FxHashMap<Variant, Variant>,
 }
 
 impl VariantMap {
-    pub fn new(map: HashMap<Variant, Variant>) -> VariantMap {
+    pub fn new(map: FxHashMap<Variant, Variant>) -> VariantMap {
         VariantMap { map }
     }
 }
@@ -214,8 +214,8 @@ impl Default for VecStringMap {
     }
 }
 
-impl From<HashMap<Str, Variant>> for VecStringMap {
-    fn from(map: HashMap<Str, Variant>) -> VecStringMap {
+impl From<FxHashMap<Str, Variant>> for VecStringMap {
+    fn from(map: FxHashMap<Str, Variant>) -> VecStringMap {
         VecStringMap(map.into_iter().collect())
     }
 }
