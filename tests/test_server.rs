@@ -9,7 +9,7 @@ use futures::Future;
 use http::{HttpTryFrom, Uri};
 
 fn server(
-    link: &server::Link<()>,
+    link: server::Link<()>,
 ) -> impl Future<
     Output = Result<
         Box<
