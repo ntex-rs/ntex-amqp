@@ -79,7 +79,7 @@ pub enum Str {
 
 impl Str {
     pub fn from_str(s: &str) -> Str {
-        Str::ByteStr(String::from_str(s))
+        Str::ByteStr(unsafe { String::from_utf8_unchecked(Bytes::copy_from_slice(s.as_bytes())) })
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -100,7 +100,9 @@ impl Str {
 
     pub fn to_bytes_str(&self) -> String<Bytes> {
         match self {
-            Str::String(s) => String::try_from(Bytes::from(s.as_bytes())).unwrap(),
+            Str::String(s) => unsafe {
+                String::from_utf8_unchecked(Bytes::copy_from_slice(s.as_bytes()))
+            },
             Str::ByteStr(s) => s.clone(),
             Str::Static(s) => String::try_from(Bytes::from_static(s.as_bytes())).unwrap(),
         }

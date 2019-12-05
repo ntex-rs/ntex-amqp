@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 use actix_amqp::server::{self, errors};
 use actix_amqp::{sasl, Configuration};
 use actix_codec::{AsyncRead, AsyncWrite};
@@ -6,7 +8,7 @@ use actix_service::{factory_fn_cfg, IntoServiceFactory, Service, ServiceFactory}
 use actix_testing::TestServer;
 use futures::future::{err, Ready};
 use futures::Future;
-use http::{HttpTryFrom, Uri};
+use http::Uri;
 
 fn server(
     link: server::Link<()>,

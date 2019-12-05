@@ -10,7 +10,9 @@ pub struct Symbol(pub Str);
 
 impl Symbol {
     pub fn from_slice(s: &str) -> Symbol {
-        Symbol(Str::ByteStr(String::from_str(s)))
+        Symbol(Str::ByteStr(unsafe {
+            String::from_utf8_unchecked(Bytes::copy_from_slice(s.as_ref()))
+        }))
     }
 
     pub fn as_bytes(&self) -> &[u8] {

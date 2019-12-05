@@ -384,7 +384,7 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
     let body = if remainder.is_empty() {
             None
         } else {
-            let b = Bytes::from(remainder);
+            let b = Bytes::copy_from_slice(remainder);
             remainder = &[];
             Some(b.into())
         };
@@ -417,8 +417,8 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be({{list.name}}::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32({{list.name}}::FIELD_COUNT as u32);
     }
     else {
         buf.put_u8(codec::FORMATCODE_LIST8);

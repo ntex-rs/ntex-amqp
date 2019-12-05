@@ -836,7 +836,7 @@ impl SessionInner {
             tag
         } else {
             let mut buf = BytesMut::new();
-            buf.put_u32_be(delivery_id);
+            buf.put_u32(delivery_id);
             buf.freeze()
         };
 

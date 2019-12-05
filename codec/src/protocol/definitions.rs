@@ -128,6 +128,165 @@ impl Encode for Frame {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
+pub enum Section {
+    Header(Header),
+    DeliveryAnnotations(DeliveryAnnotations),
+    MessageAnnotations(MessageAnnotations),
+    ApplicationProperties(ApplicationProperties),
+    Data(Data),
+    AmqpSequence(AmqpSequence),
+    AmqpValue(AmqpValue),
+    Footer(Footer),
+    Properties(Properties),
+}
+impl DecodeFormatted for Section {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(112) => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
+                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
+            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
+                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
+            Descriptor::Ulong(116) => decode_application_properties_inner(input)
+                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
+            Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
+            Descriptor::Ulong(118) => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Ulong(119) => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Ulong(120) => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Ulong(115) => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
+                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
+                decode_delivery_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
+                decode_message_annotations_inner(input)
+                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
+                decode_application_properties_inner(input)
+                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
+                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
+                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
+                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
+                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
+                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for Section {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Section::Header(ref v) => encoded_size_header_inner(v),
+            Section::DeliveryAnnotations(ref v) => encoded_size_delivery_annotations_inner(v),
+            Section::MessageAnnotations(ref v) => encoded_size_message_annotations_inner(v),
+            Section::ApplicationProperties(ref v) => encoded_size_application_properties_inner(v),
+            Section::Data(ref v) => encoded_size_data_inner(v),
+            Section::AmqpSequence(ref v) => encoded_size_amqp_sequence_inner(v),
+            Section::AmqpValue(ref v) => encoded_size_amqp_value_inner(v),
+            Section::Footer(ref v) => encoded_size_footer_inner(v),
+            Section::Properties(ref v) => encoded_size_properties_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Section::Header(ref v) => encode_header_inner(v, buf),
+            Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
+            Section::MessageAnnotations(ref v) => encode_message_annotations_inner(v, buf),
+            Section::ApplicationProperties(ref v) => encode_application_properties_inner(v, buf),
+            Section::Data(ref v) => encode_data_inner(v, buf),
+            Section::AmqpSequence(ref v) => encode_amqp_sequence_inner(v, buf),
+            Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
+            Section::Footer(ref v) => encode_footer_inner(v, buf),
+            Section::Properties(ref v) => encode_properties_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
 pub enum DeliveryState {
     Received(Received),
     Accepted(Accepted),
@@ -258,165 +417,6 @@ impl Encode for SaslFrameBody {
             SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
             SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
             SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for Outcome {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for Outcome {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum Section {
-    Header(Header),
-    DeliveryAnnotations(DeliveryAnnotations),
-    MessageAnnotations(MessageAnnotations),
-    ApplicationProperties(ApplicationProperties),
-    Data(Data),
-    AmqpSequence(AmqpSequence),
-    AmqpValue(AmqpValue),
-    Footer(Footer),
-    Properties(Properties),
-}
-impl DecodeFormatted for Section {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(112) => {
-                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
-            }
-            Descriptor::Ulong(113) => decode_delivery_annotations_inner(input)
-                .map(|(i, r)| (i, Section::DeliveryAnnotations(r))),
-            Descriptor::Ulong(114) => decode_message_annotations_inner(input)
-                .map(|(i, r)| (i, Section::MessageAnnotations(r))),
-            Descriptor::Ulong(116) => decode_application_properties_inner(input)
-                .map(|(i, r)| (i, Section::ApplicationProperties(r))),
-            Descriptor::Ulong(117) => decode_data_inner(input).map(|(i, r)| (i, Section::Data(r))),
-            Descriptor::Ulong(118) => {
-                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
-            }
-            Descriptor::Ulong(119) => {
-                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
-            }
-            Descriptor::Ulong(120) => {
-                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
-            }
-            Descriptor::Ulong(115) => {
-                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:header:list" => {
-                decode_header_inner(input).map(|(i, r)| (i, Section::Header(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:delivery-annotations:map" => {
-                decode_delivery_annotations_inner(input)
-                    .map(|(i, r)| (i, Section::DeliveryAnnotations(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:message-annotations:map" => {
-                decode_message_annotations_inner(input)
-                    .map(|(i, r)| (i, Section::MessageAnnotations(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:application-properties:map" => {
-                decode_application_properties_inner(input)
-                    .map(|(i, r)| (i, Section::ApplicationProperties(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:data:binary" => {
-                decode_data_inner(input).map(|(i, r)| (i, Section::Data(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-sequence:list" => {
-                decode_amqp_sequence_inner(input).map(|(i, r)| (i, Section::AmqpSequence(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:amqp-value:*" => {
-                decode_amqp_value_inner(input).map(|(i, r)| (i, Section::AmqpValue(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:footer:map" => {
-                decode_footer_inner(input).map(|(i, r)| (i, Section::Footer(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
-                decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for Section {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Section::Header(ref v) => encoded_size_header_inner(v),
-            Section::DeliveryAnnotations(ref v) => encoded_size_delivery_annotations_inner(v),
-            Section::MessageAnnotations(ref v) => encoded_size_message_annotations_inner(v),
-            Section::ApplicationProperties(ref v) => encoded_size_application_properties_inner(v),
-            Section::Data(ref v) => encoded_size_data_inner(v),
-            Section::AmqpSequence(ref v) => encoded_size_amqp_sequence_inner(v),
-            Section::AmqpValue(ref v) => encoded_size_amqp_value_inner(v),
-            Section::Footer(ref v) => encoded_size_footer_inner(v),
-            Section::Properties(ref v) => encoded_size_properties_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Section::Header(ref v) => encode_header_inner(v, buf),
-            Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
-            Section::MessageAnnotations(ref v) => encode_message_annotations_inner(v, buf),
-            Section::ApplicationProperties(ref v) => encode_application_properties_inner(v, buf),
-            Section::Data(ref v) => encode_data_inner(v, buf),
-            Section::AmqpSequence(ref v) => encode_amqp_sequence_inner(v, buf),
-            Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
-            Section::Footer(ref v) => encode_footer_inner(v, buf),
-            Section::Properties(ref v) => encode_properties_inner(v, buf),
         }
     }
 }
@@ -1148,8 +1148,8 @@ fn encode_error_inner(list: &Error, buf: &mut BytesMut) {
         + list.info.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Error::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Error::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -1379,8 +1379,8 @@ fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
         + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Open::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Open::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -1585,8 +1585,8 @@ fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
         + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Begin::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Begin::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -1885,8 +1885,8 @@ fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
         + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Attach::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Attach::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2143,8 +2143,8 @@ fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
         + list.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Flow::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Flow::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2350,7 +2350,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseErr
     let body = if remainder.is_empty() {
         None
     } else {
-        let b = Bytes::from(remainder);
+        let b = Bytes::copy_from_slice(remainder);
         remainder = &[];
         Some(b.into())
     };
@@ -2411,8 +2411,8 @@ fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
         + list.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Transfer::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Transfer::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2589,8 +2589,8 @@ fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
         + list.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Disposition::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Disposition::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2707,8 +2707,8 @@ fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
         0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Detach::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Detach::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2787,8 +2787,8 @@ fn encode_end_inner(list: &End, buf: &mut BytesMut) {
     let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(End::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(End::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2865,8 +2865,8 @@ fn encode_close_inner(list: &Close, buf: &mut BytesMut) {
     let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Close::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Close::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -2950,8 +2950,8 @@ fn encode_sasl_mechanisms_inner(list: &SaslMechanisms, buf: &mut BytesMut) {
     let content_size = 0 + list.sasl_server_mechanisms.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(SaslMechanisms::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(SaslMechanisms::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3067,8 +3067,8 @@ fn encode_sasl_init_inner(list: &SaslInit, buf: &mut BytesMut) {
         + list.hostname.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(SaslInit::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(SaslInit::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3147,8 +3147,8 @@ fn encode_sasl_challenge_inner(list: &SaslChallenge, buf: &mut BytesMut) {
     let content_size = 0 + list.challenge.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(SaslChallenge::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(SaslChallenge::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3225,8 +3225,8 @@ fn encode_sasl_response_inner(list: &SaslResponse, buf: &mut BytesMut) {
     let content_size = 0 + list.response.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(SaslResponse::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(SaslResponse::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3322,8 +3322,8 @@ fn encode_sasl_outcome_inner(list: &SaslOutcome, buf: &mut BytesMut) {
     let content_size = 0 + list.code.encoded_size() + list.additional_data.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(SaslOutcome::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(SaslOutcome::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3568,8 +3568,8 @@ fn encode_source_inner(list: &Source, buf: &mut BytesMut) {
         + list.capabilities.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Source::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Source::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3759,8 +3759,8 @@ fn encode_target_inner(list: &Target, buf: &mut BytesMut) {
         + list.capabilities.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Target::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Target::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -3914,8 +3914,8 @@ fn encode_header_inner(list: &Header, buf: &mut BytesMut) {
         + list.delivery_count.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Header::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Header::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -4195,8 +4195,8 @@ fn encode_properties_inner(list: &Properties, buf: &mut BytesMut) {
         + list.reply_to_group_id.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Properties::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Properties::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -4304,8 +4304,8 @@ fn encode_received_inner(list: &Received, buf: &mut BytesMut) {
     let content_size = 0 + list.section_number.encoded_size() + list.section_offset.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Received::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Received::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -4368,8 +4368,8 @@ fn encode_accepted_inner(list: &Accepted, buf: &mut BytesMut) {
     let content_size = 0;
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Accepted::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Accepted::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -4445,8 +4445,8 @@ fn encode_rejected_inner(list: &Rejected, buf: &mut BytesMut) {
     let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Rejected::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Rejected::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -4508,8 +4508,8 @@ fn encode_released_inner(list: &Released, buf: &mut BytesMut) {
     let content_size = 0;
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Released::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Released::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);
@@ -4624,8 +4624,8 @@ fn encode_modified_inner(list: &Modified, buf: &mut BytesMut) {
         + list.message_annotations.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32_be((content_size + 4) as u32); // +4 for 4 byte count
-        buf.put_u32_be(Modified::FIELD_COUNT as u32);
+        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(Modified::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
         buf.put_u8((content_size + 1) as u8);

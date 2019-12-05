@@ -156,9 +156,7 @@ async fn sasl_connect<Io: AsyncRead + AsyncWrite>(
     let initial_response =
         SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
 
-    let hostname = uri
-        .host()
-        .map(|host| string::String::try_from(bytes::Bytes::from(host.as_bytes())).unwrap());
+    let hostname = uri.host().map(|host| crate::into_string(host));
 
     let sasl_init = SaslInit {
         hostname,

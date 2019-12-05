@@ -79,7 +79,7 @@ fn generate_from_spec() {
 
     fn reformat_file(path: &std::path::Path) {
         use std::fs::OpenOptions;
-        use std::io::{Read, Seek, Write};
+        use std::io::{Read, Seek};
         std::process::Command::new("rustfmt")
             .arg(path.to_str().unwrap())
             .output()

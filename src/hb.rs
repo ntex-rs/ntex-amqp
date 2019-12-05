@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use actix_rt::time::{delay, Delay};
+use actix_rt::time::{delay_until, Delay, Instant};
 use actix_utils::time::LowResTimeService;
 
 use crate::errors::AmqpTransportError;
@@ -25,11 +25,11 @@ pub(crate) struct Heartbeat {
 
 impl Heartbeat {
     pub(crate) fn new(local: Duration, remote: Option<Duration>, time: LowResTimeService) -> Self {
-        let now = time.now();
+        let now = Instant::from_std(time.now());
         let delay = if let Some(remote) = remote {
-            delay(now + std::cmp::min(local, remote))
+            delay_until(now + std::cmp::min(local, remote))
         } else {
-            delay(now + local)
+            delay_until(now + local)
         };
 
         Heartbeat {
@@ -44,19 +44,25 @@ impl Heartbeat {
 
     pub(crate) fn update_local(&mut self, update: bool) {
         if update {
-            self.expire_local = self.time.now();
+            self.expire_local = Instant::from_std(self.time.now());
         }
     }
 
     pub(crate) fn update_remote(&mut self, update: bool) {
         if update && self.remote.is_some() {
-            self.expire_remote = self.time.now();
+            self.expire_remote = Instant::from_std(self.time.now());
         }
     }
 
     fn next_expire(&self) -> Instant {
         if let Some(remote) = self.remote {
-            std::cmp::min(self.expire_local + self.local, self.expire_remote + remote)
+            let t1 = self.expire_local + self.local;
+            let t2 = self.expire_remote + remote;
+            if t1 < t2 {
+                t1
+            } else {
+                t2
+            }
         } else {
             self.expire_local + self.local
         }

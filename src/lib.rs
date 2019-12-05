@@ -129,7 +129,7 @@ impl Configuration {
     ///
     /// Hostname is not set by default
     pub fn hostname(&mut self, hostname: &str) -> &mut Self {
-        self.hostname = Some(String::<Bytes>::from_str(hostname));
+        self.hostname = Some(into_string(hostname));
         self
     }
 
@@ -167,4 +167,8 @@ impl<'a> From<&'a Open> for Configuration {
             hostname: open.hostname.clone(),
         }
     }
+}
+
+pub fn into_string(input: &str) -> String<Bytes> {
+    unsafe { String::from_utf8_unchecked(Bytes::copy_from_slice(input.as_ref())) }
 }

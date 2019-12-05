@@ -125,7 +125,7 @@ impl AmqpError {
     }
 
     pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(ByteStr::from_str(text.as_ref()));
+        self.description = Some(crate::into_string(text.as_ref()));
         self
     }
 
@@ -163,7 +163,7 @@ impl LinkError {
     }
 
     pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(ByteStr::from_str(text.as_ref()));
+        self.description = Some(crate::into_string(text.as_ref()));
         self
     }
 

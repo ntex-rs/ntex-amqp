@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::{char, str, u8};
 
-use bytes::{BigEndian, ByteOrder, Bytes};
+use byteorder::{BigEndian, ByteOrder};
+use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use fxhash::FxHashMap;
 use ordered_float::OrderedFloat;
@@ -188,8 +189,12 @@ impl DecodeFormatted for Uuid {
 impl DecodeFormatted for Bytes {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
-            codec::FORMATCODE_BINARY8 => read_bytes_u8(input).map(|(i, o)| (i, Bytes::from(o))),
-            codec::FORMATCODE_BINARY32 => read_bytes_u32(input).map(|(i, o)| (i, Bytes::from(o))),
+            codec::FORMATCODE_BINARY8 => {
+                read_bytes_u8(input).map(|(i, o)| (i, Bytes::copy_from_slice(o)))
+            }
+            codec::FORMATCODE_BINARY32 => {
+                read_bytes_u32(input).map(|(i, o)| (i, Bytes::copy_from_slice(o)))
+            }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
@@ -200,11 +205,19 @@ impl DecodeFormatted for ByteStr {
         match fmt {
             codec::FORMATCODE_STRING8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
-                Ok((input, ByteStr::from_str(str::from_utf8(bytes)?)))
+                Ok((input, unsafe {
+                    ByteStr::from_utf8_unchecked(Bytes::copy_from_slice(
+                        str::from_utf8(bytes)?.as_ref(),
+                    ))
+                }))
             }
             codec::FORMATCODE_STRING32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
-                Ok((input, ByteStr::from_str(str::from_utf8(bytes)?)))
+                Ok((input, unsafe {
+                    ByteStr::from_utf8_unchecked(Bytes::copy_from_slice(
+                        str::from_utf8(bytes)?.as_ref(),
+                    ))
+                }))
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
