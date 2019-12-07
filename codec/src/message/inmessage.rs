@@ -295,6 +295,7 @@ impl Encode for InMessage {
 #[cfg(test)]
 mod tests {
     use bytes::{Bytes, BytesMut};
+    use bytestring::ByteString;
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
@@ -328,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_app_properties() -> Result<(), AmqpCodecError> {
-        let msg = InMessage::default().set_app_property(string::String::from_str("test"), 1);
+        let msg = InMessage::default().set_app_property(ByteString::from("test"), 1);
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);

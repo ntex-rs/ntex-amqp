@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::hash::{BuildHasher, Hash};
 use std::{char, str, u8};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
+use bytestring::ByteString;
 use chrono::{DateTime, TimeZone, Utc};
 use fxhash::FxHashMap;
 use ordered_float::OrderedFloat;
@@ -14,8 +16,7 @@ use crate::errors::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
 use crate::types::{
-    ByteStr, Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecStringMap,
-    VecSymbolMap,
+    Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecStringMap, VecSymbolMap,
 };
 
 macro_rules! be_read {
@@ -200,24 +201,16 @@ impl DecodeFormatted for Bytes {
     }
 }
 
-impl DecodeFormatted for ByteStr {
+impl DecodeFormatted for ByteString {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         match fmt {
             codec::FORMATCODE_STRING8 => {
                 let (input, bytes) = read_bytes_u8(input)?;
-                Ok((input, unsafe {
-                    ByteStr::from_utf8_unchecked(Bytes::copy_from_slice(
-                        str::from_utf8(bytes)?.as_ref(),
-                    ))
-                }))
+                Ok((input, ByteString::try_from(bytes)?))
             }
             codec::FORMATCODE_STRING32 => {
                 let (input, bytes) = read_bytes_u32(input)?;
-                Ok((input, unsafe {
-                    ByteStr::from_utf8_unchecked(Bytes::copy_from_slice(
-                        str::from_utf8(bytes)?.as_ref(),
-                    ))
-                }))
+                Ok((input, ByteString::try_from(bytes)?))
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -428,12 +421,10 @@ impl DecodeFormatted for Variant {
             codec::FORMATCODE_BINARY32 => {
                 Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Binary(o)))
             }
-            codec::FORMATCODE_STRING8 => {
-                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o.into())))
-            }
-            codec::FORMATCODE_STRING32 => {
-                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::String(o.into())))
-            }
+            codec::FORMATCODE_STRING8 => ByteString::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::String(o.into()))),
+            codec::FORMATCODE_STRING32 => ByteString::decode_with_format(input, fmt)
+                .map(|(i, o)| (i, Variant::String(o.into()))),
             codec::FORMATCODE_SYMBOL8 => {
                 Symbol::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Symbol(o)))
             }
@@ -652,8 +643,8 @@ mod tests {
         binary_short: Bytes, Bytes::from(&[4u8, 5u8][..]), Bytes::from(&[4u8, 5u8][..]),
         binary_long: Bytes, Bytes::from(&[4u8; 500][..]), Bytes::from(&[4u8; 500][..]),
 
-        string_short: ByteStr, ByteStr::from_str("Hello there"), ByteStr::from_str("Hello there"),
-        string_long: ByteStr, ByteStr::from_str(LOREM), ByteStr::from_str(LOREM),
+        string_short: ByteString, ByteString::from("Hello there"), ByteString::from("Hello there"),
+        string_long: ByteString, ByteString::from(LOREM), ByteString::from(LOREM),
 
         // symbol_short: Symbol, Symbol::from("Hello there"), Symbol::from("Hello there"),
         // symbol_long: Symbol, Symbol::from(LOREM), Symbol::from(LOREM),
@@ -691,8 +682,8 @@ mod tests {
         variant_binary_short: Variant, Variant::Binary(Bytes::from(&[4u8, 5u8][..])), Variant::Binary(Bytes::from(&[4u8, 5u8][..])),
         variant_binary_long: Variant, Variant::Binary(Bytes::from(&[4u8; 500][..])), Variant::Binary(Bytes::from(&[4u8; 500][..])),
 
-        variant_string_short: Variant, Variant::String(ByteStr::from_str("Hello there").into()), Variant::String(ByteStr::from_str("Hello there").into()),
-        variant_string_long: Variant, Variant::String(ByteStr::from_str(LOREM).into()), Variant::String(ByteStr::from_str(LOREM).into()),
+        variant_string_short: Variant, Variant::String(ByteString::from("Hello there").into()), Variant::String(ByteString::from("Hello there").into()),
+        variant_string_long: Variant, Variant::String(ByteString::from(LOREM).into()), Variant::String(ByteString::from(LOREM).into()),
 
         // variant_symbol_short: Variant, Variant::Symbol(Symbol::from("Hello there")), Variant::Symbol(Symbol::from("Hello there")),
         // variant_symbol_long: Variant, Variant::Symbol(Symbol::from(LOREM)), Variant::Symbol(Symbol::from(LOREM)),
@@ -827,17 +818,17 @@ mod tests {
     #[test]
     fn option_string() {
         let b1 = &mut BytesMut::with_capacity(0);
-        Some(ByteStr::from_str("hello")).encode(b1);
+        Some(ByteString::from("hello")).encode(b1);
 
         assert_eq!(
-            Some(ByteStr::from_str("hello")),
-            unwrap_value(Option::<ByteStr>::decode(b1))
+            Some(ByteString::from("hello")),
+            unwrap_value(Option::<ByteString>::decode(b1))
         );
 
         let b2 = &mut BytesMut::with_capacity(0);
-        let o1: Option<ByteStr> = None;
+        let o1: Option<ByteString> = None;
         o1.encode(b2);
 
-        assert_eq!(None, unwrap_value(Option::<ByteStr>::decode(b2)));
+        assert_eq!(None, unwrap_value(Option::<ByteString>::decode(b2)));
     }
 }

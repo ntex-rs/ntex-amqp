@@ -3,10 +3,10 @@ use std::future::Future;
 
 use actix_utils::oneshot;
 use bytes::{BufMut, Bytes, BytesMut};
+use bytestring::ByteString;
 use either::Either;
 use fxhash::FxHashMap;
 use slab::Slab;
-use string::{self, TryFrom};
 
 use amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
@@ -77,8 +77,8 @@ impl Session {
         name: U,
         address: T,
     ) -> SenderLinkBuilder {
-        let name = string::String::try_from(Bytes::from(name.into())).unwrap();
-        let address = string::String::try_from(Bytes::from(address.into())).unwrap();
+        let name = ByteString::from(name.into());
+        let address = ByteString::from(address.into());
         SenderLinkBuilder::new(name, address, self.inner.clone())
     }
 
@@ -88,8 +88,8 @@ impl Session {
         name: U,
         address: T,
     ) -> ReceiverLinkBuilder {
-        let name = string::String::try_from(Bytes::from(name.into())).unwrap();
-        let address = string::String::try_from(Bytes::from(address.into())).unwrap();
+        let name = ByteString::from(name.into());
+        let address = ByteString::from(address.into());
         ReceiverLinkBuilder::new(name, address, self.inner.clone())
     }
 
@@ -169,7 +169,7 @@ pub(crate) struct SessionInner {
     unsettled_deliveries: FxHashMap<DeliveryNumber, DeliveryPromise>,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
-    links_by_name: FxHashMap<string::String<Bytes>, usize>,
+    links_by_name: FxHashMap<ByteString, usize>,
     remote_handles: FxHashMap<Handle, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
     disposition_subscribers: FxHashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
@@ -278,7 +278,7 @@ impl SessionInner {
         self.remote_handles.insert(attach.handle(), token);
         let link = Cell::new(SenderLinkInner::new(
             token,
-            name.unwrap_or_else(|| string::String::default()),
+            name.unwrap_or_else(|| ByteString::default()),
             attach.handle(),
             delivery_count,
             cell,

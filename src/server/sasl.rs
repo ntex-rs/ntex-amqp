@@ -10,9 +10,9 @@ use amqp_codec::protocol::{
 };
 use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 use bytes::Bytes;
+use bytestring::ByteString;
 use futures::future::{err, ok, Either, Ready};
 use futures::{SinkExt, StreamExt};
-use string::{self, TryFrom};
 
 use super::connect::{ConnectAck, ConnectOpened};
 use super::errors::{AmqpError, ServerError};
@@ -61,11 +61,7 @@ where
 
     /// Add supported sasl mechanism
     pub fn mechanism<U: Into<String>>(mut self, symbol: U) -> Self {
-        self.mechanisms.push(
-            string::String::try_from(Bytes::from(symbol.into().into_bytes()))
-                .unwrap()
-                .into(),
-        );
+        self.mechanisms.push(ByteString::from(symbol.into()).into());
         self
     }
 

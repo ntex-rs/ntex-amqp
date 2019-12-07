@@ -9,7 +9,7 @@ lazy_static! {
         let mut m = HashMap::new();
         m.insert("*", "Variant");
         m.insert("binary", "Bytes");
-        m.insert("string", "ByteStr");
+        m.insert("string", "ByteString");
         m.insert("ubyte", "u8");
         m.insert("ushort", "u16");
         m.insert("uint", "u32");
@@ -21,7 +21,7 @@ lazy_static! {
     static ref REF_TYPES: Mutex<HashSet<String>> = Mutex::new(
         [
             "Bytes",
-            "ByteStr",
+            "ByteString",
             "Symbol",
             "Fields",
             "Map",

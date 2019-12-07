@@ -1,6 +1,7 @@
 use std::fmt;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use bytestring::ByteString;
 use chrono::{DateTime, Utc};
 use derive_more::From;
 use fxhash::FxHashMap;
@@ -39,7 +40,7 @@ pub enum ProtocolId {
 pub type Map = FxHashMap<Variant, Variant>;
 pub type StringVariantMap = FxHashMap<Str, Variant>;
 pub type Fields = FxHashMap<Symbol, Variant>;
-pub type FilterSet = FxHashMap<Symbol, Option<ByteStr>>;
+pub type FilterSet = FxHashMap<Symbol, Option<ByteString>>;
 pub type Timestamp = DateTime<Utc>;
 pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
@@ -57,7 +58,7 @@ pub enum MessageId {
     #[display(fmt = "{:?}", _0)]
     Binary(Bytes),
     #[display(fmt = "{}", _0)]
-    String(ByteStr),
+    String(ByteString),
 }
 
 impl From<usize> for MessageId {
@@ -85,7 +86,7 @@ impl DecodeFormatted for MessageId {
                 Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Binary(o)))
             }
             codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
-                ByteStr::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::String(o)))
+                ByteString::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::String(o)))
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }

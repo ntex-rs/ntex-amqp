@@ -1,7 +1,8 @@
 use std::fmt;
 
 use actix_router::Path;
-use amqp_codec::{protocol::Attach, types::ByteStr};
+use amqp_codec::protocol::Attach;
+use bytestring::ByteString;
 
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
@@ -12,7 +13,7 @@ use crate::Configuration;
 pub struct Link<S> {
     pub(crate) state: State<S>,
     pub(crate) link: ReceiverLink,
-    pub(crate) path: Path<ByteStr>,
+    pub(crate) path: Path<ByteString>,
 }
 
 impl<S> Link<S> {
@@ -20,15 +21,15 @@ impl<S> Link<S> {
         Link {
             state,
             link,
-            path: Path::new(ByteStr::from_str("")),
+            path: Path::new(ByteString::from_static("")),
         }
     }
 
-    pub fn path(&self) -> &Path<ByteStr> {
+    pub fn path(&self) -> &Path<ByteString> {
         &self.path
     }
 
-    pub fn path_mut(&mut self) -> &mut Path<ByteStr> {
+    pub fn path_mut(&mut self) -> &mut Path<ByteString> {
         &mut self.path
     }
 

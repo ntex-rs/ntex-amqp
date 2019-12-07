@@ -10,8 +10,8 @@ use amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
 };
-use amqp_codec::types::ByteStr;
 use bytes::Bytes;
+use bytestring::ByteString;
 use futures::Stream;
 
 use crate::cell::Cell;
@@ -147,7 +147,7 @@ impl ReceiverLinkInner {
         }
     }
 
-    pub fn name(&self) -> &ByteStr {
+    pub fn name(&self) -> &ByteString {
         &self.attach.name
     }
 
@@ -207,11 +207,7 @@ pub struct ReceiverLinkBuilder {
 }
 
 impl ReceiverLinkBuilder {
-    pub(crate) fn new(
-        name: string::String<Bytes>,
-        address: string::String<Bytes>,
-        session: Cell<SessionInner>,
-    ) -> Self {
+    pub(crate) fn new(name: ByteString, address: ByteString, session: Cell<SessionInner>) -> Self {
         let source = Source {
             address: Some(address),
             durable: TerminusDurability::None,

@@ -1,9 +1,10 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
 
 use std::u8;
-use bytes::{BufMut, Bytes, BytesMut};
-use uuid::Uuid;
 use derive_more::From;
+use bytes::{BufMut, Bytes, BytesMut};
+use bytestring::ByteString;
+use uuid::Uuid;
 
 use super::*;
 use crate::errors::AmqpParseError;

@@ -1,12 +1,10 @@
 use std::{borrow, fmt, hash, ops};
 
-use bytes::Bytes;
-use string::{String, TryFrom};
+use bytestring::ByteString;
 
 mod symbol;
 mod variant;
 
-pub type ByteStr = String<Bytes>;
 pub use self::symbol::{StaticSymbol, Symbol};
 pub use self::variant::{Variant, VariantMap, VecStringMap, VecSymbolMap};
 
@@ -72,14 +70,14 @@ impl List {
 
 #[derive(Display, Clone, Eq, Ord, PartialOrd)]
 pub enum Str {
-    String(std::string::String),
-    ByteStr(String<Bytes>),
+    String(String),
+    ByteStr(ByteString),
     Static(&'static str),
 }
 
 impl Str {
     pub fn from_str(s: &str) -> Str {
-        Str::ByteStr(unsafe { String::from_utf8_unchecked(Bytes::copy_from_slice(s.as_bytes())) })
+        Str::ByteStr(ByteString::from(s))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -98,13 +96,11 @@ impl Str {
         }
     }
 
-    pub fn to_bytes_str(&self) -> String<Bytes> {
+    pub fn to_bytes_str(&self) -> ByteString {
         match self {
-            Str::String(s) => unsafe {
-                String::from_utf8_unchecked(Bytes::copy_from_slice(s.as_bytes()))
-            },
+            Str::String(s) => ByteString::from(s.as_str()),
             Str::ByteStr(s) => s.clone(),
-            Str::Static(s) => String::try_from(Bytes::from_static(s.as_bytes())).unwrap(),
+            Str::Static(s) => ByteString::from_static(s),
         }
     }
 
@@ -123,14 +119,14 @@ impl From<&'static str> for Str {
     }
 }
 
-impl From<String<Bytes>> for Str {
-    fn from(s: String<Bytes>) -> Str {
+impl From<ByteString> for Str {
+    fn from(s: ByteString) -> Str {
         Str::ByteStr(s)
     }
 }
 
-impl From<std::string::String> for Str {
-    fn from(s: std::string::String) -> Str {
+impl From<String> for Str {
+    fn from(s: String) -> Str {
         Str::String(s)
     }
 }

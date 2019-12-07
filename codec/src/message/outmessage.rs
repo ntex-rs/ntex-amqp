@@ -331,11 +331,12 @@ impl Encode for OutMessage {
 #[cfg(test)]
 mod tests {
     use bytes::{Bytes, BytesMut};
+    use bytestring::ByteString;
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
     use crate::protocol::Header;
-    use crate::types::{Str, Variant};
+    use crate::types::Variant;
 
     use super::OutMessage;
 
@@ -356,7 +357,7 @@ mod tests {
     #[test]
     fn test_app_properties() -> Result<(), AmqpCodecError> {
         let mut msg = OutMessage::default();
-        msg.set_app_property(string::String::from_str("test"), 1);
+        msg.set_app_property(ByteString::from("test"), 1);
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);

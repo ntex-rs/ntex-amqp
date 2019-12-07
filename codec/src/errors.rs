@@ -9,16 +9,20 @@ pub enum AmqpParseError {
     InvalidSize,
     #[display(fmt = "More data required during frame parsing: '{:?}'", "_0")]
     Incomplete(Option<usize>),
+    #[from(ignore)]
     #[display(fmt = "Unexpected format code: '{}'", "_0")]
     InvalidFormatCode(u8),
     #[display(fmt = "Invalid value converting to char: {}", "_0")]
     InvalidChar(u32),
     #[display(fmt = "Unexpected descriptor: '{:?}'", "_0")]
     InvalidDescriptor(Descriptor),
+    #[from(ignore)]
     #[display(fmt = "Unexpected frame type: '{:?}'", "_0")]
     UnexpectedFrameType(u8),
+    #[from(ignore)]
     #[display(fmt = "Required field '{:?}' was omitted.", "_0")]
     RequiredFieldOmitted(&'static str),
+    #[from(ignore)]
     #[display(fmt = "Unknown {:?} option.", "_0")]
     UnknownEnumOption(&'static str),
     UuidParseError(uuid::BytesError),

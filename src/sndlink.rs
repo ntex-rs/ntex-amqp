@@ -7,6 +7,7 @@ use amqp_codec::protocol::{
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 use bytes::Bytes;
+use bytestring::ByteString;
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
@@ -29,7 +30,7 @@ impl std::fmt::Debug for SenderLink {
 pub(crate) struct SenderLinkInner {
     id: usize,
     idx: u32,
-    name: string::String<Bytes>,
+    name: ByteString,
     session: Session,
     remote_handle: Handle,
     delivery_count: SequenceNo,
@@ -56,7 +57,7 @@ impl SenderLink {
         self.inner.id as u32
     }
 
-    pub fn name(&self) -> &string::String<Bytes> {
+    pub fn name(&self) -> &ByteString {
         &self.inner.name
     }
 
@@ -106,7 +107,7 @@ impl SenderLink {
 impl SenderLinkInner {
     pub(crate) fn new(
         id: usize,
-        name: string::String<Bytes>,
+        name: ByteString,
         handle: Handle,
         delivery_count: SequenceNo,
         session: Cell<SessionInner>,
@@ -133,7 +134,7 @@ impl SenderLinkInner {
         self.remote_handle
     }
 
-    pub(crate) fn name(&self) -> &string::String<Bytes> {
+    pub(crate) fn name(&self) -> &ByteString {
         &self.name
     }
 
@@ -263,11 +264,7 @@ pub struct SenderLinkBuilder {
 }
 
 impl SenderLinkBuilder {
-    pub(crate) fn new(
-        name: string::String<Bytes>,
-        address: string::String<Bytes>,
-        session: Cell<SessionInner>,
-    ) -> Self {
+    pub(crate) fn new(name: ByteString, address: ByteString, session: Cell<SessionInner>) -> Self {
         let target = Target {
             address: Some(address),
             durable: TerminusDurability::None,

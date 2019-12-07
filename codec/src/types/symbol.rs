@@ -1,7 +1,6 @@
 use std::{borrow, str};
 
-use bytes::Bytes;
-use string::String;
+use bytestring::ByteString;
 
 use super::Str;
 
@@ -10,9 +9,7 @@ pub struct Symbol(pub Str);
 
 impl Symbol {
     pub fn from_slice(s: &str) -> Symbol {
-        Symbol(Str::ByteStr(unsafe {
-            String::from_utf8_unchecked(Bytes::copy_from_slice(s.as_ref()))
-        }))
+        Symbol(Str::ByteStr(ByteString::from(s)))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -23,7 +20,7 @@ impl Symbol {
         self.0.as_str()
     }
 
-    pub fn to_bytes_str(&self) -> String<Bytes> {
+    pub fn to_bytes_str(&self) -> ByteString {
         self.0.to_bytes_str()
     }
 
@@ -50,8 +47,8 @@ impl From<std::string::String> for Symbol {
     }
 }
 
-impl From<String<Bytes>> for Symbol {
-    fn from(s: String<Bytes>) -> Symbol {
+impl From<ByteString> for Symbol {
+    fn from(s: ByteString) -> Symbol {
         Symbol(Str::ByteStr(s))
     }
 }

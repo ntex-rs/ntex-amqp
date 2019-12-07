@@ -1,14 +1,14 @@
 use std::hash::{Hash, Hasher};
 
 use bytes::Bytes;
+use bytestring::ByteString;
 use chrono::{DateTime, Utc};
 use fxhash::FxHashMap;
 use ordered_float::OrderedFloat;
-use string::TryFrom;
 use uuid::Uuid;
 
 use crate::protocol::Annotations;
-use crate::types::{ByteStr, Descriptor, List, StaticSymbol, Str, Symbol};
+use crate::types::{Descriptor, List, StaticSymbol, Str, Symbol};
 
 /// Represents an AMQP type for use in polymorphic collections
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Display, From)]
@@ -89,15 +89,15 @@ pub enum Variant {
     Described((Descriptor, Box<Variant>)),
 }
 
-impl From<ByteStr> for Variant {
-    fn from(s: ByteStr) -> Self {
+impl From<ByteString> for Variant {
+    fn from(s: ByteString) -> Self {
         Str::from(s).into()
     }
 }
 
 impl From<String> for Variant {
     fn from(s: String) -> Self {
-        Str::from(string::String::try_from(Bytes::from(s)).unwrap()).into()
+        Str::from(ByteString::from(s)).into()
     }
 }
 
@@ -147,7 +147,7 @@ impl Variant {
         }
     }
 
-    pub fn to_bytes_str(&self) -> Option<ByteStr> {
+    pub fn to_bytes_str(&self) -> Option<ByteString> {
         match self {
             Variant::String(s) => Some(s.to_bytes_str()),
             Variant::Symbol(s) => Some(s.to_bytes_str()),
@@ -250,10 +250,10 @@ mod tests {
 
     #[test]
     fn string_eq() {
-        let a = Variant::String(ByteStr::from_str("hello").into());
-        let b = Variant::String(ByteStr::from_str("world!").into());
+        let a = Variant::String(ByteString::from("hello").into());
+        let b = Variant::String(ByteString::from("world!").into());
 
-        assert_eq!(Variant::String(ByteStr::from_str("hello").into()), a);
+        assert_eq!(Variant::String(ByteString::from("hello").into()), a);
         assert!(a != b);
     }
 

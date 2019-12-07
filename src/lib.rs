@@ -13,7 +13,7 @@ use std::time::Duration;
 use actix_utils::oneshot;
 use amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use bytes::Bytes;
-use string::{String, TryFrom};
+use bytestring::ByteString;
 use uuid::Uuid;
 
 mod cell;
@@ -74,7 +74,7 @@ pub struct Configuration {
     pub max_frame_size: u32,
     pub channel_max: usize,
     pub idle_time_out: Option<Milliseconds>,
-    pub hostname: Option<String<Bytes>>,
+    pub hostname: Option<ByteString>,
 }
 
 impl Default for Configuration {
@@ -129,17 +129,14 @@ impl Configuration {
     ///
     /// Hostname is not set by default
     pub fn hostname(&mut self, hostname: &str) -> &mut Self {
-        self.hostname = Some(into_string(hostname));
+        self.hostname = Some(ByteString::from(hostname));
         self
     }
 
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
         Open {
-            container_id: String::<Bytes>::try_from(Bytes::from(
-                Uuid::new_v4().to_simple().to_string(),
-            ))
-            .unwrap(),
+            container_id: ByteString::from(Uuid::new_v4().to_simple().to_string()),
             hostname: self.hostname.clone(),
             max_frame_size: self.max_frame_size,
             channel_max: self.channel_max as u16,
@@ -167,8 +164,4 @@ impl<'a> From<&'a Open> for Configuration {
             hostname: open.hostname.clone(),
         }
     }
-}
-
-pub fn into_string(input: &str) -> String<Bytes> {
-    unsafe { String::from_utf8_unchecked(Bytes::copy_from_slice(input.as_ref())) }
 }

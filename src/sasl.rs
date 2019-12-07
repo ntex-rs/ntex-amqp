@@ -2,11 +2,11 @@ use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_connect::{Connect as TcpConnect, Connection as TcpConnection};
 use actix_service::{apply_fn, pipeline, IntoService, Service};
 use actix_utils::time::LowResTimeService;
+use bytestring::ByteString;
 use either::Either;
 use futures::future::{ok, Future};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::Uri;
-use string::TryFrom;
 
 use amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use amqp_codec::types::Symbol;
@@ -156,7 +156,7 @@ async fn sasl_connect<Io: AsyncRead + AsyncWrite>(
     let initial_response =
         SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
 
-    let hostname = uri.host().map(|host| crate::into_string(host));
+    let hostname = uri.host().map(|host| ByteString::from(host));
 
     let sasl_init = SaslInit {
         hostname,

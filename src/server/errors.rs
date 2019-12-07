@@ -1,9 +1,8 @@
 use std::io;
 
-use amqp_codec::types::ByteStr;
 use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
+use bytestring::ByteString;
 use derive_more::Display;
-use string::TryFrom;
 
 pub use amqp_codec::protocol::Error;
 
@@ -43,7 +42,7 @@ impl<E> Into<protocol::Error> for ServerError<E> {
     fn into(self) -> protocol::Error {
         protocol::Error {
             condition: protocol::AmqpError::InternalError.into(),
-            description: Some(string::String::try_from(format!("{}", self).into()).unwrap()),
+            description: Some(ByteString::from(format!("{}", self))),
             info: None,
         }
     }
@@ -83,7 +82,7 @@ impl<E> From<io::Error> for ServerError<E> {
 #[display(fmt = "Amqp error: {:?} {:?} ({:?})", err, description, info)]
 pub struct AmqpError {
     err: protocol::AmqpError,
-    description: Option<ByteStr>,
+    description: Option<ByteString>,
     info: Option<protocol::Fields>,
 }
 
@@ -125,11 +124,11 @@ impl AmqpError {
     }
 
     pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(crate::into_string(text.as_ref()));
+        self.description = Some(ByteString::from(text.as_ref()));
         self
     }
 
-    pub fn set_description(mut self, text: ByteStr) -> Self {
+    pub fn set_description(mut self, text: ByteString) -> Self {
         self.description = Some(text);
         self
     }
@@ -149,7 +148,7 @@ impl Into<protocol::Error> for AmqpError {
 #[display(fmt = "Link error: {:?} {:?} ({:?})", err, description, info)]
 pub struct LinkError {
     err: protocol::LinkError,
-    description: Option<ByteStr>,
+    description: Option<ByteString>,
     info: Option<protocol::Fields>,
 }
 
@@ -163,11 +162,11 @@ impl LinkError {
     }
 
     pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(crate::into_string(text.as_ref()));
+        self.description = Some(ByteString::from(text.as_ref()));
         self
     }
 
-    pub fn set_description(mut self, text: ByteStr) -> Self {
+    pub fn set_description(mut self, text: ByteString) -> Self {
         self.description = Some(text);
         self
     }

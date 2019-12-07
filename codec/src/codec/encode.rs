@@ -3,14 +3,14 @@ use std::hash::{BuildHasher, Hash};
 use std::{i8, u8};
 
 use bytes::{BufMut, Bytes, BytesMut};
+use bytestring::ByteString;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
 use crate::types::{
-    ByteStr, Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant, VecStringMap,
-    VecSymbolMap,
+    Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant, VecStringMap, VecSymbolMap,
 };
 
 fn encode_null(buf: &mut BytesMut) {
@@ -319,7 +319,7 @@ impl ArrayEncode for Bytes {
     }
 }
 
-impl Encode for ByteStr {
+impl Encode for ByteString {
     fn encoded_size(&self) -> usize {
         let length = self.len();
         let size = if length > u8::MAX as usize { 5 } else { 2 };
@@ -338,7 +338,7 @@ impl Encode for ByteStr {
         buf.put_slice(self.as_bytes());
     }
 }
-impl ArrayEncode for ByteStr {
+impl ArrayEncode for ByteString {
     const ARRAY_FORMAT_CODE: u8 = codec::FORMATCODE_STRING32;
     fn array_encoded_size(&self) -> usize {
         4 + self.len()
