@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use actix_router::Router;
-use actix_service::{boxed, factory_fn_cfg, IntoServiceFactory, Service, ServiceFactory};
+use actix_service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use futures::future::{err, ok, Either, Ready};
 use futures::{Stream, StreamExt};
@@ -60,7 +60,7 @@ impl<S: 'static> App<S> {
         }
         let router = Cell::new(router.finish());
 
-        factory_fn_cfg(move |_: State<S>| {
+        fn_factory_with_config(move |_: State<S>| {
             ok(AppService {
                 router: router.clone(),
             })

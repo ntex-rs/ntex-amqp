@@ -4,7 +4,7 @@ use actix_amqp::server::{self, errors};
 use actix_amqp::{sasl, Configuration};
 use actix_codec::{AsyncRead, AsyncWrite};
 use actix_connect::{default_connector, TcpConnector};
-use actix_service::{factory_fn_cfg, IntoServiceFactory, Service, ServiceFactory};
+use actix_service::{fn_factory_with_config, pipeline_factory, Service};
 use actix_testing::TestServer;
 use futures::future::{err, Ready};
 use futures::Future;
@@ -49,7 +49,7 @@ async fn test_simple() -> std::io::Result<()> {
         )
         .finish(
             server::App::<()>::new()
-                .service("test", factory_fn_cfg(server))
+                .service("test", fn_factory_with_config(server))
                 .finish(),
         )
     });
@@ -106,11 +106,11 @@ async fn test_sasl() -> std::io::Result<()> {
                     Ok::<_, errors::Error>(conn.ack(()))
                 }
             })
-            .sasl(sasl_auth.into_factory().map_err(|e| e.into())),
+            .sasl(pipeline_factory(sasl_auth).map_err(|e| e.into())),
         )
         .finish(
             server::App::<()>::new()
-                .service("test", factory_fn_cfg(server))
+                .service("test", fn_factory_with_config(server))
                 .finish(),
         )
     });
