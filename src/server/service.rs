@@ -8,7 +8,7 @@ use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{Error, ProtocolId};
 use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
-use futures::future::{err, Either};
+use futures::future::{err, poll_fn, Either};
 use futures::{FutureExt, SinkExt, StreamExt};
 
 use crate::cell::Cell;
@@ -254,9 +254,11 @@ where
     let (st, srv, conn) = match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
-            if let Err(e) = framed.write(protocol) {
-                return Err(ServerError::from(e));
-            }
+            framed
+                .send(protocol)
+                .await
+                .map_err(ServerError::from)?;
+
             let cfg = inner.get_ref().config.clone();
             let controller = ConnectionController::new(cfg.clone());
 
