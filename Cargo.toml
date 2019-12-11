@@ -2,6 +2,7 @@
 name = "actix-amqp"
 version = "0.1.0"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>"]
+description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/actix-amqp"
 repository = "https://github.com/actix/actix-amqp.git"
 categories = ["network-programming"]
