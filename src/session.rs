@@ -5,6 +5,7 @@ use actix_utils::oneshot;
 use bytes::{BufMut, Bytes, BytesMut};
 use bytestring::ByteString;
 use either::Either;
+use futures::future::ok;
 use fxhash::FxHashMap;
 use slab::Slab;
 
@@ -51,8 +52,8 @@ impl Session {
         self.inner.connection.remote_config()
     }
 
-    pub async fn close(&self) -> Result<(), AmqpTransportError> {
-        Ok(())
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpTransportError>> {
+        ok(())
     }
 
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
@@ -69,6 +70,10 @@ impl Session {
 
     pub fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
         self.inner.get_ref().get_sender_link_by_handle(hnd)
+    }
+
+    pub fn get_receiver_link_by_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+        self.inner.get_ref().get_receiver_link_by_handle(hnd)
     }
 
     /// Open sender link
@@ -93,21 +98,24 @@ impl Session {
         ReceiverLinkBuilder::new(name, address, self.inner.clone())
     }
 
-    pub async fn detach_receiver_link(
+    /// Detach receiver link
+    pub fn detach_receiver_link(
         &mut self,
-        handle: usize,
+        handle: Handle,
         error: Option<Error>,
-    ) -> Result<(), AmqpTransportError> {
+    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         let (tx, rx) = oneshot::channel();
 
         self.inner
             .get_mut()
             .detach_receiver_link(handle, false, error, tx);
 
-        match rx.await {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AmqpTransportError::Disconnected),
+        async move {
+            match rx.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(AmqpTransportError::Disconnected),
+            }
         }
     }
 
@@ -119,12 +127,14 @@ impl Session {
     }
 }
 
+#[derive(Debug)]
 enum SenderLinkState {
     Opening(oneshot::Sender<SenderLink>),
     Established(SenderLink),
     Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
 }
 
+#[derive(Debug)]
 enum ReceiverLinkState {
     Opening(Option<Cell<ReceiverLinkInner>>),
     OpeningLocal(
@@ -133,7 +143,7 @@ enum ReceiverLinkState {
             oneshot::Sender<Result<ReceiverLink, AmqpTransportError>>,
         )>,
     ),
-    Established(Cell<ReceiverLinkInner>),
+    Established(ReceiverLink),
     Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
 }
 
@@ -316,7 +326,7 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(cell, token, attach));
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, attach));
         entry.insert(Either::Right(ReceiverLinkState::Opening(Some(
             inner.clone(),
         ))));
@@ -334,7 +344,7 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(cell, token, frame.clone()));
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, frame.clone()));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
             inner.clone(),
             tx,
@@ -347,8 +357,8 @@ impl SessionInner {
         rx
     }
 
-    pub(crate) fn confirm_receiver_link(&mut self, token: usize, attach: &Attach) {
-        if let Some(Either::Right(link)) = self.links.get_mut(token) {
+    pub(crate) fn confirm_receiver_link(&mut self, token: Handle, attach: &Attach) {
+        if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
             match link {
                 ReceiverLinkState::Opening(l) => {
                     let attach = Attach {
@@ -367,7 +377,7 @@ impl SessionInner {
                         desired_capabilities: None,
                         properties: None,
                     };
-                    *link = ReceiverLinkState::Established(l.take().unwrap());
+                    *link = ReceiverLinkState::Established(ReceiverLink::new(l.take().unwrap()));
                     self.post_frame(attach.into());
                 }
                 _ => error!("Unexpected receiver link state"),
@@ -378,12 +388,12 @@ impl SessionInner {
     /// Close receiver link
     pub(crate) fn detach_receiver_link(
         &mut self,
-        id: usize,
+        id: Handle,
         closed: bool,
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpTransportError>>,
     ) {
-        if let Some(Either::Right(link)) = self.links.get_mut(id) {
+        if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
                 ReceiverLinkState::Opening(inner) => {
                     let attach = Attach {
@@ -403,7 +413,7 @@ impl SessionInner {
                         properties: None,
                     };
                     let detach = Detach {
-                        handle: id as u32,
+                        handle: id,
                         closed,
                         error,
                     };
@@ -413,7 +423,7 @@ impl SessionInner {
                 }
                 ReceiverLinkState::Established(_) => {
                     let detach = Detach {
-                        handle: id as u32,
+                        handle: id,
                         closed,
                         error,
                     };
@@ -441,7 +451,7 @@ impl SessionInner {
     ) {
         if let Some(Either::Left(link)) = self.links.get_mut(id) {
             match link {
-                SenderLinkState::Opening(inner) => {
+                SenderLinkState::Opening(_) => {
                     let detach = Detach {
                         handle: id as u32,
                         closed,
@@ -473,6 +483,17 @@ impl SessionInner {
     pub(crate) fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
         if let Some(id) = self.remote_handles.get(&hnd) {
             if let Some(Either::Left(SenderLinkState::Established(ref link))) = self.links.get(*id)
+            {
+                return Some(link);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn get_receiver_link_by_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+        if let Some(id) = self.remote_handles.get(&hnd) {
+            if let Some(Either::Right(ReceiverLinkState::Established(ref link))) =
+                self.links.get(*id)
             {
                 return Some(link);
             }
@@ -520,7 +541,7 @@ impl SessionInner {
                                 ReceiverLinkState::Established(link) => {
                                     // self.outgoing_window -= 1;
                                     let _ = self.next_incoming_id.wrapping_add(1);
-                                    link.get_mut().handle_transfer(transfer);
+                                    link.inner.get_mut().handle_transfer(transfer);
                                 }
                                 ReceiverLinkState::Closing(_) => (),
                             },
@@ -544,6 +565,7 @@ impl SessionInner {
     /// Handle `Attach` frame. return false if attach frame is remote and can not be handled
     pub fn handle_attach(&mut self, attach: &Attach, cell: Cell<SessionInner>) -> bool {
         let name = attach.name();
+
         if let Some(index) = self.links_by_name.get(name) {
             match self.links.get_mut(*index) {
                 Some(Either::Left(item)) => {
@@ -586,7 +608,7 @@ impl SessionInner {
                             let (link, tx) = opt_item.take().unwrap();
                             self.remote_handles.insert(attach.handle(), *index);
 
-                            *item = ReceiverLinkState::Established(link.clone());
+                            *item = ReceiverLinkState::Established(ReceiverLink::new(link.clone()));
                             let _ = tx.send(Ok(ReceiverLink::new(link)));
                         }
                     }
@@ -651,7 +673,19 @@ impl SessionInner {
                 Either::Right(link) => match link {
                     ReceiverLinkState::Opening(_) => false,
                     ReceiverLinkState::OpeningLocal(_) => false,
-                    ReceiverLinkState::Established(_) => false,
+                    ReceiverLinkState::Established(link) => {
+                        // detach from remote endpoint
+                        let detach = Detach {
+                            handle: link.handle(),
+                            closed: true,
+                            error: None,
+                        };
+
+                        // detach rcv link
+                        self.connection
+                            .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
+                        true
+                    }
                     ReceiverLinkState::Closing(tx) => {
                         // detach confirmation
                         if let Some(tx) = tx.take() {

@@ -102,21 +102,23 @@ where
                 }
                 ControlFrameKind::Flow(ref frm, ref link) => {
                     if let Some(err) = err {
-                        link.close_with_error(err.into());
+                        let _ = link.close_with_error(err.into());
                     } else {
                         frame.0.session.inner.get_mut().apply_flow(frm);
                     }
                 }
-                ControlFrameKind::Detach(ref frm, ref link) => {
+                ControlFrameKind::DetachSender(ref frm, ref link) => {
                     if let Some(err) = err {
-                        link.close_with_error(err.into());
+                        let _ = link.close_with_error(err.into());
                     } else {
-                        frame
-                            .0
-                            .session
-                            .inner
-                            .get_mut()
-                            .handle_frame(Frame::Detach(frm.clone()));
+                        frame.0.session.inner.get_mut().handle_detach(&frm);
+                    }
+                }
+                ControlFrameKind::DetachReceiver(ref frm, ref link) => {
+                    if let Some(err) = err {
+                        let _ = link.close_with_error(err.into());
+                    } else {
+                        frame.0.session.inner.get_mut().handle_detach(frm);
                     }
                 }
             }
@@ -188,7 +190,17 @@ where
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
                                         Session::new(cell.clone()),
-                                        ControlFrameKind::Detach(frm, link.clone()),
+                                        ControlFrameKind::DetachSender(frm, link.clone()),
+                                    ));
+
+                                    return Ok(IncomingResult::Control);
+                                } else if let Some(link) =
+                                    session.get_receiver_link_by_handle(frm.handle)
+                                {
+                                    self.control_frame = Some(ControlFrame::new(
+                                        self.state.clone(),
+                                        Session::new(cell.clone()),
+                                        ControlFrameKind::DetachReceiver(frm, link.clone()),
                                     ));
 
                                     return Ok(IncomingResult::Control);
@@ -256,12 +268,12 @@ where
         while idx < self.receivers.len() {
             match unsafe { Pin::new_unchecked(&mut self.receivers[idx].1) }.poll(cx) {
                 Poll::Ready(Ok(_detach)) => {
-                    let (mut link, _) = self.receivers.swap_remove(idx);
+                    let (link, _) = self.receivers.swap_remove(idx);
                     let _ = link.close();
                 }
                 Poll::Pending => idx += 1,
                 Poll::Ready(Err(e)) => {
-                    let (mut link, _) = self.receivers.swap_remove(idx);
+                    let (link, _) = self.receivers.swap_remove(idx);
                     error!("Error in link handler: {}", e);
                     let _ = link.close_with_error(e.into());
                 }

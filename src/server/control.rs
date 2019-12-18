@@ -2,6 +2,7 @@ use actix_service::boxed::{BoxService, BoxServiceFactory};
 use amqp_codec::protocol;
 
 use crate::cell::Cell;
+use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
 use crate::sndlink::SenderLink;
 
@@ -24,7 +25,8 @@ pub(super) struct FrameInner<St> {
 pub enum ControlFrameKind {
     Attach(protocol::Attach),
     Flow(protocol::Flow, SenderLink),
-    Detach(protocol::Detach, SenderLink),
+    DetachSender(protocol::Detach, SenderLink),
+    DetachReceiver(protocol::Detach, ReceiverLink),
 }
 
 impl<St> ControlFrame<St> {

@@ -145,7 +145,7 @@ impl<S> Future for AppServiceResponse<S> {
                         Poll::Ready(Ok(_)) => (),
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Err(e)) => {
-                            this.link.close_with_error(
+                            let _ = this.link.close_with_error(
                                 LinkError::force_detach()
                                     .description(format!("error: {}", e))
                                     .into(),
@@ -158,7 +158,7 @@ impl<S> Future for AppServiceResponse<S> {
                         Poll::Ready(Some(Ok(transfer))) => {
                             // #2.7.5 delivery_id MUST be set. batching is not supported atm
                             if transfer.delivery_id.is_none() {
-                                this.link.close_with_error(
+                                let _ = this.link.close_with_error(
                                     LinkError::force_detach()
                                         .description("delivery_id MUST be set")
                                         .into(),
@@ -197,7 +197,7 @@ impl<S> Future for AppServiceResponse<S> {
                         Poll::Ready(None) => return Poll::Ready(Ok(())),
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Some(Err(_))) => {
-                            this.link.close_with_error(LinkError::force_detach().into());
+                            let _ = this.link.close_with_error(LinkError::force_detach().into());
                             return Poll::Ready(Ok(()));
                         }
                     }

@@ -21,7 +21,7 @@ use crate::Configuration;
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
-    inner: Cell<ReceiverLinkInner>,
+    pub(crate) inner: Cell<ReceiverLinkInner>,
 }
 
 impl ReceiverLink {
@@ -29,8 +29,8 @@ impl ReceiverLink {
         ReceiverLink { inner }
     }
 
-    pub fn handle(&self) -> usize {
-        self.inner.get_ref().handle
+    pub fn handle(&self) -> Handle {
+        self.inner.get_ref().handle as Handle
     }
 
     pub fn credit(&self) -> u32 {
@@ -80,12 +80,12 @@ impl ReceiverLink {
         self.inner.get_mut().session.wait_disposition(id)
     }
 
-    pub fn close(&mut self) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpTransportError>> {
         self.inner.get_mut().close(None)
     }
 
     pub fn close_with_error(
-        &mut self,
+        &self,
         error: Error,
     ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         self.inner.get_mut().close(Some(error))
@@ -119,7 +119,7 @@ impl Stream for ReceiverLink {
 
 #[derive(Debug)]
 pub(crate) struct ReceiverLinkInner {
-    handle: usize,
+    handle: Handle,
     attach: Attach,
     session: Session,
     closed: bool,
@@ -132,7 +132,7 @@ pub(crate) struct ReceiverLinkInner {
 impl ReceiverLinkInner {
     pub(crate) fn new(
         session: Cell<SessionInner>,
-        handle: usize,
+        handle: Handle,
         attach: Attach,
     ) -> ReceiverLinkInner {
         ReceiverLinkInner {

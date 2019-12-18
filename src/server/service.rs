@@ -254,10 +254,7 @@ where
     let (st, srv, conn) = match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
-            framed
-                .send(protocol)
-                .await
-                .map_err(ServerError::from)?;
+            framed.send(protocol).await.map_err(ServerError::from)?;
 
             let cfg = inner.get_ref().config.clone();
             let controller = ConnectionController::new(cfg.clone());

@@ -8,6 +8,7 @@ use amqp_codec::protocol::{
 };
 use bytes::Bytes;
 use bytestring::ByteString;
+use futures::future::{ok, Either};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
@@ -95,12 +96,15 @@ impl SenderLink {
         self.inner.get_mut().settle_message(id, state)
     }
 
-    // pub fn close(&mut self) -> impl Future<Item = (), Error = AmqpTransportError> {
-    //     self.inner.get_mut().close(None)
-    // }
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpTransportError>> {
+        self.inner.get_mut().close(None)
+    }
 
-    pub async fn close_with_error(&self, error: Error) -> Result<(), AmqpTransportError> {
-        self.inner.get_mut().close(Some(error)).await
+    pub fn close_with_error(
+        &self,
+        error: Error,
+    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+        self.inner.get_mut().close(Some(error))
     }
 }
 
@@ -147,9 +151,13 @@ impl SenderLinkInner {
         self.error = Some(err);
     }
 
-    pub async fn close(&self, error: Option<Error>) -> Result<(), AmqpTransportError> {
+    pub(crate) fn close(
+        &self,
+        error: Option<Error>,
+    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+        println!("CLOSING: {:?} {:?}", self.closed, error);
         if self.closed {
-            Ok(())
+            Either::Left(ok(()))
         } else {
             let (tx, rx) = oneshot::channel();
 
@@ -158,11 +166,13 @@ impl SenderLinkInner {
                 .get_mut()
                 .detach_sender_link(self.id, true, error, tx);
 
-            match rx.await {
-                Ok(Ok(_)) => Ok(()),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(AmqpTransportError::Disconnected),
-            }
+            Either::Right(async move {
+                match rx.await {
+                    Ok(Ok(_)) => Ok(()),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err(AmqpTransportError::Disconnected),
+                }
+            })
         }
     }
 

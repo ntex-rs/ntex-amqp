@@ -8,7 +8,7 @@ use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
 use crate::server::State;
 use crate::session::Session;
-use crate::Configuration;
+use crate::{Configuration, Handle};
 
 pub struct Link<S> {
     pub(crate) state: State<S>,
@@ -45,7 +45,7 @@ impl<S> Link<S> {
         self.state.get_mut()
     }
 
-    pub fn handle(&self) -> usize {
+    pub fn handle(&self) -> Handle {
         self.link.handle()
     }
 
