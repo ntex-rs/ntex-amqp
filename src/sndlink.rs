@@ -155,7 +155,6 @@ impl SenderLinkInner {
         &self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpTransportError>> {
-        println!("CLOSING: {:?} {:?}", self.closed, error);
         if self.closed {
             Either::Left(ok(()))
         } else {
