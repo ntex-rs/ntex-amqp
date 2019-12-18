@@ -1,6 +1,6 @@
 # Changes
 
-## [0.2.0] - 2019-12-18
+## [0.1.1] - 2019-12-18
 
 * Separate control frame entries for detach sender qand detach receiver
 
