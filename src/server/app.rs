@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use actix_router::Router;
+use actix_router::{IntoPattern, Router};
 use actix_service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use futures::future::{err, ok, Either, Ready};
@@ -18,22 +18,23 @@ use super::State;
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Message<S>, Outcome, Error, Error>;
 
-pub struct App<S = ()>(Vec<(String, Handle<S>)>);
+pub struct App<S = ()>(Vec<(Vec<String>, Handle<S>)>);
 
 impl<S: 'static> App<S> {
     pub fn new() -> App<S> {
         App(Vec::new())
     }
 
-    pub fn service<F, U: 'static>(mut self, address: &str, service: F) -> Self
+    pub fn service<T, F, U: 'static>(mut self, address: T, service: F) -> Self
     where
+        T: IntoPattern,
         F: IntoServiceFactory<U>,
         U: ServiceFactory<Config = Link<S>, Request = Message<S>, Response = Outcome>,
         U::Error: Into<Error>,
         U::InitError: Into<Error>,
     {
         self.0.push((
-            address.to_string(),
+            address.patterns(),
             boxed::factory(
                 service
                     .into_factory()
@@ -56,7 +57,7 @@ impl<S: 'static> App<S> {
     > {
         let mut router = Router::build();
         for (addr, hnd) in self.0 {
-            router.path(&addr, hnd);
+            router.path(addr, hnd);
         }
         let router = Cell::new(router.finish());
 

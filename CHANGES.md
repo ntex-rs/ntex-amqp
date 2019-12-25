@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.2] - 2019-12-25
+
+* Allow to specify multi-pattern for topics
+
 ## [0.1.1] - 2019-12-18
 
 * Separate control frame entries for detach sender qand detach receiver

@@ -1,6 +1,6 @@
 [package]
 name = "actix-amqp"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/actix-amqp"
@@ -21,14 +21,14 @@ members = [
 amqp-codec = "0.1.0"
 
 actix-codec = "0.2.0"
-actix-service = "1.0.0"
-actix-connect = "1.0.0"
-actix-router = "0.2.0"
-actix-utils = "1.0.3"
+actix-service = "1.0.1"
+actix-connect = "1.0.1"
+actix-router = "0.2.2"
+actix-utils = "1.0.4"
 actix-rt = "1.0.0"
 
 bytes = "0.5.3"
-bytestring = "0.1.1"
+bytestring = "0.1.2"
 derive_more = "0.99.2"
 either = "1.5.3"
 futures = "0.3.1"
