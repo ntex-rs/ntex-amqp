@@ -308,6 +308,14 @@ impl SenderLinkBuilder {
         self
     }
 
+    pub fn with_frame<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut Attach),
+    {
+        f(&mut self.frame);
+        self
+    }
+
     pub async fn open(self) -> Result<SenderLink, AmqpTransportError> {
         self.session
             .get_mut()

@@ -164,7 +164,7 @@ impl OutMessage {
     /// Set message body
     pub fn set_body<F>(&mut self, f: F) -> &mut Self
     where
-        F: Fn(&mut MessageBody),
+        F: FnOnce(&mut MessageBody),
     {
         f(&mut self.body);
         self.size.set(0);

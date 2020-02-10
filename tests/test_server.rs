@@ -39,11 +39,9 @@ async fn test_simple() -> std::io::Result<()> {
 
     let srv = TestServer::with(|| {
         server::Server::new(
-            server::Handshake::new(|conn: server::Connect<_>| {
-                async move {
-                    let conn = conn.open().await.unwrap();
-                    Ok::<_, errors::AmqpError>(conn.ack(()))
-                }
+            server::Handshake::new(|conn: server::Connect<_>| async move {
+                let conn = conn.open().await.unwrap();
+                Ok::<_, errors::AmqpError>(conn.ack(()))
             })
             .sasl(server::sasl::no_sasl()),
         )
@@ -100,11 +98,9 @@ async fn sasl_auth<Io: AsyncRead + AsyncWrite>(
 async fn test_sasl() -> std::io::Result<()> {
     let srv = TestServer::with(|| {
         server::Server::new(
-            server::Handshake::new(|conn: server::Connect<_>| {
-                async move {
-                    let conn = conn.open().await.unwrap();
-                    Ok::<_, errors::Error>(conn.ack(()))
-                }
+            server::Handshake::new(|conn: server::Connect<_>| async move {
+                let conn = conn.open().await.unwrap();
+                Ok::<_, errors::Error>(conn.ack(()))
             })
             .sasl(pipeline_factory(sasl_auth).map_err(|e| e.into())),
         )
