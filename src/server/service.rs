@@ -1,8 +1,8 @@
-use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::{fmt, time};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use actix_service::{boxed, IntoServiceFactory, Service, ServiceFactory};
@@ -33,6 +33,7 @@ pub struct Server<Io, St, Cn: ServiceFactory> {
     control: Option<ControlFrameNewService<St>>,
     disconnect: Option<Box<dyn Fn(&mut St, Option<&ServerError<Cn::Error>>)>>,
     max_size: usize,
+    handshake_timeout: u64,
     _t: PhantomData<(Io, St)>,
 }
 
@@ -43,6 +44,7 @@ pub(super) struct ServerInner<St, Cn: ServiceFactory, Pb> {
     control: Option<ControlFrameNewService<St>>,
     disconnect: Option<Box<dyn Fn(&mut St, Option<&ServerError<Cn::Error>>)>>,
     max_size: usize,
+    handshake_timeout: u64,
 }
 
 impl<Io, St, Cn> Server<Io, St, Cn>
@@ -63,6 +65,7 @@ where
             control: None,
             disconnect: None,
             max_size: 0,
+            handshake_timeout: 0,
             _t: PhantomData,
         }
     }
@@ -79,6 +82,14 @@ where
     /// By default max size is set to `0`
     pub fn max_size(mut self, size: usize) -> Self {
         self.max_size = size;
+        self
+    }
+
+    /// Set handshake timeout in millis.
+    ///
+    /// By default handshake timeuot is disabled.
+    pub fn handshake_timeout(mut self, timeout: u64) -> Self {
+        self.handshake_timeout = timeout;
         self
     }
 
@@ -100,6 +111,7 @@ where
                     .map_init_err(|e| e.into()),
             )),
             max_size: self.max_size,
+            handshake_timeout: self.handshake_timeout,
             _t: PhantomData,
         }
     }
@@ -121,6 +133,7 @@ where
                 actix_rt::spawn(fut.map(|_| ()));
             })),
             max_size: self.max_size,
+            handshake_timeout: self.handshake_timeout,
             _t: PhantomData,
         }
     }
@@ -144,6 +157,7 @@ where
                 control: self.control,
                 disconnect: self.disconnect,
                 max_size: self.max_size,
+                handshake_timeout: self.handshake_timeout,
             }),
             _t: PhantomData,
         }
@@ -219,12 +233,31 @@ where
     }
 
     fn call(&mut self, req: Self::Request) -> Self::Future {
-        Box::pin(handshake(
-            self.inner.max_size,
-            self.connect.clone(),
-            self.inner.clone(),
-            req,
-        ))
+        let timeout = self.inner.handshake_timeout;
+        if timeout == 0 {
+            Box::pin(handshake(
+                self.inner.max_size,
+                self.connect.clone(),
+                self.inner.clone(),
+                req,
+            ))
+        } else {
+            Box::pin(
+                actix_rt::time::timeout(
+                    time::Duration::from_millis(timeout),
+                    handshake(
+                        self.inner.max_size,
+                        self.connect.clone(),
+                        self.inner.clone(),
+                        req,
+                    ),
+                )
+                .map(|res| match res {
+                    Ok(res) => res,
+                    Err(_) => Err(ServerError::HandshakeTimeout),
+                }),
+            )
+        }
     }
 }
 

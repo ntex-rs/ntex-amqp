@@ -20,6 +20,8 @@ pub enum ServerError<E> {
     #[display(fmt = "Protocol negotiation error: {}", _0)]
     /// Amqp protocol negotiation error
     Handshake(ProtocolIdError),
+    /// Amqp handshake timeout
+    HandshakeTimeout,
     /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
     Protocol(AmqpCodecError),

@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.4] - 2020-03-05
+
+* Add server handshake timeout
+
 ## [0.1.3] - 2020-02-10
 
 * Allow to override sender link attach frame
