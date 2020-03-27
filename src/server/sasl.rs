@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_service::{Service, ServiceFactory};
 use amqp_codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
@@ -13,6 +12,7 @@ use bytes::Bytes;
 use bytestring::ByteString;
 use futures::future::{err, ok, Either, Ready};
 use futures::{SinkExt, StreamExt};
+use ntex::service::{Service, ServiceFactory};
 
 use super::connect::{ConnectAck, ConnectOpened};
 use super::errors::{AmqpError, ServerError};

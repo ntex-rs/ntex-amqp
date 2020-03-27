@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::future::Future;
 
-use actix_utils::oneshot;
 use bytes::{BufMut, Bytes, BytesMut};
 use bytestring::ByteString;
 use either::Either;
 use futures::future::ok;
 use fxhash::FxHashMap;
+use ntex::channel::oneshot;
 use slab::Slab;
 
 use amqp_codec::protocol::{

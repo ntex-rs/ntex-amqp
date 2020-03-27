@@ -2,11 +2,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use actix_router::{IntoPattern, Router};
-use actix_service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use futures::future::{err, ok, Either, Ready};
 use futures::{Stream, StreamExt};
+use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
+use ntex_router::{IntoPattern, Router};
 
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
@@ -182,7 +182,7 @@ impl<S> Future for AppServiceResponse<S> {
                                     outcome.into_delivery_state(),
                                 ),
                                 Poll::Pending => {
-                                    actix_rt::spawn(HandleMessage {
+                                    ntex::rt::spawn(HandleMessage {
                                         fut,
                                         delivery_id,
                                         link: this.link.clone(),

@@ -1,12 +1,12 @@
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_connect::{Connect as TcpConnect, Connection as TcpConnection};
-use actix_service::{apply_fn, pipeline, IntoService, Service};
-use actix_utils::time::LowResTimeService;
 use bytestring::ByteString;
 use either::Either;
 use futures::future::{ok, Future};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::Uri;
+use ntex::connect::Connect as TcpConnect;
+use ntex::service::{apply_fn, pipeline, IntoService, Service};
+use ntex::util::time::LowResTimeService;
 
 use amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use amqp_codec::types::Symbol;
@@ -46,7 +46,7 @@ pub fn connect_service<T, Io>(
     Error = either::Either<SaslConnectError, T::Error>,
 >
 where
-    T: Service<Request = TcpConnect<Uri>, Response = TcpConnection<Uri, Io>>,
+    T: Service<Request = TcpConnect<Uri>, Response = Io>,
     T::Error: 'static,
     Io: AsyncRead + AsyncWrite + 'static,
 {
@@ -65,8 +65,7 @@ where
         |(uri, config, auth, time): (Uri, Configuration, _, _), srv| {
             let fut = srv.call(uri.clone().into());
             async move {
-                fut.await.map(|stream| {
-                    let (io, _) = stream.into_parts();
+                fut.await.map(|io| {
                     (io, uri, config, auth, time)
                 })
             }

@@ -1,4 +1,4 @@
-use actix_service::{IntoServiceFactory, ServiceFactory};
+use ntex::service::{IntoServiceFactory, ServiceFactory};
 
 use super::connect::ConnectAck;
 
@@ -34,7 +34,7 @@ impl<Io, St, A> Handshake<Io, St, A>
 where
     A: ServiceFactory<Config = (), Response = ConnectAck<Io, St>>,
 {
-    pub fn sasl<F, B>(self, srv: F) -> actix_utils::either::Either<A, B>
+    pub fn sasl<F, B>(self, srv: F) -> ntex::util::either::Either<A, B>
     where
         F: IntoServiceFactory<B>,
         B: ServiceFactory<
@@ -45,6 +45,6 @@ where
         >,
         B::Error: Into<amqp_codec::protocol::Error>,
     {
-        actix_utils::either::Either::new(self.a, srv.into_factory())
+        ntex::util::either::Either::new(self.a, srv.into_factory())
     }
 }

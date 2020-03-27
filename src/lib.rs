@@ -10,10 +10,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use actix_utils::oneshot;
 use amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use bytes::Bytes;
 use bytestring::ByteString;
+use ntex::channel::oneshot;
 use uuid::Uuid;
 
 mod cell;

@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use actix_rt::time::{delay_until, Delay, Instant};
-use actix_utils::time::LowResTimeService;
+use ntex::rt::time::{delay_until, Delay, Instant};
+use ntex::util::time::LowResTimeService;
 
 use crate::errors::AmqpTransportError;
 

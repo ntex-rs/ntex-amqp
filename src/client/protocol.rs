@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_service::Service;
 use futures::{Future, SinkExt, StreamExt};
+use ntex::service::Service;
 
 use amqp_codec::protocol::ProtocolId;
 use amqp_codec::{ProtocolIdCodec, ProtocolIdError};

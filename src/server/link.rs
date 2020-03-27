@@ -1,8 +1,8 @@
 use std::fmt;
 
-use actix_router::Path;
 use amqp_codec::protocol::Attach;
 use bytestring::ByteString;
+use ntex::router::Path;
 
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;

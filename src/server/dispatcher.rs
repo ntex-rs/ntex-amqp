@@ -4,9 +4,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use actix_codec::{AsyncRead, AsyncWrite};
-use actix_service::Service;
 use amqp_codec::protocol::{Error, Frame, Role};
 use amqp_codec::AmqpCodecError;
+use ntex::service::Service;
 use slab::Slab;
 
 use crate::cell::Cell;

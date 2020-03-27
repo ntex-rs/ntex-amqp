@@ -5,12 +5,12 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_utils::oneshot;
-use actix_utils::task::LocalWaker;
-use actix_utils::time::LowResTimeService;
-use futures::future::{err, Either};
-use futures::{future, Sink, Stream};
+use futures::future::{self, err, Either};
+use futures::{Sink, Stream};
 use fxhash::FxHashMap;
+use ntex::channel::oneshot;
+use ntex::task::LocalWaker;
+use ntex::util::time::LowResTimeService;
 
 use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
 use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};

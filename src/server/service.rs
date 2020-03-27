@@ -5,11 +5,11 @@ use std::task::{Context, Poll};
 use std::{fmt, time};
 
 use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use actix_service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use amqp_codec::protocol::{Error, ProtocolId};
 use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use futures::future::{err, poll_fn, Either};
 use futures::{FutureExt, SinkExt, StreamExt};
+use ntex::service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 
 use crate::cell::Cell;
 use crate::connection::{Connection, ConnectionController};
@@ -130,7 +130,7 @@ where
             control: self.control,
             disconnect: Some(Box::new(move |st, err| {
                 let fut = disconnect(st, err);
-                actix_rt::spawn(fut.map(|_| ()));
+                ntex::rt::spawn(fut.map(|_| ()));
             })),
             max_size: self.max_size,
             handshake_timeout: self.handshake_timeout,
@@ -243,7 +243,7 @@ where
             ))
         } else {
             Box::pin(
-                actix_rt::time::timeout(
+                ntex::rt::time::timeout(
                     time::Duration::from_millis(timeout),
                     handshake(
                         self.inner.max_size,

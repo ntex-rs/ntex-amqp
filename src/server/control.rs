@@ -1,5 +1,5 @@
-use actix_service::boxed::{BoxService, BoxServiceFactory};
 use amqp_codec::protocol;
+use ntex::service::boxed::{BoxService, BoxServiceFactory};
 
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
