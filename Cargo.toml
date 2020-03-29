@@ -7,7 +7,7 @@ documentation = "https://docs.rs/actix-amqp"
 repository = "https://github.com/actix/actix-amqp.git"
 categories = ["network-programming"]
 keywords = ["AMQP", "IoT", "messaging"]
-license = "MIT/Apache-2.0"
+license = "MIT"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
 edition = "2018"
 
