@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
 use std::future::Future;
 
-use amqp_codec::protocol::{
-    Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, ReceiverSettleMode, Role,
-    SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
-};
 use bytes::Bytes;
 use bytestring::ByteString;
 use futures::future::{ok, Either};
 use ntex::channel::oneshot;
+use ntex_amqp_codec::protocol::{
+    Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, ReceiverSettleMode, Role,
+    SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
+};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;

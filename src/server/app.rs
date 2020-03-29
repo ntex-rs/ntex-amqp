@@ -2,10 +2,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use amqp_codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use futures::future::{err, ok, Either, Ready};
 use futures::{Stream, StreamExt};
 use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
+use ntex_amqp_codec::protocol::{
+    DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role,
+};
 use ntex_router::{IntoPattern, Router};
 
 use crate::cell::Cell;

@@ -1,8 +1,8 @@
 use std::fmt;
 
-use amqp_codec::protocol::{Accepted, DeliveryState, Error, Rejected, Transfer, TransferBody};
-use amqp_codec::Decode;
 use bytes::Bytes;
+use ntex_amqp_codec::protocol::{Accepted, DeliveryState, Error, Rejected, Transfer, TransferBody};
+use ntex_amqp_codec::Decode;
 
 use crate::rcvlink::ReceiverLink;
 use crate::session::Session;

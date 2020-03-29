@@ -4,12 +4,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{fmt, time};
 
-use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use amqp_codec::protocol::{Error, ProtocolId};
-use amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use futures::future::{err, poll_fn, Either};
 use futures::{FutureExt, SinkExt, StreamExt};
+use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::{boxed, IntoServiceFactory, Service, ServiceFactory};
+use ntex_amqp_codec::protocol::{Error, ProtocolId};
+use ntex_amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 
 use crate::cell::Cell;
 use crate::connection::{Connection, ConnectionController};

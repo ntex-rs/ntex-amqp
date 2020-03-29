@@ -1,16 +1,16 @@
-use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use bytestring::ByteString;
 use either::Either;
 use futures::future::{ok, Future};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::Uri;
+use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::connect::Connect as TcpConnect;
 use ntex::service::{apply_fn, pipeline, IntoService, Service};
 use ntex::util::time::LowResTimeService;
 
-use amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
-use amqp_codec::types::Symbol;
-use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
+use ntex_amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
+use ntex_amqp_codec::types::Symbol;
+use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 
 use crate::connection::Connection;
 use crate::service::ProtocolNegotiation;

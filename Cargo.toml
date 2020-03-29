@@ -18,14 +18,14 @@ members = [
 ]
 
 [dependencies]
-amqp-codec = "0.1.0"
 ntex = "0.1"
+ntex-amqp-codec = "0.1.0"
 ntex-router = "0.3"
+ntex-codec = "0.1.0"
 
-actix-codec = "0.2.0"
 bytes = "0.5.3"
-bytestring = "0.1.2"
-derive_more = "0.99.2"
+bytestring = "0.1.4"
+derive_more = "0.99.5"
 either = "1.5.3"
 futures = "0.3.1"
 fxhash = "0.2.1"
@@ -40,8 +40,12 @@ env_logger = "0.6"
 
 [patch.crates-io]
 ntex-amqp = { path = "." }
-amqp-codec = { path = "codec" }
+ntex-amqp-codec = { path = "codec" }
 
 ntex = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-rt = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-codec = { git = "https://github.com/ntex-rs/ntex.git" }
 ntex-router = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-macros = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-web-macros = { git = "https://github.com/ntex-rs/ntex.git" }
 ntex-service = { git = "https://github.com/ntex-rs/ntex.git" }

@@ -1,4 +1,4 @@
-use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError};
+use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError};
 
 #[derive(Debug, Display, Clone)]
 pub enum AmqpTransportError {

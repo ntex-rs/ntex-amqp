@@ -1,10 +1,10 @@
 use std::io;
 
-use amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 use bytestring::ByteString;
 use derive_more::Display;
+use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 
-pub use amqp_codec::protocol::Error;
+pub use ntex_amqp_codec::protocol::Error;
 
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display)]

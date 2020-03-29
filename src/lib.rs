@@ -10,10 +10,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use bytes::Bytes;
 use bytestring::ByteString;
 use ntex::channel::oneshot;
+use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use uuid::Uuid;
 
 mod cell;
@@ -33,6 +33,10 @@ pub use self::errors::AmqpTransportError;
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};
+
+pub mod codec {
+    pub use ntex_amqp_codec::*;
+}
 
 pub enum Delivery {
     Resolved(Result<Disposition, AmqpTransportError>),

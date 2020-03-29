@@ -2,12 +2,12 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use futures::{Future, SinkExt, StreamExt};
+use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::Service;
 
-use amqp_codec::protocol::ProtocolId;
-use amqp_codec::{ProtocolIdCodec, ProtocolIdError};
+use ntex_amqp_codec::protocol::ProtocolId;
+use ntex_amqp_codec::{ProtocolIdCodec, ProtocolIdError};
 
 pub struct ProtocolNegotiation<T> {
     proto: ProtocolId,

@@ -4,16 +4,16 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use actix_codec::{AsyncRead, AsyncWrite, Framed};
 use futures::future::{self, err, Either};
 use futures::{Sink, Stream};
 use fxhash::FxHashMap;
 use ntex::channel::oneshot;
+use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::task::LocalWaker;
 use ntex::util::time::LowResTimeService;
 
-use amqp_codec::protocol::{Begin, Close, End, Error, Frame};
-use amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
+use ntex_amqp_codec::protocol::{Begin, Close, End, Error, Frame};
+use ntex_amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
 
 use crate::cell::{Cell, WeakCell};
 use crate::errors::AmqpTransportError;

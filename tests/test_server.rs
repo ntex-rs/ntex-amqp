@@ -1,14 +1,14 @@
 use std::convert::TryFrom;
 
-use actix_amqp::server::{self, errors};
-use actix_amqp::{sasl, Configuration};
-use actix_codec::{AsyncRead, AsyncWrite};
-use actix_connect::{default_connector, TcpConnector};
-use actix_service::{fn_factory_with_config, pipeline_factory, Service};
-use actix_testing::TestServer;
 use futures::future::{err, Ready};
 use futures::Future;
-use http::Uri;
+use ntex::codec::{AsyncRead, AsyncWrite};
+use ntex::connect::Connector;
+use ntex::http::Uri;
+use ntex::server::test_server;
+use ntex::service::{fn_factory_with_config, pipeline_factory, Service};
+use ntex_amqp::server::{self, errors};
+use ntex_amqp::{sasl, Configuration};
 
 fn server(
     link: server::Link<()>,
@@ -29,15 +29,12 @@ fn server(
     err(errors::LinkError::force_detach().description("unimplemented"))
 }
 
-#[actix_rt::test]
+#[ntex::test]
 async fn test_simple() -> std::io::Result<()> {
-    std::env::set_var(
-        "RUST_LOG",
-        "actix_codec=info,actix_server=trace,actix_connector=trace,amqp_transport=trace",
-    );
+    std::env::set_var("RUST_LOG", "ntex=trace,ntex_amqp=trace");
     env_logger::init();
 
-    let srv = TestServer::with(|| {
+    let srv = test_server(|| {
         server::Server::new(
             server::Handshake::new(|conn: server::Connect<_>| async move {
                 let conn = conn.open().await.unwrap();
@@ -52,8 +49,8 @@ async fn test_simple() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.host(), srv.port())).unwrap();
-    let mut sasl_srv = sasl::connect_service(default_connector());
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let mut sasl_srv = sasl::connect_service(Connector::default());
     let req = sasl::SaslConnect {
         uri,
         config: Configuration::default(),
@@ -84,19 +81,23 @@ async fn sasl_auth<Io: AsyncRead + AsyncWrite>(
     if init.mechanism() == "PLAIN" {
         if let Some(resp) = init.initial_response() {
             if resp == b"\0user1\0password1" {
-                let succ = init.outcome(amqp_codec::protocol::SaslCode::Ok).await?;
+                let succ = init
+                    .outcome(ntex_amqp_codec::protocol::SaslCode::Ok)
+                    .await?;
                 return Ok(succ.open().await?.ack(()));
             }
         }
     }
 
-    let succ = init.outcome(amqp_codec::protocol::SaslCode::Auth).await?;
+    let succ = init
+        .outcome(ntex_amqp_codec::protocol::SaslCode::Auth)
+        .await?;
     Ok(succ.open().await?.ack(()))
 }
 
-#[actix_rt::test]
+#[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
-    let srv = TestServer::with(|| {
+    let srv = test_server(|| {
         server::Server::new(
             server::Handshake::new(|conn: server::Connect<_>| async move {
                 let conn = conn.open().await.unwrap();
@@ -111,8 +112,8 @@ async fn test_sasl() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.host(), srv.port())).unwrap();
-    let mut sasl_srv = sasl::connect_service(TcpConnector::new());
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let mut sasl_srv = sasl::connect_service(Connector::default());
 
     let req = sasl::SaslConnect {
         uri,

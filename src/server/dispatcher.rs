@@ -3,10 +3,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use actix_codec::{AsyncRead, AsyncWrite};
-use amqp_codec::protocol::{Error, Frame, Role};
-use amqp_codec::AmqpCodecError;
+use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::service::Service;
+use ntex_amqp_codec::protocol::{Error, Frame, Role};
+use ntex_amqp_codec::AmqpCodecError;
 use slab::Slab;
 
 use crate::cell::Cell;

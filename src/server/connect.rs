@@ -1,7 +1,7 @@
-use actix_codec::{AsyncRead, AsyncWrite, Framed};
-use amqp_codec::protocol::{Frame, Open};
-use amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec};
 use futures::{Future, StreamExt};
+use ntex::codec::{AsyncRead, AsyncWrite, Framed};
+use ntex_amqp_codec::protocol::{Frame, Open};
+use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec};
 
 use super::errors::ServerError;
 use crate::connection::ConnectionController;

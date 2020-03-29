@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
-use actix_codec::{Decoder, Encoder};
 use byteorder::{BigEndian, ByteOrder};
 use bytes::{BufMut, BytesMut};
+use ntex_codec::{Decoder, Encoder};
 
 use super::errors::{AmqpCodecError, ProtocolIdError};
 use super::framing::HEADER_LEN;

@@ -9,11 +9,11 @@ use fxhash::FxHashMap;
 use ntex::channel::oneshot;
 use slab::Slab;
 
-use amqp_codec::protocol::{
+use ntex_amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
     Handle, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody, TransferNumber,
 };
-use amqp_codec::AmqpFrame;
+use ntex_amqp_codec::AmqpFrame;
 
 use crate::cell::Cell;
 use crate::connection::ConnectionController;

@@ -43,7 +43,7 @@ where
             Error = A::Error,
             InitError = A::InitError,
         >,
-        B::Error: Into<amqp_codec::protocol::Error>,
+        B::Error: Into<ntex_amqp_codec::protocol::Error>,
     {
         ntex::util::either::Either::new(self.a, srv.into_factory())
     }

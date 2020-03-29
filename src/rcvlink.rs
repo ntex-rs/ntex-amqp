@@ -4,15 +4,15 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::u32;
 
-use amqp_codec::protocol::{
-    Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
-};
 use bytes::Bytes;
 use bytestring::ByteString;
 use futures::Stream;
 use ntex::channel::oneshot;
 use ntex::task::LocalWaker;
+use ntex_amqp_codec::protocol::{
+    Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
+    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
+};
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
