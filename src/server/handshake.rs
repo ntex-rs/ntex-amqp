@@ -45,6 +45,6 @@ where
         >,
         B::Error: Into<ntex_amqp_codec::protocol::Error>,
     {
-        ntex::util::either::Either::new(self.a, srv.into_factory())
+        ntex::util::either(self.a, srv.into_factory())
     }
 }

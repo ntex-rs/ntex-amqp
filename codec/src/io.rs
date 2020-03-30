@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use byteorder::{BigEndian, ByteOrder};
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use ntex_codec::{Decoder, Encoder};
 
 use super::errors::{AmqpCodecError, ProtocolIdError};
@@ -68,7 +68,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                         return Err(AmqpCodecError::MaxSizeExceeded);
                     }
                     self.state = DecodeState::Frame(size - 4);
-                    src.split_to(4);
+                    src.advance(4);
 
                     if len < size {
                         // extend receiving buffer to fit the whole frame
