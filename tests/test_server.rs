@@ -50,7 +50,7 @@ async fn test_simple() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let mut sasl_srv = sasl::connect_service(Connector::default());
+    let sasl_srv = sasl::connect_service(Connector::default());
     let req = sasl::SaslConnect {
         uri,
         config: Configuration::default(),
@@ -113,7 +113,7 @@ async fn test_sasl() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let mut sasl_srv = sasl::connect_service(Connector::default());
+    let sasl_srv = sasl::connect_service(Connector::default());
 
     let req = sasl::SaslConnect {
         uri,

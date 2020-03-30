@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 use std::{fmt, time};
 
@@ -150,7 +151,7 @@ where
         Pb::InitError: fmt::Display + Into<Error>,
     {
         ServerImpl {
-            inner: Cell::new(ServerInner {
+            inner: Rc::new(ServerInner {
                 connect: self.connect,
                 config: self.config,
                 publish: service.into_factory(),
@@ -165,7 +166,7 @@ where
 }
 
 struct ServerImpl<Io, St, Cn: ServiceFactory, Pb> {
-    inner: Cell<ServerInner<St, Cn, Pb>>,
+    inner: Rc<ServerInner<St, Cn, Pb>>,
     _t: PhantomData<(Io,)>,
 }
 
@@ -197,7 +198,7 @@ where
                 .await
                 .map(move |connect| ServerImplService {
                     inner,
-                    connect: Cell::new(connect),
+                    connect: Rc::new(connect),
                     _t: PhantomData,
                 })
         })
@@ -205,8 +206,8 @@ where
 }
 
 struct ServerImplService<Io, St, Cn: ServiceFactory, Pb> {
-    connect: Cell<Cn::Service>,
-    inner: Cell<ServerInner<St, Cn, Pb>>,
+    connect: Rc<Cn::Service>,
+    inner: Rc<ServerInner<St, Cn, Pb>>,
     _t: PhantomData<(Io,)>,
 }
 
@@ -225,14 +226,20 @@ where
     type Error = ServerError<Cn::Error>;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    #[inline]
+    fn poll_ready(&self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
         self.connect
-            .get_mut()
+            .as_ref()
             .poll_ready(cx)
             .map(|res| res.map_err(|e| ServerError::Service(e)))
     }
 
-    fn call(&mut self, req: Self::Request) -> Self::Future {
+    #[inline]
+    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
+        self.connect.as_ref().poll_shutdown(cx, is_error)
+    }
+
+    fn call(&self, req: Self::Request) -> Self::Future {
         let timeout = self.inner.handshake_timeout;
         if timeout == 0 {
             Box::pin(handshake(
@@ -263,8 +270,8 @@ where
 
 async fn handshake<Io, St, Cn: ServiceFactory, Pb>(
     max_size: usize,
-    connect: Cell<Cn::Service>,
-    inner: Cell<ServerInner<St, Cn, Pb>>,
+    connect: Rc<Cn::Service>,
+    inner: Rc<ServerInner<St, Cn, Pb>>,
     io: Io,
 ) -> Result<(), ServerError<Cn::Error>>
 where
@@ -289,11 +296,10 @@ where
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             framed.send(protocol).await.map_err(ServerError::from)?;
 
-            let cfg = inner.get_ref().config.clone();
+            let cfg = inner.as_ref().config.clone();
             let controller = ConnectionController::new(cfg.clone());
 
             let ack = connect
-                .get_mut()
                 .call(if protocol == ProtocolId::Amqp {
                     either::Either::Left(Connect::new(framed, controller))
                 } else {
@@ -344,7 +350,7 @@ where
             .map_err(ServerError::from);
 
         if inner2.disconnect.is_some() {
-            (*inner2.get_mut().disconnect.as_mut().unwrap())(st2.get_mut(), res.as_ref().err())
+            (*inner2.as_ref().disconnect.as_ref().unwrap())(st2.get_mut(), res.as_ref().err())
         }
         res
     } else {
@@ -353,7 +359,7 @@ where
             .map_err(ServerError::from);
 
         if inner2.disconnect.is_some() {
-            (*inner2.get_mut().disconnect.as_mut().unwrap())(st2.get_mut(), res.as_ref().err())
+            (*inner2.as_ref().disconnect.as_ref().unwrap())(st2.get_mut(), res.as_ref().err())
         }
         res
     }
