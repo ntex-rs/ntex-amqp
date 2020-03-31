@@ -67,7 +67,7 @@ async fn test_simple() -> std::io::Result<()> {
     Ok(())
 }
 
-async fn sasl_auth<Io: AsyncRead + AsyncWrite>(
+async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
     auth: server::Sasl<Io>,
 ) -> Result<server::ConnectAck<Io, ()>, server::errors::ServerError<()>> {
     let init = auth

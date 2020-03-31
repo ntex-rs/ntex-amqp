@@ -61,7 +61,7 @@ enum State {
     Drop,
 }
 
-impl<T: AsyncRead + AsyncWrite> Connection<T> {
+impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
     pub fn new(
         framed: Framed<T, AmqpCodec<AmqpFrame>>,
         local: Configuration,
@@ -389,7 +389,7 @@ impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite> Future for Connection<T> {
+impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
     type Output = Result<(), AmqpCodecError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

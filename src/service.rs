@@ -34,7 +34,7 @@ impl<T> ProtocolNegotiation<T> {
 
 impl<T> Service for ProtocolNegotiation<T>
 where
-    T: AsyncRead + AsyncWrite + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     type Request = Framed<T, ProtocolIdCodec>;
     type Response = Framed<T, ProtocolIdCodec>;

@@ -22,7 +22,7 @@ use super::{Link, State};
 #[pin_project::pin_project]
 pub struct Dispatcher<Io, St, Sr>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
     Sr: Service<Request = Link<St>, Response = ()>,
 {
     conn: Connection<Io>,
@@ -44,7 +44,7 @@ enum IncomingResult {
 
 impl<Io, St, Sr> Dispatcher<Io, St, Sr>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
     Sr: Service<Request = Link<St>, Response = ()>,
     Sr::Error: fmt::Display + Into<Error>,
 {
@@ -225,7 +225,7 @@ where
 
 impl<Io, St, Sr> Future for Dispatcher<Io, St, Sr>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
     Sr: Service<Request = Link<St>, Response = ()>,
     Sr::Error: fmt::Display + Into<Error>,
 {

@@ -51,7 +51,7 @@ pub(super) struct ServerInner<St, Cn: ServiceFactory, Pb> {
 impl<Io, St, Cn> Server<Io, St, Cn>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
 {
@@ -173,7 +173,7 @@ struct ServerImpl<Io, St, Cn: ServiceFactory, Pb> {
 impl<Io, St, Cn, Pb> ServiceFactory for ServerImpl<Io, St, Cn, Pb>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
@@ -214,7 +214,7 @@ struct ServerImplService<Io, St, Cn: ServiceFactory, Pb> {
 impl<Io, St, Cn, Pb> Service for ServerImplService<Io, St, Cn, Pb>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
         + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
@@ -276,7 +276,7 @@ async fn handshake<Io, St, Cn: ServiceFactory, Pb>(
 ) -> Result<(), ServerError<Cn::Error>>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
     Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,

@@ -48,7 +48,7 @@ pub fn connect_service<T, Io>(
 where
     T: Service<Request = TcpConnect<Uri>, Response = Io>,
     T::Error: 'static,
-    Io: AsyncRead + AsyncWrite + 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     pipeline(|connect: SaslConnect| {
         let SaslConnect {
@@ -140,7 +140,7 @@ where
     )
 }
 
-async fn sasl_connect<Io: AsyncRead + AsyncWrite>(
+async fn sasl_connect<Io: AsyncRead + AsyncWrite + Unpin>(
     (framed, uri, auth): (Framed<Io, ProtocolIdCodec>, Uri, SaslAuth),
 ) -> Result<Framed<Io, ProtocolIdCodec>, SaslConnectError> {
     let mut sasl_io = framed.into_framed(AmqpCodec::<SaslFrame>::new());

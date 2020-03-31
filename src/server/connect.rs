@@ -28,7 +28,7 @@ impl<Io> Connect<Io> {
     }
 }
 
-impl<Io: AsyncRead + AsyncWrite> Connect<Io> {
+impl<Io: AsyncRead + AsyncWrite + Unpin> Connect<Io> {
     /// Wait for connection open frame
     pub async fn open(self) -> Result<ConnectOpened<Io>, ServerError<()>> {
         let mut framed = self.conn.into_framed(AmqpCodec::<AmqpFrame>::new());

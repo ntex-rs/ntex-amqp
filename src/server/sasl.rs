@@ -47,7 +47,7 @@ impl<Io> Sasl<Io> {
 
 impl<Io> Sasl<Io>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
 {
     /// Returns reference to io object
     pub fn get_ref(&self) -> &Io {
@@ -115,7 +115,7 @@ impl<Io> fmt::Debug for Init<Io> {
 
 impl<Io> Init<Io>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
 {
     /// Sasl mechanism
     pub fn mechanism(&self) -> &str {
@@ -202,7 +202,7 @@ impl<Io> fmt::Debug for Response<Io> {
 
 impl<Io> Response<Io>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
 {
     /// Client response payload
     pub fn response(&self) -> &[u8] {
@@ -237,7 +237,7 @@ pub struct Success<Io> {
 
 impl<Io> Success<Io>
 where
-    Io: AsyncRead + AsyncWrite,
+    Io: AsyncRead + AsyncWrite + Unpin,
 {
     /// Returns reference to io object
     pub fn get_ref(&self) -> &Io {

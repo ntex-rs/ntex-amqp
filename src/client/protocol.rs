@@ -33,7 +33,7 @@ impl<Io> ProtocolNegotiation<Io> {
 
     pub fn framed(stream: Io) -> Framed<Io, ProtocolIdCodec>
     where
-        Io: AsyncRead + AsyncWrite,
+        Io: AsyncRead + AsyncWrite + Unpin,
     {
         Framed::new(stream, ProtocolIdCodec)
     }
@@ -47,7 +47,7 @@ impl<Io> Default for ProtocolNegotiation<Io> {
 
 impl<Io> Service for ProtocolNegotiation<Io>
 where
-    Io: AsyncRead + AsyncWrite + 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     type Request = Framed<Io, ProtocolIdCodec>;
     type Response = Framed<Io, ProtocolIdCodec>;
