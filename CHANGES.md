@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.0] - 2020-04-01
+
+* Switch to ntex
+
 ## [0.1.4] - 2020-03-05
 
 * Add server handshake timeout

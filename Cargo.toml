@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "0.2.0"
+version = "0.1.0"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/actix-amqp"
@@ -41,6 +41,3 @@ env_logger = "0.7"
 [patch.crates-io]
 ntex-amqp = { path = "." }
 ntex-amqp-codec = { path = "codec" }
-
-ntex = { git = "https://github.com/ntex-rs/ntex.git" }
-ntex-web-macros = { git = "https://github.com/ntex-rs/ntex.git" }
