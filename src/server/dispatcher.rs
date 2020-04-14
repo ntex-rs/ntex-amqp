@@ -89,6 +89,17 @@ where
     fn handle_control_frame(&self, frame: &ControlFrame<St>, err: Option<LinkError>) {
         if let Some(e) = err {
             error!("Error in link handler: {}", e);
+            match frame.0.kind {
+                ControlFrameKind::Attach(ref frm) => {
+                    frame
+                        .0
+                        .session
+                        .inner
+                        .get_mut()
+                        .detach_unconfirmed_sender_link(&frm, Some(e.into()));
+                }
+                _ => (),
+            }
         } else {
             match frame.0.kind {
                 ControlFrameKind::Attach(ref frm) => {

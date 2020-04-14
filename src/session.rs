@@ -270,8 +270,22 @@ impl SessionInner {
         async move { rx.await.map_err(|_| AmqpTransportError::Disconnected) }
     }
 
+    /// Detach unconfirmed sender link
+    pub(crate) fn detach_unconfirmed_sender_link(&mut self, attach: &Attach, error: Option<Error>) {
+        let detach = Detach {
+            handle: attach.handle(),
+            closed: true,
+            error,
+        };
+        self.post_frame(detach.into());
+    }
+
     /// Register remote sender link
-    pub(crate) fn confirm_sender_link(&mut self, cell: Cell<SessionInner>, attach: &Attach) {
+    pub(crate) fn confirm_sender_link(
+        &mut self,
+        cell: Cell<SessionInner>,
+        attach: &Attach,
+    ) -> SenderLink {
         trace!("Remote sender link opened: {:?}", attach.name());
         let entry = self.links.vacant_entry();
         let token = entry.key();
@@ -294,7 +308,7 @@ impl SessionInner {
             cell,
         ));
         entry.insert(Either::Left(SenderLinkState::Established(SenderLink::new(
-            link,
+            link.clone(),
         ))));
 
         let attach = Attach {
@@ -314,6 +328,8 @@ impl SessionInner {
             properties: None,
         };
         self.post_frame(attach.into());
+
+        SenderLink::new(link)
     }
 
     /// Register receiver link
@@ -629,6 +645,8 @@ impl SessionInner {
         // get local link instance
         let idx = if let Some(idx) = self.remote_handles.get(&detach.handle()) {
             *idx
+        } else if self.links.contains(detach.handle() as usize) {
+            detach.handle() as usize
         } else {
             // should not happen, error
             return;
@@ -672,8 +690,20 @@ impl SessionInner {
                 },
                 Either::Right(link) => match link {
                     ReceiverLinkState::Opening(_) => false,
-                    ReceiverLinkState::OpeningLocal(_) => false,
+                    ReceiverLinkState::OpeningLocal(ref mut item) => {
+                        let (inner, tx) = item.take().unwrap();
+                        inner.get_mut().detached();
+                        if let Some(err) = detach.error.clone() {
+                            let _ = tx.send(Err(AmqpTransportError::LinkDetached(Some(err))));
+                        } else {
+                            let _ = tx.send(Err(AmqpTransportError::LinkDetached(None)));
+                        }
+
+                        true
+                    }
                     ReceiverLinkState::Established(link) => {
+                        link.remote_closed();
+
                         // detach from remote endpoint
                         let detach = Detach {
                             handle: link.handle(),
