@@ -101,9 +101,12 @@ impl<S: 'static> Service for AppService<S> {
                     link: link.link.clone(),
                     app_state: link.state.clone(),
                     state: AppServiceResponseState::NewService(fut),
-                    // has_credit: true,
                 })
             } else {
+                trace!(
+                    "Target address is not recognized: {}",
+                    link.path().get_ref()
+                );
                 Either::Left(err(LinkError::force_detach()
                     .description(format!(
                         "Target address is not supported: {}",
