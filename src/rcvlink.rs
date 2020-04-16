@@ -96,6 +96,10 @@ impl ReceiverLink {
     pub fn remote_config(&self) -> &Configuration {
         &self.inner.session.remote_config()
     }
+
+    pub(crate) fn remote_closed(&self) {
+        self.inner.get_mut().closed = true;
+    }
 }
 
 impl Stream for ReceiverLink {
@@ -149,6 +153,12 @@ impl ReceiverLinkInner {
 
     pub fn name(&self) -> &ByteString {
         &self.attach.name
+    }
+
+    pub(crate) fn detached(&mut self) {
+        // drop pending transfers
+        self.queue.clear();
+        self.closed = true;
     }
 
     pub fn close(
