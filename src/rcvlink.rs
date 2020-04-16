@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::u32;
 
-use bytes::Bytes;
 use bytestring::ByteString;
 use futures::Stream;
 use ntex::channel::oneshot;
@@ -110,13 +109,11 @@ impl Stream for ReceiverLink {
 
         if let Some(tr) = inner.queue.pop_front() {
             Poll::Ready(Some(Ok(tr)))
+        } else if inner.closed {
+            Poll::Ready(None)
         } else {
-            if inner.closed {
-                Poll::Ready(None)
-            } else {
-                inner.reader_task.register(cx.waker());
-                Poll::Pending
-            }
+            inner.reader_task.register(cx.waker());
+            Poll::Pending
         }
     }
 }

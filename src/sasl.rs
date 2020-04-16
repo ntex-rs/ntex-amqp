@@ -1,7 +1,7 @@
 use bytestring::ByteString;
 use either::Either;
-use futures::future::{ok, Future};
-use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::future::ok;
+use futures::{SinkExt, StreamExt};
 use http::Uri;
 use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::connect::Connect as TcpConnect;
@@ -61,7 +61,7 @@ where
     })
     // connect to host
     .and_then(apply_fn(
-        connector.map_err(|e| either::Right(e)),
+        connector.map_err(either::Right),
         |(uri, config, auth, time): (Uri, Configuration, _, _), srv| {
             let fut = srv.call(uri.clone().into());
             async move {
@@ -155,7 +155,7 @@ async fn sasl_connect<Io: AsyncRead + AsyncWrite + Unpin>(
     let initial_response =
         SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
 
-    let hostname = uri.host().map(|host| ByteString::from(host));
+    let hostname = uri.host().map(ByteString::from);
 
     let sasl_init = SaslInit {
         hostname,

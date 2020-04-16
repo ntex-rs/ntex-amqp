@@ -221,9 +221,7 @@ impl Decode for OutMessage {
                     ));
                 }
                 Section::ApplicationProperties(val) => {
-                    message.application_properties = Some(VecStringMap(
-                        val.into_iter().map(|(k, v)| (k.into(), v)).collect(),
-                    ));
+                    message.application_properties = Some(VecStringMap(val.into_iter().collect()));
                 }
                 Section::Footer(val) => {
                     message.footer = Some(val);

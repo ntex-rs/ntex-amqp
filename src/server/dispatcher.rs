@@ -9,7 +9,6 @@ use ntex_amqp_codec::protocol::{Error, Frame, Role};
 use ntex_amqp_codec::AmqpCodecError;
 use slab::Slab;
 
-use crate::cell::Cell;
 use crate::connection::{ChannelState, Connection};
 use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
@@ -98,7 +97,7 @@ where
                         .get_mut()
                         .detach_unconfirmed_sender_link(&frm, Some(e.into()));
                 }
-                _ => (),
+                _ => todo!(),
             }
         } else {
             match frame.0.kind {
@@ -173,7 +172,7 @@ where
                                 if self.control_srv.is_some() {
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
-                                        Session::new(cell.clone()),
+                                        Session::new(cell),
                                         ControlFrameKind::Attach(attach),
                                     ));
                                     return Ok(IncomingResult::Control);
@@ -200,7 +199,7 @@ where
                                 if let Some(link) = session.get_sender_link_by_handle(frm.handle) {
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
-                                        Session::new(cell.clone()),
+                                        Session::new(cell),
                                         ControlFrameKind::DetachSender(frm, link.clone()),
                                     ));
 
@@ -210,7 +209,7 @@ where
                                 {
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
-                                        Session::new(cell.clone()),
+                                        Session::new(cell),
                                         ControlFrameKind::DetachReceiver(frm, link.clone()),
                                     ));
 

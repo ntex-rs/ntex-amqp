@@ -46,6 +46,7 @@ pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
 pub type Annotations = FxHashMap<Symbol, Variant>;
 
+#[allow(clippy::unreadable_literal, clippy::match_bool)]
 mod definitions;
 pub use self::definitions::*;
 

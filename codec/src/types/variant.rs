@@ -168,6 +168,7 @@ impl VariantMap {
     }
 }
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for VariantMap {
     fn hash<H: Hasher>(&self, _state: &mut H) {
         unimplemented!()

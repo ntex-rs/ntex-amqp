@@ -1,3 +1,5 @@
+#![allow(clippy::mutable_key_type, clippy::len_without_is_empty)]
+
 #[macro_use]
 extern crate derive_more;
 

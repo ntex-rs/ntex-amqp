@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::future::{err, ok, Either, Ready};
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
 use ntex_amqp_codec::protocol::{
     DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role,
@@ -91,7 +91,7 @@ impl<S: 'static> Service for AppService<S> {
             .frame()
             .target
             .as_ref()
-            .and_then(|target| target.address.as_ref().map(|addr| addr.clone()));
+            .and_then(|target| target.address.as_ref().cloned());
 
         if let Some(path) = path {
             link.path_mut().set(path);

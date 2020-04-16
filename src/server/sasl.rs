@@ -1,11 +1,9 @@
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use bytestring::ByteString;
-use futures::future::{err, ok, Either, Ready};
+use futures::future::{err, ok, Ready};
 use futures::{SinkExt, StreamExt};
 use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::{Service, ServiceFactory};
@@ -224,7 +222,7 @@ where
             .next()
             .await
             .ok_or(ServerError::Disconnected)?
-            .map_err(|res| ServerError::from(res))?;
+            .map_err(ServerError::from)?;
 
         Ok(Success { framed, controller })
     }
@@ -257,7 +255,7 @@ where
         let protocol = framed
             .next()
             .await
-            .ok_or(ServerError::from(ProtocolIdError::Disconnected))?
+            .ok_or_else(|| ServerError::from(ProtocolIdError::Disconnected))?
             .map_err(ServerError::from)?;
 
         match protocol {

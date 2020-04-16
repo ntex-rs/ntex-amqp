@@ -4,8 +4,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures::future::{self, err, Either};
-use futures::{Sink, Stream};
+use futures::{future, Stream};
 use fxhash::FxHashMap;
 use ntex::channel::oneshot;
 use ntex::codec::{AsyncRead, AsyncWrite, Framed};
@@ -30,6 +29,7 @@ pub struct Connection<T: AsyncRead + AsyncWrite> {
 pub(crate) enum ChannelState {
     Opening(Option<oneshot::Sender<Session>>, WeakCell<ConnectionInner>),
     Established(Cell<SessionInner>),
+    #[allow(dead_code)]
     Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
 }
 
@@ -203,10 +203,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
         inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
     }
 
-    pub(crate) fn send_frame(&mut self, frame: AmqpFrame) {
-        self.inner.get_mut().post_frame(frame)
-    }
-
     pub(crate) fn register_write_task(&self, cx: &mut Context) {
         self.inner.write_task.register(cx.waker());
     }
@@ -244,11 +240,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
         }
         self.hb.update_remote(update);
 
-        if inner.state == State::Drop {
-            Poll::Ready(Ok(()))
-        } else if inner.state == State::RemoteClose
-            && inner.write_queue.is_empty()
-            && self.framed.is_write_buf_empty()
+        if inner.state == State::Drop
+            || (inner.state == State::RemoteClose
+                && inner.write_queue.is_empty()
+                && self.framed.is_write_buf_empty())
         {
             Poll::Ready(Ok(()))
         } else {
@@ -372,7 +367,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                 Poll::Ready(Some(Err(e))) => {
                     trace!("error reading: {:?}", e);
                     inner.set_error(e.clone().into());
-                    return Poll::Ready(Some(Err(e.into())));
+                    return Poll::Ready(Some(Err(e)));
                 }
             }
         }

@@ -1,4 +1,4 @@
-use futures::{Future, StreamExt};
+use futures::StreamExt;
 use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex_amqp_codec::protocol::{Frame, Open};
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec};

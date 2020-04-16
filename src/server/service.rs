@@ -5,14 +5,12 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 use std::{fmt, time};
 
-use futures::future::{err, poll_fn, Either};
 use futures::{FutureExt, SinkExt, StreamExt};
 use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use ntex_amqp_codec::protocol::{Error, ProtocolId};
-use ntex_amqp_codec::{AmqpCodecError, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
+use ntex_amqp_codec::{AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 
-use crate::cell::Cell;
 use crate::connection::{Connection, ConnectionController};
 use crate::Configuration;
 
@@ -107,9 +105,7 @@ where
             config: self.config,
             disconnect: self.disconnect,
             control: Some(boxed::factory(
-                f.into_factory()
-                    .map_err(|e| e.into())
-                    .map_init_err(|e| e.into()),
+                f.into_factory().map_err(|e| e.into()).map_init_err(|_| ()),
             )),
             max_size: self.max_size,
             handshake_timeout: self.handshake_timeout,
@@ -231,7 +227,7 @@ where
         self.connect
             .as_ref()
             .poll_ready(cx)
-            .map(|res| res.map_err(|e| ServerError::Service(e)))
+            .map(|res| res.map_err(ServerError::Service))
     }
 
     #[inline]
@@ -306,7 +302,7 @@ where
                     either::Either::Right(Sasl::new(framed, controller))
                 })
                 .await
-                .map_err(|e| ServerError::Service(e))?;
+                .map_err(ServerError::Service)?;
 
             let (st, mut framed, controller) = ack.into_inner();
             let st = State::new(st);

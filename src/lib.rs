@@ -1,4 +1,4 @@
-#![allow(unused_imports, dead_code)]
+#![allow(clippy::type_complexity)]
 
 #[macro_use]
 extern crate derive_more;
@@ -10,7 +10,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytes::Bytes;
 use bytestring::ByteString;
 use ntex::channel::oneshot;
 use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
@@ -93,7 +92,7 @@ impl Configuration {
         Configuration {
             max_frame_size: std::u16::MAX as u32,
             channel_max: 1024,
-            idle_time_out: Some(120000),
+            idle_time_out: Some(120_000),
             hostname: None,
         }
     }

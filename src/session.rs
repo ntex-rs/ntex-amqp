@@ -302,7 +302,7 @@ impl SessionInner {
         self.remote_handles.insert(attach.handle(), token);
         let link = Cell::new(SenderLinkInner::new(
             token,
-            name.unwrap_or_else(|| ByteString::default()),
+            name.unwrap_or_else(ByteString::default),
             attach.handle(),
             delivery_count,
             cell,
@@ -362,8 +362,7 @@ impl SessionInner {
 
         let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, frame.clone()));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
-            inner.clone(),
-            tx,
+            inner, tx,
         )))));
 
         frame.handle = token as Handle;
@@ -921,6 +920,7 @@ impl SessionInner {
         };
 
         let transfer = Transfer {
+            body,
             settled,
             message_format,
             handle: link_handle,
@@ -932,7 +932,6 @@ impl SessionInner {
             resume: false,
             aborted: false,
             batchable: false,
-            body: body,
         };
         self.unsettled_deliveries.insert(delivery_id, promise);
 

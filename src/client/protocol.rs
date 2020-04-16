@@ -17,7 +17,7 @@ pub struct ProtocolNegotiation<Io> {
 impl<Io> Clone for ProtocolNegotiation<Io> {
     fn clone(&self) -> Self {
         ProtocolNegotiation {
-            proto: self.proto.clone(),
+            proto: self.proto,
             _r: PhantomData,
         }
     }

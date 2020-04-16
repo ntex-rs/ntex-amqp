@@ -4,7 +4,6 @@ use bytestring::ByteString;
 use ntex::router::Path;
 use ntex_amqp_codec::protocol::Attach;
 
-use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
 use crate::server::State;
 use crate::session::Session;
