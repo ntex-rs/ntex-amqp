@@ -20,6 +20,7 @@ pub use self::service::Server;
 
 use crate::cell::Cell;
 
+#[derive(Debug)]
 pub struct State<St>(Cell<St>);
 
 impl<St> State<St> {

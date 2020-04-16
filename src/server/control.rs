@@ -1,3 +1,5 @@
+use std::fmt;
+
 use ntex::service::boxed::{BoxService, BoxServiceFactory};
 use ntex_amqp_codec::protocol;
 
@@ -19,6 +21,14 @@ pub(super) struct FrameInner<St> {
     pub(super) kind: ControlFrameKind,
     pub(super) state: State<St>,
     pub(super) session: Session,
+}
+
+impl<St> fmt::Debug for ControlFrame<St> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ControlFrame")
+            .field("kind", &self.0.get_ref().kind)
+            .finish()
+    }
 }
 
 #[derive(Debug)]

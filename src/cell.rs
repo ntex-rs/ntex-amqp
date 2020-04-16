@@ -29,7 +29,7 @@ impl<T> Deref for Cell<T> {
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Cell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.inner.fmt(f)
+        self.get_ref().fmt(f)
     }
 }
 
