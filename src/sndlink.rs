@@ -21,7 +21,7 @@ pub struct SenderLink {
 }
 
 impl std::fmt::Debug for SenderLink {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_tuple("SenderLink")
             .field(&std::ops::Deref::deref(&self.inner.get_ref().name))
             .finish()
@@ -130,11 +130,11 @@ impl SenderLinkInner {
         }
     }
 
-    pub fn id(&self) -> u32 {
+    pub(crate) fn id(&self) -> u32 {
         self.id as u32
     }
 
-    pub fn remote_handle(&self) -> Handle {
+    pub(crate) fn remote_handle(&self) -> Handle {
         self.remote_handle
     }
 
@@ -184,7 +184,7 @@ impl SenderLinkInner {
         self.error = Some(err);
     }
 
-    pub fn apply_flow(&mut self, flow: &Flow) {
+    pub(crate) fn apply_flow(&mut self, flow: &Flow) {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
             let delta = flow
@@ -220,7 +220,7 @@ impl SenderLinkInner {
         }
     }
 
-    pub fn send<T: Into<TransferBody>>(&mut self, body: T, tag: Option<Bytes>) -> Delivery {
+    pub(crate) fn send<T: Into<TransferBody>>(&mut self, body: T, tag: Option<Bytes>) -> Delivery {
         if let Some(ref err) = self.error {
             Delivery::Resolved(Err(err.clone()))
         } else {
@@ -252,7 +252,7 @@ impl SenderLinkInner {
         }
     }
 
-    pub fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
+    pub(crate) fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
         let _ = self.delivery_count.saturating_add(1);
 
         let disp = Disposition {

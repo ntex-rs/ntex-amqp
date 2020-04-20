@@ -36,7 +36,7 @@ impl Drop for Session {
 }
 
 impl std::fmt::Debug for Session {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_struct("Session").finish()
     }
 }
@@ -82,8 +82,8 @@ impl Session {
         name: U,
         address: T,
     ) -> SenderLinkBuilder {
-        let name = ByteString::from(name.into());
-        let address = ByteString::from(address.into());
+        let name = name.into();
+        let address = address.into();
         SenderLinkBuilder::new(name, address, self.inner.clone())
     }
 
@@ -93,8 +93,8 @@ impl Session {
         name: U,
         address: T,
     ) -> ReceiverLinkBuilder {
-        let name = ByteString::from(name.into());
-        let address = ByteString::from(address.into());
+        let name = name.into();
+        let address = address.into();
         ReceiverLinkBuilder::new(name, address, self.inner.clone())
     }
 
@@ -196,7 +196,7 @@ struct PendingTransfer {
 }
 
 impl SessionInner {
-    pub fn new(
+    pub(crate) fn new(
         id: usize,
         local: bool,
         connection: ConnectionController,
@@ -225,7 +225,7 @@ impl SessionInner {
     }
 
     /// Local channel id
-    pub fn id(&self) -> u16 {
+    pub(crate) fn id(&self) -> u16 {
         self.id as u16
     }
 
@@ -516,7 +516,7 @@ impl SessionInner {
         None
     }
 
-    pub fn handle_frame(&mut self, frame: Frame) {
+    pub(crate) fn handle_frame(&mut self, frame: Frame) {
         if self.error.is_none() {
             match frame {
                 Frame::Flow(flow) => self.apply_flow(&flow),
@@ -578,7 +578,7 @@ impl SessionInner {
     }
 
     /// Handle `Attach` frame. return false if attach frame is remote and can not be handled
-    pub fn handle_attach(&mut self, attach: &Attach, cell: Cell<SessionInner>) -> bool {
+    pub(crate) fn handle_attach(&mut self, attach: &Attach, cell: Cell<SessionInner>) -> bool {
         let name = attach.name();
 
         if let Some(index) = self.links_by_name.get(name) {
@@ -640,7 +640,7 @@ impl SessionInner {
     }
 
     /// Handle `Detach` frame.
-    pub fn handle_detach(&mut self, detach: &mut Detach) {
+    pub(crate) fn handle_detach(&mut self, detach: &mut Detach) {
         // get local link instance
         let idx = if let Some(idx) = self.remote_handles.get(&detach.handle()) {
             *idx
@@ -842,7 +842,7 @@ impl SessionInner {
         self.post_frame(flow.into());
     }
 
-    pub fn post_frame(&mut self, frame: Frame) {
+    pub(crate) fn post_frame(&mut self, frame: Frame) {
         self.connection
             .post_frame(AmqpFrame::new(self.remote_channel_id, frame));
     }
@@ -861,7 +861,7 @@ impl SessionInner {
         rx
     }
 
-    pub fn send_transfer(
+    pub(crate) fn send_transfer(
         &mut self,
         link_handle: Handle,
         idx: u32,
@@ -885,7 +885,7 @@ impl SessionInner {
         self.post_frame(frame);
     }
 
-    pub fn prepare_transfer(
+    pub(crate) fn prepare_transfer(
         &mut self,
         link_handle: Handle,
         body: Option<TransferBody>,

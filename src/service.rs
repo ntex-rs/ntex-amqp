@@ -9,7 +9,7 @@ use ntex::service::Service;
 use ntex_amqp_codec::protocol::ProtocolId;
 use ntex_amqp_codec::{ProtocolIdCodec, ProtocolIdError};
 
-pub struct ProtocolNegotiation<T> {
+pub(crate) struct ProtocolNegotiation<T> {
     proto: ProtocolId,
     _r: PhantomData<T>,
 }
@@ -24,7 +24,7 @@ impl<T> Clone for ProtocolNegotiation<T> {
 }
 
 impl<T> ProtocolNegotiation<T> {
-    pub fn new(proto: ProtocolId) -> Self {
+    pub(crate) fn new(proto: ProtocolId) -> Self {
         ProtocolNegotiation {
             proto,
             _r: PhantomData,
@@ -42,7 +42,7 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     #[inline]
-    fn poll_ready(&self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 

@@ -23,7 +23,7 @@ pub struct Sasl<Io> {
 }
 
 impl<Io> fmt::Debug for Sasl<Io> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("SaslAuth")
             .field("mechanisms", &self.mechanisms)
             .finish()
@@ -104,7 +104,7 @@ pub struct Init<Io> {
 }
 
 impl<Io> fmt::Debug for Init<Io> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("SaslInit")
             .field("frame", &self.frame)
             .finish()
@@ -191,7 +191,7 @@ pub struct Response<Io> {
 }
 
 impl<Io> fmt::Debug for Response<Io> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("SaslResponse")
             .field("frame", &self.frame)
             .finish()
@@ -281,7 +281,7 @@ where
                         controller.set_remote((&frame).into());
                         Ok(ConnectOpened::new(frame, framed, controller))
                     }
-                    frame => Err(ServerError::Unexpected(frame)),
+                    frame => Err(ServerError::Unexpected(Box::new(frame))),
                 }
             }
             proto => Err(ProtocolIdError::Unexpected {
@@ -327,7 +327,7 @@ impl<Io, St, E> Service for NoSaslService<Io, St, E> {
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
     #[inline]
-    fn poll_ready(&self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 

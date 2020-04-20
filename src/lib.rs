@@ -49,7 +49,7 @@ type DeliveryPromise = oneshot::Sender<Result<Disposition, AmqpTransportError>>;
 impl Future for Delivery {
     type Output = Result<Disposition, AmqpTransportError>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Delivery::Pending(ref mut receiver) = *self {
             return match Pin::new(receiver).poll(cx) {
                 Poll::Ready(Ok(r)) => Poll::Ready(r.map(|state| state)),

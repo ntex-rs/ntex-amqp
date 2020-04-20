@@ -29,7 +29,7 @@ pub enum ServerError<E> {
     /// Amqp protocol error
     ProtocolError(Error),
     #[display(fmt = "Expected open frame, got: {:?}", _0)]
-    Unexpected(protocol::Frame),
+    Unexpected(Box<protocol::Frame>),
     #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
     UnexpectedSaslFrame(SaslFrame),
     #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]

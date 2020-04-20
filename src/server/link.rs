@@ -78,7 +78,7 @@ impl<S> Clone for Link<S> {
 }
 
 impl<S> fmt::Debug for Link<S> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Link<S>")
             .field("frame", self.link.frame())
             .finish()

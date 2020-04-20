@@ -19,7 +19,7 @@ use super::{Link, State};
 
 /// Amqp server connection dispatcher.
 #[pin_project::pin_project]
-pub struct Dispatcher<Io, St, Sr>
+pub(crate) struct Dispatcher<Io, St, Sr>
 where
     Io: AsyncRead + AsyncWrite + Unpin,
     Sr: Service<Request = Link<St>, Response = ()>,
@@ -65,7 +65,7 @@ where
         }
     }
 
-    fn handle_control_fut(&mut self, cx: &mut Context) -> bool {
+    fn handle_control_fut(&mut self, cx: &mut Context<'_>) -> bool {
         // process control frame
         if let Some(ref mut fut) = self.control_fut {
             match Pin::new(fut).poll(cx) {
@@ -103,7 +103,12 @@ where
             match frame.0.get_mut().kind {
                 ControlFrameKind::Attach(ref frm) => {
                     let cell = frame.0.session.inner.clone();
-                    frame.0.session.inner.get_mut().confirm_sender_link(cell, &frm);
+                    frame
+                        .0
+                        .session
+                        .inner
+                        .get_mut()
+                        .confirm_sender_link(cell, &frm);
                 }
                 ControlFrameKind::Flow(ref frm, ref link) => {
                     if let Some(err) = err {
@@ -130,7 +135,7 @@ where
         }
     }
 
-    fn poll_incoming(&mut self, cx: &mut Context) -> Result<IncomingResult, AmqpCodecError> {
+    fn poll_incoming(&mut self, cx: &mut Context<'_>) -> Result<IncomingResult, AmqpCodecError> {
         loop {
             // handle remote begin and attach
             match self.conn.poll_incoming(cx) {
@@ -146,7 +151,9 @@ where
                             // apply flow to specific link
                             let session = self.conn.get_session(channel_id);
                             if self.control_srv.is_some() {
-                                if let Some(link) = session.get_sender_link_by_handle(frm.handle.unwrap()) {
+                                if let Some(link) =
+                                    session.get_sender_link_by_handle(frm.handle.unwrap())
+                                {
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
                                         Session::new(session.clone()),
@@ -178,7 +185,9 @@ where
                                 let session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 let link = session.get_mut().open_receiver_link(cell, attach);
-                                let fut = self.service.call(Link::new(link.clone(), self.state.clone()));
+                                let fut = self
+                                    .service
+                                    .call(Link::new(link.clone(), self.state.clone()));
                                 self.receivers.push((link, fut));
                             }
                         },
@@ -195,7 +204,9 @@ where
                                     ));
 
                                     return Ok(IncomingResult::Control);
-                                } else if let Some(link) = session.get_receiver_link_by_handle(frm.handle) {
+                                } else if let Some(link) =
+                                    session.get_receiver_link_by_handle(frm.handle)
+                                {
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
                                         Session::new(cell),
@@ -230,7 +241,7 @@ where
 {
     type Output = Result<(), AmqpCodecError>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // process control frame
         if !self.handle_control_fut(cx) {
             return Poll::Pending;

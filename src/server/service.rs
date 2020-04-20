@@ -23,7 +23,7 @@ use super::sasl::Sasl;
 use super::State;
 
 /// Amqp connection type
-pub type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;
+pub(crate) type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;
 
 /// Server dispatcher factory
 pub struct Server<Io, St, Cn: ServiceFactory> {
@@ -223,7 +223,7 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     #[inline]
-    fn poll_ready(&self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.connect
             .as_ref()
             .poll_ready(cx)
@@ -249,14 +249,12 @@ where
             let (dispatcher, mut st) = if timeout == 0 {
                 fut.await?
             } else {
-                ntex::rt::time::timeout(
-                    time::Duration::from_millis(timeout),
-                    fut
-                )
-                .map(|res| match res {
-                    Ok(res) => res,
-                    Err(_) => Err(ServerError::HandshakeTimeout),
-                }).await?
+                ntex::rt::time::timeout(time::Duration::from_millis(timeout), fut)
+                    .map(|res| match res {
+                        Ok(res) => res,
+                        Err(_) => Err(ServerError::HandshakeTimeout),
+                    })
+                    .await?
             };
 
             let res = dispatcher.await.map_err(ServerError::from);

@@ -203,11 +203,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
         inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
     }
 
-    pub(crate) fn register_write_task(&self, cx: &mut Context) {
+    pub(crate) fn register_write_task(&self, cx: &mut Context<'_>) {
         self.inner.write_task.register(cx.waker());
     }
 
-    pub(crate) fn poll_outgoing(&mut self, cx: &mut Context) -> Poll<Result<(), AmqpCodecError>> {
+    pub(crate) fn poll_outgoing(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), AmqpCodecError>> {
         let inner = self.inner.get_mut();
         let mut update = false;
         loop {
@@ -253,7 +256,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
 
     pub(crate) fn poll_incoming(
         &mut self,
-        cx: &mut Context,
+        cx: &mut Context<'_>,
     ) -> Poll<Option<Result<AmqpFrame, AmqpCodecError>>> {
         let inner = self.inner.get_mut();
 
@@ -387,7 +390,7 @@ impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
 impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
     type Output = Result<(), AmqpCodecError>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // connection heartbeat
         match self.hb.poll(cx) {
             Ok(act) => match act {

@@ -51,7 +51,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Connect<Io> {
                     controller,
                 })
             }
-            frame => Err(ServerError::Unexpected(frame)),
+            frame => Err(ServerError::Unexpected(Box::new(frame))),
         }
     }
 }

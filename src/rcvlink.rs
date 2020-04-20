@@ -106,7 +106,7 @@ impl ReceiverLink {
 impl Stream for ReceiverLink {
     type Item = Result<Transfer, AmqpTransportError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let inner = self.inner.get_mut();
 
         if let Some(tr) = inner.queue.pop_front() {
@@ -156,7 +156,7 @@ impl ReceiverLinkInner {
         }
     }
 
-    pub fn name(&self) -> &ByteString {
+    pub(crate) fn name(&self) -> &ByteString {
         &self.attach.name
     }
 
@@ -166,7 +166,7 @@ impl ReceiverLinkInner {
         self.closed = true;
     }
 
-    pub fn close(
+    pub(crate) fn close(
         &mut self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpTransportError>> {
@@ -190,7 +190,7 @@ impl ReceiverLinkInner {
         }
     }
 
-    pub fn set_link_credit(&mut self, credit: u32) {
+    pub(crate) fn set_link_credit(&mut self, credit: u32) {
         self.credit += credit;
         self.session
             .inner
@@ -198,7 +198,7 @@ impl ReceiverLinkInner {
             .rcv_link_flow(self.handle as u32, self.delivery_count, credit);
     }
 
-    pub fn handle_transfer(&mut self, transfer: Transfer) {
+    pub(crate) fn handle_transfer(&mut self, transfer: Transfer) {
         if self.credit == 0 {
             // check link credit
             let err = Error {

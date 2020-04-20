@@ -68,7 +68,10 @@ impl Heartbeat {
         }
     }
 
-    pub(crate) fn poll(&mut self, cx: &mut Context) -> Result<HeartbeatAction, AmqpTransportError> {
+    pub(crate) fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Result<HeartbeatAction, AmqpTransportError> {
         match Pin::new(&mut self.delay).poll(cx) {
             Poll::Ready(_) => {
                 let mut act = HeartbeatAction::None;

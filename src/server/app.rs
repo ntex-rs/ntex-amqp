@@ -22,6 +22,12 @@ type Handle<S> = boxed::BoxServiceFactory<Link<S>, Message<S>, Outcome, Error, E
 
 pub struct App<S = ()>(Vec<(Vec<String>, Handle<S>)>);
 
+impl<S: 'static> Default for App<S> {
+    fn default() -> App<S> {
+        App::new()
+    }
+}
+
 impl<S: 'static> App<S> {
     pub fn new() -> App<S> {
         App(Vec::new())
@@ -82,7 +88,7 @@ impl<S: 'static> Service for AppService<S> {
     type Future = Either<Ready<Result<(), Error>>, AppServiceResponse<S>>;
 
     #[inline]
-    fn poll_ready(&self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -139,7 +145,7 @@ enum AppServiceResponseState<S> {
 impl<S> Future for AppServiceResponse<S> {
     type Output = Result<(), Error>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut();
         let mut link = this.link.clone();
         let app_state = this.app_state.clone();
@@ -233,7 +239,7 @@ struct HandleMessage {
 impl Future for HandleMessage {
     type Output = ();
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut();
 
         match Pin::new(&mut this.fut).poll(cx) {

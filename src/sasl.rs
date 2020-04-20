@@ -2,9 +2,9 @@ use bytestring::ByteString;
 use either::Either;
 use futures::future::ok;
 use futures::{SinkExt, StreamExt};
-use ntex::http::Uri;
 use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::connect::Connect as TcpConnect;
+use ntex::http::Uri;
 use ntex::service::{apply_fn, pipeline, IntoService, Service};
 use ntex::util::time::LowResTimeService;
 
