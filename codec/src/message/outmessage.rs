@@ -14,13 +14,13 @@ use super::SECTION_PREFIX_LENGTH;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OutMessage {
     pub message_format: Option<MessageFormat>,
-    header: Option<Header>,
-    delivery_annotations: Option<Annotations>,
-    message_annotations: Option<VecSymbolMap>,
-    properties: Option<Properties>,
-    application_properties: Option<VecStringMap>,
-    footer: Option<Annotations>,
-    body: MessageBody,
+    pub header: Option<Header>,
+    pub delivery_annotations: Option<Annotations>,
+    pub message_annotations: Option<VecSymbolMap>,
+    pub properties: Option<Properties>,
+    pub application_properties: Option<VecStringMap>,
+    pub footer: Option<Annotations>,
+    pub body: MessageBody,
     size: Cell<usize>,
 }
 
@@ -121,6 +121,11 @@ impl OutMessage {
         }
         self.size.set(0);
         self
+    }
+
+    /// Delivery annotations
+    pub fn delivery_annotations(&self) -> Option<&Annotations> {
+        self.delivery_annotations.as_ref()
     }
 
     /// Call closure with message reference
@@ -267,7 +272,7 @@ impl Encode for OutMessage {
         };
 
         if let Some(ref h) = self.header {
-            size += h.encoded_size() + SECTION_PREFIX_LENGTH;
+            size += h.encoded_size();
         }
         if let Some(ref da) = self.delivery_annotations {
             size += da.encoded_size() + SECTION_PREFIX_LENGTH;

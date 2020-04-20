@@ -1,10 +1,16 @@
 # Changes
 
+## [0.1.3] - 2020-04-21
+
+* Fix OutMessage and InMessage encoding
+
+* Move LinkError to root
+
 ## [0.1.2] - 2020-04-20
 
 * Fix handshake timeout
 
-* Propogate receiver remote close errors
+* Propagate receiver remote close errors
 
 ## [0.1.1] - 2020-04-14
 

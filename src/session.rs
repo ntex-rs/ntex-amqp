@@ -745,18 +745,14 @@ impl SessionInner {
         let to = disposition.last.unwrap_or(from);
 
         if from == to {
-            let _ = self
-                .unsettled_deliveries
-                .remove(&from)
-                .unwrap()
-                .send(Ok(disposition));
+            if let Some(val) = self.unsettled_deliveries.remove(&from) {
+                let _ = val.send(Ok(disposition));
+            }
         } else {
             for k in from..=to {
-                let _ = self
-                    .unsettled_deliveries
-                    .remove(&k)
-                    .unwrap()
-                    .send(Ok(disposition.clone()));
+                if let Some(val) = self.unsettled_deliveries.remove(&k) {
+                    let _ = val.send(Ok(disposition.clone()));
+                }
             }
         }
     }

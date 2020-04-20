@@ -4,6 +4,7 @@ use bytestring::ByteString;
 use derive_more::Display;
 use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 
+pub use crate::errors::LinkError;
 pub use ntex_amqp_codec::protocol::Error;
 
 /// Errors which can occur when attempting to handle amqp connection.
@@ -137,44 +138,6 @@ impl AmqpError {
 }
 
 impl Into<protocol::Error> for AmqpError {
-    fn into(self) -> protocol::Error {
-        protocol::Error {
-            condition: self.err.into(),
-            description: self.description,
-            info: self.info,
-        }
-    }
-}
-
-#[derive(Debug, Display)]
-#[display(fmt = "Link error: {:?} {:?} ({:?})", err, description, info)]
-pub struct LinkError {
-    err: protocol::LinkError,
-    description: Option<ByteString>,
-    info: Option<protocol::Fields>,
-}
-
-impl LinkError {
-    pub fn force_detach() -> Self {
-        LinkError {
-            err: protocol::LinkError::DetachForced,
-            description: None,
-            info: None,
-        }
-    }
-
-    pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(ByteString::from(text.as_ref()));
-        self
-    }
-
-    pub fn set_description(mut self, text: ByteString) -> Self {
-        self.description = Some(text);
-        self
-    }
-}
-
-impl Into<protocol::Error> for LinkError {
     fn into(self) -> protocol::Error {
         protocol::Error {
             condition: self.err.into(),

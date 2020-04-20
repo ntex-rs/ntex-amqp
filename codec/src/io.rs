@@ -108,7 +108,10 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
             dst.reserve(std::cmp::max(need, SIZE_HIGH_WM));
         }
 
+        let len = dst.len();
         item.encode(dst);
+        debug_assert!(dst.len() - len == size);
+
         Ok(())
     }
 }

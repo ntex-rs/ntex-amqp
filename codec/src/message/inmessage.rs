@@ -233,7 +233,7 @@ impl Encode for InMessage {
         };
 
         if let Some(ref h) = self.header {
-            size += h.encoded_size() + SECTION_PREFIX_LENGTH;
+            size += h.encoded_size();
         }
         if let Some(ref da) = self.delivery_annotations {
             size += da.encoded_size() + SECTION_PREFIX_LENGTH;
