@@ -96,8 +96,10 @@ impl ReceiverLink {
         &self.inner.session.remote_config()
     }
 
-    pub(crate) fn remote_closed(&self) {
-        self.inner.get_mut().closed = true;
+    pub(crate) fn remote_closed(&self, error: Option<Error>) {
+        let inner = self.inner.get_mut();
+        inner.closed = true;
+        inner.error = error;
     }
 }
 
@@ -110,7 +112,11 @@ impl Stream for ReceiverLink {
         if let Some(tr) = inner.queue.pop_front() {
             Poll::Ready(Some(Ok(tr)))
         } else if inner.closed {
-            Poll::Ready(None)
+            if let Some(err) = inner.error.take() {
+                Poll::Ready(Some(Err(AmqpTransportError::LinkDetached(Some(err)))))
+            } else {
+                Poll::Ready(None)
+            }
         } else {
             inner.reader_task.register(cx.waker());
             Poll::Pending
@@ -128,6 +134,7 @@ pub(crate) struct ReceiverLinkInner {
     queue: VecDeque<Transfer>,
     credit: u32,
     delivery_count: u32,
+    error: Option<Error>,
 }
 
 impl ReceiverLinkInner {
@@ -143,6 +150,7 @@ impl ReceiverLinkInner {
             reader_task: LocalWaker::new(),
             queue: VecDeque::with_capacity(4),
             credit: 0,
+            error: None,
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
             attach,
         }
@@ -171,6 +179,8 @@ impl ReceiverLinkInner {
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }
+        self.reader_task.wake();
+
         async move {
             match rx.await {
                 Ok(Ok(_)) => Ok(()),

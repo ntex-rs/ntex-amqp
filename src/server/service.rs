@@ -237,30 +237,35 @@ where
 
     fn call(&self, req: Self::Request) -> Self::Future {
         let timeout = self.inner.handshake_timeout;
-        if timeout == 0 {
-            Box::pin(handshake(
-                self.inner.max_size,
-                self.connect.clone(),
-                self.inner.clone(),
-                req,
-            ))
-        } else {
-            Box::pin(
+        let inner = self.inner.clone();
+        let fut = handshake(
+            self.inner.max_size,
+            self.connect.clone(),
+            self.inner.clone(),
+            req,
+        );
+
+        Box::pin(async move {
+            let (dispatcher, mut st) = if timeout == 0 {
+                fut.await?
+            } else {
                 ntex::rt::time::timeout(
                     time::Duration::from_millis(timeout),
-                    handshake(
-                        self.inner.max_size,
-                        self.connect.clone(),
-                        self.inner.clone(),
-                        req,
-                    ),
+                    fut
                 )
                 .map(|res| match res {
                     Ok(res) => res,
                     Err(_) => Err(ServerError::HandshakeTimeout),
-                }),
-            )
-        }
+                }).await?
+            };
+
+            let res = dispatcher.await.map_err(ServerError::from);
+
+            if inner.disconnect.is_some() {
+                (*inner.as_ref().disconnect.as_ref().unwrap())(st.get_mut(), res.as_ref().err())
+            };
+            res
+        })
     }
 }
 
@@ -269,7 +274,7 @@ async fn handshake<Io, St, Cn: ServiceFactory, Pb>(
     connect: Rc<Cn::Service>,
     inner: Rc<ServerInner<St, Cn, Pb>>,
     io: Io,
-) -> Result<(), ServerError<Cn::Error>>
+) -> Result<(Dispatcher<Io, St, Pb::Service>, State<St>), ServerError<Cn::Error>>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
@@ -333,7 +338,7 @@ where
         }
     };
 
-    let mut st2 = st.clone();
+    let st2 = st.clone();
 
     if let Some(ref control_srv) = inner2.control {
         let control = control_srv
@@ -341,22 +346,8 @@ where
             .await
             .map_err(|_| ServerError::ControlServiceInit)?;
 
-        let res = Dispatcher::new(conn, st, srv, Some(control))
-            .await
-            .map_err(ServerError::from);
-
-        if inner2.disconnect.is_some() {
-            (*inner2.as_ref().disconnect.as_ref().unwrap())(st2.get_mut(), res.as_ref().err())
-        }
-        res
+        Ok((Dispatcher::new(conn, st, srv, Some(control)), st2))
     } else {
-        let res = Dispatcher::new(conn, st, srv, None)
-            .await
-            .map_err(ServerError::from);
-
-        if inner2.disconnect.is_some() {
-            (*inner2.as_ref().disconnect.as_ref().unwrap())(st2.get_mut(), res.as_ref().err())
-        }
-        res
+        Ok((Dispatcher::new(conn, st, srv, None), st2))
     }
 }

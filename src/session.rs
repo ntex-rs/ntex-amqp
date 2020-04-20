@@ -77,7 +77,7 @@ impl Session {
     }
 
     /// Open sender link
-    pub fn build_sender_link<T: Into<String>, U: Into<String>>(
+    pub fn build_sender_link<T: Into<ByteString>, U: Into<ByteString>>(
         &mut self,
         name: U,
         address: T,
@@ -88,7 +88,7 @@ impl Session {
     }
 
     /// Open receiver link
-    pub fn build_receiver_link<T: Into<String>, U: Into<String>>(
+    pub fn build_receiver_link<T: Into<ByteString>, U: Into<ByteString>>(
         &mut self,
         name: U,
         address: T,
@@ -569,8 +569,8 @@ impl SessionInner {
                         );
                     }
                 }
-                Frame::Detach(detach) => {
-                    self.handle_detach(&detach);
+                Frame::Detach(mut detach) => {
+                    self.handle_detach(&mut detach);
                 }
                 frame => error!("Unexpected frame: {:?}", frame),
             }
@@ -640,7 +640,7 @@ impl SessionInner {
     }
 
     /// Handle `Detach` frame.
-    pub fn handle_detach(&mut self, detach: &Detach) {
+    pub fn handle_detach(&mut self, detach: &mut Detach) {
         // get local link instance
         let idx = if let Some(idx) = self.remote_handles.get(&detach.handle()) {
             *idx
@@ -701,7 +701,7 @@ impl SessionInner {
                         true
                     }
                     ReceiverLinkState::Established(link) => {
-                        link.remote_closed();
+                        link.remote_closed(detach.error.take());
 
                         // detach from remote endpoint
                         let detach = Detach {

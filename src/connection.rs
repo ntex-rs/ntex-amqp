@@ -397,6 +397,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
                     return Poll::Ready(Ok(()));
                 }
                 HeartbeatAction::Heartbeat => {
+                    trace!("Sending hb frame");
                     self.inner
                         .get_mut()
                         .write_queue

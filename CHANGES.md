@@ -1,5 +1,11 @@
 # Changes
 
+## [0.1.2] - 2020-04-20
+
+* Fix handshake timeout
+
+* Propogate receiver remote close errors
+
 ## [0.1.1] - 2020-04-14
 
 * Handle detach during reciver link open
