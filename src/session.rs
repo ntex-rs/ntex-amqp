@@ -249,6 +249,9 @@ impl SessionInner {
                         let _ = tx.send(Err(err.clone()));
                     }
                 }
+                Either::Right(ReceiverLinkState::Established(ref mut link)) => {
+                    link.remote_closed(None)
+                }
                 _ => (),
             }
         }
@@ -283,30 +286,32 @@ impl SessionInner {
     /// Register remote sender link
     pub(crate) fn confirm_sender_link(
         &mut self,
-        cell: Cell<SessionInner>,
         attach: &Attach,
+        cell: Cell<SessionInner>,
+    ) -> SenderLink {
+        trace!("Remote sender link opened: {:?}", attach.name());
+        let link = Cell::new(SenderLinkInner::with(attach, cell.clone()));
+        self.confirm_sender_link_inner(attach, link)
+    }
+
+    /// Register remote sender link
+    pub(crate) fn confirm_sender_link_inner(
+        &mut self,
+        attach: &Attach,
+        link: Cell<SenderLinkInner>,
     ) -> SenderLink {
         trace!("Remote sender link opened: {:?}", attach.name());
         let entry = self.links.vacant_entry();
         let token = entry.key();
-        let delivery_count = attach.initial_delivery_count.unwrap_or(0);
 
-        let mut name = None;
         if let Some(ref source) = attach.source {
             if let Some(ref addr) = source.address {
-                name = Some(addr.clone());
                 self.links_by_name.insert(addr.clone(), token);
             }
         }
 
+        link.get_mut().id = token;
         self.remote_handles.insert(attach.handle(), token);
-        let link = Cell::new(SenderLinkInner::new(
-            token,
-            name.unwrap_or_else(ByteString::default),
-            attach.handle(),
-            delivery_count,
-            cell,
-        ));
         entry.insert(Either::Left(SenderLinkState::Established(SenderLink::new(
             link.clone(),
         ))));
@@ -321,7 +326,7 @@ impl SessionInner {
             target: attach.target.clone(),
             unsettled: None,
             incomplete_unsettled: false,
-            initial_delivery_count: Some(delivery_count),
+            initial_delivery_count: Some(attach.initial_delivery_count.unwrap_or(0)),
             max_message_size: Some(65536),
             offered_capabilities: None,
             desired_capabilities: None,

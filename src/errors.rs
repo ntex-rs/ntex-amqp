@@ -48,6 +48,11 @@ impl LinkError {
         }
     }
 
+    pub fn text(mut self, text: &'static str) -> Self {
+        self.description = Some(ByteString::from_static(text));
+        self
+    }
+
     pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
         self.description = Some(ByteString::from(text.as_ref()));
         self

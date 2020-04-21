@@ -33,7 +33,7 @@ impl<St> fmt::Debug for ControlFrame<St> {
 
 #[derive(Debug)]
 pub enum ControlFrameKind {
-    Attach(protocol::Attach),
+    AttachSender(protocol::Attach, SenderLink),
     Flow(protocol::Flow, SenderLink),
     DetachSender(protocol::Detach, SenderLink),
     DetachReceiver(protocol::Detach, ReceiverLink),

@@ -278,7 +278,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                         inner.set_error(AmqpTransportError::Closed(close.error.clone()));
 
                         if inner.state == State::Closing {
-                            inner.sessions.clear();
+                            inner.set_error(AmqpTransportError::Disconnected);
                             return Poll::Ready(None);
                         } else {
                             let close = Close { error: None };
@@ -396,6 +396,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
             Ok(act) => match act {
                 HeartbeatAction::None => (),
                 HeartbeatAction::Close => {
+                    trace!("Headerbeat expired");
                     self.inner.get_mut().set_error(AmqpTransportError::Timeout);
                     return Poll::Ready(Ok(()));
                 }
@@ -408,6 +409,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
                 }
             },
             Err(e) => {
+                trace!("Headerbeat error: {:?}", e);
                 self.inner.get_mut().set_error(e);
                 return Poll::Ready(Ok(()));
             }
@@ -415,7 +417,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
 
         loop {
             match self.poll_incoming(cx) {
-                Poll::Ready(None) => return Poll::Ready(Ok(())),
+                Poll::Ready(None) => {
+                    trace!("Connection is gone");
+                    self.inner
+                        .get_mut()
+                        .set_error(AmqpTransportError::Disconnected);
+                    return Poll::Ready(Ok(()));
+                }
                 Poll::Ready(Some(Ok(frame))) => {
                     if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
                         if let ChannelState::Established(ref session) = channel {
@@ -425,7 +433,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
                     }
                     warn!("Unexpected frame: {:?}", frame);
                 }
-                Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e)),
+                Poll::Ready(Some(Err(e))) => {
+                    trace!("Amqp connection read error: {:?}", e);
+                    self.inner.get_mut().set_error(e.clone().into());
+                    return Poll::Ready(Err(e));
+                }
                 Poll::Pending => break,
             }
         }
@@ -433,7 +445,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
         self.register_write_task(cx);
 
         match self.poll_incoming(cx) {
-            Poll::Ready(None) => return Poll::Ready(Ok(())),
+            Poll::Ready(None) => {
+                trace!("Connection is gone");
+                self.inner
+                    .get_mut()
+                    .set_error(AmqpTransportError::Disconnected);
+                return Poll::Ready(Ok(()));
+            }
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(channel) = self.inner.sessions.get(frame.channel_id() as usize) {
                     if let ChannelState::Established(ref session) = channel {
@@ -443,7 +461,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
                 }
                 warn!("Unexpected frame: {:?}", frame);
             }
-            Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e)),
+            Poll::Ready(Some(Err(e))) => {
+                trace!("Amqp connection write error: {:?}", e);
+                self.inner.get_mut().set_error(e.clone().into());
+                return Poll::Ready(Err(e));
+            }
             Poll::Pending => (),
         }
 

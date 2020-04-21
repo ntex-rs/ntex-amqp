@@ -9,9 +9,11 @@ use ntex_amqp_codec::protocol::{Error, Frame, Role};
 use ntex_amqp_codec::AmqpCodecError;
 use slab::Slab;
 
+use crate::cell::Cell;
 use crate::connection::{ChannelState, Connection};
 use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
+use crate::sndlink::{SenderLink, SenderLinkInner};
 
 use super::control::{ControlFrame, ControlFrameKind, ControlFrameService};
 use super::errors::LinkError;
@@ -89,7 +91,7 @@ where
         if let Some(e) = err {
             error!("Error in link handler: {}", e);
             match frame.0.kind {
-                ControlFrameKind::Attach(ref frm) => {
+                ControlFrameKind::AttachSender(ref frm, _) => {
                     frame
                         .0
                         .session
@@ -101,14 +103,13 @@ where
             }
         } else {
             match frame.0.get_mut().kind {
-                ControlFrameKind::Attach(ref frm) => {
-                    let cell = frame.0.session.inner.clone();
+                ControlFrameKind::AttachSender(ref frm, ref link) => {
                     frame
                         .0
                         .session
                         .inner
                         .get_mut()
-                        .confirm_sender_link(cell, &frm);
+                        .confirm_sender_link_inner(&frm, link.inner.clone());
                 }
                 ControlFrameKind::Flow(ref frm, ref link) => {
                     if let Some(err) = err {
@@ -170,14 +171,19 @@ where
                                 let session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 if self.control_srv.is_some() {
+                                    let link = SenderLink::new(Cell::new(SenderLinkInner::with(
+                                        &attach,
+                                        cell.clone(),
+                                    )));
+
                                     self.control_frame = Some(ControlFrame::new(
                                         self.state.clone(),
                                         Session::new(cell),
-                                        ControlFrameKind::Attach(attach),
+                                        ControlFrameKind::AttachSender(attach, link),
                                     ));
                                     return Ok(IncomingResult::Control);
                                 } else {
-                                    session.get_mut().confirm_sender_link(cell, &attach);
+                                    session.get_mut().confirm_sender_link(&attach, cell);
                                 }
                             }
                             Role::Sender => {

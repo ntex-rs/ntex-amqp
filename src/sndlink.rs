@@ -4,7 +4,7 @@ use std::future::Future;
 use bytes::Bytes;
 use bytestring::ByteString;
 use futures::future::{ok, Either};
-use ntex::channel::oneshot;
+use ntex::channel::{condition, oneshot};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
@@ -29,7 +29,7 @@ impl std::fmt::Debug for SenderLink {
 }
 
 pub(crate) struct SenderLinkInner {
-    id: usize,
+    pub(crate) id: usize,
     idx: u32,
     name: ByteString,
     session: Session,
@@ -39,6 +39,7 @@ pub(crate) struct SenderLinkInner {
     pending_transfers: VecDeque<PendingTransfer>,
     error: Option<AmqpTransportError>,
     closed: bool,
+    on_close: condition::Condition,
 }
 
 struct PendingTransfer {
@@ -106,6 +107,10 @@ impl SenderLink {
     ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         self.inner.get_mut().close(Some(error))
     }
+
+    pub fn on_close(&self) -> condition::Waiter {
+        self.inner.get_ref().on_close.wait()
+    }
 }
 
 impl SenderLinkInner {
@@ -127,6 +132,31 @@ impl SenderLinkInner {
             pending_transfers: VecDeque::new(),
             error: None,
             closed: false,
+            on_close: condition::Condition::new(),
+        }
+    }
+
+    pub(crate) fn with(frame: &Attach, session: Cell<SessionInner>) -> SenderLinkInner {
+        let mut name = None;
+        if let Some(ref source) = frame.source {
+            if let Some(ref addr) = source.address {
+                name = Some(addr.clone());
+            }
+        }
+        let delivery_count = frame.initial_delivery_count.unwrap_or(0);
+
+        SenderLinkInner {
+            delivery_count,
+            id: 0,
+            idx: 0,
+            name: name.unwrap_or_else(ByteString::default),
+            session: Session::new(session),
+            remote_handle: frame.handle(),
+            link_credit: 0,
+            pending_transfers: VecDeque::new(),
+            error: None,
+            closed: false,
+            on_close: condition::Condition::new(),
         }
     }
 
@@ -152,12 +182,15 @@ impl SenderLinkInner {
     }
 
     pub(crate) fn close(
-        &self,
+        &mut self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpTransportError>> {
         if self.closed {
             Either::Left(ok(()))
         } else {
+            self.closed = true;
+            self.on_close.notify();
+
             let (tx, rx) = oneshot::channel();
 
             self.session

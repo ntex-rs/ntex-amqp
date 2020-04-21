@@ -1,5 +1,11 @@
 # Changes
 
+## [0.1.4] - 2020-04-21
+
+* Refactor server control frame
+
+* Wakeup receiver link on disconnect
+
 ## [0.1.3] - 2020-04-21
 
 * Fix OutMessage and InMessage encoding
