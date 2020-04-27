@@ -341,8 +341,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                                         );
                                         let id = session.get_mut().id();
                                         inner.post_frame(AmqpFrame::new(id, end.into()));
-                                        inner.sessions.remove(channel_id);
-                                        inner.sessions_map.remove(&frame.channel_id());
+                                        if let Some(token) = inner.sessions_map.remove(&frame.channel_id()) {
+                                            inner.sessions.remove(token);
+                                        }
                                     }
                                     _ => session.get_mut().handle_frame(frame.into_parts().1),
                                 }
@@ -352,8 +353,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                                     if let Some(tx) = tx.take() {
                                         let _ = tx.send(Ok(()));
                                     }
-                                    inner.sessions.remove(channel_id);
-                                    inner.sessions_map.remove(&frame.channel_id());
+                                    if let Some(token) = inner.sessions_map.remove(&frame.channel_id()) {
+                                        inner.sessions.remove(token);
+                                    }
                                 }
                                 frm => trace!("Got frame after initiated session end: {:?}", frm),
                             },
