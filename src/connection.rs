@@ -160,14 +160,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
         }
     }
 
-    /// Get session by id. This method panics if session does not exists or in opening/closing state.
-    pub(crate) fn get_session(&self, id: usize) -> Cell<SessionInner> {
-        if let Some(channel) = self.inner.get_ref().sessions.get(id) {
-            if let ChannelState::Established(ref session) = channel {
-                return session.clone();
-            }
-        }
-        panic!("Session not found: {}", id);
+    /// Get session by remote id. This method panics if session does not exists or in opening/closing state.
+    pub(crate) fn get_remote_session(&self, id: usize) -> Option<Cell<SessionInner>> {
+        let inner = self.inner.get_ref();
+        inner.sessions_map.get(&(id as u16)).and_then(|token| {
+            inner.sessions.get(*token).and_then(|channel| {
+                if let ChannelState::Established(ref session) = channel {
+                    Some(session.clone())
+                } else {
+                    None
+                }
+            })
+        })
     }
 
     pub(crate) fn register_remote_session(&mut self, channel_id: u16, begin: &Begin) {

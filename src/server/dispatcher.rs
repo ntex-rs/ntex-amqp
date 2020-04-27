@@ -1,7 +1,7 @@
-use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::{fmt, io};
 
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::service::Service;
@@ -144,13 +144,19 @@ where
                     let (channel_id, frame) = frame.into_parts();
                     let channel_id = channel_id as usize;
 
+                    if let Frame::Begin(frm) = frame {
+                        self.conn.register_remote_session(channel_id as u16, &frm);
+                        continue;
+                    }
+
+                    let session = self
+                        .conn
+                        .get_remote_session(channel_id)
+                        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Unknown session"))?;
+
                     match frame {
-                        Frame::Begin(frm) => {
-                            self.conn.register_remote_session(channel_id as u16, &frm);
-                        }
                         Frame::Flow(frm) => {
                             // apply flow to specific link
-                            let session = self.conn.get_session(channel_id);
                             if self.control_srv.is_some() {
                                 if let Some(link) =
                                     session.get_sender_link_by_handle(frm.handle.unwrap())
@@ -168,7 +174,6 @@ where
                         Frame::Attach(attach) => match attach.role {
                             Role::Receiver => {
                                 // remotly opened sender link
-                                let session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 if self.control_srv.is_some() {
                                     let link = SenderLink::new(Cell::new(SenderLinkInner::with(
@@ -188,7 +193,6 @@ where
                             }
                             Role::Sender => {
                                 // receiver link
-                                let session = self.conn.get_session(channel_id);
                                 let cell = session.clone();
                                 let link = session.get_mut().open_receiver_link(cell, attach);
                                 let fut = self
@@ -198,7 +202,6 @@ where
                             }
                         },
                         Frame::Detach(frm) => {
-                            let session = self.conn.get_session(channel_id);
                             let cell = session.clone();
 
                             if self.control_srv.is_some() {

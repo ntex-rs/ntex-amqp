@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.5] - 2020-04-28
+
+* Fix open multiple sessions
+
 ## [0.1.4] - 2020-04-21
 
 * Refactor server control frame
