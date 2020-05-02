@@ -341,7 +341,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                                         );
                                         let id = session.get_mut().id();
                                         inner.post_frame(AmqpFrame::new(id, end.into()));
-                                        if let Some(token) = inner.sessions_map.remove(&frame.channel_id()) {
+                                        if let Some(token) =
+                                            inner.sessions_map.remove(&frame.channel_id())
+                                        {
                                             inner.sessions.remove(token);
                                         }
                                     }
@@ -353,7 +355,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                                     if let Some(tx) = tx.take() {
                                         let _ = tx.send(Ok(()));
                                     }
-                                    if let Some(token) = inner.sessions_map.remove(&frame.channel_id()) {
+                                    if let Some(token) =
+                                        inner.sessions_map.remove(&frame.channel_id())
+                                    {
                                         inner.sessions.remove(token);
                                     }
                                 }

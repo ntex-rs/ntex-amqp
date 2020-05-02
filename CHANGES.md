@@ -1,5 +1,13 @@
 # Changes
 
+## [0.1.6] - 2020-05-02
+
+* Add `LinkError::redirect()`
+
+## [codec-0.1.2] - 2020-05-02
+
+* Add const `Symbox::from_static()` helper method.
+
 ## [0.1.5] - 2020-04-28
 
 * Fix open multiple sessions

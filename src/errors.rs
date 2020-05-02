@@ -48,6 +48,14 @@ impl LinkError {
         }
     }
 
+    pub fn redirect() -> Self {
+        LinkError {
+            err: protocol::LinkError::Redirect,
+            description: None,
+            info: None,
+        }
+    }
+
     pub fn text(mut self, text: &'static str) -> Self {
         self.description = Some(ByteString::from_static(text));
         self
@@ -60,6 +68,11 @@ impl LinkError {
 
     pub fn set_description(mut self, text: ByteString) -> Self {
         self.description = Some(text);
+        self
+    }
+
+    pub fn fields(mut self, fields: protocol::Fields) -> Self {
+        self.info = Some(fields);
         self
     }
 }

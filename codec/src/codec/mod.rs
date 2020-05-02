@@ -104,7 +104,7 @@ pub const FORMATCODE_ARRAY32: u8 = 0xf0;
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Bytes, BytesMut};
+    use bytes::{Buf, Bytes, BytesMut};
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;
@@ -125,7 +125,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.reserve(frame.encoded_size());
         frame.encode(&mut buf);
-        buf.split_to(4);
+        let _ = buf.split_to(4);
         assert_eq!(Bytes::from_static(data), buf.freeze());
 
         Ok(())
@@ -142,7 +142,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.reserve(frame.encoded_size());
         frame.encode(&mut buf);
-        buf.split_to(4);
+        let _ = buf.split_to(4);
         assert_eq!(Bytes::from_static(data), buf.freeze());
 
         Ok(())

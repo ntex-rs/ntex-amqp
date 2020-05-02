@@ -8,6 +8,10 @@ use super::Str;
 pub struct Symbol(pub Str);
 
 impl Symbol {
+    pub const fn from_static(s: &'static str) -> Symbol {
+        Symbol(Str::Static(s))
+    }
+
     pub fn from_slice(s: &str) -> Symbol {
         Symbol(Str::ByteStr(ByteString::from(s)))
     }
@@ -31,7 +35,7 @@ impl Symbol {
 
 impl From<&'static str> for Symbol {
     fn from(s: &'static str) -> Symbol {
-        Symbol(Str::Static(s))
+        Symbol::from_static(s)
     }
 }
 

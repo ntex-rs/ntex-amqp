@@ -19,7 +19,7 @@ members = [
 
 [dependencies]
 ntex = "0.1.13"
-ntex-amqp-codec = "0.1.1"
+ntex-amqp-codec = "0.1.2"
 ntex-router = "0.3.4"
 ntex-codec = "0.1.2"
 
