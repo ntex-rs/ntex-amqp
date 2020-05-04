@@ -350,10 +350,12 @@ impl SenderLinkBuilder {
     }
 
     pub async fn open(self) -> Result<SenderLink, AmqpTransportError> {
-        self.session
-            .get_mut()
-            .open_sender_link(self.frame)
-            .await
-            .map_err(|_e| AmqpTransportError::Disconnected)
+        let result = self.session.get_mut().open_sender_link(self.frame).await;
+
+        match result {
+            Ok(Ok(link)) => Ok(link),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(AmqpTransportError::Disconnected),
+        }
     }
 }

@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.8] - 2020-05-04
+
+* Proper handling of errors during sender link opening
+
 ## [0.1.7] - 2020-05-02
 
 * Add `LinkError::redirect()`

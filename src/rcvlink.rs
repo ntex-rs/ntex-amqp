@@ -158,9 +158,9 @@ impl ReceiverLinkInner {
         }
     }
 
-    pub(crate) fn name(&self) -> &ByteString {
-        &self.attach.name
-    }
+    // pub(crate) fn name(&self) -> &ByteString {
+    //     &self.attach.name
+    // }
 
     pub(crate) fn detached(&mut self) {
         // drop pending transfers

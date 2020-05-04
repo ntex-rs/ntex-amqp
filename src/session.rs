@@ -129,8 +129,8 @@ impl Session {
 
 #[derive(Debug)]
 enum SenderLinkState {
-    Opening(oneshot::Sender<SenderLink>),
     Established(SenderLink),
+    Opening(Option<oneshot::Sender<Result<SenderLink, AmqpTransportError>>>),
     Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
 }
 
@@ -415,31 +415,33 @@ impl SessionInner {
     ) {
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
-                ReceiverLinkState::Opening(inner) => {
-                    let attach = Attach {
-                        name: inner.as_ref().unwrap().get_ref().name().clone(),
-                        handle: id as Handle,
-                        role: Role::Sender,
-                        snd_settle_mode: SenderSettleMode::Mixed,
-                        rcv_settle_mode: ReceiverSettleMode::First,
-                        source: None,
-                        target: None,
-                        unsettled: None,
-                        incomplete_unsettled: false,
-                        initial_delivery_count: None,
-                        max_message_size: None,
-                        offered_capabilities: None,
-                        desired_capabilities: None,
-                        properties: None,
-                    };
+                ReceiverLinkState::Opening(_inner) => {
+                    // let attach = Attach {
+                    //     name: inner.as_ref().unwrap().get_ref().name().clone(),
+                    //     handle: id as Handle,
+                    //     role: Role::Sender,
+                    //     snd_settle_mode: SenderSettleMode::Mixed,
+                    //     rcv_settle_mode: ReceiverSettleMode::First,
+                    //     source: None,
+                    //     target: None,
+                    //     unsettled: None,
+                    //     incomplete_unsettled: false,
+                    //     initial_delivery_count: None,
+                    //     max_message_size: None,
+                    //     offered_capabilities: None,
+                    //     desired_capabilities: None,
+                    //     properties: None,
+                    // };
                     let detach = Detach {
                         handle: id,
                         closed,
                         error,
                     };
-                    *link = ReceiverLinkState::Closing(Some(tx));
-                    self.post_frame(attach.into());
+                    // *link = ReceiverLinkState::Closing(Some(tx));
+                    // self.post_frame(attach.into());
                     self.post_frame(detach.into());
+                    let _ = tx.send(Ok(()));
+                    let _ = self.links.remove(id as usize);
                 }
                 ReceiverLinkState::Established(_) => {
                     let detach = Detach {
@@ -452,6 +454,7 @@ impl SessionInner {
                 }
                 ReceiverLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
+                    let _ = self.links.remove(id as usize);
                     error!("Unexpected receiver link state: closing - {}", id);
                 }
                 ReceiverLinkState::OpeningLocal(_inner) => unimplemented!(),
@@ -611,8 +614,8 @@ impl SessionInner {
                             SenderLinkState::Established(SenderLink::new(link.clone())),
                         );
 
-                        if let SenderLinkState::Opening(tx) = local_sender {
-                            let _ = tx.send(SenderLink::new(link));
+                        if let SenderLinkState::Opening(Some(tx)) = local_sender {
+                            let _ = tx.send(Ok(SenderLink::new(link)));
                         }
                     }
                 }
@@ -659,7 +662,13 @@ impl SessionInner {
         let remove = if let Some(link) = self.links.get_mut(idx) {
             match link {
                 Either::Left(link) => match link {
-                    SenderLinkState::Opening(_) => true,
+                    SenderLinkState::Opening(ref mut tx) => {
+                        if let Some(tx) = tx.take() {
+                            let err = AmqpTransportError::LinkDetached(detach.error.clone());
+                            let _ = tx.send(Err(err));
+                        }
+                        true
+                    }
                     SenderLinkState::Established(link) => {
                         // detach from remote endpoint
                         let detach = Detach {
@@ -848,12 +857,15 @@ impl SessionInner {
             .post_frame(AmqpFrame::new(self.remote_channel_id, frame));
     }
 
-    pub(crate) fn open_sender_link(&mut self, mut frame: Attach) -> oneshot::Receiver<SenderLink> {
+    pub(crate) fn open_sender_link(
+        &mut self,
+        mut frame: Attach,
+    ) -> oneshot::Receiver<Result<SenderLink, AmqpTransportError>> {
         let (tx, rx) = oneshot::channel();
 
         let entry = self.links.vacant_entry();
         let token = entry.key();
-        entry.insert(Either::Left(SenderLinkState::Opening(tx)));
+        entry.insert(Either::Left(SenderLinkState::Opening(Some(tx))));
 
         frame.handle = token as Handle;
 
