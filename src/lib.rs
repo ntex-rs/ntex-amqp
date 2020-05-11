@@ -13,12 +13,14 @@ use std::time::Duration;
 
 use bytestring::ByteString;
 use ntex::channel::oneshot;
+pub use ntex_amqp_codec::protocol::Error;
 use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use uuid::Uuid;
 
 mod cell;
 pub mod client;
 mod connection;
+pub mod error_code;
 mod errors;
 mod hb;
 mod rcvlink;
@@ -29,7 +31,7 @@ mod session;
 mod sndlink;
 
 pub use self::connection::{Connection, ConnectionController};
-pub use self::errors::{AmqpTransportError, LinkError};
+pub use self::errors::{AmqpError, AmqpTransportError, LinkError};
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};

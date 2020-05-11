@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.9] - 2020-05-11
+
+* Add standard error code constants
+
 ## [0.1.8] - 2020-05-04
 
 * Proper handling of errors during sender link opening

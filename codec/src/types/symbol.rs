@@ -72,6 +72,12 @@ impl PartialEq<str> for Symbol {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
 pub struct StaticSymbol(pub &'static str);
 
+impl StaticSymbol {
+    pub const fn new(s: &'static str) -> StaticSymbol {
+        StaticSymbol(s)
+    }
+}
+
 impl From<&'static str> for StaticSymbol {
     fn from(s: &'static str) -> StaticSymbol {
         StaticSymbol(s)

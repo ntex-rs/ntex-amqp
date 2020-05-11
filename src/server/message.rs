@@ -7,8 +7,7 @@ use ntex_amqp_codec::Decode;
 use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
 
-use super::errors::AmqpError;
-use super::State;
+use super::{AmqpError, State};
 
 pub struct Message<S> {
     state: State<S>,

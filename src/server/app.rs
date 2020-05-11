@@ -13,10 +13,9 @@ use ntex_router::{IntoPattern, Router};
 use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
 
-use super::errors::LinkError;
 use super::link::Link;
 use super::message::{Message, Outcome};
-use super::State;
+use super::{LinkError, State};
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Message<S>, Outcome, Error, Error>;
 

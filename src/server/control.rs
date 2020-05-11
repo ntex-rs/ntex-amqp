@@ -8,8 +8,7 @@ use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
 use crate::sndlink::SenderLink;
 
-use super::errors::LinkError;
-use super::State;
+use super::{LinkError, State};
 
 pub(crate) type ControlFrameService<St> = BoxService<ControlFrame<St>, (), LinkError>;
 pub(crate) type ControlFrameNewService<St> =

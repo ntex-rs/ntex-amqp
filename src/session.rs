@@ -290,7 +290,7 @@ impl SessionInner {
         cell: Cell<SessionInner>,
     ) -> SenderLink {
         trace!("Remote sender link opened: {:?}", attach.name());
-        let link = Cell::new(SenderLinkInner::with(attach, cell.clone()));
+        let link = Cell::new(SenderLinkInner::with(attach, cell));
         self.confirm_sender_link_inner(attach, link)
     }
 

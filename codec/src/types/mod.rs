@@ -80,6 +80,10 @@ impl Str {
         Str::ByteStr(ByteString::from(s))
     }
 
+    pub const fn from_static(s: &'static str) -> Str {
+        Str::Static(s)
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Str::String(s) => s.as_ref(),

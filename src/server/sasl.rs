@@ -13,7 +13,7 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
 use super::connect::{ConnectAck, ConnectOpened};
-use super::errors::{AmqpError, ServerError};
+use super::{AmqpError, ServerError};
 use crate::connection::ConnectionController;
 
 pub struct Sasl<Io> {

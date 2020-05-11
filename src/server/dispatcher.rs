@@ -16,8 +16,7 @@ use crate::session::Session;
 use crate::sndlink::{SenderLink, SenderLinkInner};
 
 use super::control::{ControlFrame, ControlFrameKind, ControlFrameService};
-use super::errors::LinkError;
-use super::{Link, State};
+use super::{Link, LinkError, State};
 
 /// Amqp server connection dispatcher.
 #[pin_project::pin_project]

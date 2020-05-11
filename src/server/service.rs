@@ -17,10 +17,9 @@ use crate::Configuration;
 use super::connect::{Connect, ConnectAck};
 use super::control::{ControlFrame, ControlFrameNewService};
 use super::dispatcher::Dispatcher;
-use super::errors::{LinkError, ServerError};
 use super::link::Link;
 use super::sasl::Sasl;
-use super::State;
+use super::{LinkError, ServerError, State};
 
 /// Amqp connection type
 pub(crate) type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;

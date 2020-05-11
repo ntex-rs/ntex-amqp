@@ -1,5 +1,3 @@
-use uuid;
-
 use crate::protocol::ProtocolId;
 use crate::types::Descriptor;
 

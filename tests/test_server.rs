@@ -7,7 +7,7 @@ use ntex::connect::Connector;
 use ntex::http::Uri;
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, pipeline_factory, Service};
-use ntex_amqp::server::{self, errors};
+use ntex_amqp::server::{self, AmqpError, LinkError};
 use ntex_amqp::{sasl, Configuration};
 
 fn server(
@@ -18,15 +18,15 @@ fn server(
             dyn Service<
                     Request = server::Message<()>,
                     Response = server::Outcome,
-                    Error = errors::AmqpError,
+                    Error = AmqpError,
                     Future = Ready<Result<server::Message<()>, server::Outcome>>,
                 > + 'static,
         >,
-        errors::LinkError,
+        LinkError,
     >,
 > {
     println!("OPEN LINK: {:?}", link);
-    err(errors::LinkError::force_detach().description("unimplemented"))
+    err(LinkError::force_detach().description("unimplemented"))
 }
 
 #[ntex::test]
@@ -38,7 +38,7 @@ async fn test_simple() -> std::io::Result<()> {
         server::Server::new(
             server::Handshake::new(|conn: server::Connect<_>| async move {
                 let conn = conn.open().await.unwrap();
-                Ok::<_, errors::AmqpError>(conn.ack(()))
+                Ok::<_, AmqpError>(conn.ack(()))
             })
             .sasl(server::sasl::no_sasl()),
         )
@@ -69,7 +69,7 @@ async fn test_simple() -> std::io::Result<()> {
 
 async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
     auth: server::Sasl<Io>,
-) -> Result<server::ConnectAck<Io, ()>, server::errors::ServerError<()>> {
+) -> Result<server::ConnectAck<Io, ()>, server::ServerError<()>> {
     let init = auth
         .mechanism("PLAIN")
         .mechanism("ANONYMOUS")
@@ -101,7 +101,7 @@ async fn test_sasl() -> std::io::Result<()> {
         server::Server::new(
             server::Handshake::new(|conn: server::Connect<_>| async move {
                 let conn = conn.open().await.unwrap();
-                Ok::<_, errors::Error>(conn.ack(()))
+                Ok::<_, server::Error>(conn.ack(()))
             })
             .sasl(pipeline_factory(sasl_auth).map_err(|e| e.into())),
         )
