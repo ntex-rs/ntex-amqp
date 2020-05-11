@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.10] - 2020-05-12
+
+* Add AttachReceiver control frame
+
 ## [0.1.9] - 2020-05-11
 
 * Add standard error code constants

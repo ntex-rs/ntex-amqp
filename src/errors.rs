@@ -158,6 +158,7 @@ impl LinkError {
         self
     }
 
+    #[allow(clippy::mutable_key_type)]
     pub fn fields(mut self, fields: protocol::Fields) -> Self {
         self.info = Some(fields);
         self

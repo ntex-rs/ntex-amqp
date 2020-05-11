@@ -1,3 +1,5 @@
+#![allow(clippy::declare_interior_mutable_const)]
+
 //! Defines the standard AMQP error codes.
 use ntex_amqp_codec::types::Symbol;
 

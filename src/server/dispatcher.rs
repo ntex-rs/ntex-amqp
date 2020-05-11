@@ -86,22 +86,26 @@ where
         true
     }
 
-    fn handle_control_frame(&self, frame: &mut ControlFrame<St>, err: Option<LinkError>) {
+    fn handle_control_frame(&mut self, frame: &mut ControlFrame<St>, err: Option<LinkError>) {
         if let Some(e) = err {
             error!("Error in link handler: {}", e);
-            match frame.0.kind {
-                ControlFrameKind::AttachSender(ref frm, _) => {
-                    frame
-                        .0
-                        .session
-                        .inner
-                        .get_mut()
-                        .detach_unconfirmed_sender_link(&frm, Some(e.into()));
-                }
-                _ => (),
+            if let ControlFrameKind::AttachSender(ref frm, _) = frame.0.kind {
+                frame
+                    .0
+                    .session
+                    .inner
+                    .get_mut()
+                    .detach_unconfirmed_sender_link(&frm, Some(e.into()));
             }
         } else {
             match frame.0.get_mut().kind {
+                ControlFrameKind::AttachReceiver(ref link) => {
+                    let fut = self
+                        .service
+                        .call(Link::new(link.clone(), self.state.clone()));
+                    self.receivers.push((link.clone(), fut));
+                }
+
                 ControlFrameKind::AttachSender(ref frm, ref link) => {
                     frame
                         .0
@@ -170,36 +174,48 @@ where
                             }
                             session.get_mut().apply_flow(&frm);
                         }
-                        Frame::Attach(attach) => match attach.role {
-                            Role::Receiver => {
-                                // remotly opened sender link
-                                let cell = session.clone();
-                                if self.control_srv.is_some() {
-                                    let link = SenderLink::new(Cell::new(SenderLinkInner::with(
-                                        &attach,
-                                        cell.clone(),
-                                    )));
+                        Frame::Attach(attach) => {
+                            match attach.role {
+                                Role::Receiver => {
+                                    // remotly opened sender link
+                                    let cell = session.clone();
+                                    if self.control_srv.is_some() {
+                                        let link = SenderLink::new(Cell::new(
+                                            SenderLinkInner::with(&attach, cell.clone()),
+                                        ));
 
-                                    self.control_frame = Some(ControlFrame::new(
-                                        self.state.clone(),
-                                        Session::new(cell),
-                                        ControlFrameKind::AttachSender(attach, link),
-                                    ));
-                                    return Ok(IncomingResult::Control);
-                                } else {
-                                    session.get_mut().confirm_sender_link(&attach, cell);
+                                        self.control_frame = Some(ControlFrame::new(
+                                            self.state.clone(),
+                                            Session::new(cell),
+                                            ControlFrameKind::AttachSender(attach, link),
+                                        ));
+                                        return Ok(IncomingResult::Control);
+                                    } else {
+                                        session.get_mut().confirm_sender_link(&attach, cell);
+                                    }
+                                }
+                                Role::Sender => {
+                                    // receiver link
+                                    let cell = session.clone();
+                                    let link =
+                                        session.get_mut().open_receiver_link(cell.clone(), attach);
+
+                                    if self.control_srv.is_some() {
+                                        self.control_frame = Some(ControlFrame::new(
+                                            self.state.clone(),
+                                            Session::new(cell),
+                                            ControlFrameKind::AttachReceiver(link),
+                                        ));
+                                        return Ok(IncomingResult::Control);
+                                    } else {
+                                        let fut = self
+                                            .service
+                                            .call(Link::new(link.clone(), self.state.clone()));
+                                        self.receivers.push((link, fut));
+                                    }
                                 }
                             }
-                            Role::Sender => {
-                                // receiver link
-                                let cell = session.clone();
-                                let link = session.get_mut().open_receiver_link(cell, attach);
-                                let fut = self
-                                    .service
-                                    .call(Link::new(link.clone(), self.state.clone()));
-                                self.receivers.push((link, fut));
-                            }
-                        },
+                        }
                         Frame::Detach(frm) => {
                             let cell = session.clone();
 
