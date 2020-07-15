@@ -200,7 +200,9 @@ impl From<InMessage> for OutMessage {
         };
 
         if let Some(ref mut props) = msg.properties {
-            props.correlation_id = props.message_id.clone();
+            if props.correlation_id.is_none() {
+                props.correlation_id = props.message_id.clone();
+            }
         };
 
         msg
