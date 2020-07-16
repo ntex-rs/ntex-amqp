@@ -753,16 +753,31 @@ impl SessionInner {
     }
 
     fn settle_deliveries(&mut self, disposition: Disposition) {
-        trace!("settle delivery: {:#?}", disposition);
+        trace!("Settle delivery: {:#?}", disposition);
 
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
 
         if from == to {
             if let Some(val) = self.unsettled_deliveries.remove(&from) {
+                if !disposition.settled {
+                    let mut disp = disposition.clone();
+                    disp.role = Role::Sender;
+                    disp.settled = true;
+                    disp.state = Some(DeliveryState::Accepted(Accepted {}));
+                    self.post_frame(Frame::Disposition(disp));
+                }
                 let _ = val.send(Ok(disposition));
             }
         } else {
+            if !disposition.settled {
+                let mut disp = disposition.clone();
+                disp.role = Role::Sender;
+                disp.settled = true;
+                disp.state = Some(DeliveryState::Accepted(Accepted {}));
+                self.post_frame(Frame::Disposition(disp));
+            }
+
             for k in from..=to {
                 if let Some(val) = self.unsettled_deliveries.remove(&k) {
                     let _ = val.send(Ok(disposition.clone()));
@@ -884,6 +899,10 @@ impl SessionInner {
         settled: Option<bool>,
     ) {
         if self.remote_incoming_window == 0 {
+            log::trace!(
+                "Remote window is 0, push to pending queue, hnd:{:?}",
+                link_handle
+            );
             self.pending_transfers.push_back(PendingTransfer {
                 link_handle,
                 idx,
@@ -895,6 +914,7 @@ impl SessionInner {
             return;
         }
         let frame = self.prepare_transfer(link_handle, body, promise, tag, settled);
+        log::trace!("Sending transfer over {}", link_handle);
         self.post_frame(frame);
     }
 

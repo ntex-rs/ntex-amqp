@@ -260,6 +260,12 @@ impl SenderLinkInner {
             let body = body.into();
             let (delivery_tx, delivery_rx) = oneshot::channel();
             if self.link_credit == 0 {
+                log::trace!(
+                    "Sender link credit is 0, push to pending queue hnd:{} {:?}, queue size: {}",
+                    self.remote_handle,
+                    tag,
+                    self.pending_transfers.len()
+                );
                 self.pending_transfers.push_back(PendingTransfer {
                     tag,
                     settle: Some(false),
@@ -277,7 +283,7 @@ impl SenderLinkInner {
                     Some(body),
                     delivery_tx,
                     tag,
-                    Some(false),
+                    None,
                 );
             }
             let _ = self.idx.saturating_add(1);

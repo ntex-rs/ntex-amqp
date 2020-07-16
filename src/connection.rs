@@ -559,7 +559,7 @@ impl ConnectionInner {
     }
 
     fn post_frame(&mut self, frame: AmqpFrame) {
-        // trace!("POST-FRAME: {:#?}", frame.performative());
+        // trace!("Post frame: {:#?}", frame.performative());
         self.write_queue.push_back(frame);
         self.write_task.wake();
     }
