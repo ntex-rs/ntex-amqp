@@ -101,6 +101,7 @@ impl<S: 'static> Service for AppService<S> {
         if let Some(path) = path {
             link.path_mut().set(path);
             if let Some((hnd, _info)) = self.router.recognize(link.path_mut()) {
+                trace!("Create handler service for {}", link.path().get_ref());
                 let fut = hnd.new_service(link.clone());
                 Either::Right(AppServiceResponse {
                     link: link.link.clone(),
@@ -155,8 +156,20 @@ impl<S> Future for AppServiceResponse<S> {
                     // check readiness
                     match srv.poll_ready(cx) {
                         Poll::Ready(Ok(_)) => (),
-                        Poll::Pending => return Poll::Pending,
+                        Poll::Pending => {
+                            log::trace!(
+                                "Handler service is not ready for {}",
+                                this.link
+                                    .frame()
+                                    .target
+                                    .as_ref()
+                                    .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
+                                    .unwrap_or("")
+                            );
+                            return Poll::Pending;
+                        }
                         Poll::Ready(Err(e)) => {
+                            log::trace!("Service readiness check failed: {:?}", e);
                             let _ = this.link.close_with_error(
                                 LinkError::force_detach()
                                     .description(format!("error: {}", e))
@@ -199,16 +212,24 @@ impl<S> Future for AppServiceResponse<S> {
                                         link: this.link.clone(),
                                     });
                                 }
-                                Poll::Ready(Err(e)) => settle(
-                                    &mut this.link,
-                                    delivery_id,
-                                    DeliveryState::Rejected(Rejected { error: Some(e) }),
-                                ),
+                                Poll::Ready(Err(e)) => {
+                                    log::trace!("Service response error: {:?}", e);
+                                    settle(
+                                        &mut this.link,
+                                        delivery_id,
+                                        DeliveryState::Rejected(Rejected { error: Some(e) }),
+                                    )
+                                }
                             }
                         }
-                        Poll::Ready(None) => return Poll::Ready(Ok(())),
+                        Poll::Ready(None) => {
+                            // TODO: shutdown service
+                            log::trace!("Link is gone");
+                            return Poll::Ready(Ok(()));
+                        }
                         Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Some(Err(_))) => {
+                        Poll::Ready(Some(Err(e))) => {
+                            log::trace!("Link is failed: {:?}", e);
                             let _ = this.link.close_with_error(LinkError::force_detach().into());
                             return Poll::Ready(Ok(()));
                         }
@@ -216,12 +237,33 @@ impl<S> Future for AppServiceResponse<S> {
                 }
                 AppServiceResponseState::NewService(ref mut fut) => match Pin::new(fut).poll(cx) {
                     Poll::Ready(Ok(srv)) => {
+                        log::trace!(
+                            "Handler service is created for {}",
+                            this.link
+                                .frame()
+                                .target
+                                .as_ref()
+                                .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
+                                .unwrap_or("")
+                        );
                         this.link.open();
                         this.link.set_link_credit(50);
                         this.state = AppServiceResponseState::Service(srv);
                         continue;
                     }
-                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                    Poll::Ready(Err(e)) => {
+                        log::error!(
+                            "Failed to create link service for {} err: {:?}",
+                            this.link
+                                .frame()
+                                .target
+                                .as_ref()
+                                .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
+                                .unwrap_or(""),
+                            e
+                        );
+                        return Poll::Ready(Err(e));
+                    }
                     Poll::Pending => return Poll::Pending,
                 },
             }
@@ -242,13 +284,34 @@ impl Future for HandleMessage {
         let mut this = self.as_mut();
 
         match Pin::new(&mut this.fut).poll(cx) {
+            Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(outcome)) => {
+                log::trace!(
+                    "Outcome is ready {:?} for {}",
+                    outcome,
+                    this.link
+                        .frame()
+                        .target
+                        .as_ref()
+                        .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
+                        .unwrap_or("")
+                );
                 let delivery_id = this.delivery_id;
                 settle(&mut this.link, delivery_id, outcome.into_delivery_state());
                 Poll::Ready(())
             }
-            Poll::Pending => Poll::Pending,
             Poll::Ready(Err(e)) => {
+                log::trace!(
+                    "Outcome is failed {:?} for {}",
+                    e,
+                    this.link
+                        .frame()
+                        .target
+                        .as_ref()
+                        .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
+                        .unwrap_or("")
+                );
+
                 let delivery_id = this.delivery_id;
                 settle(
                     &mut this.link,

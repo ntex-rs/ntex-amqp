@@ -77,6 +77,7 @@ where
                 }
                 Poll::Pending => return false,
                 Poll::Ready(Err(e)) => {
+                    log::trace!("Control service failed: {:?}", e);
                     let _ = self.control_fut.take();
                     let mut frame = self.control_frame.take().unwrap();
                     self.handle_control_frame(&mut frame, Some(e));
@@ -249,7 +250,10 @@ where
                 }
                 Poll::Pending => break,
                 Poll::Ready(None) => return Ok(IncomingResult::Disconnect),
-                Poll::Ready(Some(Err(e))) => return Err(e),
+                Poll::Ready(Some(Err(e))) => {
+                    log::trace!("Polling for incoming frame failed: {:?}", e);
+                    return Err(e);
+                }
             }
         }
 

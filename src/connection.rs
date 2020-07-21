@@ -130,6 +130,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
             let inner = inner.get_mut();
 
             if let Some(ref e) = inner.error {
+                log::error!("Connection is in error state: {:?}", e);
                 Err(e.clone())
             } else {
                 let (tx, rx) = oneshot::channel();
@@ -138,6 +139,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                 let token = entry.key();
 
                 if token >= inner.local.channel_max {
+                    log::trace!("Too many channels: {:?}", token);
                     Err(AmqpTransportError::TooManyChannels)
                 } else {
                     entry.insert(ChannelState::Opening(Some(tx), cell));
@@ -220,9 +222,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
         loop {
             while !self.framed.is_write_buf_full() {
                 if let Some(frame) = inner.pop_next_frame() {
+                    #[cfg(feature = "frame-trace")]
                     trace!("outgoing: {:#?}", frame);
                     update = true;
                     if let Err(e) = self.framed.write(frame) {
+                        error!("Cannot encode frame: {:?}", e);
                         inner.set_error(e.clone().into());
                         return Poll::Ready(Err(e));
                     }
@@ -235,7 +239,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                 match self.framed.flush(cx) {
                     Poll::Pending => break,
                     Poll::Ready(Err(e)) => {
-                        trace!("error sending data: {}", e);
+                        trace!("Cannot send data: {}", e);
                         inner.set_error(e.clone().into());
                         return Poll::Ready(Err(e));
                     }
@@ -268,6 +272,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
         loop {
             match Pin::new(&mut self.framed).poll_next(cx) {
                 Poll::Ready(Some(Ok(frame))) => {
+                    #[cfg(feature = "frame-trace")]
                     trace!("incoming: {:#?}", frame);
 
                     update = true;
@@ -282,9 +287,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                         inner.set_error(AmqpTransportError::Closed(close.error.clone()));
 
                         if inner.state == State::Closing {
+                            log::trace!("Connection closed: {:?}", close);
                             inner.set_error(AmqpTransportError::Disconnected);
                             return Poll::Ready(None);
                         } else {
+                            log::trace!("Connection closed remotely: {:?}", close);
                             let close = Close { error: None };
                             inner.post_frame(AmqpFrame::new(0, close.into()));
                             inner.state = State::RemoteClose;
@@ -292,7 +299,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                     }
 
                     if inner.error.is_some() {
-                        error!("connection closed but new framed is received: {:?}", frame);
+                        error!("Connection closed but new framed is received: {:?}", frame);
                         return Poll::Ready(None);
                     }
 
@@ -351,7 +358,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                                 }
                             }
                             ChannelState::Closing(ref mut tx) => match frame.performative() {
-                                Frame::End(_) => {
+                                Frame::End(frm) => {
+                                    trace!("Session end is confirmed: {:?}", frm);
                                     if let Some(tx) = tx.take() {
                                         let _ = tx.send(Ok(()));
                                     }
@@ -370,6 +378,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                     }
                 }
                 Poll::Ready(None) => {
+                    trace!("Amqp connection has been disconnected with no error");
                     inner.set_error(AmqpTransportError::Disconnected);
                     return Poll::Ready(None);
                 }
@@ -378,7 +387,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                     break;
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    trace!("error reading: {:?}", e);
+                    trace!("Error while reading from socket: {:?}", e);
                     inner.set_error(e.clone().into());
                     return Poll::Ready(Some(Err(e)));
                 }
@@ -391,6 +400,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
 
 impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
     fn drop(&mut self) {
+        trace!("Connection has been dropped, disconnecting");
         self.inner
             .get_mut()
             .set_error(AmqpTransportError::Disconnected);
@@ -540,6 +550,7 @@ impl ConnectionInner {
     }
 
     fn set_error(&mut self, err: AmqpTransportError) {
+        log::trace!("Set connection error: {:?}", err);
         for (_, channel) in self.sessions.iter_mut() {
             match channel {
                 ChannelState::Opening(_, _) | ChannelState::Closing(_) => (),
@@ -559,14 +570,13 @@ impl ConnectionInner {
     }
 
     fn post_frame(&mut self, frame: AmqpFrame) {
-        // trace!("Post frame: {:#?}", frame.performative());
         self.write_queue.push_back(frame);
         self.write_task.wake();
     }
 
     fn complete_session_creation(&mut self, channel_id: u16, begin: &Begin) {
         trace!(
-            "session opened: {:?} {:?}",
+            "Session opened: local {:?} remote {:?}",
             channel_id,
             begin.remote_channel()
         );

@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "0.1.11"
+version = "0.1.12"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/actix-amqp"
@@ -16,6 +16,12 @@ members = [
   ".",
   "codec",
 ]
+
+[features]
+default = []
+
+# log frames on trace level
+frame-trace = []
 
 [dependencies]
 ntex = "0.1.20"

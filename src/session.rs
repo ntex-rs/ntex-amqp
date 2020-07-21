@@ -113,8 +113,14 @@ impl Session {
         async move {
             match rx.await {
                 Ok(Ok(_)) => Ok(()),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(AmqpTransportError::Disconnected),
+                Ok(Err(e)) => {
+                    log::trace!("Cannot complete detach receiver link {:?}", e);
+                    Err(e)
+                }
+                Err(_) => {
+                    log::trace!("Cannot complete detach receiver link, connection is gone");
+                    Err(AmqpTransportError::Disconnected)
+                }
             }
         }
     }
@@ -231,6 +237,8 @@ impl SessionInner {
 
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
+        log::trace!("Connection is failed, dropping state: {:?}", err);
+
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
             let _ = tr.promise.send(Err(err.clone()));
@@ -416,29 +424,11 @@ impl SessionInner {
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
                 ReceiverLinkState::Opening(_inner) => {
-                    // let attach = Attach {
-                    //     name: inner.as_ref().unwrap().get_ref().name().clone(),
-                    //     handle: id as Handle,
-                    //     role: Role::Sender,
-                    //     snd_settle_mode: SenderSettleMode::Mixed,
-                    //     rcv_settle_mode: ReceiverSettleMode::First,
-                    //     source: None,
-                    //     target: None,
-                    //     unsettled: None,
-                    //     incomplete_unsettled: false,
-                    //     initial_delivery_count: None,
-                    //     max_message_size: None,
-                    //     offered_capabilities: None,
-                    //     desired_capabilities: None,
-                    //     properties: None,
-                    // };
                     let detach = Detach {
                         handle: id,
                         closed,
                         error,
                     };
-                    // *link = ReceiverLinkState::Closing(Some(tx));
-                    // self.post_frame(attach.into());
                     self.post_frame(detach.into());
                     let _ = tx.send(Ok(()));
                     let _ = self.links.remove(id as usize);
@@ -594,7 +584,7 @@ impl SessionInner {
                 Some(Either::Left(item)) => {
                     if item.is_opening() {
                         trace!(
-                            "sender link opened: {:?} {} -> {}",
+                            "Sender link opened: {:?} {} -> {}",
                             name,
                             index,
                             attach.handle()
@@ -622,7 +612,7 @@ impl SessionInner {
                 Some(Either::Right(item)) => {
                     if item.is_opening() {
                         trace!(
-                            "receiver link opened: {:?} {} -> {}",
+                            "Receiver link opened: {:?} {} -> {}",
                             name,
                             index,
                             attach.handle()
@@ -656,6 +646,7 @@ impl SessionInner {
             detach.handle() as usize
         } else {
             // should not happen, error
+            log::info!("Detaching unknown link: {:?}", detach);
             return;
         };
 
@@ -753,10 +744,19 @@ impl SessionInner {
     }
 
     fn settle_deliveries(&mut self, disposition: Disposition) {
-        trace!("Settle delivery: {:#?}", disposition);
-
         let from = disposition.first;
         let to = disposition.last.unwrap_or(from);
+
+        if cfg!(feature = "frame-trace") {
+            trace!("Settle delivery: {:#?}", disposition);
+        } else {
+            trace!(
+                "Settle delivery from {}, state {:?} settled: {:?}",
+                from,
+                disposition.state,
+                disposition.settled
+            );
+        }
 
         if from == to {
             if let Some(val) = self.unsettled_deliveries.remove(&from) {
@@ -798,7 +798,8 @@ impl SessionInner {
             .saturating_sub(self.next_outgoing_id);
 
         trace!(
-            "session received credit. window: {}, pending: {}",
+            "Session received credit {:?}. window: {}, pending: {}",
+            flow.link_credit(),
             self.remote_outgoing_window,
             self.pending_transfers.len()
         );
