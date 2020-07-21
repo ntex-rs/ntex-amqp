@@ -400,7 +400,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
 
 impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
     fn drop(&mut self) {
-        trace!("Connection has been dropped, disconnecting");
+        trace!("Connection has been dropped, disconnecting {:?}", backtrace::Backtrace::new());
         self.inner
             .get_mut()
             .set_error(AmqpTransportError::Disconnected);
@@ -438,7 +438,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
         loop {
             match self.poll_incoming(cx) {
                 Poll::Ready(None) => {
-                    trace!("Connection is gone");
+                    trace!("Connection is gone while reading");
                     self.inner
                         .get_mut()
                         .set_error(AmqpTransportError::Disconnected);
@@ -466,7 +466,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
 
         match self.poll_incoming(cx) {
             Poll::Ready(None) => {
-                trace!("Connection is gone");
+                trace!("Connection is gone while reading 2");
                 self.inner
                     .get_mut()
                     .set_error(AmqpTransportError::Disconnected);
