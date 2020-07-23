@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.12] - 2020-07-23
+
+* Better logging
+
 ## [0.1.10] - 2020-05-12
 
 * Add AttachReceiver control frame
