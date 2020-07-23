@@ -400,7 +400,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
 
 impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
     fn drop(&mut self) {
-        trace!("Connection has been dropped, disconnecting {:?}", backtrace::Backtrace::new());
+        trace!("Connection has been dropped, disconnecting");
         self.inner
             .get_mut()
             .set_error(AmqpTransportError::Disconnected);
