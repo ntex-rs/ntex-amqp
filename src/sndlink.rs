@@ -173,6 +173,8 @@ impl SenderLinkInner {
     }
 
     pub(crate) fn detached(&mut self, err: AmqpTransportError) {
+        trace!("Detaching sender link {:?} with error {:?}", self.name, err);
+
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
             let _ = tr.promise.send(Err(err.clone()));
@@ -212,20 +214,28 @@ impl SenderLinkInner {
     pub(crate) fn apply_flow(&mut self, flow: &Flow) {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
+            trace!(
+                "Apply sender link {:?} flow, credit: {:?} flow count: {:?}, delivery count: {:?}",
+                self.name,
+                credit,
+                flow.delivery_count.unwrap_or(0),
+                self.delivery_count
+            );
+
             let delta = flow
                 .delivery_count
                 .unwrap_or(0)
                 .saturating_add(credit)
                 .saturating_sub(self.delivery_count);
+            self.link_credit += delta;
 
             let session = self.session.inner.get_mut();
 
             // credit became available => drain pending_transfers
-            self.link_credit += delta;
             while self.link_credit > 0 {
                 if let Some(transfer) = self.pending_transfers.pop_front() {
                     self.link_credit -= 1;
-                    let _ = self.delivery_count.saturating_add(1);
+                    self.delivery_count = self.delivery_count.saturating_add(1);
                     session.send_transfer(
                         self.remote_handle,
                         transfer.idx,
@@ -268,7 +278,7 @@ impl SenderLinkInner {
             } else {
                 let session = self.session.inner.get_mut();
                 self.link_credit -= 1;
-                let _ = self.delivery_count.saturating_add(1);
+                self.delivery_count = self.delivery_count.saturating_add(1);
                 session.send_transfer(
                     self.remote_handle,
                     self.idx,
@@ -278,14 +288,12 @@ impl SenderLinkInner {
                     None,
                 );
             }
-            let _ = self.idx.saturating_add(1);
+            self.idx = self.idx.saturating_add(1);
             Delivery::Pending(delivery_rx)
         }
     }
 
     pub(crate) fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
-        let _ = self.delivery_count.saturating_add(1);
-
         let disp = Disposition {
             role: Role::Sender,
             first: id,

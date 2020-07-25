@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.15] - 2020-07-25
+
+* Fix sender link apply flow
+
 ## [0.1.14] - 2020-07-25
 
 * Notify sender link detached

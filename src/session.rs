@@ -915,7 +915,11 @@ impl SessionInner {
             return;
         }
         let frame = self.prepare_transfer(link_handle, body, promise, tag, settled);
-        log::trace!("Sending transfer over {}", link_handle);
+        log::trace!(
+            "Sending transfer over {} window: {}",
+            link_handle,
+            self.remote_incoming_window
+        );
         self.post_frame(frame);
     }
 
