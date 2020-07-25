@@ -179,6 +179,7 @@ impl SenderLinkInner {
         }
 
         self.error = Some(err);
+        self.on_close.notify();
     }
 
     pub(crate) fn close(
@@ -206,15 +207,6 @@ impl SenderLinkInner {
                 }
             })
         }
-    }
-
-    pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
-        // drop pending transfers
-        for tr in self.pending_transfers.drain(..) {
-            let _ = tr.promise.send(Err(err.clone()));
-        }
-
-        self.error = Some(err);
     }
 
     pub(crate) fn apply_flow(&mut self, flow: &Flow) {

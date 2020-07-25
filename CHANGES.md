@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.14] - 2020-07-25
+
+* Notify sender link detached
+
 ## [0.1.13] - 2020-07-23
 
 * Better logging

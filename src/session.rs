@@ -250,7 +250,7 @@ impl SessionInner {
             match st {
                 Either::Left(SenderLinkState::Opening(_)) => (),
                 Either::Left(SenderLinkState::Established(ref mut link)) => {
-                    link.inner.get_mut().set_error(err.clone())
+                    link.inner.get_mut().detached(err.clone())
                 }
                 Either::Left(SenderLinkState::Closing(ref mut link)) => {
                     if let Some(tx) = link.take() {
