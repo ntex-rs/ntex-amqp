@@ -56,6 +56,14 @@ impl<S> Link<S> {
         self.link.session_mut()
     }
 
+    pub fn receiver(&self) -> &ReceiverLink {
+        &self.link
+    }
+
+    pub fn receiver_mut(&mut self) -> &mut ReceiverLink {
+        &mut self.link
+    }
+
     pub fn link_credit(mut self, credit: u32) {
         self.link.set_link_credit(credit);
     }
