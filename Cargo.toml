@@ -1,7 +1,7 @@
 [package]
 name = "ntex-amqp"
 version = "0.1.15"
-authors = ["Nikolay Kim <fafhrd91@gmail.com>"]
+authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/actix-amqp"
 repository = "https://github.com/actix/actix-amqp.git"
