@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.16] - 2020-07-31
+
+* Add receiver/receiver_mut for server Link
+
 ## [0.1.15] - 2020-07-25
 
 * Fix sender link apply flow
