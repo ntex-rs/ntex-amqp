@@ -16,4 +16,7 @@ pub use self::codec::{Decode, Encode};
 pub use self::errors::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 pub use self::framing::{AmqpFrame, SaslFrame};
 pub use self::io::{AmqpCodec, ProtocolIdCodec};
-pub use self::message::{InMessage, MessageBody, OutMessage};
+pub use self::message::{Message, MessageBody};
+
+#[doc(hidden)]
+pub use self::message::{InMessage, OutMessage};

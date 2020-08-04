@@ -25,7 +25,7 @@ frame-trace = []
 
 [dependencies]
 ntex = "0.1.20"
-ntex-amqp-codec = "0.1.4"
+ntex-amqp-codec = "0.1.5"
 ntex-router = "0.3.4"
 ntex-codec = "0.1.2"
 
