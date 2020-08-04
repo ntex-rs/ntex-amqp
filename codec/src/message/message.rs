@@ -117,6 +117,17 @@ impl Message {
         self
     }
 
+    /// Get message annotation
+    pub fn message_annotation(&self, key: &str) -> Option<&Variant> {
+        if let Some(ref props) = self.message_annotations {
+            props
+                .iter()
+                .find_map(|item| if &item.0 == key { Some(&item.1) } else { None })
+        } else {
+            None
+        }
+    }
+
     /// Add message annotation
     pub fn add_message_annotation<K, V>(&mut self, key: K, value: V) -> &mut Self
     where

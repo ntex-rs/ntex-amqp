@@ -215,6 +215,12 @@ impl Default for VecStringMap {
     }
 }
 
+impl From<Vec<(Str, Variant)>> for VecStringMap {
+    fn from(data: Vec<(Str, Variant)>) -> VecStringMap {
+        VecStringMap(data)
+    }
+}
+
 impl From<FxHashMap<Str, Variant>> for VecStringMap {
     fn from(map: FxHashMap<Str, Variant>) -> VecStringMap {
         VecStringMap(map.into_iter().collect())
