@@ -591,7 +591,7 @@ fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::Encode;
+    use crate::codec::{Decode, Encode};
     use bytes::{BufMut, BytesMut};
 
     const LOREM: &str = include_str!("lorem.txt");
@@ -603,7 +603,7 @@ mod tests {
             fn $name() {
                 let b1 = &mut BytesMut::with_capacity(($test).encoded_size());
                 ($test).encode(b1);
-                assert_eq!($expected, unwrap_value($kind::decode(b1)));
+                assert_eq!($expected, unwrap_value(<$kind as Decode>::decode(b1)));
             }
         )*
         }

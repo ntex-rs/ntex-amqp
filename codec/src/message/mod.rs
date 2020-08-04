@@ -1,9 +1,13 @@
 mod body;
 mod inmessage;
-mod outmessage;
+mod message;
 
 pub use self::body::MessageBody;
+pub use self::message::Message;
+
+#[doc(hidden)]
+pub type OutMessage = Message;
+#[doc(hidden)]
 pub use self::inmessage::InMessage;
-pub use self::outmessage::OutMessage;
 
 pub(self) const SECTION_PREFIX_LENGTH: usize = 3;

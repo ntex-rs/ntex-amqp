@@ -14,10 +14,10 @@ use crate::cell::Cell;
 use crate::rcvlink::ReceiverLink;
 
 use super::link::Link;
-use super::message::{Message, Outcome};
+use super::transfer::{Outcome, Transfer};
 use super::{LinkError, State};
 
-type Handle<S> = boxed::BoxServiceFactory<Link<S>, Message<S>, Outcome, Error, Error>;
+type Handle<S> = boxed::BoxServiceFactory<Link<S>, Transfer<S>, Outcome, Error, Error>;
 
 pub struct App<S = ()>(Vec<(Vec<String>, Handle<S>)>);
 
@@ -36,7 +36,7 @@ impl<S: 'static> App<S> {
     where
         T: IntoPattern,
         F: IntoServiceFactory<U>,
-        U: ServiceFactory<Config = Link<S>, Request = Message<S>, Response = Outcome>,
+        U: ServiceFactory<Config = Link<S>, Request = Transfer<S>, Response = Outcome>,
         U::Error: Into<Error>,
         U::InitError: Into<Error>,
     {
@@ -136,9 +136,11 @@ struct AppServiceResponse<S> {
 }
 
 enum AppServiceResponseState<S> {
-    Service(boxed::BoxService<Message<S>, Outcome, Error>),
+    Service(boxed::BoxService<Transfer<S>, Outcome, Error>),
     NewService(
-        Pin<Box<dyn Future<Output = Result<boxed::BoxService<Message<S>, Outcome, Error>, Error>>>>,
+        Pin<
+            Box<dyn Future<Output = Result<boxed::BoxService<Transfer<S>, Outcome, Error>, Error>>>,
+        >,
     ),
 }
 
@@ -196,7 +198,7 @@ impl<S> Future for AppServiceResponse<S> {
                             }
 
                             let delivery_id = transfer.delivery_id.unwrap();
-                            let msg = Message::new(app_state.clone(), transfer, link.clone());
+                            let msg = Transfer::new(app_state.clone(), transfer, link.clone());
 
                             let mut fut = srv.call(msg);
                             match Pin::new(&mut fut).poll(cx) {

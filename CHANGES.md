@@ -1,5 +1,13 @@
 # Changes
 
+## [0.1.17] - 2020-08-04
+
+* Rename server::Message to server::Transfer
+
+## [codec-0.1.4] - 2020-08-04
+
+* Deprecated In/OutMessage, replaced with Message
+
 ## [0.1.16] - 2020-07-31
 
 * Add receiver/receiver_mut for server Link

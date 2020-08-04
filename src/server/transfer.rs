@@ -1,7 +1,9 @@
 use std::fmt;
 
 use bytes::Bytes;
-use ntex_amqp_codec::protocol::{Accepted, DeliveryState, Error, Rejected, Transfer, TransferBody};
+use ntex_amqp_codec::protocol::{
+    Accepted, DeliveryState, Error, Rejected, Transfer as AmqpTransfer, TransferBody,
+};
 use ntex_amqp_codec::Decode;
 
 use crate::rcvlink::ReceiverLink;
@@ -9,9 +11,9 @@ use crate::session::Session;
 
 use super::{AmqpError, State};
 
-pub struct Message<S> {
+pub struct Transfer<S> {
     state: State<S>,
-    frame: Transfer,
+    frame: AmqpTransfer,
     link: ReceiverLink,
 }
 
@@ -41,9 +43,9 @@ impl Outcome {
     }
 }
 
-impl<S> Message<S> {
-    pub(crate) fn new(state: State<S>, frame: Transfer, link: ReceiverLink) -> Self {
-        Message { state, frame, link }
+impl<S> Transfer<S> {
+    pub(crate) fn new(state: State<S>, frame: AmqpTransfer, link: ReceiverLink) -> Self {
+        Transfer { state, frame, link }
     }
 
     pub fn state(&self) -> &S {
@@ -62,7 +64,7 @@ impl<S> Message<S> {
         self.link.session_mut()
     }
 
-    pub fn frame(&self) -> &Transfer {
+    pub fn frame(&self) -> &AmqpTransfer {
         &self.frame
     }
 
@@ -86,9 +88,9 @@ impl<S> Message<S> {
     }
 }
 
-impl<S> fmt::Debug for Message<S> {
+impl<S> fmt::Debug for Transfer<S> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("Message<S>")
+        fmt.debug_struct("Transfer<S>")
             .field("frame", &self.frame)
             .finish()
     }

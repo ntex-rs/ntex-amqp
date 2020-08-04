@@ -104,7 +104,7 @@ pub const FORMATCODE_ARRAY32: u8 = 0xf0;
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Buf, Bytes, BytesMut};
+    use bytes::{Bytes, BytesMut};
 
     use crate::codec::{Decode, Encode};
     use crate::errors::AmqpCodecError;

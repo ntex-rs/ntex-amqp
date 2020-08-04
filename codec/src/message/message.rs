@@ -12,7 +12,7 @@ use super::inmessage::InMessage;
 use super::SECTION_PREFIX_LENGTH;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct OutMessage {
+pub struct Message {
     pub message_format: Option<MessageFormat>,
     pub header: Option<Header>,
     pub delivery_annotations: Option<Annotations>,
@@ -24,18 +24,18 @@ pub struct OutMessage {
     size: Cell<usize>,
 }
 
-impl OutMessage {
+impl Message {
     /// Create new message and set body
-    pub fn with_body(body: Bytes) -> OutMessage {
-        let mut msg = OutMessage::default();
+    pub fn with_body(body: Bytes) -> Message {
+        let mut msg = Message::default();
         msg.body.data.push(body);
         msg.message_format = Some(0);
         msg
     }
 
     /// Create new message and set messages as body
-    pub fn with_messages(messages: Vec<TransferBody>) -> OutMessage {
-        let mut msg = OutMessage::default();
+    pub fn with_messages(messages: Vec<TransferBody>) -> Message {
+        let mut msg = Message::default();
         msg.body.messages = messages;
         msg.message_format = Some(0);
         msg
@@ -87,6 +87,17 @@ impl OutMessage {
     /// Get application property
     pub fn app_properties(&self) -> Option<&VecStringMap> {
         self.application_properties.as_ref()
+    }
+
+    /// Get application property
+    pub fn app_property(&self, key: &str) -> Option<&Variant> {
+        if let Some(ref props) = self.application_properties {
+            props
+                .iter()
+                .find_map(|item| if &item.0 == key { Some(&item.1) } else { None })
+        } else {
+            None
+        }
     }
 
     /// Add application property
@@ -177,17 +188,17 @@ impl OutMessage {
     }
 
     /// Create new message and set `correlation_id` property
-    pub fn reply_message(&self) -> OutMessage {
-        OutMessage::default().if_some(&self.properties, |mut msg, data| {
+    pub fn reply_message(&self) -> Message {
+        Message::default().if_some(&self.properties, |mut msg, data| {
             msg.set_properties(|props| props.correlation_id = data.message_id.clone());
             msg
         })
     }
 }
 
-impl From<InMessage> for OutMessage {
+impl From<InMessage> for Message {
     fn from(from: InMessage) -> Self {
-        let mut msg = OutMessage {
+        let mut msg = Message {
             message_format: from.message_format,
             header: from.header,
             properties: from.properties,
@@ -209,9 +220,9 @@ impl From<InMessage> for OutMessage {
     }
 }
 
-impl Decode for OutMessage {
-    fn decode(mut input: &[u8]) -> Result<(&[u8], OutMessage), AmqpParseError> {
-        let mut message = OutMessage::default();
+impl Decode for Message {
+    fn decode(mut input: &[u8]) -> Result<(&[u8], Message), AmqpParseError> {
+        let mut message = Message::default();
 
         loop {
             let (buf, sec) = Section::decode(input)?;
@@ -257,7 +268,7 @@ impl Decode for OutMessage {
     }
 }
 
-impl Encode for OutMessage {
+impl Encode for Message {
     fn encoded_size(&self) -> usize {
         let size = self.size.get();
         if size != 0 {
@@ -343,17 +354,17 @@ mod tests {
     use crate::protocol::Header;
     use crate::types::Variant;
 
-    use super::OutMessage;
+    use super::Message;
 
     #[test]
     fn test_properties() -> Result<(), AmqpCodecError> {
-        let mut msg = OutMessage::default();
+        let mut msg = Message::default();
         msg.set_properties(|props| props.message_id = Some(1.into()));
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = OutMessage::decode(&buf)?.1;
+        let msg2 = Message::decode(&buf)?.1;
         let props = msg2.properties.as_ref().unwrap();
         assert_eq!(props.message_id, Some(1.into()));
         Ok(())
@@ -361,13 +372,13 @@ mod tests {
 
     #[test]
     fn test_app_properties() -> Result<(), AmqpCodecError> {
-        let mut msg = OutMessage::default();
+        let mut msg = Message::default();
         msg.set_app_property(ByteString::from("test"), 1);
 
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = OutMessage::decode(&buf)?.1;
+        let msg2 = Message::decode(&buf)?.1;
         let props = msg2.application_properties.as_ref().unwrap();
         assert_eq!(props[0].0.as_str(), "test");
         assert_eq!(props[0].1, Variant::from(1));
@@ -384,12 +395,12 @@ mod tests {
             delivery_count: 1,
         };
 
-        let mut msg = OutMessage::default();
+        let mut msg = Message::default();
         msg.set_header(hdr.clone());
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = OutMessage::decode(&buf)?.1;
+        let msg2 = Message::decode(&buf)?.1;
         assert_eq!(msg2.header().unwrap(), &hdr);
         Ok(())
     }
@@ -398,35 +409,35 @@ mod tests {
     fn test_data() -> Result<(), AmqpCodecError> {
         let data = Bytes::from_static(b"test data");
 
-        let mut msg = OutMessage::default();
+        let mut msg = Message::default();
         msg.set_body(|body| body.set_data(data.clone()));
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = OutMessage::decode(&buf)?.1;
+        let msg2 = Message::decode(&buf)?.1;
         assert_eq!(msg2.body.data().unwrap(), &data);
         Ok(())
     }
 
     #[test]
     fn test_data_empty() -> Result<(), AmqpCodecError> {
-        let msg = OutMessage::default();
+        let msg = Message::default();
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = OutMessage::decode(&buf)?.1;
+        let msg2 = Message::decode(&buf)?.1;
         assert_eq!(msg2.body.data().unwrap(), &Bytes::from_static(b""));
         Ok(())
     }
 
     #[test]
     fn test_messages() -> Result<(), AmqpCodecError> {
-        let mut msg1 = OutMessage::default();
+        let mut msg1 = Message::default();
         msg1.set_properties(|props| props.message_id = Some(1.into()));
-        let mut msg2 = OutMessage::default();
+        let mut msg2 = Message::default();
         msg2.set_properties(|props| props.message_id = Some(2.into()));
 
-        let mut msg = OutMessage::default();
+        let mut msg = Message::default();
         msg.set_body(|body| {
             body.messages.push(msg1.clone().into());
             body.messages.push(msg2.clone().into());
@@ -434,11 +445,11 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg3 = OutMessage::decode(&buf)?.1;
-        let msg4 = OutMessage::decode(&msg3.body.data().unwrap())?.1;
+        let msg3 = Message::decode(&buf)?.1;
+        let msg4 = Message::decode(&msg3.body.data().unwrap())?.1;
         assert_eq!(msg1.properties, msg4.properties);
 
-        let msg5 = OutMessage::decode(&msg3.body.data[1])?.1;
+        let msg5 = Message::decode(&msg3.body.data[1])?.1;
         assert_eq!(msg2.properties, msg5.properties);
         Ok(())
     }

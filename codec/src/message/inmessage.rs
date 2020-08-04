@@ -11,7 +11,7 @@ use crate::protocol::{
 use crate::types::{Descriptor, Str, Variant};
 
 use super::body::MessageBody;
-use super::outmessage::OutMessage;
+use super::message::Message;
 use super::SECTION_PREFIX_LENGTH;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -160,8 +160,8 @@ impl InMessage {
     }
 
     /// Create new message and set `correlation_id` property
-    pub fn reply_message(&self) -> OutMessage {
-        let mut msg = OutMessage::default().if_some(&self.properties, |mut msg, data| {
+    pub fn reply_message(&self) -> Message {
+        let mut msg = Message::default().if_some(&self.properties, |mut msg, data| {
             msg.set_properties(|props| props.correlation_id = data.message_id.clone());
             msg
         });
