@@ -1,5 +1,11 @@
 # Changes
 
+## [codec-0.2.0] - 2020-08-05
+
+* Drop In/OutMessage
+
+* Use vec for message annotations and message app propperties
+
 ## [0.1.17] - 2020-08-04
 
 * Rename server::Message to server::Transfer

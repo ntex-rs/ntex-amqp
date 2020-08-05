@@ -8,14 +8,13 @@ use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, T
 use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap};
 
 use super::body::MessageBody;
-use super::inmessage::InMessage;
 use super::SECTION_PREFIX_LENGTH;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Message {
     pub message_format: Option<MessageFormat>,
     pub header: Option<Header>,
-    pub delivery_annotations: Option<Annotations>,
+    pub delivery_annotations: Option<VecSymbolMap>,
     pub message_annotations: Option<VecSymbolMap>,
     pub properties: Option<Properties>,
     pub application_properties: Option<VecStringMap>,
@@ -146,8 +145,13 @@ impl Message {
     }
 
     /// Delivery annotations
-    pub fn delivery_annotations(&self) -> Option<&Annotations> {
+    pub fn delivery_annotations(&self) -> Option<&VecSymbolMap> {
         self.delivery_annotations.as_ref()
+    }
+
+    /// Mut reference to delivery annotations
+    pub fn delivery_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
+        self.delivery_annotations.as_mut()
     }
 
     /// Call closure with message reference
@@ -207,30 +211,6 @@ impl Message {
     }
 }
 
-impl From<InMessage> for Message {
-    fn from(from: InMessage) -> Self {
-        let mut msg = Message {
-            message_format: from.message_format,
-            header: from.header,
-            properties: from.properties,
-            delivery_annotations: from.delivery_annotations,
-            message_annotations: from.message_annotations.map(|v| v.into()),
-            application_properties: from.application_properties.map(|v| v.into()),
-            footer: from.footer,
-            body: from.body,
-            size: Cell::new(0),
-        };
-
-        if let Some(ref mut props) = msg.properties {
-            if props.correlation_id.is_none() {
-                props.correlation_id = props.message_id.clone();
-            }
-        };
-
-        msg
-    }
-}
-
 impl Decode for Message {
     fn decode(mut input: &[u8]) -> Result<(&[u8], Message), AmqpParseError> {
         let mut message = Message::default();
@@ -245,12 +225,10 @@ impl Decode for Message {
                     message.delivery_annotations = Some(val);
                 }
                 Section::MessageAnnotations(val) => {
-                    message.message_annotations = Some(VecSymbolMap(
-                        val.into_iter().map(|(k, v)| (k.0.into(), v)).collect(),
-                    ));
+                    message.message_annotations = Some(val);
                 }
                 Section::ApplicationProperties(val) => {
-                    message.application_properties = Some(VecStringMap(val.into_iter().collect()));
+                    message.application_properties = Some(val);
                 }
                 Section::Footer(val) => {
                     message.footer = Some(val);

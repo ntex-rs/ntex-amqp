@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::codec::{self, DecodeFormatted, Encode};
 use super::errors::AmqpParseError;
-use super::message::{InMessage, OutMessage};
+use super::message::Message;
 use super::types::*;
 
 impl fmt::Display for Error {
@@ -231,8 +231,7 @@ impl Default for Properties {
 #[derive(Debug, Clone, From, PartialEq)]
 pub enum TransferBody {
     Data(Bytes),
-    MessageIn(InMessage),
-    MessageOut(OutMessage),
+    Message(Message),
 }
 
 impl TransferBody {
@@ -245,8 +244,7 @@ impl TransferBody {
     pub fn message_format(&self) -> Option<MessageFormat> {
         match self {
             TransferBody::Data(_) => None,
-            TransferBody::MessageIn(ref data) => data.message_format,
-            TransferBody::MessageOut(ref data) => data.message_format,
+            TransferBody::Message(ref data) => data.message_format,
         }
     }
 }
@@ -255,15 +253,13 @@ impl Encode for TransferBody {
     fn encoded_size(&self) -> usize {
         match self {
             TransferBody::Data(ref data) => data.len(),
-            TransferBody::MessageIn(ref data) => data.encoded_size(),
-            TransferBody::MessageOut(ref data) => data.encoded_size(),
+            TransferBody::Message(ref data) => data.encoded_size(),
         }
     }
     fn encode(&self, dst: &mut BytesMut) {
         match *self {
             TransferBody::Data(ref data) => dst.put_slice(&data),
-            TransferBody::MessageIn(ref data) => data.encode(dst),
-            TransferBody::MessageOut(ref data) => data.encode(dst),
+            TransferBody::Message(ref data) => data.encode(dst),
         }
     }
 }

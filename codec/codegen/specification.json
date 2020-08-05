@@ -1016,7 +1016,7 @@
   {
     "name": "delivery-annotations",
     "class": "restricted",
-    "source": "annotations",
+    "source": "vec-symbol-map",
     "provides": "section",
     "descriptor": {
       "name": "amqp:delivery-annotations:map",
@@ -1026,7 +1026,7 @@
   {
     "name": "message-annotations",
     "class": "restricted",
-    "source": "annotations",
+    "source": "vec-symbol-map",
     "provides": "section",
     "descriptor": {
       "name": "amqp:message-annotations:map",
@@ -1036,7 +1036,7 @@
   {
     "name": "application-properties",
     "class": "restricted",
-    "source": "string-variant-map",
+    "source": "vec-string-map",
     "provides": "section",
     "descriptor": {
       "name": "amqp:application-properties:map",
