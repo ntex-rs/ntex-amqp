@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
-use crate::codec::{Decode, Encode, FORMATCODE_BINARY8};
+use crate::codec::{Decode, Encode};
 use crate::errors::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, TransferBody};
 use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap};
@@ -216,6 +216,10 @@ impl Decode for Message {
         let mut message = Message::default();
 
         loop {
+            if input.is_empty() {
+                break;
+            }
+
             let (buf, sec) = Section::decode(input)?;
             match sec {
                 Section::Header(val) => {
@@ -248,9 +252,6 @@ impl Decode for Message {
                     message.body.data.push(val);
                 }
             }
-            if buf.is_empty() {
-                break;
-            }
             input = buf;
         }
         Ok((input, message))
@@ -264,14 +265,7 @@ impl Encode for Message {
             return size;
         }
 
-        // body size, always add empty body if needed
-        let body_size = self.body.encoded_size();
-        let mut size = if body_size == 0 {
-            // empty bytes
-            SECTION_PREFIX_LENGTH + 2
-        } else {
-            body_size
-        };
+        let mut size = self.body.encoded_size();
 
         if let Some(ref h) = self.header {
             size += h.encoded_size();
@@ -316,14 +310,7 @@ impl Encode for Message {
         }
 
         // message body
-        if self.body.encoded_size() == 0 {
-            // special treatment for empty body
-            Descriptor::Ulong(117).encode(dst);
-            dst.put_u8(FORMATCODE_BINARY8);
-            dst.put_u8(0);
-        } else {
-            self.body.encode(dst);
-        }
+        self.body.encode(dst);
 
         // message footer, always last item
         if let Some(ref f) = self.footer {
@@ -413,9 +400,10 @@ mod tests {
         let msg = Message::default();
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
+        assert_eq!(buf, Bytes::from_static(b""));
 
         let msg2 = Message::decode(&buf)?.1;
-        assert_eq!(msg2.body.data().unwrap(), &Bytes::from_static(b""));
+        assert!(msg2.body.data().is_none());
         Ok(())
     }
 
