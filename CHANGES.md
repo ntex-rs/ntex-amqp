@@ -1,5 +1,11 @@
 # Changes
 
+## [0.1.19] - 2020-10-23
+
+* Fix flow frame handling
+
+* Use proper handle for sender link
+
 ## [codec-0.2.1] - 2020-09-17
 
 * Do not add empty Message section to encoded buffer

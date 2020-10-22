@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "0.1.18"
+version = "0.1.19"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/actix-amqp"
@@ -24,7 +24,7 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = "0.1.20"
+ntex = "0.1.24"
 ntex-amqp-codec = "0.2.0"
 ntex-router = "0.3.4"
 ntex-codec = "0.1.2"
@@ -36,7 +36,7 @@ either = "1.5.3"
 futures = "0.3.4"
 fxhash = "0.2.1"
 log = "0.4"
-pin-project = "0.4.22"
+pin-project = "1.0.1"
 uuid = { version = "0.8", features = ["v4"] }
 slab = "0.4"
 

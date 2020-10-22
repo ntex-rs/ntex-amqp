@@ -812,7 +812,10 @@ impl SessionInner {
         }
 
         // apply link flow
-        if let Some(Either::Left(link)) = flow.handle().and_then(|h| self.links.get_mut(h as usize))
+        if let Some(Either::Left(link)) = flow
+            .handle()
+            .and_then(|h| self.remote_handles.get(&h).map(|h| *h))
+            .and_then(|h| self.links.get_mut(h))
         {
             match link {
                 SenderLinkState::Established(ref mut link) => {

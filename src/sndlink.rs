@@ -237,7 +237,7 @@ impl SenderLinkInner {
                     self.link_credit -= 1;
                     self.delivery_count = self.delivery_count.saturating_add(1);
                     session.send_transfer(
-                        self.remote_handle,
+                        self.id as u32,
                         transfer.idx,
                         transfer.body,
                         transfer.promise,
@@ -264,7 +264,7 @@ impl SenderLinkInner {
             if self.link_credit == 0 {
                 log::trace!(
                     "Sender link credit is 0, push to pending queue hnd:{} {:?}, queue size: {}",
-                    self.remote_handle,
+                    self.id as u32,
                     tag,
                     self.pending_transfers.len()
                 );
@@ -279,14 +279,7 @@ impl SenderLinkInner {
                 let session = self.session.inner.get_mut();
                 self.link_credit -= 1;
                 self.delivery_count = self.delivery_count.saturating_add(1);
-                session.send_transfer(
-                    self.remote_handle,
-                    self.idx,
-                    Some(body),
-                    delivery_tx,
-                    tag,
-                    None,
-                );
+                session.send_transfer(self.id as u32, self.idx, Some(body), delivery_tx, tag, None);
             }
             self.idx = self.idx.saturating_add(1);
             Delivery::Pending(delivery_rx)
