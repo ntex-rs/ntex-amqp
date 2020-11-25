@@ -53,7 +53,7 @@ pub(crate) struct ConnectionInner {
     state: State,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
     Normal,
     Closing,
@@ -289,13 +289,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                         if inner.state == State::Closing {
                             log::trace!("Connection closed: {:?}", close);
                             inner.set_error(AmqpTransportError::Disconnected);
-                            return Poll::Ready(None);
                         } else {
                             log::trace!("Connection closed remotely: {:?}", close);
                             let close = Close { error: None };
                             inner.post_frame(AmqpFrame::new(0, close.into()));
                             inner.state = State::RemoteClose;
                         }
+                        return Poll::Ready(None);
                     }
 
                     if inner.error.is_some() {

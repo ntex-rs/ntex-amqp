@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.20] - 2020-11-25
+
+* Do not log error for remote closed connections
+
 ## [0.1.19] - 2020-10-23
 
 * Fix flow frame handling
