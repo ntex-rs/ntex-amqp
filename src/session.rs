@@ -11,7 +11,8 @@ use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
     Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error, Flow, Frame,
-    Handle, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody, TransferNumber,
+    Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody,
+    TransferNumber,
 };
 use ntex_amqp_codec::AmqpFrame;
 
@@ -196,9 +197,19 @@ struct PendingTransfer {
     link_handle: Handle,
     idx: u32,
     body: Option<TransferBody>,
-    promise: DeliveryPromise,
+    promise: Option<DeliveryPromise>,
     tag: Option<Bytes>,
     settled: Option<bool>,
+    more: TransferState,
+    message_format: Option<MessageFormat>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TransferState {
+    First,
+    Continue,
+    Last,
+    Only,
 }
 
 impl SessionInner {
@@ -241,7 +252,9 @@ impl SessionInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            let _ = tr.promise.send(Err(err.clone()));
+            if let Some(tx) = tr.promise {
+                let _ = tx.send(Err(err.clone()));
+            }
         }
 
         // drop links
@@ -279,6 +292,10 @@ impl SessionInner {
         let (tx, rx) = oneshot::channel();
         self.disposition_subscribers.insert(id, tx);
         async move { rx.await.map_err(|_| AmqpTransportError::Disconnected) }
+    }
+
+    pub(crate) fn max_frame_size(&self) -> usize {
+        self.connection.remote_config().max_frame_size as usize
     }
 
     /// Detach unconfirmed sender link
@@ -678,7 +695,9 @@ impl SessionInner {
                         while idx < self.pending_transfers.len() {
                             if self.pending_transfers[idx].link_handle == handle {
                                 let tr = self.pending_transfers.remove(idx).unwrap();
-                                let _ = tr.promise.send(Err(err.clone()));
+                                if let Some(tx) = tr.promise {
+                                    let _ = tx.send(Err(err.clone()));
+                                }
                             } else {
                                 idx += 1;
                             }
@@ -805,7 +824,16 @@ impl SessionInner {
         );
 
         while let Some(t) = self.pending_transfers.pop_front() {
-            self.send_transfer(t.link_handle, t.idx, t.body, t.promise, t.tag, t.settled);
+            self.send_transfer(
+                t.link_handle,
+                t.idx,
+                t.body,
+                t.promise,
+                t.tag,
+                t.settled,
+                t.more,
+                t.message_format,
+            );
             if self.remote_outgoing_window == 0 {
                 break;
             }
@@ -898,9 +926,11 @@ impl SessionInner {
         link_handle: Handle,
         idx: u32,
         body: Option<TransferBody>,
-        promise: DeliveryPromise,
+        promise: Option<DeliveryPromise>,
         tag: Option<Bytes>,
         settled: Option<bool>,
+        more: TransferState,
+        message_format: Option<MessageFormat>,
     ) {
         if self.remote_incoming_window == 0 {
             log::trace!(
@@ -914,44 +944,39 @@ impl SessionInner {
                 promise,
                 tag,
                 settled,
+                more,
+                message_format,
             });
-            return;
+        } else {
+            let frame = self.prepare_transfer(
+                link_handle,
+                body,
+                promise,
+                tag,
+                settled,
+                more,
+                message_format,
+            );
+            log::trace!(
+                "Sending transfer over {} window: {}",
+                link_handle,
+                self.remote_incoming_window
+            );
+            self.post_frame(frame);
         }
-        let frame = self.prepare_transfer(link_handle, body, promise, tag, settled);
-        log::trace!(
-            "Sending transfer over {} window: {}",
-            link_handle,
-            self.remote_incoming_window
-        );
-        self.post_frame(frame);
     }
 
     pub(crate) fn prepare_transfer(
         &mut self,
         link_handle: Handle,
         body: Option<TransferBody>,
-        promise: DeliveryPromise,
+        promise: Option<DeliveryPromise>,
         delivery_tag: Option<Bytes>,
         settled: Option<bool>,
+        more: TransferState,
+        message_format: Option<MessageFormat>,
     ) -> Frame {
-        let delivery_id = self.next_outgoing_id;
-
-        let tag = if let Some(tag) = delivery_tag {
-            tag
-        } else {
-            let mut buf = BytesMut::new();
-            buf.put_u32(delivery_id);
-            buf.freeze()
-        };
-
-        self.next_outgoing_id += 1;
         self.remote_incoming_window -= 1;
-
-        let message_format = if let Some(ref body) = body {
-            body.message_format()
-        } else {
-            None
-        };
 
         let settled2 = settled.clone().unwrap_or(false);
         let state = if settled2 {
@@ -960,21 +985,49 @@ impl SessionInner {
             None
         };
 
-        let transfer = Transfer {
+        let mut transfer = Transfer {
             body,
             settled,
-            message_format,
-            handle: link_handle,
-            delivery_id: Some(delivery_id),
-            delivery_tag: Some(tag),
-            more: false,
-            rcv_settle_mode: None,
             state, //: Some(DeliveryState::Accepted(Accepted {})),
+            message_format,
+            more: false,
+            handle: link_handle,
+            delivery_id: None,
+            delivery_tag: None,
+            rcv_settle_mode: None,
             resume: false,
             aborted: false,
             batchable: false,
         };
-        self.unsettled_deliveries.insert(delivery_id, promise);
+
+        match more {
+            TransferState::First | TransferState::Only => {
+                let delivery_id = self.next_outgoing_id;
+                self.next_outgoing_id += 1;
+
+                transfer.delivery_id = Some(delivery_id);
+                transfer.delivery_tag = if let Some(tag) = delivery_tag {
+                    Some(tag)
+                } else {
+                    let mut buf = BytesMut::new();
+                    buf.put_u32(delivery_id);
+                    Some(buf.freeze())
+                };
+
+                transfer.more = more == TransferState::First;
+                transfer.batchable = more == TransferState::First;
+
+                self.unsettled_deliveries
+                    .insert(delivery_id, promise.unwrap());
+            }
+            TransferState::Continue => {
+                transfer.more = true;
+                transfer.batchable = true;
+            }
+            TransferState::Last => {
+                transfer.more = false;
+            }
+        }
 
         Frame::Transfer(transfer)
     }

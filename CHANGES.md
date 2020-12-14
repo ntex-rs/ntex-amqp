@@ -1,5 +1,9 @@
 # Changes
 
+## [0.1.21] - 2020-12-14
+
+* Split large message into smaller transfers
+
 ## [0.1.20] - 2020-11-25
 
 * Do not log error for remote closed connections

@@ -1,18 +1,20 @@
 use std::collections::VecDeque;
 use std::future::Future;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use bytestring::ByteString;
 use futures::future::{ok, Either};
 use ntex::channel::{condition, oneshot};
 use ntex_amqp_codec::protocol::{
-    Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, ReceiverSettleMode, Role,
-    SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
+    Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
+    ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
+    TerminusExpiryPolicy, TransferBody,
 };
+use ntex_amqp_codec::Encode;
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
-use crate::session::{Session, SessionInner};
+use crate::session::{Session, SessionInner, TransferState};
 use crate::{Delivery, DeliveryPromise, Handle};
 
 #[derive(Clone)]
@@ -46,8 +48,10 @@ struct PendingTransfer {
     idx: u32,
     tag: Option<Bytes>,
     body: Option<TransferBody>,
-    promise: DeliveryPromise,
+    promise: Option<DeliveryPromise>,
     settle: Option<bool>,
+    more: TransferState,
+    message_format: Option<MessageFormat>,
 }
 
 impl SenderLink {
@@ -177,7 +181,9 @@ impl SenderLinkInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            let _ = tr.promise.send(Err(err.clone()));
+            if let Some(tx) = tr.promise {
+                let _ = tx.send(Err(err.clone()));
+            }
         }
 
         self.error = Some(err);
@@ -243,6 +249,8 @@ impl SenderLinkInner {
                         transfer.promise,
                         transfer.tag,
                         transfer.settle,
+                        transfer.more,
+                        transfer.message_format,
                     );
                 } else {
                     break;
@@ -260,30 +268,114 @@ impl SenderLinkInner {
             Delivery::Resolved(Err(err.clone()))
         } else {
             let body = body.into();
+            let message_format = body.message_format();
             let (delivery_tx, delivery_rx) = oneshot::channel();
-            if self.link_credit == 0 {
-                log::trace!(
-                    "Sender link credit is 0, push to pending queue hnd:{} {:?}, queue size: {}",
-                    self.id as u32,
-                    tag,
-                    self.pending_transfers.len()
-                );
-                self.pending_transfers.push_back(PendingTransfer {
-                    tag,
-                    settle: Some(false),
-                    body: Some(body),
-                    idx: self.idx,
-                    promise: delivery_tx,
-                });
+
+            let max_frame_size = self.session.inner.get_ref().max_frame_size();
+            let max_frame_size = if max_frame_size > 2048 {
+                max_frame_size - 2048
+            } else if max_frame_size == 0 {
+                usize::MAX
             } else {
-                let session = self.session.inner.get_mut();
-                self.link_credit -= 1;
-                self.delivery_count = self.delivery_count.saturating_add(1);
-                session.send_transfer(self.id as u32, self.idx, Some(body), delivery_tx, tag, None);
+                max_frame_size
+            };
+
+            // body is larger than allowed frame size, send body as a set of transfers
+            if body.len() > max_frame_size {
+                let mut body = match body {
+                    TransferBody::Data(data) => data,
+                    TransferBody::Message(msg) => {
+                        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+                        msg.encode(&mut buf);
+                        buf.freeze()
+                    }
+                };
+
+                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+                self.send_inner(
+                    chunk.into(),
+                    tag,
+                    TransferState::First,
+                    Some(delivery_tx),
+                    message_format,
+                );
+
+                loop {
+                    let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+
+                    // last chunk
+                    if body.is_empty() {
+                        self.send_inner(
+                            chunk.into(),
+                            None,
+                            TransferState::Last,
+                            None,
+                            message_format,
+                        );
+                        break;
+                    } else {
+                        self.send_inner(
+                            chunk.into(),
+                            None,
+                            TransferState::Continue,
+                            None,
+                            message_format,
+                        );
+                    }
+                }
+            } else {
+                self.send_inner(
+                    body,
+                    tag,
+                    TransferState::Only,
+                    Some(delivery_tx),
+                    message_format,
+                );
             }
-            self.idx = self.idx.saturating_add(1);
+
             Delivery::Pending(delivery_rx)
         }
+    }
+
+    fn send_inner(
+        &mut self,
+        body: TransferBody,
+        tag: Option<Bytes>,
+        more: TransferState,
+        promise: Option<DeliveryPromise>,
+        message_format: Option<MessageFormat>,
+    ) {
+        if self.link_credit == 0 {
+            log::trace!(
+                "Sender link credit is 0, push to pending queue hnd:{} {:?}, queue size: {}",
+                self.id as u32,
+                tag,
+                self.pending_transfers.len()
+            );
+            self.pending_transfers.push_back(PendingTransfer {
+                tag,
+                promise,
+                more,
+                message_format,
+                settle: Some(false),
+                body: Some(body),
+                idx: self.idx,
+            });
+        } else {
+            self.link_credit -= 1;
+            self.delivery_count = self.delivery_count.saturating_add(1);
+            self.session.inner.get_mut().send_transfer(
+                self.id as u32,
+                self.idx,
+                Some(body),
+                promise,
+                tag,
+                None,
+                more,
+                message_format,
+            );
+        }
+        self.idx = self.idx.saturating_add(1);
     }
 
     pub(crate) fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
