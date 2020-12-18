@@ -20,7 +20,7 @@ use crate::hb::{Heartbeat, HeartbeatAction};
 use crate::session::{Session, SessionInner};
 use crate::Configuration;
 
-pub struct Connection<T: AsyncRead + AsyncWrite> {
+pub struct Connection<T> {
     inner: Cell<ConnectionInner>,
     framed: Framed<T, AmqpCodec<AmqpFrame>>,
     hb: Heartbeat,
@@ -35,10 +35,7 @@ pub(crate) enum ChannelState {
 
 impl ChannelState {
     fn is_opening(&self) -> bool {
-        match self {
-            ChannelState::Opening(_, _) => true,
-            _ => false,
-        }
+        matches!(self, ChannelState::Opening(_, _))
     }
 }
 
@@ -398,7 +395,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite> Drop for Connection<T> {
+impl<T> Drop for Connection<T> {
     fn drop(&mut self) {
         trace!("Connection has been dropped, disconnecting");
         self.inner
@@ -413,25 +410,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // connection heartbeat
         match self.hb.poll(cx) {
-            Ok(act) => match act {
-                HeartbeatAction::None => (),
-                HeartbeatAction::Close => {
-                    trace!("Headerbeat expired");
-                    self.inner.get_mut().set_error(AmqpTransportError::Timeout);
-                    return Poll::Ready(Ok(()));
-                }
-                HeartbeatAction::Heartbeat => {
-                    trace!("Sending hb frame");
-                    self.inner
-                        .get_mut()
-                        .write_queue
-                        .push_back(AmqpFrame::new(0, Frame::Empty));
-                }
-            },
-            Err(e) => {
-                trace!("Headerbeat error: {:?}", e);
-                self.inner.get_mut().set_error(e);
+            HeartbeatAction::None => (),
+            HeartbeatAction::Close => {
+                trace!("Headerbeat expired");
+                self.inner.get_mut().set_error(AmqpTransportError::Timeout);
                 return Poll::Ready(Ok(()));
+            }
+            HeartbeatAction::Heartbeat => {
+                trace!("Sending hb frame");
+                self.inner
+                    .get_mut()
+                    .write_queue
+                    .push_back(AmqpFrame::new(0, Frame::Empty));
             }
         }
 

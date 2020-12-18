@@ -18,22 +18,22 @@ use crate::sndlink::{SenderLink, SenderLinkInner};
 use super::control::{ControlFrame, ControlFrameKind, ControlFrameService};
 use super::{Link, LinkError, State};
 
-/// Amqp server connection dispatcher.
-#[pin_project::pin_project]
-pub(crate) struct Dispatcher<Io, St, Sr>
-where
-    Io: AsyncRead + AsyncWrite + Unpin,
-    Sr: Service<Request = Link<St>, Response = ()>,
-{
-    conn: Connection<Io>,
-    state: State<St>,
-    service: Sr,
-    control_srv: Option<ControlFrameService<St>>,
-    control_frame: Option<ControlFrame<St>>,
-    #[pin]
-    control_fut: Option<<ControlFrameService<St> as Service>::Future>,
-    receivers: Vec<(ReceiverLink, Sr::Future)>,
-    _channels: slab::Slab<ChannelState>,
+pin_project_lite::pin_project! {
+    /// Amqp server connection dispatcher.
+    pub(crate) struct Dispatcher<Io, St, Sr>
+    where
+        Sr: Service<Request = Link<St>, Response = ()>,
+    {
+        conn: Connection<Io>,
+        state: State<St>,
+        service: Sr,
+        control_srv: Option<ControlFrameService<St>>,
+        control_frame: Option<ControlFrame<St>>,
+        #[pin]
+        control_fut: Option<<ControlFrameService<St> as Service>::Future>,
+        receivers: Vec<(ReceiverLink, Sr::Future)>,
+        _channels: slab::Slab<ChannelState>,
+    }
 }
 
 enum IncomingResult {

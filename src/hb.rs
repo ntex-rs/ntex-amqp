@@ -6,8 +6,6 @@ use std::time::Duration;
 use ntex::rt::time::{delay_until, Delay, Instant};
 use ntex::util::time::LowResTimeService;
 
-use crate::errors::AmqpTransportError;
-
 pub(crate) enum HeartbeatAction {
     None,
     Heartbeat,
@@ -68,17 +66,14 @@ impl Heartbeat {
         }
     }
 
-    pub(crate) fn poll(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Result<HeartbeatAction, AmqpTransportError> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> HeartbeatAction {
         match Pin::new(&mut self.delay).poll(cx) {
             Poll::Ready(_) => {
                 let mut act = HeartbeatAction::None;
                 let dl = self.delay.deadline();
                 if dl >= self.expire_local + self.local {
                     // close connection
-                    return Ok(HeartbeatAction::Close);
+                    return HeartbeatAction::Close;
                 }
                 if let Some(remote) = self.remote {
                     if dl >= self.expire_remote + remote {
@@ -88,9 +83,9 @@ impl Heartbeat {
                 }
                 self.delay.reset(self.next_expire());
                 let _ = Pin::new(&mut self.delay).poll(cx);
-                Ok(act)
+                act
             }
-            Poll::Pending => Ok(HeartbeatAction::None),
+            Poll::Pending => HeartbeatAction::None,
         }
     }
 }

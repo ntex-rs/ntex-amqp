@@ -409,7 +409,7 @@ impl SenderLinkBuilder {
         };
         let frame = Attach {
             name,
-            handle: 0 as Handle,
+            handle: 0_u32,
             role: Role::Sender,
             snd_settle_mode: SenderSettleMode::Mixed,
             rcv_settle_mode: ReceiverSettleMode::First,

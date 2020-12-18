@@ -54,7 +54,7 @@ impl Future for Delivery {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Delivery::Pending(ref mut receiver) = *self {
             return match Pin::new(receiver).poll(cx) {
-                Poll::Ready(Ok(r)) => Poll::Ready(r.map(|state| state)),
+                Poll::Ready(Ok(r)) => Poll::Ready(r),
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(e)) => {
                     trace!("delivery oneshot is gone: {:?}", e);

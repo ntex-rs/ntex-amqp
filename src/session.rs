@@ -156,19 +156,13 @@ enum ReceiverLinkState {
 
 impl SenderLinkState {
     fn is_opening(&self) -> bool {
-        match self {
-            SenderLinkState::Opening(_) => true,
-            _ => false,
-        }
+        matches!(self, SenderLinkState::Opening(_))
     }
 }
 
 impl ReceiverLinkState {
     fn is_opening(&self) -> bool {
-        match self {
-            ReceiverLinkState::OpeningLocal(_) => true,
-            _ => false,
-        }
+        matches!(self, ReceiverLinkState::OpeningLocal(_))
     }
 }
 
@@ -842,7 +836,7 @@ impl SessionInner {
         // apply link flow
         if let Some(Either::Left(link)) = flow
             .handle()
-            .and_then(|h| self.remote_handles.get(&h).map(|h| *h))
+            .and_then(|h| self.remote_handles.get(&h).copied())
             .and_then(|h| self.links.get_mut(h))
         {
             match link {
@@ -921,6 +915,7 @@ impl SessionInner {
         rx
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn send_transfer(
         &mut self,
         link_handle: Handle,
@@ -966,6 +961,7 @@ impl SessionInner {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare_transfer(
         &mut self,
         link_handle: Handle,
