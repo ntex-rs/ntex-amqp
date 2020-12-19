@@ -1,8 +1,8 @@
 # Changes
 
-## [0.1.22] - 2020-12-xx
+## [0.1.22] - 2020-12-19
 
-
+* Support partial transfers on receiver side
 
 ## [0.1.21] - 2020-12-14
 

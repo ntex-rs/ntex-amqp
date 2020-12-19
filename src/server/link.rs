@@ -64,7 +64,7 @@ impl<S> Link<S> {
         &mut self.link
     }
 
-    pub fn link_credit(mut self, credit: u32) {
+    pub fn link_credit(&self, credit: u32) {
         self.link.set_link_credit(credit);
     }
 

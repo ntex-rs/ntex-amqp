@@ -146,13 +146,13 @@ where
             match self.conn.poll_incoming(cx) {
                 Poll::Ready(Some(Ok(frame))) => {
                     let (channel_id, frame) = frame.into_parts();
-                    let channel_id = channel_id as usize;
 
                     if let Frame::Begin(frm) = frame {
-                        self.conn.register_remote_session(channel_id as u16, &frm);
+                        self.conn.register_remote_session(channel_id, &frm);
                         continue;
                     }
 
+                    let channel_id = channel_id as usize;
                     let session = self
                         .conn
                         .get_remote_session(channel_id)

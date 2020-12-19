@@ -1,17 +1,14 @@
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::u32;
+use std::{collections::VecDeque, future::Future, pin::Pin, task::Context, task::Poll};
 
+use bytes::BytesMut;
 use bytestring::ByteString;
 use futures::Stream;
-use ntex::channel::oneshot;
-use ntex::task::LocalWaker;
+use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
+    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
 };
+use ntex_amqp_codec::Encode;
 
 use crate::cell::Cell;
 use crate::errors::AmqpTransportError;
@@ -57,12 +54,19 @@ impl ReceiverLink {
             .confirm_receiver_link(inner.handle, &inner.attach);
     }
 
-    pub fn set_link_credit(&mut self, credit: u32) {
+    pub fn set_link_credit(&self, credit: u32) {
         self.inner.get_mut().set_link_credit(credit);
     }
 
+    /// Set max total size for partial transfers.
+    ///
+    /// Default is 256Kb
+    pub fn set_max_partial_transfer_size(&self, size: usize) {
+        self.inner.get_mut().set_max_partial_transfer(size);
+    }
+
     /// Send disposition frame
-    pub fn send_disposition(&mut self, disp: Disposition) {
+    pub fn send_disposition(&self, disp: Disposition) {
         self.inner
             .get_mut()
             .session
@@ -73,7 +77,7 @@ impl ReceiverLink {
 
     /// Wait for disposition with specified number
     pub fn wait_disposition(
-        &mut self,
+        &self,
         id: DeliveryNumber,
     ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
         self.inner.get_mut().session.wait_disposition(id)
@@ -111,7 +115,18 @@ impl Stream for ReceiverLink {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let inner = self.inner.get_mut();
 
-        if let Some(tr) = inner.queue.pop_front() {
+        if inner.partial_body.is_some() && inner.queue.len() == 1 {
+            if inner.closed {
+                if let Some(err) = inner.error.take() {
+                    Poll::Ready(Some(Err(AmqpTransportError::LinkDetached(Some(err)))))
+                } else {
+                    Poll::Ready(None)
+                }
+            } else {
+                inner.reader_task.register(cx.waker());
+                Poll::Pending
+            }
+        } else if let Some(tr) = inner.queue.pop_front() {
             Poll::Ready(Some(Ok(tr)))
         } else if inner.closed {
             if let Some(err) = inner.error.take() {
@@ -137,6 +152,8 @@ pub(crate) struct ReceiverLinkInner {
     credit: u32,
     delivery_count: u32,
     error: Option<Error>,
+    partial_body: Option<BytesMut>,
+    partial_body_max: usize,
 }
 
 impl ReceiverLinkInner {
@@ -153,6 +170,8 @@ impl ReceiverLinkInner {
             queue: VecDeque::with_capacity(4),
             credit: 0,
             error: None,
+            partial_body: None,
+            partial_body_max: 262144,
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
             attach,
         }
@@ -192,6 +211,10 @@ impl ReceiverLinkInner {
         }
     }
 
+    fn set_max_partial_transfer(&mut self, size: usize) {
+        self.partial_body_max = size;
+    }
+
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
         self.credit += credit;
         self.session
@@ -200,7 +223,7 @@ impl ReceiverLinkInner {
             .rcv_link_flow(self.handle as u32, self.delivery_count, credit);
     }
 
-    pub(crate) fn handle_transfer(&mut self, transfer: Transfer) {
+    pub(crate) fn handle_transfer(&mut self, mut transfer: Transfer) {
         if self.credit == 0 {
             // check link credit
             let err = Error {
@@ -211,10 +234,76 @@ impl ReceiverLinkInner {
             let _ = self.close(Some(err));
         } else {
             self.credit -= 1;
-            self.delivery_count += 1;
-            self.queue.push_back(transfer);
-            if self.queue.len() == 1 {
-                self.reader_task.wake()
+
+            if let Some(ref mut body) = self.partial_body {
+                if transfer.delivery_id.is_some() {
+                    // if delivery_id is set, then it should be equal to first transfer
+                    if self.queue.back().unwrap().delivery_id != transfer.delivery_id {
+                        let err = Error {
+                            condition: LinkError::DetachForced.into(),
+                            description: Some(ByteString::from_static("delivery_id is wrong")),
+                            info: None,
+                        };
+                        let _ = self.close(Some(err));
+                        return;
+                    }
+                }
+
+                // merge transfer data and check size
+                if let Some(transfer_body) = transfer.body.take() {
+                    if body.len() + transfer_body.len() > self.partial_body_max {
+                        let err = Error {
+                            condition: LinkError::MessageSizeExceeded.into(),
+                            description: None,
+                            info: None,
+                        };
+                        let _ = self.close(Some(err));
+                        return;
+                    }
+
+                    transfer_body.encode(body);
+                }
+
+                // received last partial transfer
+                if !transfer.more {
+                    self.delivery_count += 1;
+                    self.queue.back_mut().unwrap().body = Some(TransferBody::Data(
+                        self.partial_body.take().unwrap().freeze(),
+                    ));
+                    if self.queue.len() == 1 {
+                        self.reader_task.wake()
+                    }
+                }
+            } else if transfer.more {
+                if transfer.delivery_id.is_none() {
+                    let err = Error {
+                        condition: LinkError::DetachForced.into(),
+                        description: Some(ByteString::from_static("delivery_id is required")),
+                        info: None,
+                    };
+                    let _ = self.close(Some(err));
+                } else {
+                    let body = if let Some(body) = transfer.body.take() {
+                        match body {
+                            TransferBody::Data(data) => BytesMut::from(data.as_ref()),
+                            TransferBody::Message(msg) => {
+                                let mut buf = BytesMut::with_capacity(msg.encoded_size());
+                                msg.encode(&mut buf);
+                                buf
+                            }
+                        }
+                    } else {
+                        BytesMut::new()
+                    };
+                    self.partial_body = Some(body);
+                    self.queue.push_back(transfer);
+                }
+            } else {
+                self.delivery_count += 1;
+                self.queue.push_back(transfer);
+                if self.queue.len() == 1 {
+                    self.reader_task.wake()
+                }
             }
         }
     }
