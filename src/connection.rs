@@ -8,7 +8,7 @@ use ntex::util::time::LowResTimeService;
 use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use ntex_amqp_codec::protocol::{Begin, Close, End, Error, Frame};
-use ntex_amqp_codec::{AHashMap, AmqpCodec, AmqpCodecError, AmqpFrame};
+use ntex_amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame, HashMap};
 
 use crate::cell::{Cell, WeakCell};
 use crate::errors::AmqpTransportError;
@@ -41,7 +41,7 @@ pub(crate) struct ConnectionInner {
     write_queue: VecDeque<AmqpFrame>,
     write_task: LocalWaker,
     sessions: slab::Slab<ChannelState>,
-    sessions_map: AHashMap<u16, usize>,
+    sessions_map: HashMap<u16, usize>,
     error: Option<AmqpTransportError>,
     state: State,
 }
@@ -494,7 +494,7 @@ impl ConnectionController {
             write_queue: VecDeque::new(),
             write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
-            sessions_map: AHashMap::default(),
+            sessions_map: HashMap::default(),
             error: None,
             state: State::Normal,
         }))
@@ -533,7 +533,7 @@ impl ConnectionInner {
             write_queue: VecDeque::new(),
             write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
-            sessions_map: AHashMap::default(),
+            sessions_map: HashMap::default(),
             error: None,
             state: State::Normal,
         }

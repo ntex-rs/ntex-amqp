@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::hash::{BuildHasher, Hash};
-use std::{char, str, u8};
+use std::{char, collections, convert::TryFrom, hash::BuildHasher, hash::Hash, str, u8};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
@@ -17,7 +14,7 @@ use crate::protocol::{self, CompoundHeader};
 use crate::types::{
     Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecStringMap, VecSymbolMap,
 };
-use crate::AHashMap;
+use crate::HashMap;
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
@@ -257,14 +254,14 @@ impl ArrayDecode for Symbol {
 }
 
 impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
-    for HashMap<K, V, S>
+    for collections::HashMap<K, V, S>
 {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         let (input, header) = decode_map_header(input, fmt)?;
         let mut map_input = &input[..header.size as usize];
         let count = header.count / 2;
-        let mut map: HashMap<K, V, S> =
-            HashMap::with_capacity_and_hasher(count as usize, Default::default());
+        let mut map: collections::HashMap<K, V, S> =
+            collections::HashMap::with_capacity_and_hasher(count as usize, Default::default());
         for _ in 0..count {
             let (input1, key) = K::decode(map_input)?;
             let (input2, value) = V::decode(input1)?;
@@ -438,9 +435,9 @@ impl DecodeFormatted for Variant {
             codec::FORMATCODE_LIST32 => {
                 List::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::List(o)))
             }
-            codec::FORMATCODE_MAP8 => AHashMap::<Variant, Variant>::decode_with_format(input, fmt)
+            codec::FORMATCODE_MAP8 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
                 .map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
-            codec::FORMATCODE_MAP32 => AHashMap::<Variant, Variant>::decode_with_format(input, fmt)
+            codec::FORMATCODE_MAP32 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
                 .map(|(i, o)| (i, Variant::Map(VariantMap::new(o)))),
             // codec::FORMATCODE_ARRAY8 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
             // codec::FORMATCODE_ARRAY32 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),

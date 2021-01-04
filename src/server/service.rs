@@ -1,28 +1,16 @@
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::task::{Context, Poll};
-use std::{fmt, time};
+use std::{fmt, marker::PhantomData, pin::Pin, rc::Rc, task::Context, task::Poll, time};
 
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{Future, FutureExt, SinkExt, StreamExt};
 use ntex::service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use ntex_amqp_codec::protocol::{Error, ProtocolId};
 use ntex_amqp_codec::{AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
-use crate::connection::{Connection, ConnectionController};
-use crate::Configuration;
+use crate::{connection::Connection, connection::ConnectionController, Configuration};
 
-use super::connect::{Connect, ConnectAck};
 use super::control::{ControlFrame, ControlFrameNewService};
-use super::dispatcher::Dispatcher;
-use super::link::Link;
-use super::sasl::Sasl;
-use super::{LinkError, ServerError, State};
-
-/// Amqp connection type
-pub(crate) type AmqpConnect<Io> = either::Either<Connect<Io>, Sasl<Io>>;
+use super::handshake::{Handshake, HandshakeAck};
+use super::{dispatcher::Dispatcher, link::Link, LinkError, ServerError, State};
 
 /// Server dispatcher factory
 pub struct Server<Io, St, Cn: ServiceFactory> {
@@ -49,7 +37,7 @@ impl<Io, St, Cn> Server<Io, St, Cn>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
+    Cn: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
         + 'static,
 {
     /// Create server factory and provide connect service
@@ -169,7 +157,7 @@ impl<Io, St, Cn, Pb> ServiceFactory for ServerImpl<Io, St, Cn, Pb>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
+    Cn: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
         + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
@@ -210,7 +198,7 @@ impl<Io, St, Cn, Pb> Service for ServerImplService<Io, St, Cn, Pb>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>
+    Cn: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
         + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
@@ -238,10 +226,10 @@ where
         let timeout = self.inner.handshake_timeout;
         let inner = self.inner.clone();
         let fut = handshake(
+            req,
             self.inner.max_size,
             self.connect.clone(),
             self.inner.clone(),
-            req,
         );
 
         Box::pin(async move {
@@ -249,11 +237,8 @@ where
                 fut.await?
             } else {
                 ntex::rt::time::timeout(time::Duration::from_millis(timeout), fut)
-                    .map(|res| match res {
-                        Ok(res) => res,
-                        Err(_) => Err(ServerError::HandshakeTimeout),
-                    })
-                    .await?
+                    .await
+                    .map_err(|_| ServerError::HandshakeTimeout)??
             };
 
             let res = dispatcher.await.map_err(ServerError::from);
@@ -267,15 +252,15 @@ where
 }
 
 async fn handshake<Io, St, Cn: ServiceFactory, Pb>(
+    io: Io,
     max_size: usize,
     connect: Rc<Cn::Service>,
     inner: Rc<ServerInner<St, Cn, Pb>>,
-    io: Io,
 ) -> Result<(Dispatcher<Io, St, Pb::Service>, State<St>), ServerError<Cn::Error>>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    Cn: ServiceFactory<Config = (), Request = AmqpConnect<Io>, Response = ConnectAck<Io, St>>,
+    Cn: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
     Pb::Error: fmt::Display + Into<Error>,
     Pb::InitError: fmt::Display + Into<Error>,
@@ -299,15 +284,14 @@ where
 
             let ack = connect
                 .call(if protocol == ProtocolId::Amqp {
-                    either::Either::Left(Connect::new(framed, controller))
+                    Handshake::new_plain(framed, controller)
                 } else {
-                    either::Either::Right(Sasl::new(framed, controller))
+                    Handshake::new_sasl(framed, controller)
                 })
                 .await
                 .map_err(ServerError::Service)?;
 
             let (st, mut framed, controller) = ack.into_inner();
-            let st = State::new(st);
             framed.get_codec_mut().max_size(max_size);
 
             // confirm Open
@@ -317,12 +301,13 @@ where
                 .await
                 .map_err(ServerError::from)?;
 
+            let st = State::new(st);
             let conn = Connection::new_server(framed, controller.0, None);
 
             // create publish service
             let srv = inner.publish.new_service(st.clone()).await.map_err(|e| {
                 error!("Can not construct app service");
-                ServerError::ProtocolError(e.into())
+                ServerError::Protocol(e.into())
             })?;
 
             (st, srv, conn)

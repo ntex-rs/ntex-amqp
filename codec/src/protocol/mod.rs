@@ -10,7 +10,7 @@ use super::codec::{self, DecodeFormatted, Encode};
 use super::errors::AmqpParseError;
 use super::message::Message;
 use super::types::*;
-use crate::AHashMap;
+use crate::HashMap;
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -37,14 +37,14 @@ pub enum ProtocolId {
     AmqpSasl = 3,
 }
 
-pub type Map = AHashMap<Variant, Variant>;
-pub type StringVariantMap = AHashMap<Str, Variant>;
-pub type Fields = AHashMap<Symbol, Variant>;
-pub type FilterSet = AHashMap<Symbol, Option<ByteString>>;
+pub type Map = HashMap<Variant, Variant>;
+pub type StringVariantMap = HashMap<Str, Variant>;
+pub type Fields = HashMap<Symbol, Variant>;
+pub type FilterSet = HashMap<Symbol, Option<ByteString>>;
 pub type Timestamp = DateTime<Utc>;
 pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
-pub type Annotations = AHashMap<Symbol, Variant>;
+pub type Annotations = HashMap<Symbol, Variant>;
 
 #[allow(clippy::unreadable_literal, clippy::match_bool)]
 mod definitions;

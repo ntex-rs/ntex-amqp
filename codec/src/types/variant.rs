@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::protocol::Annotations;
 use crate::types::{Descriptor, List, StaticSymbol, Str, Symbol};
-use crate::AHashMap;
+use crate::HashMap;
 
 /// Represents an AMQP type for use in polymorphic collections
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Display, From)]
@@ -159,11 +159,11 @@ impl Variant {
 #[derive(PartialEq, Eq, Clone, Debug, Display)]
 #[display(fmt = "{:?}", map)]
 pub struct VariantMap {
-    pub map: AHashMap<Variant, Variant>,
+    pub map: HashMap<Variant, Variant>,
 }
 
 impl VariantMap {
-    pub fn new(map: AHashMap<Variant, Variant>) -> VariantMap {
+    pub fn new(map: HashMap<Variant, Variant>) -> VariantMap {
         VariantMap { map }
     }
 }
@@ -221,8 +221,8 @@ impl From<Vec<(Str, Variant)>> for VecStringMap {
     }
 }
 
-impl From<AHashMap<Str, Variant>> for VecStringMap {
-    fn from(map: AHashMap<Str, Variant>) -> VecStringMap {
+impl From<HashMap<Str, Variant>> for VecStringMap {
+    fn from(map: HashMap<Str, Variant>) -> VecStringMap {
         VecStringMap(map.into_iter().collect())
     }
 }

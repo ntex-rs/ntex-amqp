@@ -26,10 +26,10 @@ pub enum ServerError<E> {
     HandshakeTimeout,
     /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
-    Protocol(AmqpCodecError),
+    Codec(AmqpCodecError),
     #[display(fmt = "Protocol error: {}", _0)]
     /// Amqp protocol error
-    ProtocolError(Error),
+    Protocol(Error),
     #[display(fmt = "Expected open frame, got: {:?}", _0)]
     Unexpected(Box<protocol::Frame>),
     #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
@@ -60,7 +60,7 @@ impl<E> From<AmqpError> for ServerError<E> {
 
 impl<E> From<AmqpCodecError> for ServerError<E> {
     fn from(err: AmqpCodecError) -> Self {
-        ServerError::Protocol(err)
+        ServerError::Codec(err)
     }
 }
 
@@ -85,7 +85,7 @@ impl<E> From<io::Error> for ServerError<E> {
 impl<E> From<Either<AmqpCodecError, io::Error>> for ServerError<E> {
     fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
         match err {
-            Either::Left(err) => ServerError::Protocol(err),
+            Either::Left(err) => ServerError::Codec(err),
             Either::Right(err) => ServerError::Io(err),
         }
     }
