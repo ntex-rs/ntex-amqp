@@ -1,10 +1,10 @@
 [package]
 name = "ntex-amqp"
-version = "0.1.22"
+version = "0.2.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
-documentation = "https://docs.rs/actix-amqp"
-repository = "https://github.com/actix/actix-amqp.git"
+documentation = "https://docs.rs/ntex-amqp"
+repository = "https://github.com/ntex/ntex-amqp.git"
 categories = ["network-programming"]
 keywords = ["AMQP", "IoT", "messaging"]
 license = "MIT"
@@ -24,17 +24,16 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = "0.1.24"
-ntex-amqp-codec = "0.2.0"
+ntex = "0.1.26"
+ntex-amqp-codec = "0.3.0"
 ntex-router = "0.3.4"
-ntex-codec = "0.1.2"
+ntex-codec = "0.2.1"
 
-bytes = "0.5.4"
+bytes = "0.5.6"
 bytestring = "0.1.5"
 derive_more = "0.99.5"
 either = "1.5.3"
-futures = "0.3.4"
-fxhash = "0.2.1"
+futures = "0.3.8"
 log = "0.4"
 pin-project-lite = "0.2.0"
 uuid = { version = "0.8", features = ["v4"] }

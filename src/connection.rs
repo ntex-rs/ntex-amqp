@@ -1,18 +1,14 @@
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::Duration;
+use std::{collections::VecDeque, io, pin::Pin, task::Context, task::Poll, time::Duration};
 
-use futures::{future, Stream};
-use fxhash::FxHashMap;
+use either::Either;
+use futures::{future, Future, Stream};
 use ntex::channel::oneshot;
-use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::task::LocalWaker;
 use ntex::util::time::LowResTimeService;
+use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use ntex_amqp_codec::protocol::{Begin, Close, End, Error, Frame};
-use ntex_amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
+use ntex_amqp_codec::{AHashMap, AmqpCodec, AmqpCodecError, AmqpFrame};
 
 use crate::cell::{Cell, WeakCell};
 use crate::errors::AmqpTransportError;
@@ -45,7 +41,7 @@ pub(crate) struct ConnectionInner {
     write_queue: VecDeque<AmqpFrame>,
     write_task: LocalWaker,
     sessions: slab::Slab<ChannelState>,
-    sessions_map: FxHashMap<u16, usize>,
+    sessions_map: AHashMap<u16, usize>,
     error: Option<AmqpTransportError>,
     state: State,
 }
@@ -213,7 +209,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
     pub(crate) fn poll_outgoing(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<(), AmqpCodecError>> {
+    ) -> Poll<Result<(), Either<AmqpCodecError, io::Error>>> {
         let inner = self.inner.get_mut();
         let mut update = false;
         loop {
@@ -224,8 +220,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                     update = true;
                     if let Err(e) = self.framed.write(frame) {
                         error!("Cannot encode frame: {:?}", e);
-                        inner.set_error(e.clone().into());
-                        return Poll::Ready(Err(e));
+                        inner.set_error(AmqpTransportError::Disconnected);
+                        return Poll::Ready(Err(Either::Left(e)));
                     }
                 } else {
                     break;
@@ -237,8 +233,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                     Poll::Pending => break,
                     Poll::Ready(Err(e)) => {
                         trace!("Cannot send data: {}", e);
-                        inner.set_error(e.clone().into());
-                        return Poll::Ready(Err(e));
+                        inner.set_error(AmqpTransportError::Disconnected);
+                        return Poll::Ready(Err(Either::Right(e)));
                     }
                     Poll::Ready(_) => (),
                 }
@@ -262,7 +258,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
     pub(crate) fn poll_incoming(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<AmqpFrame, AmqpCodecError>>> {
+    ) -> Poll<Option<Result<AmqpFrame, Either<AmqpCodecError, io::Error>>>> {
         let inner = self.inner.get_mut();
 
         let mut update = false;
@@ -385,7 +381,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Connection<T> {
                 }
                 Poll::Ready(Some(Err(e))) => {
                     trace!("Error while reading from socket: {:?}", e);
-                    inner.set_error(e.clone().into());
+                    inner.set_error(AmqpTransportError::Disconnected);
                     return Poll::Ready(Some(Err(e)));
                 }
             }
@@ -405,7 +401,7 @@ impl<T> Drop for Connection<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
-    type Output = Result<(), AmqpCodecError>;
+    type Output = Result<(), Either<AmqpCodecError, io::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // connection heartbeat
@@ -445,7 +441,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
                 }
                 Poll::Ready(Some(Err(e))) => {
                     trace!("Amqp connection read error: {:?}", e);
-                    self.inner.get_mut().set_error(e.clone().into());
+                    self.inner
+                        .get_mut()
+                        .set_error(AmqpTransportError::Disconnected);
                     return Poll::Ready(Err(e));
                 }
                 Poll::Pending => break,
@@ -473,7 +471,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for Connection<T> {
             }
             Poll::Ready(Some(Err(e))) => {
                 trace!("Amqp connection write error: {:?}", e);
-                self.inner.get_mut().set_error(e.clone().into());
+                self.inner
+                    .get_mut()
+                    .set_error(AmqpTransportError::Disconnected);
                 return Poll::Ready(Err(e));
             }
             Poll::Pending => (),
@@ -494,7 +494,7 @@ impl ConnectionController {
             write_queue: VecDeque::new(),
             write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
-            sessions_map: FxHashMap::default(),
+            sessions_map: AHashMap::default(),
             error: None,
             state: State::Normal,
         }))
@@ -533,7 +533,7 @@ impl ConnectionInner {
             write_queue: VecDeque::new(),
             write_task: LocalWaker::new(),
             sessions: slab::Slab::with_capacity(8),
-            sessions_map: FxHashMap::default(),
+            sessions_map: AHashMap::default(),
             error: None,
             state: State::Normal,
         }

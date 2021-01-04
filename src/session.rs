@@ -5,7 +5,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use bytestring::ByteString;
 use either::Either;
 use futures::future::ok;
-use fxhash::FxHashMap;
 use ntex::channel::oneshot;
 use slab::Slab;
 
@@ -14,6 +13,7 @@ use ntex_amqp_codec::protocol::{
     Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Transfer, TransferBody,
     TransferNumber,
 };
+use ntex_amqp_codec::AHashMap;
 use ntex_amqp_codec::AmqpFrame;
 
 use crate::cell::Cell;
@@ -177,13 +177,13 @@ pub(crate) struct SessionInner {
     remote_outgoing_window: u32,
     remote_incoming_window: u32,
 
-    unsettled_deliveries: FxHashMap<DeliveryNumber, DeliveryPromise>,
+    unsettled_deliveries: AHashMap<DeliveryNumber, DeliveryPromise>,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
-    links_by_name: FxHashMap<ByteString, usize>,
-    remote_handles: FxHashMap<Handle, usize>,
+    links_by_name: AHashMap<ByteString, usize>,
+    remote_handles: AHashMap<Handle, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
-    disposition_subscribers: FxHashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
+    disposition_subscribers: AHashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
     error: Option<AmqpTransportError>,
 }
 
@@ -225,12 +225,12 @@ impl SessionInner {
             remote_incoming_window,
             remote_outgoing_window,
             next_outgoing_id: INITIAL_OUTGOING_ID,
-            unsettled_deliveries: FxHashMap::default(),
+            unsettled_deliveries: AHashMap::default(),
             links: Slab::new(),
-            links_by_name: FxHashMap::default(),
-            remote_handles: FxHashMap::default(),
+            links_by_name: AHashMap::default(),
+            remote_handles: AHashMap::default(),
             pending_transfers: VecDeque::new(),
-            disposition_subscribers: FxHashMap::default(),
+            disposition_subscribers: AHashMap::default(),
             error: None,
         }
     }

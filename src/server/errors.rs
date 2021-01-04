@@ -2,6 +2,7 @@ use std::io;
 
 use bytestring::ByteString;
 use derive_more::Display;
+use either::Either;
 use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 
 use crate::errors::AmqpError;
@@ -78,5 +79,23 @@ impl<E> From<SaslFrame> for ServerError<E> {
 impl<E> From<io::Error> for ServerError<E> {
     fn from(err: io::Error) -> Self {
         ServerError::Io(err)
+    }
+}
+
+impl<E> From<Either<AmqpCodecError, io::Error>> for ServerError<E> {
+    fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
+        match err {
+            Either::Left(err) => ServerError::Protocol(err),
+            Either::Right(err) => ServerError::Io(err),
+        }
+    }
+}
+
+impl<E> From<Either<ProtocolIdError, io::Error>> for ServerError<E> {
+    fn from(err: Either<ProtocolIdError, io::Error>) -> Self {
+        match err {
+            Either::Left(err) => ServerError::Handshake(err),
+            Either::Right(err) => ServerError::Io(err),
+        }
     }
 }

@@ -6,10 +6,10 @@ use std::task::{Context, Poll};
 use std::{fmt, time};
 
 use futures::{FutureExt, SinkExt, StreamExt};
-use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::{boxed, IntoServiceFactory, Service, ServiceFactory};
 use ntex_amqp_codec::protocol::{Error, ProtocolId};
 use ntex_amqp_codec::{AmqpFrame, ProtocolIdCodec, ProtocolIdError};
+use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use crate::connection::{Connection, ConnectionController};
 use crate::Configuration;
@@ -287,7 +287,7 @@ where
         .next()
         .await
         .ok_or(ServerError::Disconnected)?
-        .map_err(ServerError::Handshake)?;
+        .map_err(ServerError::from)?;
 
     let (st, srv, conn) = match protocol {
         // start amqp processing

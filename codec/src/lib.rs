@@ -17,3 +17,6 @@ pub use self::errors::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 pub use self::framing::{AmqpFrame, SaslFrame};
 pub use self::io::{AmqpCodec, ProtocolIdCodec};
 pub use self::message::{Message, MessageBody};
+
+/// A `HashMap` using a ahash::RandomState hasher.
+pub type AHashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;

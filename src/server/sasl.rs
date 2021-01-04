@@ -5,12 +5,12 @@ use bytes::Bytes;
 use bytestring::ByteString;
 use futures::future::{err, ok, Ready};
 use futures::{SinkExt, StreamExt};
-use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::{Service, ServiceFactory};
 use ntex_amqp_codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use super::connect::{ConnectAck, ConnectOpened};
 use super::{AmqpError, ServerError};
@@ -255,7 +255,7 @@ where
         let protocol = framed
             .next()
             .await
-            .ok_or_else(|| ServerError::from(ProtocolIdError::Disconnected))?
+            .ok_or_else(|| ServerError::Disconnected)?
             .map_err(ServerError::from)?;
 
         match protocol {

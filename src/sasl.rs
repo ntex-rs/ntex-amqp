@@ -2,11 +2,11 @@ use bytestring::ByteString;
 use either::Either;
 use futures::future::ok;
 use futures::{SinkExt, StreamExt};
-use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::connect::Connect as TcpConnect;
 use ntex::http::Uri;
 use ntex::service::{apply_fn, pipeline, IntoService, Service};
 use ntex::util::time::LowResTimeService;
+use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use ntex_amqp_codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use ntex_amqp_codec::types::Symbol;

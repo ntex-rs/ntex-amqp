@@ -24,12 +24,32 @@ impl From<AmqpCodecError> for AmqpTransportError {
 
 #[derive(Debug, Display, From)]
 pub enum SaslConnectError {
-    Protocol(ProtocolIdError),
+    ProtocolId(ProtocolIdError),
     AmqpError(AmqpCodecError),
     #[display(fmt = "Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
     ExpectedOpenFrame,
     Disconnected,
+    Io(std::io::Error),
+}
+
+impl From<Either<AmqpCodecError, std::io::Error>> for SaslConnectError {
+    fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {
+        match err {
+            Either::Left(err) => SaslConnectError::AmqpError(err),
+            Either::Right(err) => SaslConnectError::Io(err),
+        }
+    }
+}
+
+impl From<ProtocolNegotiationError> for SaslConnectError {
+    fn from(err: ProtocolNegotiationError) -> Self {
+        match err {
+            ProtocolNegotiationError::Disconnected => SaslConnectError::Disconnected,
+            ProtocolNegotiationError::Protocol(err) => SaslConnectError::ProtocolId(err),
+            ProtocolNegotiationError::Io(err) => SaslConnectError::Io(err),
+        }
+    }
 }
 
 #[derive(Debug, Display)]
@@ -176,6 +196,22 @@ impl Into<protocol::Error> for LinkError {
             condition,
             description: self.description,
             info: self.info,
+        }
+    }
+}
+
+#[derive(Debug, Display, From)]
+pub enum ProtocolNegotiationError {
+    Disconnected,
+    Protocol(ProtocolIdError),
+    Io(std::io::Error),
+}
+
+impl From<Either<ProtocolIdError, std::io::Error>> for ProtocolNegotiationError {
+    fn from(err: Either<ProtocolIdError, std::io::Error>) -> Self {
+        match err {
+            Either::Left(err) => ProtocolNegotiationError::Protocol(err),
+            Either::Right(err) => ProtocolNegotiationError::Io(err),
         }
     }
 }

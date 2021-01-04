@@ -1,4 +1,4 @@
-use ntex::codec::Framed;
+use ntex_codec::Framed;
 
 use crate::Configuration;
 

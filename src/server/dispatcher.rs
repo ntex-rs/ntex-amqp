@@ -1,8 +1,6 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::{fmt, io};
+use std::{fmt, future::Future, io, pin::Pin, task::Context, task::Poll};
 
+use either::Either;
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::service::Service;
 use ntex_amqp_codec::protocol::{Error, Frame, Role};
@@ -140,7 +138,10 @@ where
         }
     }
 
-    fn poll_incoming(&mut self, cx: &mut Context<'_>) -> Result<IncomingResult, AmqpCodecError> {
+    fn poll_incoming(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Result<IncomingResult, Either<AmqpCodecError, io::Error>> {
         loop {
             // handle remote begin and attach
             match self.conn.poll_incoming(cx) {
@@ -153,10 +154,9 @@ where
                     }
 
                     let channel_id = channel_id as usize;
-                    let session = self
-                        .conn
-                        .get_remote_session(channel_id)
-                        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Unknown session"))?;
+                    let session = self.conn.get_remote_session(channel_id).ok_or_else(|| {
+                        Either::Right(io::Error::new(io::ErrorKind::Other, "Unknown session"))
+                    })?;
 
                     match frame {
                         Frame::Flow(frm) => {
@@ -267,7 +267,7 @@ where
     Sr: Service<Request = Link<St>, Response = ()>,
     Sr::Error: fmt::Display + Into<Error>,
 {
-    type Output = Result<(), AmqpCodecError>;
+    type Output = Result<(), Either<AmqpCodecError, io::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // process control frame

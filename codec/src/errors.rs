@@ -27,35 +27,16 @@ pub enum AmqpParseError {
     Utf8Error(std::str::Utf8Error),
 }
 
-#[derive(Debug, Display, From)]
+#[derive(Debug, Display, From, Clone)]
 pub enum AmqpCodecError {
     ParseError(AmqpParseError),
     #[display(fmt = "bytes left unparsed at the frame trail")]
     UnparsedBytesLeft,
     #[display(fmt = "max inbound frame size exceeded")]
     MaxSizeExceeded,
-    #[display(fmt = "Io error: {:?}", _0)]
-    Io(Option<std::io::Error>),
 }
 
-impl Clone for AmqpCodecError {
-    fn clone(&self) -> AmqpCodecError {
-        match self {
-            AmqpCodecError::ParseError(err) => AmqpCodecError::ParseError(err.clone()),
-            AmqpCodecError::UnparsedBytesLeft => AmqpCodecError::UnparsedBytesLeft,
-            AmqpCodecError::MaxSizeExceeded => AmqpCodecError::MaxSizeExceeded,
-            AmqpCodecError::Io(_) => AmqpCodecError::Io(None),
-        }
-    }
-}
-
-impl From<std::io::Error> for AmqpCodecError {
-    fn from(err: std::io::Error) -> AmqpCodecError {
-        AmqpCodecError::Io(Some(err))
-    }
-}
-
-#[derive(Debug, Display, From)]
+#[derive(Debug, Display, From, Clone)]
 pub enum ProtocolIdError {
     InvalidHeader,
     Incompatible,
@@ -65,7 +46,4 @@ pub enum ProtocolIdError {
         exp: ProtocolId,
         got: ProtocolId,
     },
-    Disconnected,
-    #[display(fmt = "io error: {:?}", "_0")]
-    Io(std::io::Error),
 }

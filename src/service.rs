@@ -3,11 +3,13 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::{Future, SinkExt, StreamExt};
-use ntex::codec::{AsyncRead, AsyncWrite, Framed};
 use ntex::service::Service;
+use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use ntex_amqp_codec::protocol::ProtocolId;
 use ntex_amqp_codec::{ProtocolIdCodec, ProtocolIdError};
+
+use crate::errors::ProtocolNegotiationError;
 
 pub(crate) struct ProtocolNegotiation<T> {
     proto: ProtocolId,
@@ -38,7 +40,7 @@ where
 {
     type Request = Framed<T, ProtocolIdCodec>;
     type Response = Framed<T, ProtocolIdCodec>;
-    type Error = ProtocolIdError;
+    type Error = ProtocolNegotiationError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
     #[inline]
@@ -52,14 +54,19 @@ where
         Box::pin(async move {
             framed.send(proto).await?;
 
-            let protocol = framed.next().await.ok_or(ProtocolIdError::Disconnected)??;
+            let protocol = framed
+                .next()
+                .await
+                .ok_or(ProtocolNegotiationError::Disconnected)??;
             if proto == protocol {
                 Ok(framed)
             } else {
-                Err(ProtocolIdError::Unexpected {
-                    exp: proto,
-                    got: protocol,
-                })
+                Err(ProtocolNegotiationError::Protocol(
+                    ProtocolIdError::Unexpected {
+                        exp: proto,
+                        got: protocol,
+                    },
+                ))
             }
         })
     }
