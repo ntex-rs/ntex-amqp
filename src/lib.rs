@@ -14,28 +14,33 @@ use ntex::channel::oneshot;
 use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use uuid::Uuid;
 
+#[macro_use]
+mod utils;
+
 mod cell;
 pub mod client;
 mod connection;
+mod control;
 pub mod error_code;
 mod errors;
 mod hb;
 mod io;
 mod rcvlink;
-// pub mod sasl;
 pub mod server;
 mod service;
 mod session;
 mod sndlink;
-mod utils;
+mod state;
 
 pub use ntex_amqp_codec::protocol::Error;
 
 pub use self::connection::Connection;
+pub use self::control::{ControlFrame, ControlFrameKind};
 pub use self::errors::{AmqpError, AmqpProtocolError, LinkError};
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};
+pub use self::state::State;
 
 pub mod codec {
     pub use ntex_amqp_codec::*;
@@ -163,13 +168,11 @@ impl Configuration {
         }
     }
 
-    pub(crate) fn timeout(&self) -> Option<Duration> {
+    pub(crate) fn timeout_secs(&self) -> usize {
         if self.idle_time_out > 0 {
-            Some(Duration::from_millis(
-                ((self.idle_time_out as f32) * 0.8) as u64,
-            ))
+            ((self.idle_time_out as f32) * 0.8 / 1000.0) as usize
         } else {
-            None
+            0
         }
     }
 }

@@ -1,4 +1,7 @@
+use either::Either;
+
 use crate::codec::AmqpCodecError;
+use crate::errors::AmqpProtocolError;
 
 /// Errors which can occur when attempting to handle amqp client connection.
 #[derive(Debug, Display, From)]
@@ -19,11 +22,11 @@ pub enum ClientError {
 
 impl std::error::Error for ClientError {}
 
-impl From<Either<AmqpCodecError, io::Error>> for ClientError {
-    fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
+impl From<Either<AmqpCodecError, std::io::Error>> for ClientError {
+    fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {
         match err {
             Either::Left(err) => ClientError::Protocol(AmqpProtocolError::Codec(err)),
-            Either::Right(err) => ClientError::Protocol(AmqpProtocolError::Io(err)),
+            Either::Right(err) => ClientError::Protocol(AmqpProtocolError::Io(Some(err))),
         }
     }
 }

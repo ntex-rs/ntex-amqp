@@ -16,9 +16,10 @@ use ntex::connect::openssl::{OpensslConnector, SslConnector};
 #[cfg(feature = "rustls")]
 use ntex::connect::rustls::{ClientConfig, RustlsConnector};
 
-// use super::{codec, connection::Client, error::ClientError, error::ProtocolError};
-use super::error::ClientError;
-use crate::{io::IoState, utils::Select, Configuration};
+use crate::codec::protocol::Milliseconds;
+use crate::{errors::AmqpProtocolError, io::IoState, utils::Select, Configuration};
+
+use super::{connection::Client, error::ClientError};
 
 /// Amqp client connector
 pub struct AmqpConnector<A, T> {

@@ -2,12 +2,9 @@ use std::fmt;
 
 use bytestring::ByteString;
 use ntex::router::Path;
-use ntex_amqp_codec::protocol::Attach;
 
-use crate::rcvlink::ReceiverLink;
-use crate::server::State;
-use crate::session::Session;
-use crate::Handle;
+use crate::codec::protocol::Attach;
+use crate::{rcvlink::ReceiverLink, session::Session, Handle, State};
 
 pub struct Link<S> {
     pub(crate) state: State<S>,

@@ -8,28 +8,27 @@ use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, 
 use ntex_amqp_codec::protocol::{
     DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role,
 };
-use ntex_router::{IntoPattern, Router};
+use ntex_router::{IntoPattern, Router as PatternRouter};
 
-use crate::cell::Cell;
-use crate::rcvlink::ReceiverLink;
+use crate::{cell::Cell, rcvlink::ReceiverLink, State};
 
 use super::link::Link;
 use super::transfer::{Outcome, Transfer};
-use super::{LinkError, State};
+use super::LinkError;
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Transfer<S>, Outcome, Error, Error>;
 
-pub struct App<S = ()>(Vec<(Vec<String>, Handle<S>)>);
+pub struct Router<S = ()>(Vec<(Vec<String>, Handle<S>)>);
 
-impl<S: 'static> Default for App<S> {
-    fn default() -> App<S> {
-        App::new()
+impl<S: 'static> Default for Router<S> {
+    fn default() -> Router<S> {
+        Router::new()
     }
 }
 
-impl<S: 'static> App<S> {
-    pub fn new() -> App<S> {
-        App(Vec::new())
+impl<S: 'static> Router<S> {
+    pub fn new() -> Router<S> {
+        Router(Vec::new())
     }
 
     pub fn service<T, F, U: 'static>(mut self, address: T, service: F) -> Self
@@ -62,29 +61,29 @@ impl<S: 'static> App<S> {
         Error = Error,
         InitError = Error,
     > {
-        let mut router = Router::build();
+        let mut router = PatternRouter::build();
         for (addr, hnd) in self.0 {
             router.path(addr, hnd);
         }
         let router = Cell::new(router.finish());
 
         fn_factory_with_config(move |_: State<S>| {
-            ok(AppService {
+            ok(RouterService {
                 router: router.clone(),
             })
         })
     }
 }
 
-struct AppService<S> {
-    router: Cell<Router<Handle<S>>>,
+struct RouterService<S> {
+    router: Cell<PatternRouter<Handle<S>>>,
 }
 
-impl<S: 'static> Service for AppService<S> {
+impl<S: 'static> Service for RouterService<S> {
     type Request = Link<S>;
     type Response = ();
     type Error = Error;
-    type Future = Either<Ready<Result<(), Error>>, AppServiceResponse<S>>;
+    type Future = Either<Ready<Result<(), Error>>, RouterServiceResponse<S>>;
 
     #[inline]
     fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -103,10 +102,10 @@ impl<S: 'static> Service for AppService<S> {
             if let Some((hnd, _info)) = self.router.recognize(link.path_mut()) {
                 trace!("Create handler service for {}", link.path().get_ref());
                 let fut = hnd.new_service(link.clone());
-                Either::Right(AppServiceResponse {
+                Either::Right(RouterServiceResponse {
                     link: link.link.clone(),
                     app_state: link.state.clone(),
-                    state: AppServiceResponseState::NewService(fut),
+                    state: RouterServiceResponseState::NewService(fut),
                 })
             } else {
                 trace!(
@@ -128,14 +127,13 @@ impl<S: 'static> Service for AppService<S> {
     }
 }
 
-struct AppServiceResponse<S> {
+struct RouterServiceResponse<S> {
     link: ReceiverLink,
     app_state: State<S>,
-    state: AppServiceResponseState<S>,
-    // has_credit: bool,
+    state: RouterServiceResponseState<S>,
 }
 
-enum AppServiceResponseState<S> {
+enum RouterServiceResponseState<S> {
     Service(boxed::BoxService<Transfer<S>, Outcome, Error>),
     NewService(
         Pin<
@@ -144,7 +142,7 @@ enum AppServiceResponseState<S> {
     ),
 }
 
-impl<S> Future for AppServiceResponse<S> {
+impl<S> Future for RouterServiceResponse<S> {
     type Output = Result<(), Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -154,7 +152,7 @@ impl<S> Future for AppServiceResponse<S> {
 
         loop {
             match this.state {
-                AppServiceResponseState::Service(ref mut srv) => {
+                RouterServiceResponseState::Service(ref mut srv) => {
                     // check readiness
                     match srv.poll_ready(cx) {
                         Poll::Ready(Ok(_)) => (),
@@ -237,7 +235,8 @@ impl<S> Future for AppServiceResponse<S> {
                         }
                     }
                 }
-                AppServiceResponseState::NewService(ref mut fut) => match Pin::new(fut).poll(cx) {
+                RouterServiceResponseState::NewService(ref mut fut) => match Pin::new(fut).poll(cx)
+                {
                     Poll::Ready(Ok(srv)) => {
                         log::trace!(
                             "Handler service is created for {}",
@@ -250,7 +249,7 @@ impl<S> Future for AppServiceResponse<S> {
                         );
                         this.link.open();
                         this.link.set_link_credit(50);
-                        this.state = AppServiceResponseState::Service(srv);
+                        this.state = RouterServiceResponseState::Service(srv);
                         continue;
                     }
                     Poll::Ready(Err(e)) => {

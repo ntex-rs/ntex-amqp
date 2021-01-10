@@ -1,15 +1,13 @@
 use std::fmt;
 
 use bytes::Bytes;
-use ntex_amqp_codec::protocol::{
+
+use crate::codec::protocol::{
     Accepted, DeliveryState, Error, Rejected, Transfer as AmqpTransfer, TransferBody,
 };
-use ntex_amqp_codec::Decode;
+use crate::{codec::Decode, rcvlink::ReceiverLink, session::Session, State};
 
-use crate::rcvlink::ReceiverLink;
-use crate::session::Session;
-
-use super::{AmqpError, State};
+use super::AmqpError;
 
 pub struct Transfer<S> {
     state: State<S>,

@@ -8,11 +8,10 @@ use ntex_amqp_codec::{AmqpCodec, AmqpFrame};
 use crate::cell::Cell;
 use crate::connection::Connection;
 use crate::io::DispatcherItem;
-use crate::{errors::AmqpProtocolError, sndlink::SenderLink, sndlink::SenderLinkInner};
+use crate::sndlink::{SenderLink, SenderLinkInner};
+use crate::{errors::AmqpProtocolError, ControlFrame, ControlFrameKind, State};
 
-use super::{
-    control::ControlFrame, control::ControlFrameKind, Link, LinkError, ServerError, State,
-};
+use super::{Link, LinkError, ServerError};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<St, Sr, Ctl: Service, E, E2> {
@@ -203,7 +202,7 @@ where
         match request {
             DispatcherItem::Item(frame) => {
                 // trace!("incoming: {:#?}", frame);
-                let item = crate::try_ready_err!(self
+                let item = try_ready_err!(self
                     .sink
                     .0
                     .get_mut()

@@ -9,14 +9,12 @@ use ntex_amqp_codec::{
     protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame,
 };
 
-use crate::connection::Connection;
 use crate::io::{IoDispatcher, IoState, Timer};
-use crate::Configuration;
+use crate::{Configuration, Connection, ControlFrame, State};
 
-use super::control::ControlFrame;
 use super::default::DefaultControlService;
 use super::handshake::{Handshake, HandshakeAck};
-use super::{dispatcher::Dispatcher, link::Link, LinkError, ServerError, State};
+use super::{dispatcher::Dispatcher, link::Link, LinkError, ServerError};
 
 /// Server dispatcher factory
 pub struct Server<Io, St, H: ServiceFactory, Ctl: ServiceFactory> {

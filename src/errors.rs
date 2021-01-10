@@ -1,9 +1,11 @@
+use std::io;
+
 use bytestring::ByteString;
 use either::Either;
 pub use ntex_amqp_codec::protocol::Error;
 use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError};
 
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, Display)]
 pub enum AmqpProtocolError {
     Codec(AmqpCodecError),
     TooManyChannels,
@@ -22,8 +24,30 @@ pub enum AmqpProtocolError {
     #[display(fmt = "Unexpected frame, got: {:?}", _0)]
     Unexpected(Box<protocol::Frame>),
     /// Unexpected io error
-    #[display(fmt = "Unexpected io error: {}", _0)]
-    Io(io::Error),
+    #[display(fmt = "Unexpected io error: {:?}", _0)]
+    Io(Option<io::Error>),
+}
+
+impl Clone for AmqpProtocolError {
+    fn clone(&self) -> Self {
+        match self {
+            AmqpProtocolError::Codec(err) => AmqpProtocolError::Codec(err.clone()),
+            AmqpProtocolError::TooManyChannels => AmqpProtocolError::TooManyChannels,
+            AmqpProtocolError::Disconnected => AmqpProtocolError::Disconnected,
+            AmqpProtocolError::Timeout => AmqpProtocolError::Timeout,
+            AmqpProtocolError::UnknownSession(id, err) => {
+                AmqpProtocolError::UnknownSession(*id, err.clone())
+            }
+            AmqpProtocolError::Closed(err) => AmqpProtocolError::Closed(err.clone()),
+            AmqpProtocolError::SessionEnded(err) => AmqpProtocolError::SessionEnded(err.clone()),
+            AmqpProtocolError::LinkDetached(err) => AmqpProtocolError::LinkDetached(err.clone()),
+            AmqpProtocolError::UnexpectedOpeningState(err) => {
+                AmqpProtocolError::UnexpectedOpeningState(err.clone())
+            }
+            AmqpProtocolError::Unexpected(err) => AmqpProtocolError::Unexpected(err.clone()),
+            AmqpProtocolError::Io(_) => AmqpProtocolError::Io(None),
+        }
+    }
 }
 
 impl From<AmqpCodecError> for AmqpProtocolError {

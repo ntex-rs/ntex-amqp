@@ -4,8 +4,7 @@ use std::task::{Context, Poll};
 use futures::future::{ok, Ready};
 use ntex::service::{Service, ServiceFactory};
 
-use super::control::ControlFrame;
-use super::State;
+use crate::{ControlFrame, State};
 
 /// Default control service
 pub struct DefaultControlService<S, E>(PhantomData<(S, E)>);

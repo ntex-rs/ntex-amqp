@@ -11,22 +11,20 @@ use ntex::service::{into_service, IntoService, Service};
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::io::{IoDispatcher, IoState, Timer};
-use crate::HashMap;
-
-// use super::control::ControlMessage;
-// use super::dispatcher::create_dispatcher;
+use crate::{Configuration, Connection, HashMap, State};
 
 /// Mqtt client
-pub struct Client<Io> {
+pub struct Client<Io, St> {
     io: Io,
     state: IoState<AmqpCodec<AmqpFrame>>,
     connection: Connection,
     keepalive: u16,
     disconnect_timeout: u16,
     remote_config: Configuration,
+    st: State<St>,
 }
 
-impl<T> Client<T>
+impl<T> Client<T, ()>
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
@@ -46,33 +44,46 @@ where
             keepalive,
             disconnect_timeout,
             remote_config,
+            st: State::new(()),
         }
     }
 }
 
-impl<Io> Client<Io>
+impl<Io, St> Client<Io, St>
 where
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     #[inline]
     /// Get client sink
     pub fn sink(&self) -> Connection {
-        self.sink.clone()
+        self.connection.clone()
+    }
+
+    #[inline]
+    /// Set connection state
+    pub fn state<T>(self, st: T) -> Client<Io, T> {
+        Client {
+            io: self.io,
+            state: self.state,
+            connection: self.connection,
+            keepalive: self.keepalive,
+            disconnect_timeout: self.disconnect_timeout,
+            remote_config: self.remote_config,
+            st: State::new(st),
+        }
     }
 
     /// Run client with default control messages handler.
     ///
     /// Default handler closes connection on any control message.
     pub async fn start_default(self) {
-        let idle_timeout = self.remote_config.idle_time_out.unwrap_or(0);
+        let idle_timeout = self.remote_config.timeout_secs();
         if idle_timeout > 0 {
-            ntex::rt::spawn(keepalive(self.sink.clone(), self.idle_timeout));
+            ntex::rt::spawn(keepalive(self.connection.clone(), idle_timeout));
         }
 
         let dispatcher = create_dispatcher(
-            self.sink,
-            self.max_receive,
-            16,
+            self.connection,
             into_service(|pkt| ok(either::Left(pkt))),
             into_service(
                 |msg: ControlMessage<()>| ok(msg.disconnect(codec::Disconnect::default())),
@@ -91,7 +102,7 @@ where
     }
 }
 
-async fn keepalive(sink: MqttSink, timeout: u16) {
+async fn keepalive(sink: Connection, timeout: usize) {
     log::debug!("start mqtt client keep-alive task");
 
     let keepalive = Duration::from_secs(timeout as u64);
