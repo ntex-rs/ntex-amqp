@@ -11,7 +11,7 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::Encode;
 
 use crate::cell::Cell;
-use crate::errors::AmqpProtocolError;
+use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner};
 
 #[derive(Clone, Debug)]

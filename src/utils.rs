@@ -1,8 +1,7 @@
 use std::task::{Context, Poll};
-use std::{convert::TryFrom, future::Future, pin::Pin};
+use std::{future::Future, pin::Pin};
 
 use either::Either;
-use ntex::service::Service;
 
 /// Unwrap result and return `err` future
 ///
@@ -12,19 +11,6 @@ macro_rules! try_ready_err {
         match $e {
             Ok(value) => value,
             Err(e) => return futures::future::err(e),
-        }
-    };
-}
-
-macro_rules! ensure {
-    ($cond:expr, $e:expr) => {
-        if !($cond) {
-            return Err($e);
-        }
-    };
-    ($cond:expr, $fmt:expr, $($arg:tt)+) => {
-        if !($cond) {
-            return Err($fmt, $($arg)+);
         }
     };
 }
@@ -63,22 +49,5 @@ where
         }
 
         Poll::Pending
-    }
-}
-
-/// Check service readiness
-pub(crate) fn ready<S>(service: &S) -> Ready<'_, S> {
-    Ready(service)
-}
-
-pub(crate) struct Ready<'a, S>(&'a S);
-
-impl<'a, S> Unpin for Ready<'a, S> {}
-
-impl<'a, S: Service> Future for Ready<'a, S> {
-    type Output = Result<(), S::Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.0.poll_ready(cx)
     }
 }

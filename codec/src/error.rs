@@ -24,6 +24,9 @@ pub enum AmqpParseError {
     #[display(fmt = "Unknown {:?} option.", "_0")]
     UnknownEnumOption(&'static str),
     UuidParseError(uuid::Error),
+    #[from(ignore)]
+    #[display(fmt = "Unexpected type: '{:?}'", "_0")]
+    UnexpectedType(&'static str),
     Utf8Error(std::str::Utf8Error),
 }
 

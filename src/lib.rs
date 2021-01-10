@@ -1,13 +1,12 @@
 #![deny(rust_2018_idioms, unreachable_pub)]
-#![allow(clippy::type_complexity)]
-#![allow(dead_code, unreachable_pub)]
+#![allow(clippy::type_complexity, dead_code)]
 
 #[macro_use]
 extern crate derive_more;
 #[macro_use]
 extern crate log;
 
-use std::{future::Future, pin::Pin, task::Context, task::Poll, time::Duration};
+use std::{future::Future, pin::Pin, task::Context, task::Poll};
 
 use bytestring::ByteString;
 use ntex::channel::oneshot;
@@ -21,22 +20,22 @@ mod cell;
 pub mod client;
 mod connection;
 mod control;
+mod default;
+mod dispatcher;
+pub mod error;
 pub mod error_code;
-mod errors;
 mod hb;
 mod io;
 mod rcvlink;
+mod router;
 pub mod server;
-mod service;
 mod session;
 mod sndlink;
 mod state;
-
-pub use ntex_amqp_codec::protocol::Error;
+pub mod types;
 
 pub use self::connection::Connection;
 pub use self::control::{ControlFrame, ControlFrameKind};
-pub use self::errors::{AmqpError, AmqpProtocolError, LinkError};
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};
@@ -50,15 +49,15 @@ type HashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;
 type HashSet<V> = std::collections::HashSet<V, ahash::RandomState>;
 
 pub enum Delivery {
-    Resolved(Result<Disposition, AmqpProtocolError>),
-    Pending(oneshot::Receiver<Result<Disposition, AmqpProtocolError>>),
+    Resolved(Result<Disposition, error::AmqpProtocolError>),
+    Pending(oneshot::Receiver<Result<Disposition, error::AmqpProtocolError>>),
     Gone,
 }
 
-type DeliveryPromise = oneshot::Sender<Result<Disposition, AmqpProtocolError>>;
+type DeliveryPromise = oneshot::Sender<Result<Disposition, error::AmqpProtocolError>>;
 
 impl Future for Delivery {
-    type Output = Result<Disposition, AmqpProtocolError>;
+    type Output = Result<Disposition, error::AmqpProtocolError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Delivery::Pending(ref mut receiver) = *self {
@@ -67,7 +66,7 @@ impl Future for Delivery {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(e)) => {
                     trace!("delivery oneshot is gone: {:?}", e);
-                    Poll::Ready(Err(AmqpProtocolError::Disconnected))
+                    Poll::Ready(Err(error::AmqpProtocolError::Disconnected))
                 }
             };
         }

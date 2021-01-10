@@ -10,11 +10,9 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_router::{IntoPattern, Router as PatternRouter};
 
+use crate::error::LinkError;
+use crate::types::{Link, Outcome, Transfer};
 use crate::{cell::Cell, rcvlink::ReceiverLink, State};
-
-use super::link::Link;
-use super::transfer::{Outcome, Transfer};
-use super::LinkError;
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Transfer<S>, Outcome, Error, Error>;
 

@@ -9,7 +9,7 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
 use super::{handshake::HandshakeAmqpOpened, ServerError};
-use crate::{connection::Connection, errors::AmqpProtocolError, io::IoState, Configuration};
+use crate::{connection::Connection, error::AmqpProtocolError, io::IoState, Configuration};
 
 pub struct Sasl<Io> {
     io: Io,

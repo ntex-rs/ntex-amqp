@@ -1,20 +1,16 @@
-use std::time::{Duration, Instant};
-use std::{cell::RefCell, convert::TryFrom, marker::PhantomData, num::NonZeroU16};
+use std::time::Duration;
 
-use bytestring::ByteString;
-use futures::future::{ok, Either, Future};
+use futures::future::{err, ok};
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::router::{IntoPattern, Path, Router, RouterBuilder};
-use ntex::rt::time::{delay_until, Instant as RtInstant};
-use ntex::service::boxed::BoxService;
-use ntex::service::{into_service, IntoService, Service};
+use ntex::service::fn_service;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
+use crate::dispatcher::Dispatcher;
 use crate::io::{IoDispatcher, IoState, Timer};
-use crate::{Configuration, Connection, HashMap, State};
+use crate::{error::LinkError, Configuration, Connection, State};
 
 /// Mqtt client
-pub struct Client<Io, St> {
+pub struct Client<Io, St = ()> {
     io: Io,
     state: IoState<AmqpCodec<AmqpFrame>>,
     connection: Connection,
@@ -51,6 +47,7 @@ where
 
 impl<Io, St> Client<Io, St>
 where
+    St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     #[inline]
@@ -61,7 +58,7 @@ where
 
     #[inline]
     /// Set connection state
-    pub fn state<T>(self, st: T) -> Client<Io, T> {
+    pub fn state<T: 'static>(self, st: T) -> Client<Io, T> {
         Client {
             io: self.io,
             state: self.state,
@@ -82,12 +79,11 @@ where
             ntex::rt::spawn(keepalive(self.connection.clone(), idle_timeout));
         }
 
-        let dispatcher = create_dispatcher(
+        let dispatcher = Dispatcher::new(
+            self.st,
             self.connection,
-            into_service(|pkt| ok(either::Left(pkt))),
-            into_service(
-                |msg: ControlMessage<()>| ok(msg.disconnect(codec::Disconnect::default())),
-            ),
+            fn_service(|_| err::<_, LinkError>(LinkError::force_detach())),
+            fn_service(|_| ok::<_, LinkError>(())),
         );
 
         let _ = IoDispatcher::with(
@@ -102,18 +98,18 @@ where
     }
 }
 
-async fn keepalive(sink: Connection, timeout: usize) {
+async fn keepalive(_sink: Connection, timeout: usize) {
     log::debug!("start mqtt client keep-alive task");
 
-    let keepalive = Duration::from_secs(timeout as u64);
-    loop {
-        let expire = RtInstant::from_std(Instant::now() + keepalive);
-        delay_until(expire).await;
+    let _keepalive = Duration::from_secs(timeout as u64);
+    // loop {
+    //     let expire = RtInstant::from_std(Instant::now() + keepalive);
+    //     delay_until(expire).await;
 
-        if !sink.ping() {
-            // connection is closed
-            log::debug!("mqtt client connection is closed, stopping keep-alive task");
-            break;
-        }
-    }
+    //     if !sink.ping() {
+    //         // connection is closed
+    //         log::debug!("mqtt client connection is closed, stopping keep-alive task");
+    //         break;
+    //     }
+    // }
 }

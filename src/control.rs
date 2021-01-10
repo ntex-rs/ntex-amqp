@@ -3,7 +3,7 @@ use std::fmt;
 use ntex_amqp_codec::protocol;
 
 use crate::cell::Cell;
-use crate::errors::AmqpProtocolError;
+use crate::error::AmqpProtocolError;
 use crate::rcvlink::ReceiverLink;
 use crate::session::SessionInner;
 use crate::sndlink::SenderLink;

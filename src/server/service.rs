@@ -9,12 +9,13 @@ use ntex_amqp_codec::{
     protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame,
 };
 
+use crate::dispatcher::Dispatcher;
 use crate::io::{IoDispatcher, IoState, Timer};
-use crate::{Configuration, Connection, ControlFrame, State};
+use crate::types::Link;
+use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
 
-use super::default::DefaultControlService;
 use super::handshake::{Handshake, HandshakeAck};
-use super::{dispatcher::Dispatcher, link::Link, LinkError, ServerError};
+use super::{LinkError, ServerError};
 
 /// Server dispatcher factory
 pub struct Server<Io, St, H: ServiceFactory, Ctl: ServiceFactory> {
@@ -272,7 +273,7 @@ where
                 .map_err(|e| ServerError::Service(e.into()))?
                 .map_err(|e| From::from(e));
 
-            let dispatcher = Dispatcher::new(sink, pb_srv, st, ctl_srv);
+            let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv);
 
             IoDispatcher::with(io, state, dispatcher, inner.time.clone())
                 .keepalive_timeout(keepalive as u16)
@@ -338,7 +339,7 @@ where
                 .map_err(ServerError::Service)?;
 
             let (st, mut io, sink, state) = ack.into_inner();
-            state.with_codec(|codec| codec.max_size(max_size));
+            state.with_codec(|codec| codec.set_max_size(max_size));
 
             // confirm Open
             let local = inner.config.to_open();

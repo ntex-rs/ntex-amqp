@@ -1,7 +1,7 @@
 use bytes::BytesMut;
 use std::marker::Sized;
 
-use crate::errors::AmqpParseError;
+use crate::error::AmqpParseError;
 
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
@@ -107,7 +107,7 @@ mod tests {
     use bytes::{Bytes, BytesMut};
 
     use crate::codec::{Decode, Encode};
-    use crate::errors::AmqpCodecError;
+    use crate::error::AmqpCodecError;
     use crate::framing::{AmqpFrame, SaslFrame};
     use crate::protocol::SaslFrameBody;
 

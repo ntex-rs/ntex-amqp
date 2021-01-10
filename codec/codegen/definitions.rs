@@ -7,7 +7,7 @@ use bytestring::ByteString;
 use uuid::Uuid;
 
 use super::*;
-use crate::errors::AmqpParseError;
+use crate::error::AmqpParseError;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 
 #[derive(Clone, Debug, PartialEq, From)]

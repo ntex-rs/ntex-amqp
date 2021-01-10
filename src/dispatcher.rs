@@ -6,21 +6,20 @@ use ntex_amqp_codec::protocol::{Frame, Role};
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame};
 
 use crate::cell::Cell;
-use crate::connection::Connection;
-use crate::io::DispatcherItem;
+use crate::error::{AmqpProtocolError, AmqpServiceError, LinkError};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::{errors::AmqpProtocolError, ControlFrame, ControlFrameKind, State};
-
-use super::{Link, LinkError, ServerError};
+use crate::{
+    connection::Connection, io::DispatcherItem, types, ControlFrame, ControlFrameKind, State,
+};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<St, Sr, Ctl: Service, E, E2> {
+    state: State<St>,
     sink: Connection,
     service: Sr,
-    service_state: State<St>,
-    control_service: Ctl,
+    ctl_service: Ctl,
+    ctl_fut: RefCell<Option<(ControlFrame<E>, Pin<Box<Ctl::Future>>)>>,
     shutdown: std::cell::Cell<bool>,
-    control_fut: RefCell<Option<(ControlFrame<E>, Pin<Box<Ctl::Future>>)>>,
     _t: std::marker::PhantomData<E2>,
 }
 
@@ -28,30 +27,25 @@ impl<St, Sr, Ctl, E, E2> Dispatcher<St, Sr, Ctl, E, E2>
 where
     E: From<E2>,
     E2: 'static,
-    Sr: Service<Request = Link<St>, Response = (), Error = E2>,
+    Sr: Service<Request = types::Link<St>, Response = (), Error = E2>,
     Sr::Future: 'static,
     Ctl: Service<Request = ControlFrame<E>, Response = (), Error = E2>,
     LinkError: TryFrom<E2, Error = E>,
 {
-    pub(crate) fn new(
-        sink: Connection,
-        service: Sr,
-        service_state: State<St>,
-        control_service: Ctl,
-    ) -> Self {
+    pub(crate) fn new(state: State<St>, sink: Connection, service: Sr, ctl_service: Ctl) -> Self {
         Dispatcher {
             sink,
+            state,
             service,
-            service_state,
-            control_service,
+            ctl_service,
+            ctl_fut: RefCell::new(None),
             shutdown: std::cell::Cell::new(false),
-            control_fut: RefCell::new(None),
             _t: std::marker::PhantomData,
         }
     }
 
-    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, ServerError<E>> {
-        let mut inner = self.control_fut.borrow_mut();
+    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, AmqpServiceError<E>> {
+        let mut inner = self.ctl_fut.borrow_mut();
 
         // process control frame
         if let Some(ref mut item) = &mut *inner {
@@ -74,10 +68,10 @@ where
         &self,
         frame: ControlFrame<E>,
         err: Option<E2>,
-    ) -> Result<(), ServerError<E>> {
+    ) -> Result<(), AmqpServiceError<E>> {
         if let Some(err) = err {
             let err = LinkError::try_from(err)
-                .map_err(ServerError::Service)?
+                .map_err(AmqpServiceError::Service)?
                 .into();
 
             match &frame.0.get_mut().kind {
@@ -108,7 +102,7 @@ where
                     let link = link.clone();
                     ntex::rt::spawn(
                         self.service
-                            .call(Link::new(link.clone(), self.service_state.clone()))
+                            .call(types::Link::new(link.clone(), self.state.clone()))
                             .then(|res| async move {
                                 match res {
                                     Ok(_) => link.close().await,
@@ -147,7 +141,7 @@ impl<St, Sr, Ctl, E, E2> Service for Dispatcher<St, Sr, Ctl, E, E2>
 where
     E: From<E2>,
     E2: 'static,
-    Sr: Service<Request = Link<St>, Response = (), Error = E2>,
+    Sr: Service<Request = types::Link<St>, Response = (), Error = E2>,
     Sr::Future: 'static,
     Ctl: Service<Request = ControlFrame<E>, Response = (), Error = E2>,
     Ctl::Future: 'static,
@@ -155,7 +149,7 @@ where
 {
     type Request = DispatcherItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
-    type Error = ServerError<E>;
+    type Error = AmqpServiceError<E>;
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -166,11 +160,11 @@ where
         let res1 = self
             .service
             .poll_ready(cx)
-            .map_err(|err| ServerError::Service(err.into()))?;
+            .map_err(|err| AmqpServiceError::Service(err.into()))?;
         let res2 = self
-            .control_service
+            .ctl_service
             .poll_ready(cx)
-            .map_err(|err| ServerError::Service(err.into()))?;
+            .map_err(|err| AmqpServiceError::Service(err.into()))?;
 
         if res0 || res1.is_pending() || res2.is_pending() {
             Poll::Pending
@@ -183,14 +177,14 @@ where
         if !self.shutdown.get() {
             self.shutdown.set(true);
             ntex::rt::spawn(
-                self.control_service
+                self.ctl_service
                     .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)))
                     .map(|_| ()),
             );
         }
 
         let res1 = self.service.poll_shutdown(cx, is_error);
-        let res2 = self.control_service.poll_shutdown(cx, is_error);
+        let res2 = self.ctl_service.poll_shutdown(cx, is_error);
         if res1.is_pending() || res2.is_pending() {
             Poll::Pending
         } else {
@@ -207,7 +201,7 @@ where
                     .0
                     .get_mut()
                     .handle_frame(frame)
-                    .map_err(ServerError::Protocol));
+                    .map_err(AmqpServiceError::Protocol));
                 let frame = if let Some(item) = item {
                     item
                 } else {
@@ -221,7 +215,7 @@ where
                     return ready(
                         self.sink
                             .register_remote_session(channel_id, &frm)
-                            .map_err(ServerError::Codec),
+                            .map_err(AmqpServiceError::Codec),
                     );
                 }
 
@@ -243,8 +237,8 @@ where
                                 session.clone(),
                                 ControlFrameKind::Flow(frm, link.clone()),
                             );
-                            *self.control_fut.borrow_mut() =
-                                Some((frame.clone(), Box::pin(self.control_service.call(frame))));
+                            *self.ctl_fut.borrow_mut() =
+                                Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                             return ready(Ok(()));
                         }
                         session.get_mut().apply_flow(&frm);
@@ -263,10 +257,8 @@ where
                                     ControlFrameKind::AttachSender(attach, link),
                                 );
 
-                                *self.control_fut.borrow_mut() = Some((
-                                    frame.clone(),
-                                    Box::pin(self.control_service.call(frame)),
-                                ));
+                                *self.ctl_fut.borrow_mut() =
+                                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                                 Ok(())
                             }
                             Role::Sender => {
@@ -279,10 +271,8 @@ where
                                     session,
                                     ControlFrameKind::AttachReceiver(link),
                                 );
-                                *self.control_fut.borrow_mut() = Some((
-                                    frame.clone(),
-                                    Box::pin(self.control_service.call(frame)),
-                                ));
+                                *self.ctl_fut.borrow_mut() =
+                                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                                 Ok(())
                             }
                         }
@@ -293,15 +283,15 @@ where
                                 session.clone(),
                                 ControlFrameKind::DetachSender(frm, link.clone()),
                             );
-                            *self.control_fut.borrow_mut() =
-                                Some((frame.clone(), Box::pin(self.control_service.call(frame))));
+                            *self.ctl_fut.borrow_mut() =
+                                Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                         } else if let Some(link) = session.get_receiver_link_by_handle(frm.handle) {
                             let frame = ControlFrame::new(
                                 session.clone(),
                                 ControlFrameKind::DetachReceiver(frm, link.clone()),
                             );
-                            *self.control_fut.borrow_mut() =
-                                Some((frame.clone(), Box::pin(self.control_service.call(frame))));
+                            *self.ctl_fut.borrow_mut() =
+                                Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                         } else {
                             session.get_mut().handle_frame(Frame::Detach(frm));
                         }
@@ -314,8 +304,8 @@ where
             }
             DispatcherItem::EncoderError(err) | DispatcherItem::DecoderError(err) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
-                *self.control_fut.borrow_mut() =
-                    Some((frame.clone(), Box::pin(self.control_service.call(frame))));
+                *self.ctl_fut.borrow_mut() =
+                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                 ready(Ok(()))
             }
             DispatcherItem::KeepAliveTimeout => ready(Ok(())),

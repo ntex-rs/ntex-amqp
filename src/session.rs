@@ -17,7 +17,7 @@ use ntex_amqp_codec::AmqpFrame;
 
 use crate::cell::Cell;
 use crate::connection::Connection;
-use crate::errors::AmqpProtocolError;
+use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{DeliveryPromise, HashMap};

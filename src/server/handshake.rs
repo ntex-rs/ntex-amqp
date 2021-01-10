@@ -4,8 +4,8 @@ use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex_amqp_codec::protocol::{Frame, Open};
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, SaslFrame};
 
-use super::{errors::ServerError, sasl::Sasl};
-use crate::{connection::Connection, errors::AmqpProtocolError, io::IoState, Configuration};
+use super::{error::ServerError, sasl::Sasl};
+use crate::{connection::Connection, error::AmqpProtocolError, io::IoState, Configuration};
 
 /// Connection handshake
 pub enum Handshake<Io> {

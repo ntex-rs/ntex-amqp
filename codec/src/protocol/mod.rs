@@ -7,7 +7,7 @@ use derive_more::From;
 use uuid::Uuid;
 
 use super::codec::{self, DecodeFormatted, Encode};
-use super::errors::AmqpParseError;
+use super::error::AmqpParseError;
 use super::message::Message;
 use super::types::*;
 use crate::HashMap;

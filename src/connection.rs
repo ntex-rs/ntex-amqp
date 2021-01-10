@@ -5,7 +5,7 @@ use ntex_amqp_codec::protocol::{Begin, Close, End, Error, Frame};
 use ntex_amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
 
 use crate::cell::{Cell, WeakCell};
-use crate::errors::AmqpProtocolError;
+use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner};
 use crate::{io::IoState, Configuration, HashMap};
 
@@ -189,14 +189,6 @@ impl Connection {
 }
 
 impl ConnectionInner {
-    pub(crate) fn state(&self) -> ConnectionState {
-        self.st
-    }
-
-    pub(crate) fn set_state(&mut self, st: ConnectionState) {
-        self.st = st
-    }
-
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("Set connection error: {:?}", err);
         for (_, channel) in self.sessions.iter_mut() {

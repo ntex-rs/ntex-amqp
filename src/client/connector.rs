@@ -1,7 +1,5 @@
-use std::num::{NonZeroU16, NonZeroU32};
 use std::time::Duration;
 
-use bytes::Bytes;
 use bytestring::ByteString;
 use futures::future::Either;
 use futures::{Future, FutureExt};
@@ -16,10 +14,11 @@ use ntex::connect::openssl::{OpensslConnector, SslConnector};
 #[cfg(feature = "rustls")]
 use ntex::connect::rustls::{ClientConfig, RustlsConnector};
 
-use crate::codec::protocol::Milliseconds;
-use crate::{errors::AmqpProtocolError, io::IoState, utils::Select, Configuration};
+use crate::codec::protocol::{Frame, Milliseconds, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
+use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
+use crate::{error::ProtocolIdError, io::IoState, utils::Select, Configuration, Connection};
 
-use super::{connection::Client, error::ClientError};
+use super::{connection::Client, error::ClientError, SaslAuth};
 
 /// Amqp client connector
 pub struct AmqpConnector<A, T> {
@@ -174,55 +173,181 @@ where
     }
 
     fn _connect(&self) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
-        // let fut = self.connector.call(Connect::new(self.address.clone()));
-        // let disconnect_timeout = self.disconnect_timeout;
+        let fut = self.connector.call(Connect::new(self.address.clone()));
+        let config = self.config.clone();
+        let disconnect_timeout = self.disconnect_timeout;
 
-        // async move {
-        //     let mut io = fut.await?;
-        //     let state = IoState::new(codec::Codec::new().max_inbound_size(max_packet_size));
+        async move {
+            trace!("Negotiation client protocol id: Amqp");
 
-        //     state.send(&mut io, codec::Packet::Connect(pkt)).await?;
+            let io = fut.await?;
+            let state = IoState::new(ProtocolIdCodec);
+            _connect_plain(io, state, config, disconnect_timeout).await
+        }
+    }
 
-        //     let packet = state
-        //         .next(&mut io)
-        //         .await
-        //         .map_err(|e| ClientError::from(ProtocolError::from(e)))
-        //         .and_then(|res| {
-        //             res.ok_or_else(|| {
-        //                 log::trace!("Mqtt server is disconnected during handshake");
-        //                 ClientError::Disconnected
-        //             })
-        //         })?;
+    /// Connect to amqp server
+    pub fn connect_sasl(
+        &self,
+        auth: SaslAuth,
+    ) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
+        if self.handshake_timeout > 0 {
+            Either::Left(
+                Select::new(
+                    delay_for(Duration::from_millis(self.handshake_timeout as u64)),
+                    self._connect_sasl(auth),
+                )
+                .map(|result| match result {
+                    either::Either::Left(_) => Err(ClientError::HandshakeTimeout),
+                    either::Either::Right(res) => res.map_err(From::from),
+                }),
+            )
+        } else {
+            Either::Right(self._connect_sasl(auth))
+        }
+    }
 
-        //     match packet {
-        //         codec::Packet::ConnectAck(pkt) => {
-        //             log::trace!("Connect ack response from server: {:#?}", pkt);
-        //             if pkt.reason_code == codec::ConnectAckReason::Success {
-        //                 // set max outbound (encoder) packet size
-        //                 if let Some(size) = pkt.max_packet_size {
-        //                     state.with_codec(|codec| codec.set_max_outbound_size(size));
-        //                 }
-        //                 // server keep-alive
-        //                 let keep_alive = pkt.server_keepalive_sec.unwrap_or(keep_alive);
+    fn _connect_sasl(
+        &self,
+        auth: SaslAuth,
+    ) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
+        let fut = self.connector.call(Connect::new(self.address.clone()));
+        let config = self.config.clone();
+        let disconnect_timeout = self.disconnect_timeout;
 
-        //                 Ok(Client::new(
-        //                     io,
-        //                     state,
-        //                     pkt,
-        //                     max_receive,
-        //                     keep_alive,
-        //                     disconnect_timeout,
-        //                 ))
-        //             } else {
-        //                 Err(ClientError::Ack(pkt))
-        //             }
-        //         }
-        //         p => Err(ProtocolError::Unexpected(
-        //             p.packet_type(),
-        //             "Expected CONNECT-ACK packet",
-        //         )
-        //         .into()),
-        //     }
-        // }
+        async move {
+            trace!("Negotiation client protocol id: AmqpSasl");
+
+            let mut io = fut.await?;
+            let state = IoState::new(ProtocolIdCodec);
+            state.send(&mut io, ProtocolId::AmqpSasl).await?;
+
+            let proto = state
+                .next(&mut io)
+                .await
+                .map_err(ClientError::from)
+                .and_then(|res| {
+                    res.ok_or_else(|| {
+                        log::trace!("Amqp server is disconnected during handshake");
+                        ClientError::Disconnected
+                    })
+                })?;
+            if proto != ProtocolId::AmqpSasl {
+                return Err(ClientError::from(ProtocolIdError::Unexpected {
+                    exp: ProtocolId::AmqpSasl,
+                    got: proto,
+                }));
+            }
+
+            let state = state.map_codec(|_| AmqpCodec::<SaslFrame>::new());
+
+            // processing sasl-mechanisms
+            let _ = state
+                .next(&mut io)
+                .await
+                .map_err(ClientError::from)
+                .and_then(|res| res.ok_or(ClientError::Disconnected))?;
+
+            let initial_response =
+                SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+
+            let sasl_init = SaslInit {
+                hostname: config.hostname.clone(),
+                mechanism: Symbol::from("PLAIN"),
+                initial_response: Some(initial_response),
+            };
+
+            state.send(&mut io, sasl_init.into()).await?;
+
+            // processing sasl-outcome
+            let sasl_frame = state
+                .next(&mut io)
+                .await
+                .map_err(ClientError::from)
+                .and_then(|res| res.ok_or(ClientError::Disconnected))?;
+
+            if let SaslFrame {
+                body: SaslFrameBody::SaslOutcome(outcome),
+            } = sasl_frame
+            {
+                if outcome.code() != SaslCode::Ok {
+                    return Err(ClientError::Sasl(outcome.code()));
+                }
+            } else {
+                return Err(ClientError::Disconnected);
+            }
+            let state = state.map_codec(|_| ProtocolIdCodec);
+
+            _connect_plain(io, state, config, disconnect_timeout).await
+        }
+    }
+}
+
+async fn _connect_plain<T>(
+    mut io: T,
+    state: IoState<ProtocolIdCodec>,
+    config: Configuration,
+    disconnect_timeout: u16,
+) -> Result<Client<T>, ClientError>
+where
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
+{
+    trace!("Negotiation client protocol id: Amqp");
+
+    state.send(&mut io, ProtocolId::Amqp).await?;
+
+    let proto = state
+        .next(&mut io)
+        .await
+        .map_err(ClientError::from)
+        .and_then(|res| {
+            res.ok_or_else(|| {
+                log::trace!("Amqp server is disconnected during handshake");
+                ClientError::Disconnected
+            })
+        })?;
+
+    if proto != ProtocolId::Amqp {
+        return Err(ClientError::from(ProtocolIdError::Unexpected {
+            exp: ProtocolId::Amqp,
+            got: proto,
+        }));
+    }
+
+    let state =
+        state.map_codec(|_| AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize));
+
+    let open = config.to_open();
+    trace!("Open client amqp connection: {:?}", open);
+    state
+        .send(&mut io, AmqpFrame::new(0, Frame::Open(open)))
+        .await?;
+
+    let frame = state
+        .next(&mut io)
+        .await
+        .map_err(ClientError::from)
+        .and_then(|res| {
+            res.ok_or_else(|| {
+                log::trace!("Amqp server is disconnected during handshake");
+                ClientError::Disconnected
+            })
+        })?;
+
+    if let Frame::Open(open) = frame.performative() {
+        trace!("Open confirmed: {:?}", open);
+        let remote_config = open.into();
+        let connection = Connection::new(state.clone(), &config, &remote_config);
+        let client = Client::new(
+            io,
+            state,
+            connection,
+            config.timeout_secs() as u16,
+            disconnect_timeout,
+            remote_config,
+        );
+        Ok(client)
+    } else {
+        Err(ClientError::ExpectOpenFrame(frame))
     }
 }

@@ -8,7 +8,7 @@ use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayDecode, Decode, DecodeFormatted};
-use crate::errors::AmqpParseError;
+use crate::error::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
 use crate::types::{

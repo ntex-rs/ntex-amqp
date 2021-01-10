@@ -2,22 +2,20 @@ use std::convert::TryFrom;
 
 use futures::future::Ready;
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::connect::Connector;
 use ntex::http::Uri;
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, Service};
-use ntex_amqp::server::{self, AmqpError, LinkError};
-use ntex_amqp::{sasl, Configuration};
+use ntex_amqp::{client, error::LinkError, server, types};
 
 async fn server(
-    link: server::Link<()>,
+    link: types::Link<()>,
 ) -> Result<
     Box<
         dyn Service<
-                Request = server::Transfer<()>,
-                Response = server::Outcome,
-                Error = AmqpError,
-                Future = Ready<Result<server::Outcome, AmqpError>>,
+                Request = types::Transfer<()>,
+                Response = types::Outcome,
+                Error = LinkError,
+                Future = Ready<Result<types::Outcome, LinkError>>,
             > + 'static,
     >,
     LinkError,
@@ -42,26 +40,22 @@ async fn test_simple() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::App::<()>::new()
+            server::Router::<()>::new()
                 .service("test", fn_factory_with_config(server))
                 .finish(),
         )
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let sasl_srv = sasl::connect_service(Connector::default());
-    let req = sasl::SaslConnect {
-        uri,
-        config: Configuration::default(),
-        time: None,
-        auth: sasl::SaslAuth {
+
+    let client = client::AmqpConnector::new(uri)
+        .connect_sasl(client::SaslAuth {
             authz_id: "".to_string(),
             authn_id: "user1".to_string(),
             password: "password1".to_string(),
-        },
-    };
-    let res = sasl_srv.call(req).await;
-    println!("E: {:?}", res.err());
+        })
+        .await;
+    println!("E: {:?}", client.err());
 
     Ok(())
 }
@@ -109,27 +103,22 @@ async fn test_sasl() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::App::<()>::new()
+            server::Router::<()>::new()
                 .service("test", fn_factory_with_config(server))
                 .finish(),
         )
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let sasl_srv = sasl::connect_service(Connector::default());
 
-    let req = sasl::SaslConnect {
-        uri,
-        config: Configuration::default(),
-        time: None,
-        auth: sasl::SaslAuth {
+    let client = client::AmqpConnector::new(uri)
+        .connect_sasl(client::SaslAuth {
             authz_id: "".to_string(),
             authn_id: "user1".to_string(),
             password: "password1".to_string(),
-        },
-    };
-    let res = sasl_srv.call(req).await;
-    println!("E: {:?}", res.err());
+        })
+        .await;
+    println!("E: {:?}", client.err());
 
     Ok(())
 }

@@ -5,7 +5,7 @@ use derive_more::Display;
 use either::Either;
 use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 
-use crate::errors::{AmqpError, AmqpProtocolError};
+use crate::error::AmqpProtocolError;
 
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display)]
@@ -13,23 +13,17 @@ pub enum ServerError<E> {
     #[display(fmt = "Message handler service error")]
     /// Message handler service error
     Service(E),
-    #[display(fmt = "Amqp error: {}", _0)]
-    /// Amqp error
-    Amqp(AmqpError),
     #[display(fmt = "Protocol negotiation error: {}", _0)]
     /// Amqp protocol negotiation error
     Handshake(ProtocolIdError),
     /// Amqp handshake timeout
     HandshakeTimeout,
-
     /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
-
     /// Amqp protocol error
     #[display(fmt = "Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
-
     #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
     UnexpectedSaslFrame(SaslFrame),
     #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
@@ -47,12 +41,6 @@ impl<E> Into<protocol::Error> for ServerError<E> {
             description: Some(ByteString::from(format!("{}", self))),
             info: None,
         }
-    }
-}
-
-impl<E> From<AmqpError> for ServerError<E> {
-    fn from(err: AmqpError) -> Self {
-        ServerError::Amqp(err)
     }
 }
 

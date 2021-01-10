@@ -69,7 +69,7 @@ where
     }
 }
 
-pub struct IoState<U> {
+pub(crate) struct IoState<U> {
     pub(crate) inner: Rc<RefCell<IoStateInner<U>>>,
 }
 
@@ -121,7 +121,7 @@ where
 
     #[inline]
     /// Consume the `IoState`, returning `IoState` with different codec.
-    pub fn map_codec<F, U2>(self, f: F) -> IoState<U2>
+    pub(crate) fn map_codec<F, U2>(self, f: F) -> IoState<U2>
     where
         F: Fn(&U) -> U2,
         U2: Encoder + Decoder,
@@ -147,14 +147,14 @@ where
         }
     }
 
-    pub fn with_codec<F, R>(&self, f: F) -> R
+    pub(crate) fn with_codec<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut U) -> R,
     {
         f(&mut self.inner.borrow_mut().codec)
     }
 
-    pub async fn next<T>(
+    pub(crate) async fn next<T>(
         &self,
         io: &mut T,
     ) -> Result<Option<<U as Decoder>::Item>, Either<<U as Decoder>::Error, io::Error>>
@@ -181,7 +181,7 @@ where
         }
     }
 
-    pub fn poll_next<T>(
+    pub(crate) fn poll_next<T>(
         &self,
         io: &mut T,
         cx: &mut Context<'_>,
@@ -208,7 +208,7 @@ where
         }
     }
 
-    pub async fn send<T>(
+    pub(crate) async fn send<T>(
         &self,
         io: &mut T,
         item: <U as Encoder>::Item,
