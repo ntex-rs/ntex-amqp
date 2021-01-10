@@ -1,21 +1,21 @@
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 use bytes::Bytes;
 use bytestring::ByteString;
-use futures::{SinkExt, StreamExt};
+use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex_amqp_codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
-use ntex_codec::{AsyncRead, AsyncWrite, Framed};
 
 use super::{handshake::HandshakeAmqpOpened, ServerError};
-use crate::connection::ConnectionController;
+use crate::{connection::Connection, errors::AmqpProtocolError, io::IoState, Configuration};
 
 pub struct Sasl<Io> {
-    framed: Framed<Io, ProtocolIdCodec>,
+    io: Io,
+    state: IoState<AmqpCodec<SaslFrame>>,
     mechanisms: Symbols,
-    controller: ConnectionController,
+    local_config: Rc<Configuration>,
 }
 
 impl<Io> fmt::Debug for Sasl<Io> {
@@ -28,12 +28,14 @@ impl<Io> fmt::Debug for Sasl<Io> {
 
 impl<Io> Sasl<Io> {
     pub(crate) fn new(
-        framed: Framed<Io, ProtocolIdCodec>,
-        controller: ConnectionController,
+        io: Io,
+        state: IoState<AmqpCodec<SaslFrame>>,
+        local_config: Rc<Configuration>,
     ) -> Self {
         Sasl {
-            framed,
-            controller,
+            io,
+            state,
+            local_config,
             mechanisms: Symbols::default(),
         }
     }
@@ -45,12 +47,12 @@ where
 {
     /// Returns reference to io object
     pub fn get_ref(&self) -> &Io {
-        self.framed.get_ref()
+        &self.io
     }
 
     /// Returns mutable reference to io object
     pub fn get_mut(&mut self) -> &mut Io {
-        self.framed.get_mut()
+        &mut self.io
     }
 
     /// Add supported sasl mechanism
@@ -62,30 +64,34 @@ where
     /// Initialize sasl auth procedure
     pub async fn init(self) -> Result<SaslInit<Io>, ServerError<()>> {
         let Sasl {
-            framed,
+            mut io,
+            state,
             mechanisms,
-            controller,
+            local_config,
             ..
         } = self;
 
-        let mut framed = framed.into_framed(AmqpCodec::<SaslFrame>::new());
         let frame = SaslMechanisms {
             sasl_server_mechanisms: mechanisms,
         }
         .into();
 
-        framed.send(frame).await.map_err(ServerError::from)?;
-        let frame = framed
-            .next()
+        state
+            .send(&mut io, frame)
             .await
-            .ok_or(ServerError::Disconnected)?
             .map_err(ServerError::from)?;
+        let frame = state
+            .next(&mut io)
+            .await
+            .map_err(ServerError::from)?
+            .ok_or(ServerError::Disconnected)?;
 
         match frame.body {
             SaslFrameBody::SaslInit(frame) => Ok(SaslInit {
                 frame,
-                framed,
-                controller,
+                io,
+                state,
+                local_config,
             }),
             body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
         }
@@ -95,8 +101,9 @@ where
 /// Initialization stage of sasl negotiation
 pub struct SaslInit<Io> {
     frame: protocol::SaslInit,
-    framed: Framed<Io, AmqpCodec<SaslFrame>>,
-    controller: ConnectionController,
+    io: Io,
+    state: IoState<AmqpCodec<SaslFrame>>,
+    local_config: Rc<Configuration>,
 }
 
 impl<Io> fmt::Debug for SaslInit<Io> {
@@ -128,12 +135,12 @@ where
 
     /// Returns reference to io object
     pub fn get_ref(&self) -> &Io {
-        self.framed.get_ref()
+        &self.io
     }
 
     /// Returns mutable reference to io object
     pub fn get_mut(&mut self) -> &mut Io {
-        self.framed.get_mut()
+        &mut self.io
     }
 
     /// Initiate sasl challenge
@@ -146,22 +153,27 @@ where
         self,
         challenge: Bytes,
     ) -> Result<SaslResponse<Io>, ServerError<()>> {
-        let mut framed = self.framed;
-        let controller = self.controller;
+        let mut io = self.io;
+        let state = self.state;
+        let local_config = self.local_config;
         let frame = SaslChallenge { challenge }.into();
 
-        framed.send(frame).await.map_err(ServerError::from)?;
-        let frame = framed
-            .next()
+        state
+            .send(&mut io, frame)
             .await
-            .ok_or(ServerError::Disconnected)?
             .map_err(ServerError::from)?;
+        let frame = state
+            .next(&mut io)
+            .await
+            .map_err(ServerError::from)?
+            .ok_or(ServerError::Disconnected)?;
 
         match frame.body {
             SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse {
                 frame,
-                framed,
-                controller,
+                io,
+                state,
+                local_config,
             }),
             body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
         }
@@ -169,24 +181,33 @@ where
 
     /// Sasl challenge outcome
     pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, ServerError<()>> {
-        let mut framed = self.framed;
-        let controller = self.controller;
+        let mut io = self.io;
+        let state = self.state;
+        let local_config = self.local_config;
 
         let frame = SaslOutcome {
             code,
             additional_data: None,
         }
         .into();
-        framed.send(frame).await.map_err(ServerError::from)?;
+        state
+            .send(&mut io, frame)
+            .await
+            .map_err(ServerError::from)?;
 
-        Ok(SaslSuccess { framed, controller })
+        Ok(SaslSuccess {
+            io,
+            state,
+            local_config,
+        })
     }
 }
 
 pub struct SaslResponse<Io> {
     frame: protocol::SaslResponse,
-    framed: Framed<Io, AmqpCodec<SaslFrame>>,
-    controller: ConnectionController,
+    io: Io,
+    state: IoState<AmqpCodec<SaslFrame>>,
+    local_config: Rc<Configuration>,
 }
 
 impl<Io> fmt::Debug for SaslResponse<Io> {
@@ -208,28 +229,37 @@ where
 
     /// Sasl challenge outcome
     pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, ServerError<()>> {
-        let mut framed = self.framed;
-        let controller = self.controller;
+        let mut io = self.io;
+        let state = self.state;
+        let local_config = self.local_config;
+
         let frame = SaslOutcome {
             code,
             additional_data: None,
         }
         .into();
-
-        framed.send(frame).await.map_err(ServerError::from)?;
-        framed
-            .next()
+        state
+            .send(&mut io, frame)
             .await
-            .ok_or(ServerError::Disconnected)?
             .map_err(ServerError::from)?;
+        state
+            .next(&mut io)
+            .await
+            .map_err(ServerError::from)?
+            .ok_or(ServerError::Disconnected)?;
 
-        Ok(SaslSuccess { framed, controller })
+        Ok(SaslSuccess {
+            io,
+            state,
+            local_config,
+        })
     }
 }
 
 pub struct SaslSuccess<Io> {
-    framed: Framed<Io, AmqpCodec<SaslFrame>>,
-    controller: ConnectionController,
+    io: Io,
+    state: IoState<AmqpCodec<SaslFrame>>,
+    local_config: Rc<Configuration>,
 }
 
 impl<Io> SaslSuccess<Io>
@@ -238,49 +268,60 @@ where
 {
     /// Returns reference to io object
     pub fn get_ref(&self) -> &Io {
-        self.framed.get_ref()
+        &self.io
     }
 
     /// Returns mutable reference to io object
     pub fn get_mut(&mut self) -> &mut Io {
-        self.framed.get_mut()
+        &mut self.io
     }
 
     /// Wait for connection open frame
     pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, ServerError<()>> {
-        let mut framed = self.framed.into_framed(ProtocolIdCodec);
-        let mut controller = self.controller;
+        let mut io = self.io;
+        let state = self.state.map_codec(|_| ProtocolIdCodec);
 
-        let protocol = framed
-            .next()
+        let protocol = state
+            .next(&mut io)
             .await
-            .ok_or_else(|| ServerError::Disconnected)?
-            .map_err(ServerError::from)?;
+            .map_err(ServerError::from)?
+            .ok_or(ServerError::Disconnected)?;
 
         match protocol {
             ProtocolId::Amqp => {
                 // confirm protocol
-                framed
-                    .send(ProtocolId::Amqp)
+                state
+                    .send(&mut io, ProtocolId::Amqp)
                     .await
                     .map_err(ServerError::from)?;
 
                 // Wait for connection open frame
-                let mut framed = framed.into_framed(AmqpCodec::<AmqpFrame>::new());
-                let frame = framed
-                    .next()
+                let state = state.map_codec(|_| AmqpCodec::<AmqpFrame>::new());
+                let frame = state
+                    .next(&mut io)
                     .await
-                    .ok_or(ServerError::Disconnected)?
-                    .map_err(ServerError::from)?;
+                    .map_err(ServerError::from)?
+                    .ok_or(ServerError::Disconnected)?;
 
                 let frame = frame.into_parts().1;
                 match frame {
                     protocol::Frame::Open(frame) => {
                         trace!("Got open frame: {:?}", frame);
-                        controller.set_remote((&frame).into());
-                        Ok(HandshakeAmqpOpened::new(frame, framed, controller))
+
+                        let local_config = self.local_config;
+                        let remote_config = (&frame).into();
+                        let sink = Connection::new(state.clone(), &local_config, &remote_config);
+
+                        Ok(HandshakeAmqpOpened::new(
+                            frame,
+                            io,
+                            sink,
+                            state,
+                            local_config,
+                            remote_config,
+                        ))
                     }
-                    frame => Err(ServerError::Unexpected(Box::new(frame))),
+                    frame => Err(AmqpProtocolError::Unexpected(Box::new(frame)).into()),
                 }
             }
             proto => Err(ProtocolIdError::Unexpected {

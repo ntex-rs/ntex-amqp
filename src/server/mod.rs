@@ -1,5 +1,6 @@
 mod app;
 mod control;
+mod default;
 mod dispatcher;
 mod errors;
 mod handshake;
@@ -16,8 +17,7 @@ pub use self::link::Link;
 pub use self::sasl::Sasl;
 pub use self::service::Server;
 pub use self::transfer::{Outcome, Transfer};
-pub use crate::errors::{AmqpError, LinkError};
-pub use ntex_amqp_codec::protocol::Error;
+pub use crate::errors::{AmqpError, Error, LinkError};
 
 use crate::cell::Cell;
 

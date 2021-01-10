@@ -11,9 +11,8 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::Encode;
 
 use crate::cell::Cell;
-use crate::errors::AmqpTransportError;
+use crate::errors::AmqpProtocolError;
 use crate::session::{Session, SessionInner};
-use crate::Configuration;
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
@@ -79,25 +78,19 @@ impl ReceiverLink {
     pub fn wait_disposition(
         &self,
         id: DeliveryNumber,
-    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
+    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
         self.inner.get_mut().session.wait_disposition(id)
     }
 
-    pub fn close(&self) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(None)
     }
 
     pub fn close_with_error(
         &self,
         error: Error,
-    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(Some(error))
-    }
-
-    #[inline]
-    /// Get remote connection configuration
-    pub fn remote_config(&self) -> &Configuration {
-        &self.inner.session.remote_config()
     }
 
     pub(crate) fn remote_closed(&self, error: Option<Error>) {
@@ -110,7 +103,7 @@ impl ReceiverLink {
 }
 
 impl Stream for ReceiverLink {
-    type Item = Result<Transfer, AmqpTransportError>;
+    type Item = Result<Transfer, AmqpProtocolError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let inner = self.inner.get_mut();
@@ -118,7 +111,7 @@ impl Stream for ReceiverLink {
         if inner.partial_body.is_some() && inner.queue.len() == 1 {
             if inner.closed {
                 if let Some(err) = inner.error.take() {
-                    Poll::Ready(Some(Err(AmqpTransportError::LinkDetached(Some(err)))))
+                    Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
                 } else {
                     Poll::Ready(None)
                 }
@@ -130,7 +123,7 @@ impl Stream for ReceiverLink {
             Poll::Ready(Some(Ok(tr)))
         } else if inner.closed {
             if let Some(err) = inner.error.take() {
-                Poll::Ready(Some(Err(AmqpTransportError::LinkDetached(Some(err)))))
+                Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
             } else {
                 Poll::Ready(None)
             }
@@ -190,7 +183,7 @@ impl ReceiverLinkInner {
     pub(crate) fn close(
         &mut self,
         error: Option<Error>,
-    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
         if self.closed {
             let _ = tx.send(Ok(()));
@@ -206,7 +199,7 @@ impl ReceiverLinkInner {
             match rx.await {
                 Ok(Ok(_)) => Ok(()),
                 Ok(Err(e)) => Err(e),
-                Err(_) => Err(AmqpTransportError::Disconnected),
+                Err(_) => Err(AmqpProtocolError::Disconnected),
             }
         }
     }
@@ -354,7 +347,7 @@ impl ReceiverLinkBuilder {
         self
     }
 
-    pub async fn open(self) -> Result<ReceiverLink, AmqpTransportError> {
+    pub async fn open(self) -> Result<ReceiverLink, AmqpProtocolError> {
         let cell = self.session.clone();
         let res = self
             .session
@@ -365,7 +358,7 @@ impl ReceiverLinkBuilder {
         match res {
             Ok(Ok(res)) => Ok(res),
             Ok(Err(err)) => Err(err),
-            Err(_) => Err(AmqpTransportError::Disconnected),
+            Err(_) => Err(AmqpProtocolError::Disconnected),
         }
     }
 }

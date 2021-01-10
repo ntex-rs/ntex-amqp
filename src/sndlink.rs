@@ -13,7 +13,7 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::Encode;
 
 use crate::cell::Cell;
-use crate::errors::AmqpTransportError;
+use crate::errors::AmqpProtocolError;
 use crate::session::{Session, SessionInner, TransferState};
 use crate::{Delivery, DeliveryPromise, Handle};
 
@@ -39,7 +39,7 @@ pub(crate) struct SenderLinkInner {
     delivery_count: SequenceNo,
     link_credit: u32,
     pending_transfers: VecDeque<PendingTransfer>,
-    error: Option<AmqpTransportError>,
+    error: Option<AmqpProtocolError>,
     closed: bool,
     on_close: condition::Condition,
 }
@@ -79,7 +79,7 @@ impl SenderLink {
         &mut self.inner.get_mut().session
     }
 
-    pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpTransportError>>
+    pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
     where
         T: Into<TransferBody>,
     {
@@ -90,7 +90,7 @@ impl SenderLink {
         &self,
         body: T,
         tag: Bytes,
-    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>>
+    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
     where
         T: Into<TransferBody>,
     {
@@ -101,14 +101,14 @@ impl SenderLink {
         self.inner.get_mut().settle_message(id, state)
     }
 
-    pub fn close(&self) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(None)
     }
 
     pub fn close_with_error(
         &self,
         error: Error,
-    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(Some(error))
     }
 
@@ -176,7 +176,7 @@ impl SenderLinkInner {
         &self.name
     }
 
-    pub(crate) fn detached(&mut self, err: AmqpTransportError) {
+    pub(crate) fn detached(&mut self, err: AmqpProtocolError) {
         trace!("Detaching sender link {:?} with error {:?}", self.name, err);
 
         // drop pending transfers
@@ -193,7 +193,7 @@ impl SenderLinkInner {
     pub(crate) fn close(
         &mut self,
         error: Option<Error>,
-    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         if self.closed {
             Either::Left(ok(()))
         } else {
@@ -211,7 +211,7 @@ impl SenderLinkInner {
                 match rx.await {
                     Ok(Ok(_)) => Ok(()),
                     Ok(Err(e)) => Err(e),
-                    Err(_) => Err(AmqpTransportError::Disconnected),
+                    Err(_) => Err(AmqpProtocolError::Disconnected),
                 }
             })
         }
@@ -387,7 +387,7 @@ impl SenderLinkInner {
             state: Some(state),
             batchable: false,
         };
-        self.session.inner.get_mut().post_frame(disp.into());
+        let _ = self.session.inner.get_mut().post_frame(disp.into());
     }
 }
 
@@ -440,13 +440,13 @@ impl SenderLinkBuilder {
         self
     }
 
-    pub async fn open(self) -> Result<SenderLink, AmqpTransportError> {
+    pub async fn open(self) -> Result<SenderLink, AmqpProtocolError> {
         let result = self.session.get_mut().open_sender_link(self.frame).await;
 
         match result {
             Ok(Ok(link)) => Ok(link),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(AmqpTransportError::Disconnected),
+            Err(_) => Err(AmqpProtocolError::Disconnected),
         }
     }
 }

@@ -1,28 +1,21 @@
 use std::fmt;
 
-use ntex::service::boxed::{BoxService, BoxServiceFactory};
 use ntex_amqp_codec::protocol;
 
 use crate::cell::Cell;
+use crate::errors::AmqpProtocolError;
 use crate::rcvlink::ReceiverLink;
-use crate::session::Session;
+use crate::session::SessionInner;
 use crate::sndlink::SenderLink;
 
-use super::{LinkError, State};
+pub struct ControlFrame<E>(pub(super) Cell<FrameInner<E>>);
 
-pub(crate) type ControlFrameService<St> = BoxService<ControlFrame<St>, (), LinkError>;
-pub(crate) type ControlFrameNewService<St> =
-    BoxServiceFactory<(), ControlFrame<St>, (), LinkError, ()>;
-
-pub struct ControlFrame<St>(pub(super) Cell<FrameInner<St>>);
-
-pub(super) struct FrameInner<St> {
-    pub(super) kind: ControlFrameKind,
-    pub(super) state: State<St>,
-    pub(super) session: Session,
+pub(super) struct FrameInner<E> {
+    pub(super) kind: ControlFrameKind<E>,
+    pub(super) session: Option<Cell<SessionInner>>,
 }
 
-impl<St> fmt::Debug for ControlFrame<St> {
+impl<E: fmt::Debug> fmt::Debug for ControlFrame<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlFrame")
             .field("kind", &self.0.get_ref().kind)
@@ -31,19 +24,28 @@ impl<St> fmt::Debug for ControlFrame<St> {
 }
 
 #[derive(Debug)]
-pub enum ControlFrameKind {
+pub enum ControlFrameKind<E> {
     AttachReceiver(ReceiverLink),
     AttachSender(protocol::Attach, SenderLink),
     Flow(protocol::Flow, SenderLink),
     DetachSender(protocol::Detach, SenderLink),
     DetachReceiver(protocol::Detach, ReceiverLink),
+    Error(E),
+    ProtocolError(AmqpProtocolError),
+    Closed(bool),
 }
 
-impl<St> ControlFrame<St> {
-    pub(crate) fn new(state: State<St>, session: Session, kind: ControlFrameKind) -> Self {
+impl<E> ControlFrame<E> {
+    pub(crate) fn new(session: Cell<SessionInner>, kind: ControlFrameKind<E>) -> Self {
         ControlFrame(Cell::new(FrameInner {
-            state,
-            session,
+            session: Some(session),
+            kind,
+        }))
+    }
+
+    pub(crate) fn new_kind(kind: ControlFrameKind<E>) -> Self {
+        ControlFrame(Cell::new(FrameInner {
+            session: None,
             kind,
         }))
     }
@@ -52,28 +54,12 @@ impl<St> ControlFrame<St> {
         ControlFrame(self.0.clone())
     }
 
-    #[inline]
-    pub fn state(&self) -> &St {
-        self.0.state.get_ref()
+    pub(crate) fn session(&self) -> &Cell<SessionInner> {
+        self.0.get_ref().session.as_ref().unwrap()
     }
 
     #[inline]
-    pub fn state_mut(&mut self) -> &mut St {
-        self.0.get_mut().state.get_mut()
-    }
-
-    #[inline]
-    pub fn session(&self) -> &Session {
-        &self.0.session
-    }
-
-    #[inline]
-    pub fn session_mut(&mut self) -> &mut Session {
-        &mut self.0.get_mut().session
-    }
-
-    #[inline]
-    pub fn frame(&self) -> &ControlFrameKind {
+    pub fn frame(&self) -> &ControlFrameKind<E> {
         &self.0.kind
     }
 }

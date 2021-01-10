@@ -42,7 +42,7 @@ pub fn connect_service<T, Io>(
     connector: T,
 ) -> impl Service<
     Request = SaslConnect,
-    Response = Connection<Io>,
+    Response = Connection,
     Error = either::Either<SaslConnectError, T::Error>,
 >
 where

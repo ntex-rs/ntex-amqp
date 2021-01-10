@@ -7,7 +7,7 @@ use ntex_amqp_codec::protocol::Attach;
 use crate::rcvlink::ReceiverLink;
 use crate::server::State;
 use crate::session::Session;
-use crate::{Configuration, Handle};
+use crate::Handle;
 
 pub struct Link<S> {
     pub(crate) state: State<S>,
@@ -66,12 +66,6 @@ impl<S> Link<S> {
 
     pub fn link_credit(&self, credit: u32) {
         self.link.set_link_credit(credit);
-    }
-
-    #[inline]
-    /// Get remote connection configuration
-    pub fn remote_config(&self) -> &Configuration {
-        &self.link.remote_config()
     }
 }
 

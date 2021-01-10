@@ -1,31 +1,41 @@
 use bytestring::ByteString;
 use either::Either;
+pub use ntex_amqp_codec::protocol::Error;
 use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError};
 
 #[derive(Debug, Display, Clone)]
-pub enum AmqpTransportError {
+pub enum AmqpProtocolError {
     Codec(AmqpCodecError),
     TooManyChannels,
     Disconnected,
     Timeout,
+    #[display(fmt = "Unknown session: {} {:?}", _0, _1)]
+    UnknownSession(usize, Box<protocol::Frame>),
     #[display(fmt = "Connection closed, error: {:?}", _0)]
     Closed(Option<protocol::Error>),
     #[display(fmt = "Session ended, error: {:?}", _0)]
     SessionEnded(Option<protocol::Error>),
     #[display(fmt = "Link detached, error: {:?}", _0)]
     LinkDetached(Option<protocol::Error>),
+    #[display(fmt = "Unexpected frame for opening state, got: {:?}", _0)]
+    UnexpectedOpeningState(Box<protocol::Frame>),
+    #[display(fmt = "Unexpected frame, got: {:?}", _0)]
+    Unexpected(Box<protocol::Frame>),
+    /// Unexpected io error
+    #[display(fmt = "Unexpected io error: {}", _0)]
+    Io(io::Error),
 }
 
-impl From<AmqpCodecError> for AmqpTransportError {
+impl From<AmqpCodecError> for AmqpProtocolError {
     fn from(err: AmqpCodecError) -> Self {
-        AmqpTransportError::Codec(err)
+        AmqpProtocolError::Codec(err)
     }
 }
 
 #[derive(Debug, Display, From)]
 pub enum SaslConnectError {
     ProtocolId(ProtocolIdError),
-    AmqpError(AmqpCodecError),
+    Codec(AmqpCodecError),
     #[display(fmt = "Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
     ExpectedOpenFrame,
@@ -36,7 +46,7 @@ pub enum SaslConnectError {
 impl From<Either<AmqpCodecError, std::io::Error>> for SaslConnectError {
     fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {
         match err {
-            Either::Left(err) => SaslConnectError::AmqpError(err),
+            Either::Left(err) => SaslConnectError::Codec(err),
             Either::Right(err) => SaslConnectError::Io(err),
         }
     }

@@ -5,8 +5,7 @@ use derive_more::Display;
 use either::Either;
 use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 
-use crate::errors::AmqpError;
-use ntex_amqp_codec::protocol::Error;
+use crate::errors::{AmqpError, AmqpProtocolError};
 
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display)]
@@ -14,8 +13,6 @@ pub enum ServerError<E> {
     #[display(fmt = "Message handler service error")]
     /// Message handler service error
     Service(E),
-    /// Control service init error
-    ControlServiceInit,
     #[display(fmt = "Amqp error: {}", _0)]
     /// Amqp error
     Amqp(AmqpError),
@@ -24,14 +21,15 @@ pub enum ServerError<E> {
     Handshake(ProtocolIdError),
     /// Amqp handshake timeout
     HandshakeTimeout,
+
     /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
-    #[display(fmt = "Protocol error: {}", _0)]
+
     /// Amqp protocol error
-    Protocol(Error),
-    #[display(fmt = "Expected open frame, got: {:?}", _0)]
-    Unexpected(Box<protocol::Frame>),
+    #[display(fmt = "Amqp protocol error: {:?}", _0)]
+    Protocol(AmqpProtocolError),
+
     #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
     UnexpectedSaslFrame(SaslFrame),
     #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
@@ -61,6 +59,12 @@ impl<E> From<AmqpError> for ServerError<E> {
 impl<E> From<AmqpCodecError> for ServerError<E> {
     fn from(err: AmqpCodecError) -> Self {
         ServerError::Codec(err)
+    }
+}
+
+impl<E> From<AmqpProtocolError> for ServerError<E> {
+    fn from(err: AmqpProtocolError) -> Self {
+        ServerError::Protocol(err)
     }
 }
 
