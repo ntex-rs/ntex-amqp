@@ -1,15 +1,12 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::{convert::TryFrom, future::Future, marker::PhantomData, pin::Pin};
 
 use futures::future::{err, ok, Either, Ready};
 use futures::Stream;
 use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
-use ntex_amqp_codec::protocol::{
-    DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role,
-};
 use ntex_router::{IntoPattern, Router as PatternRouter};
 
+use crate::codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use crate::error::LinkError;
 use crate::types::{Link, Outcome, Transfer};
 use crate::{cell::Cell, rcvlink::ReceiverLink, State};
@@ -34,17 +31,12 @@ impl<S: 'static> Router<S> {
         T: IntoPattern,
         F: IntoServiceFactory<U>,
         U: ServiceFactory<Config = Link<S>, Request = Transfer<S>, Response = Outcome>,
-        U::Error: Into<Error>,
-        U::InitError: Into<Error>,
+        Error: From<U::Error> + From<U::InitError>,
+        Outcome: TryFrom<U::Error, Error = Error>,
     {
         self.0.push((
             address.patterns(),
-            boxed::factory(
-                service
-                    .into_factory()
-                    .map_init_err(|e| e.into())
-                    .map_err(|e| e.into()),
-            ),
+            ResourceServiceFactory::create(service.into_factory()),
         ));
 
         self
@@ -333,4 +325,129 @@ fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
         batchable: false,
     };
     link.send_disposition(disposition);
+}
+
+struct ResourceServiceFactory<S, T> {
+    factory: T,
+    _t: PhantomData<S>,
+}
+
+impl<S, T> ResourceServiceFactory<S, T>
+where
+    S: 'static,
+    T: ServiceFactory<Config = Link<S>, Request = Transfer<S>, Response = Outcome> + 'static,
+    Error: From<T::Error> + From<T::InitError>,
+    Outcome: TryFrom<T::Error, Error = Error>,
+{
+    fn create(factory: T) -> Handle<S> {
+        boxed::factory(ResourceServiceFactory {
+            factory,
+            _t: PhantomData,
+        })
+    }
+}
+
+impl<S, T> ServiceFactory for ResourceServiceFactory<S, T>
+where
+    T: ServiceFactory<Config = Link<S>, Request = Transfer<S>, Response = Outcome>,
+    Error: From<T::Error> + From<T::InitError>,
+    Outcome: TryFrom<T::Error, Error = Error>,
+{
+    type Config = Link<S>;
+    type Request = Transfer<S>;
+    type Response = Outcome;
+    type Error = Error;
+    type InitError = Error;
+    type Service = ResourceService<S, T::Service>;
+    type Future = ResourceServiceFactoryFut<S, T>;
+
+    fn new_service(&self, cfg: Link<S>) -> Self::Future {
+        ResourceServiceFactoryFut {
+            fut: self.factory.new_service(cfg),
+            _t: PhantomData,
+        }
+    }
+}
+
+pin_project_lite::pin_project! {
+    struct ResourceServiceFactoryFut<S, T: ServiceFactory> {
+        #[pin] fut: T::Future,
+        _t: PhantomData<S>,
+    }
+}
+
+impl<S, T> Future for ResourceServiceFactoryFut<S, T>
+where
+    T: ServiceFactory<Config = Link<S>, Request = Transfer<S>, Response = Outcome>,
+    Error: From<T::Error> + From<T::InitError>,
+    Outcome: TryFrom<T::Error, Error = Error>,
+{
+    type Output = Result<ResourceService<S, T::Service>, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+
+        Poll::Ready(Ok(ResourceService {
+            service: futures::ready!(this.fut.poll(cx)).map_err(Error::from)?,
+            _t: PhantomData,
+        }))
+    }
+}
+
+struct ResourceService<S, T> {
+    service: T,
+    _t: PhantomData<S>,
+}
+
+impl<S, T> Service for ResourceService<S, T>
+where
+    T: Service<Request = Transfer<S>, Response = Outcome>,
+    Error: From<T::Error>,
+    Outcome: TryFrom<T::Error, Error = Error>,
+{
+    type Request = Transfer<S>;
+    type Response = Outcome;
+    type Error = Error;
+    type Future = ResourceServiceFut<S, T>;
+
+    #[inline]
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx).map_err(Error::from)
+    }
+
+    #[inline]
+    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
+        self.service.poll_shutdown(cx, is_error)
+    }
+
+    #[inline]
+    fn call(&self, req: Transfer<S>) -> Self::Future {
+        ResourceServiceFut {
+            fut: self.service.call(req),
+            _t: PhantomData,
+        }
+    }
+}
+
+pin_project_lite::pin_project! {
+    struct ResourceServiceFut<S, T: Service> {
+        #[pin] fut: T::Future,
+        _t: PhantomData<S>,
+    }
+}
+
+impl<S, T> Future for ResourceServiceFut<S, T>
+where
+    T: Service<Request = Transfer<S>, Response = Outcome>,
+    Error: From<T::Error>,
+    Outcome: TryFrom<T::Error, Error = Error>,
+{
+    type Output = Result<Outcome, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(match futures::ready!(self.project().fut.poll(cx)) {
+            Ok(res) => Ok(res),
+            Err(err) => Outcome::try_from(err),
+        })
+    }
 }

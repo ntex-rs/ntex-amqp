@@ -9,7 +9,7 @@ pub use crate::codec::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display)]
-pub enum AmqpServiceError<E> {
+pub enum DispatcherError<E> {
     #[display(fmt = "Message handler service error")]
     /// Message handler service error
     Service(E),
@@ -25,7 +25,7 @@ pub enum AmqpServiceError<E> {
     Io(io::Error),
 }
 
-impl<E> Into<protocol::Error> for AmqpServiceError<E> {
+impl<E> Into<protocol::Error> for DispatcherError<E> {
     fn into(self) -> protocol::Error {
         protocol::Error {
             condition: protocol::AmqpError::InternalError.into(),
@@ -35,29 +35,29 @@ impl<E> Into<protocol::Error> for AmqpServiceError<E> {
     }
 }
 
-impl<E> From<AmqpCodecError> for AmqpServiceError<E> {
+impl<E> From<AmqpCodecError> for DispatcherError<E> {
     fn from(err: AmqpCodecError) -> Self {
-        AmqpServiceError::Codec(err)
+        DispatcherError::Codec(err)
     }
 }
 
-impl<E> From<AmqpProtocolError> for AmqpServiceError<E> {
+impl<E> From<AmqpProtocolError> for DispatcherError<E> {
     fn from(err: AmqpProtocolError) -> Self {
-        AmqpServiceError::Protocol(err)
+        DispatcherError::Protocol(err)
     }
 }
 
-impl<E> From<io::Error> for AmqpServiceError<E> {
+impl<E> From<io::Error> for DispatcherError<E> {
     fn from(err: io::Error) -> Self {
-        AmqpServiceError::Io(err)
+        DispatcherError::Io(err)
     }
 }
 
-impl<E> From<Either<AmqpCodecError, io::Error>> for AmqpServiceError<E> {
+impl<E> From<Either<AmqpCodecError, io::Error>> for DispatcherError<E> {
     fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
         match err {
-            Either::Left(err) => AmqpServiceError::Codec(err),
-            Either::Right(err) => AmqpServiceError::Io(err),
+            Either::Left(err) => DispatcherError::Codec(err),
+            Either::Right(err) => DispatcherError::Io(err),
         }
     }
 }
@@ -119,83 +119,89 @@ impl From<io::Error> for AmqpProtocolError {
     }
 }
 
-// #[derive(Debug, Display)]
-// #[display(fmt = "Amqp error: {:?} {:?} ({:?})", err, description, info)]
-// pub struct AmqpError {
-//     err: Either<protocol::AmqpError, protocol::ErrorCondition>,
-//     description: Option<ByteString>,
-//     info: Option<protocol::Fields>,
-// }
+#[derive(Debug, Display)]
+#[display(fmt = "Amqp error: {:?} {:?} ({:?})", err, description, info)]
+pub struct AmqpError {
+    err: Either<protocol::AmqpError, protocol::ErrorCondition>,
+    description: Option<ByteString>,
+    info: Option<protocol::Fields>,
+}
 
-// impl AmqpError {
-//     pub fn new(err: protocol::AmqpError) -> Self {
-//         AmqpError {
-//             err: Either::Left(err),
-//             description: None,
-//             info: None,
-//         }
-//     }
+impl AmqpError {
+    pub fn new(err: protocol::AmqpError) -> Self {
+        AmqpError {
+            err: Either::Left(err),
+            description: None,
+            info: None,
+        }
+    }
 
-//     pub fn with_error(err: protocol::ErrorCondition) -> Self {
-//         AmqpError {
-//             err: Either::Right(err),
-//             description: None,
-//             info: None,
-//         }
-//     }
+    pub fn with_error(err: protocol::ErrorCondition) -> Self {
+        AmqpError {
+            err: Either::Right(err),
+            description: None,
+            info: None,
+        }
+    }
 
-//     pub fn internal_error() -> Self {
-//         Self::new(protocol::AmqpError::InternalError)
-//     }
+    pub fn internal_error() -> Self {
+        Self::new(protocol::AmqpError::InternalError)
+    }
 
-//     pub fn not_found() -> Self {
-//         Self::new(protocol::AmqpError::NotFound)
-//     }
+    pub fn not_found() -> Self {
+        Self::new(protocol::AmqpError::NotFound)
+    }
 
-//     pub fn unauthorized_access() -> Self {
-//         Self::new(protocol::AmqpError::UnauthorizedAccess)
-//     }
+    pub fn unauthorized_access() -> Self {
+        Self::new(protocol::AmqpError::UnauthorizedAccess)
+    }
 
-//     pub fn decode_error() -> Self {
-//         Self::new(protocol::AmqpError::DecodeError)
-//     }
+    pub fn decode_error() -> Self {
+        Self::new(protocol::AmqpError::DecodeError)
+    }
 
-//     pub fn invalid_field() -> Self {
-//         Self::new(protocol::AmqpError::InvalidField)
-//     }
+    pub fn invalid_field() -> Self {
+        Self::new(protocol::AmqpError::InvalidField)
+    }
 
-//     pub fn not_allowed() -> Self {
-//         Self::new(protocol::AmqpError::NotAllowed)
-//     }
+    pub fn not_allowed() -> Self {
+        Self::new(protocol::AmqpError::NotAllowed)
+    }
 
-//     pub fn not_implemented() -> Self {
-//         Self::new(protocol::AmqpError::NotImplemented)
-//     }
+    pub fn not_implemented() -> Self {
+        Self::new(protocol::AmqpError::NotImplemented)
+    }
 
-//     pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-//         self.description = Some(ByteString::from(text.as_ref()));
-//         self
-//     }
+    pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
+        self.description = Some(ByteString::from(text.as_ref()));
+        self
+    }
 
-//     pub fn set_description(mut self, text: ByteString) -> Self {
-//         self.description = Some(text);
-//         self
-//     }
-// }
+    pub fn set_description(mut self, text: ByteString) -> Self {
+        self.description = Some(text);
+        self
+    }
+}
 
-// impl Into<protocol::Error> for AmqpError {
-//     fn into(self) -> protocol::Error {
-//         let condition = match self.err {
-//             Either::Left(err) => err.into(),
-//             Either::Right(err) => err,
-//         };
-//         protocol::Error {
-//             condition,
-//             description: self.description,
-//             info: self.info,
-//         }
-//     }
-// }
+impl Into<protocol::Error> for AmqpError {
+    fn into(self) -> protocol::Error {
+        let condition = match self.err {
+            Either::Left(err) => err.into(),
+            Either::Right(err) => err,
+        };
+        protocol::Error {
+            condition,
+            description: self.description,
+            info: self.info,
+        }
+    }
+}
+
+impl From<AmqpError> for std::convert::Infallible {
+    fn from(_: AmqpError) -> Self {
+        unreachable!()
+    }
+}
 
 #[derive(Debug, Display)]
 #[display(fmt = "Link error: {:?} {:?} ({:?})", err, description, info)]
@@ -228,26 +234,6 @@ impl LinkError {
             description: None,
             info: None,
         }
-    }
-
-    //     pub fn unauthorized_access() -> Self {
-    //         Self::new(protocol::AmqpError::UnauthorizedAccess)
-    //     }
-
-    //     pub fn decode_error() -> Self {
-    //         Self::new(protocol::AmqpError::DecodeError)
-    //     }
-
-    //     pub fn invalid_field() -> Self {
-    //         Self::new(protocol::AmqpError::InvalidField)
-    //     }
-
-    //     pub fn not_allowed() -> Self {
-    //         Self::new(protocol::AmqpError::NotAllowed)
-    //     }
-
-    pub fn not_implemented() -> Self {
-        Self::new(protocol::AmqpError::NotImplemented.into())
     }
 
     pub fn text(mut self, text: &'static str) -> Self {

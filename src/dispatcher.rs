@@ -6,7 +6,7 @@ use ntex_amqp_codec::protocol::{Frame, Role};
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame};
 
 use crate::cell::Cell;
-use crate::error::{AmqpProtocolError, AmqpServiceError, LinkError};
+use crate::error::{AmqpProtocolError, DispatcherError, LinkError};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{
     connection::Connection, io::DispatcherItem, types, ControlFrame, ControlFrameKind, State,
@@ -44,7 +44,7 @@ where
         }
     }
 
-    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, AmqpServiceError<E>> {
+    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, DispatcherError<E>> {
         let mut inner = self.ctl_fut.borrow_mut();
 
         // process control frame
@@ -68,10 +68,10 @@ where
         &self,
         frame: ControlFrame<E>,
         err: Option<E2>,
-    ) -> Result<(), AmqpServiceError<E>> {
+    ) -> Result<(), DispatcherError<E>> {
         if let Some(err) = err {
             let err = LinkError::try_from(err)
-                .map_err(AmqpServiceError::Service)?
+                .map_err(DispatcherError::Service)?
                 .into();
 
             match &frame.0.get_mut().kind {
@@ -149,7 +149,7 @@ where
 {
     type Request = DispatcherItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
-    type Error = AmqpServiceError<E>;
+    type Error = DispatcherError<E>;
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -160,11 +160,11 @@ where
         let res1 = self
             .service
             .poll_ready(cx)
-            .map_err(|err| AmqpServiceError::Service(err.into()))?;
+            .map_err(|err| DispatcherError::Service(err.into()))?;
         let res2 = self
             .ctl_service
             .poll_ready(cx)
-            .map_err(|err| AmqpServiceError::Service(err.into()))?;
+            .map_err(|err| DispatcherError::Service(err.into()))?;
 
         if res0 || res1.is_pending() || res2.is_pending() {
             Poll::Pending
@@ -201,7 +201,7 @@ where
                     .0
                     .get_mut()
                     .handle_frame(frame)
-                    .map_err(AmqpServiceError::Protocol));
+                    .map_err(DispatcherError::Protocol));
                 let frame = if let Some(item) = item {
                     item
                 } else {
@@ -215,7 +215,7 @@ where
                     return ready(
                         self.sink
                             .register_remote_session(channel_id, &frm)
-                            .map_err(AmqpServiceError::Codec),
+                            .map_err(DispatcherError::Codec),
                     );
                 }
 
