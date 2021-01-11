@@ -3,7 +3,7 @@ mod connector;
 mod error;
 
 pub use self::connection::Client;
-pub use self::connector::AmqpConnector;
+pub use self::connector::Connector;
 pub use self::error::ConnectError;
 
 #[derive(Debug)]

@@ -49,12 +49,15 @@ async fn test_simple() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::AmqpConnector::new(uri)
-        .connect_sasl(client::SaslAuth {
-            authz_id: "".to_string(),
-            authn_id: "user1".to_string(),
-            password: "password1".to_string(),
-        })
+    let client = client::Connector::new()
+        .connect_sasl(
+            uri,
+            client::SaslAuth {
+                authz_id: "".to_string(),
+                authn_id: "user1".to_string(),
+                password: "password1".to_string(),
+            },
+        )
         .await;
     println!("E: {:?}", client.err());
 
@@ -110,12 +113,15 @@ async fn test_sasl() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::AmqpConnector::new(uri)
-        .connect_sasl(client::SaslAuth {
-            authz_id: "".to_string(),
-            authn_id: "user1".to_string(),
-            password: "password1".to_string(),
-        })
+    let client = client::Connector::new()
+        .connect_sasl(
+            uri,
+            client::SaslAuth {
+                authz_id: "".to_string(),
+                authn_id: "user1".to_string(),
+                password: "password1".to_string(),
+            },
+        )
         .await;
     println!("E: {:?}", client.err());
 

@@ -1,10 +1,9 @@
-use std::time::Duration;
+use std::{marker::PhantomData, time::Duration};
 
 use bytestring::ByteString;
-use futures::future::Either;
-use futures::{Future, FutureExt};
+use futures::{future::Either, Future, FutureExt};
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::connect::{self, Address, Connect, Connector};
+use ntex::connect::{self, Address, Connect};
 use ntex::rt::time::delay_for;
 use ntex::service::Service;
 
@@ -21,34 +20,30 @@ use crate::{error::ProtocolIdError, io::IoState, utils::Select, Configuration, C
 use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
-pub struct AmqpConnector<A, T> {
-    address: A,
+pub struct Connector<A, T> {
     connector: T,
     config: Configuration,
     handshake_timeout: u16,
     disconnect_timeout: u16,
+    _t: PhantomData<A>,
 }
 
-impl<A> AmqpConnector<A, ()>
-where
-    A: Address + Clone,
-{
-    #[allow(clippy::new_ret_no_self)]
+impl<A> Connector<A, ()> {
     /// Create new amqp connector
-    pub fn new(address: A) -> AmqpConnector<A, Connector<A>> {
-        AmqpConnector {
-            address,
-            connector: Connector::default(),
+    pub fn new() -> Connector<A, connect::Connector<A>> {
+        Connector {
+            connector: connect::Connector::default(),
             handshake_timeout: 0,
             disconnect_timeout: 3000,
             config: Configuration::default(),
+            _t: PhantomData,
         }
     }
 }
 
-impl<A, T> AmqpConnector<A, T>
+impl<A, T> Connector<A, T>
 where
-    A: Address + Clone,
+    A: Address,
     T: Service<Request = Connect<A>, Error = connect::ConnectError>,
     T::Response: AsyncRead + AsyncWrite + Unpin + 'static,
 {
@@ -114,53 +109,56 @@ where
     }
 
     /// Use custom connector
-    pub fn connector<U>(self, connector: U) -> AmqpConnector<A, U>
+    pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
         U: Service<Request = Connect<A>, Error = connect::ConnectError>,
         U::Response: AsyncRead + AsyncWrite + Unpin + 'static,
     {
-        AmqpConnector {
+        Connector {
             connector,
             config: self.config,
-            address: self.address,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            _t: PhantomData,
         }
     }
 
     #[cfg(feature = "openssl")]
     /// Use openssl connector
-    pub fn openssl(self, connector: SslConnector) -> AmqpConnector<A, OpensslConnector<A>> {
-        AmqpConnector {
+    pub fn openssl(self, connector: SslConnector) -> Connector<A, OpensslConnector<A>> {
+        Connector {
             config: self.config,
-            address: self.address,
             connector: OpensslConnector::new(connector),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            _t: PhantomData,
         }
     }
 
     #[cfg(feature = "rustls")]
     /// Use rustls connector
-    pub fn rustls(self, config: ClientConfig) -> AmqpConnector<A, RustlsConnector<A>> {
+    pub fn rustls(self, config: ClientConfig) -> Connector<A, RustlsConnector<A>> {
         use std::sync::Arc;
 
-        AmqpConnector {
+        Connector {
             config: self.config,
-            address: self.address,
             connector: RustlsConnector::new(Arc::new(config)),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            _t: PhantomData,
         }
     }
 
     /// Connect to amqp server
-    pub fn connect(&self) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
+    pub fn connect(
+        &self,
+        address: A,
+    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         if self.handshake_timeout > 0 {
             Either::Left(
                 Select::new(
                     delay_for(Duration::from_millis(self.handshake_timeout as u64)),
-                    self._connect(),
+                    self._connect(address),
                 )
                 .map(|result| match result {
                     either::Either::Left(_) => Err(ConnectError::HandshakeTimeout),
@@ -168,12 +166,15 @@ where
                 }),
             )
         } else {
-            Either::Right(self._connect())
+            Either::Right(self._connect(address))
         }
     }
 
-    fn _connect(&self) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
-        let fut = self.connector.call(Connect::new(self.address.clone()));
+    fn _connect(
+        &self,
+        address: A,
+    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
+        let fut = self.connector.call(Connect::new(address));
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
 
@@ -189,13 +190,14 @@ where
     /// Connect to amqp server
     pub fn connect_sasl(
         &self,
+        addr: A,
         auth: SaslAuth,
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         if self.handshake_timeout > 0 {
             Either::Left(
                 Select::new(
                     delay_for(Duration::from_millis(self.handshake_timeout as u64)),
-                    self._connect_sasl(auth),
+                    self._connect_sasl(addr, auth),
                 )
                 .map(|result| match result {
                     either::Either::Left(_) => Err(ConnectError::HandshakeTimeout),
@@ -203,15 +205,16 @@ where
                 }),
             )
         } else {
-            Either::Right(self._connect_sasl(auth))
+            Either::Right(self._connect_sasl(addr, auth))
         }
     }
 
     fn _connect_sasl(
         &self,
+        addr: A,
         auth: SaslAuth,
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
-        let fut = self.connector.call(Connect::new(self.address.clone()));
+        let fut = self.connector.call(Connect::new(addr));
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
 

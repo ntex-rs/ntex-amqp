@@ -5,8 +5,8 @@ async fn main() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "ntex=trace,ntex_amqp=trace,basic=trace");
     env_logger::init();
 
-    let driver = client::AmqpConnector::new("127.0.0.1:5671")
-        .connect()
+    let driver = client::Connector::new()
+        .connect("127.0.0.1:5671")
         .await
         .unwrap();
     let sink = driver.sink();
