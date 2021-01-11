@@ -192,6 +192,11 @@ where
     fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
         if !self.shutdown.get() {
             self.shutdown.set(true);
+            let sink = self.sink.0.get_mut();
+            if is_error {
+                sink.set_error(AmqpProtocolError::Disconnected);
+            }
+            sink.on_close.notify();
             ntex::rt::spawn(
                 self.ctl_service
                     .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)))
@@ -324,8 +329,20 @@ where
                     Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                 ready(Ok(()))
             }
-            DispatcherItem::KeepAliveTimeout => ready(Ok(())),
-            DispatcherItem::IoError(_err) => ready(Ok(())),
+            DispatcherItem::KeepAliveTimeout => {
+                self.sink
+                    .0
+                    .get_mut()
+                    .set_error(AmqpProtocolError::KeepAliveTimeout);
+                ready(Ok(()))
+            }
+            DispatcherItem::IoError(_) => {
+                self.sink
+                    .0
+                    .get_mut()
+                    .set_error(AmqpProtocolError::Disconnected);
+                ready(Ok(()))
+            }
         }
     }
 }

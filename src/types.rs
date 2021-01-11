@@ -41,10 +41,6 @@ impl<S> Link<S> {
         self.state.get_ref()
     }
 
-    pub fn state_mut(&mut self) -> &mut S {
-        self.state.get_mut()
-    }
-
     pub fn handle(&self) -> Handle {
         self.link.handle()
     }
@@ -110,10 +106,6 @@ impl<S> Transfer<S> {
 
     pub fn state(&self) -> &S {
         self.state.get_ref()
-    }
-
-    pub fn state_mut(&mut self) -> &mut S {
-        self.state.get_mut()
     }
 
     pub fn session(&self) -> &Session {

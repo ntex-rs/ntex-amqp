@@ -1,5 +1,5 @@
 use futures::{future, Future};
-use ntex::channel::oneshot;
+use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 
 use ntex_amqp_codec::protocol::{Begin, Close, End, Error, Frame};
 use ntex_amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
@@ -17,6 +17,7 @@ pub(crate) struct ConnectionInner {
     state: IoState<AmqpCodec<AmqpFrame>>,
     pub(crate) sessions: slab::Slab<ChannelState>,
     pub(crate) sessions_map: HashMap<u16, usize>,
+    pub(crate) on_close: Condition,
     pub(crate) error: Option<AmqpProtocolError>,
     channel_max: usize,
     pub(crate) max_frame_size: usize,
@@ -55,6 +56,7 @@ impl Connection {
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::default(),
             error: None,
+            on_close: Condition::new(),
             channel_max: local_config.channel_max,
             max_frame_size: remote_config.max_frame_size as usize,
         }))
@@ -78,8 +80,19 @@ impl Connection {
         inner.error.is_none()
     }
 
+    /// Get waiter for on_close event
+    pub fn on_close(&self) -> Waiter {
+        self.0.get_ref().on_close.wait()
+    }
+
+    /// Get connection error
+    pub fn get_error(&self) -> Option<AmqpProtocolError> {
+        self.0.get_ref().error.clone()
+    }
+
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
+        self.0.get_mut().state.inner.borrow_mut().close();
         future::ok(())
     }
 
@@ -92,6 +105,7 @@ impl Connection {
     where
         Error: From<E>,
     {
+        self.0.get_mut().state.inner.borrow_mut().close();
         future::ok(())
     }
 
@@ -215,7 +229,9 @@ impl ConnectionInner {
         self.sessions.clear();
         self.sessions_map.clear();
 
-        self.error = Some(err);
+        if self.error.is_none() {
+            self.error = Some(err);
+        }
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {

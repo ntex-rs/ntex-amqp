@@ -1,23 +1,22 @@
-use crate::cell::Cell;
+use std::rc::Rc;
 
 #[derive(Debug)]
-pub struct State<St>(Cell<St>);
+pub struct State<St>(Rc<St>);
 
 impl<St> State<St> {
     pub(crate) fn new(st: St) -> Self {
-        State(Cell::new(st))
-    }
-
-    pub(crate) fn clone(&self) -> Self {
-        State(self.0.clone())
+        State(Rc::new(st))
     }
 
     pub fn get_ref(&self) -> &St {
-        self.0.get_ref()
+        self.0.as_ref()
     }
+}
 
-    pub fn get_mut(&mut self) -> &mut St {
-        self.0.get_mut()
+impl<St> Clone for State<St> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
@@ -26,11 +25,5 @@ impl<St> std::ops::Deref for State<St> {
 
     fn deref(&self) -> &Self::Target {
         self.get_ref()
-    }
-}
-
-impl<St> std::ops::DerefMut for State<St> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.get_mut()
     }
 }

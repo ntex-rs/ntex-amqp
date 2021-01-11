@@ -38,8 +38,8 @@ impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
 pub enum AmqpProtocolError {
     Codec(AmqpCodecError),
     TooManyChannels,
+    KeepAliveTimeout,
     Disconnected,
-    Timeout,
     #[display(fmt = "Unknown session: {} {:?}", _0, _1)]
     UnknownSession(usize, Box<protocol::Frame>),
     #[display(fmt = "Connection closed, error: {:?}", _0)]

@@ -53,9 +53,9 @@ async fn test_simple() -> std::io::Result<()> {
         .connect_sasl(
             uri,
             client::SaslAuth {
-                authz_id: "".to_string(),
-                authn_id: "user1".to_string(),
-                password: "password1".to_string(),
+                authz_id: "".into(),
+                authn_id: "user1".into(),
+                password: "password1".into(),
             },
         )
         .await;
@@ -117,9 +117,9 @@ async fn test_sasl() -> std::io::Result<()> {
         .connect_sasl(
             uri,
             client::SaslAuth {
-                authz_id: "".to_string(),
-                authn_id: "user1".to_string(),
-                password: "password1".to_string(),
+                authz_id: "".into(),
+                authn_id: "user1".into(),
+                password: "password1".into(),
             },
         )
         .await;
