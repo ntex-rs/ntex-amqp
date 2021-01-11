@@ -61,9 +61,3 @@ impl From<()> for Error {
         }
     }
 }
-
-impl From<Error> for std::convert::Infallible {
-    fn from(_: Error) -> Self {
-        unreachable!()
-    }
-}

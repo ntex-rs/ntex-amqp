@@ -34,7 +34,7 @@ impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
     }
 }
 
-#[derive(Debug, Display)]
+#[derive(Clone, Debug, Display)]
 pub enum AmqpProtocolError {
     Codec(AmqpCodecError),
     TooManyChannels,
@@ -52,42 +52,11 @@ pub enum AmqpProtocolError {
     UnexpectedOpeningState(Box<protocol::Frame>),
     #[display(fmt = "Unexpected frame, got: {:?}", _0)]
     Unexpected(Box<protocol::Frame>),
-    /// Unexpected io error
-    #[display(fmt = "Unexpected io error: {:?}", _0)]
-    Io(Option<io::Error>),
-}
-
-impl Clone for AmqpProtocolError {
-    fn clone(&self) -> Self {
-        match self {
-            AmqpProtocolError::Codec(err) => AmqpProtocolError::Codec(err.clone()),
-            AmqpProtocolError::TooManyChannels => AmqpProtocolError::TooManyChannels,
-            AmqpProtocolError::Disconnected => AmqpProtocolError::Disconnected,
-            AmqpProtocolError::Timeout => AmqpProtocolError::Timeout,
-            AmqpProtocolError::UnknownSession(id, err) => {
-                AmqpProtocolError::UnknownSession(*id, err.clone())
-            }
-            AmqpProtocolError::Closed(err) => AmqpProtocolError::Closed(err.clone()),
-            AmqpProtocolError::SessionEnded(err) => AmqpProtocolError::SessionEnded(err.clone()),
-            AmqpProtocolError::LinkDetached(err) => AmqpProtocolError::LinkDetached(err.clone()),
-            AmqpProtocolError::UnexpectedOpeningState(err) => {
-                AmqpProtocolError::UnexpectedOpeningState(err.clone())
-            }
-            AmqpProtocolError::Unexpected(err) => AmqpProtocolError::Unexpected(err.clone()),
-            AmqpProtocolError::Io(_) => AmqpProtocolError::Io(None),
-        }
-    }
 }
 
 impl From<AmqpCodecError> for AmqpProtocolError {
     fn from(err: AmqpCodecError) -> Self {
         AmqpProtocolError::Codec(err)
-    }
-}
-
-impl From<io::Error> for AmqpProtocolError {
-    fn from(err: io::Error) -> Self {
-        AmqpProtocolError::Io(Some(err))
     }
 }
 
@@ -155,18 +124,6 @@ impl AmqpError {
     }
 }
 
-impl From<()> for AmqpError {
-    fn from(_: ()) -> AmqpError {
-        AmqpError::internal_error()
-    }
-}
-
-impl From<std::convert::Infallible> for AmqpError {
-    fn from(_: std::convert::Infallible) -> AmqpError {
-        unreachable!()
-    }
-}
-
 impl From<AmqpError> for protocol::Error {
     fn from(e: AmqpError) -> protocol::Error {
         let condition = match e.err {
@@ -178,12 +135,6 @@ impl From<AmqpError> for protocol::Error {
             description: e.description,
             info: e.info,
         }
-    }
-}
-
-impl From<AmqpError> for std::convert::Infallible {
-    fn from(_: AmqpError) -> Self {
-        unreachable!()
     }
 }
 
@@ -262,12 +213,6 @@ impl From<LinkError> for protocol::Error {
             description: e.description,
             info: e.info,
         }
-    }
-}
-
-impl From<LinkError> for std::convert::Infallible {
-    fn from(_: LinkError) -> Self {
-        unreachable!()
     }
 }
 

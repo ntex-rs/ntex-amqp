@@ -108,9 +108,3 @@ impl From<HandshakeError> for protocol::Error {
         }
     }
 }
-
-impl From<std::convert::Infallible> for HandshakeError {
-    fn from(_: std::convert::Infallible) -> Self {
-        unreachable!()
-    }
-}
