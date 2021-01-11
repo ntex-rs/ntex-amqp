@@ -1,11 +1,12 @@
-use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll};
+use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll, time};
 
 use futures::future::{ready, FutureExt, Ready};
+use ntex::rt::time::{delay_for, Delay};
 use ntex::service::Service;
-use ntex_amqp_codec::protocol::{Frame, Role};
-use ntex_amqp_codec::{AmqpCodec, AmqpFrame};
 
 use crate::cell::Cell;
+use crate::codec::protocol::{Frame, Role};
+use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{AmqpProtocolError, DispatcherError, Error};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{
@@ -20,6 +21,8 @@ pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {
     ctl_service: Ctl,
     ctl_fut: RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
     shutdown: std::cell::Cell<bool>,
+    expire: RefCell<Delay>,
+    idle_timeout: usize,
 }
 
 impl<St, Sr, Ctl> Dispatcher<St, Sr, Ctl>
@@ -31,14 +34,34 @@ where
     Ctl::Error: 'static,
     Error: From<Sr::Error> + From<Ctl::Error>,
 {
-    pub(crate) fn new(state: State<St>, sink: Connection, service: Sr, ctl_service: Ctl) -> Self {
+    pub(crate) fn new(
+        state: State<St>,
+        sink: Connection,
+        service: Sr,
+        ctl_service: Ctl,
+        idle_timeout: usize,
+    ) -> Self {
         Dispatcher {
             sink,
             state,
             service,
             ctl_service,
+            idle_timeout,
             ctl_fut: RefCell::new(None),
             shutdown: std::cell::Cell::new(false),
+            expire: RefCell::new(delay_for(time::Duration::from_secs(idle_timeout as u64))),
+        }
+    }
+
+    fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
+        let idle_timeout = self.idle_timeout;
+        if idle_timeout > 0 {
+            let mut expire = self.expire.borrow_mut();
+            if Pin::new(&mut *expire).poll(cx).is_ready() {
+                self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
+                *expire = delay_for(time::Duration::from_secs(idle_timeout as u64));
+                let _ = Pin::new(&mut *expire).poll(cx);
+            }
         }
     }
 

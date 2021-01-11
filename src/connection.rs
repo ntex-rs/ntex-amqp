@@ -68,6 +68,16 @@ impl Connection {
         inner.state.inner.borrow_mut().write_task.wake()
     }
 
+    #[inline]
+    /// Check connection state
+    pub fn is_opened(&mut self) -> bool {
+        let inner = self.0.get_mut();
+        if inner.st != ConnectionState::Normal {
+            return false;
+        }
+        inner.error.is_none()
+    }
+
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         future::ok(())
@@ -86,7 +96,7 @@ impl Connection {
     }
 
     /// Opens the session
-    pub fn open_session(&mut self) -> impl Future<Output = Result<Session, AmqpProtocolError>> {
+    pub fn open_session(&self) -> impl Future<Output = Result<Session, AmqpProtocolError>> {
         let cell = self.0.downgrade();
         let inner = self.0.clone();
 

@@ -5,9 +5,9 @@ use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::service::fn_service;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
-use crate::dispatcher::Dispatcher;
+use crate::error::{DispatcherError, LinkError};
 use crate::io::{IoDispatcher, IoState, Timer};
-use crate::{error::LinkError, Configuration, Connection, State};
+use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
 
 /// Mqtt client
 pub struct Client<Io, St = ()> {
@@ -73,20 +73,16 @@ where
     /// Run client with default control messages handler.
     ///
     /// Default handler closes connection on any control message.
-    pub async fn start_default(self) {
-        let idle_timeout = self.remote_config.timeout_remote_secs();
-        if idle_timeout > 0 {
-            ntex::rt::spawn(keepalive(self.connection.clone(), idle_timeout));
-        }
-
+    pub async fn start_default(self) -> Result<(), DispatcherError> {
         let dispatcher = Dispatcher::new(
             self.st,
             self.connection,
             fn_service(|_| err::<_, LinkError>(LinkError::force_detach())),
             fn_service(|_| ok::<_, LinkError>(())),
+            self.remote_config.timeout_remote_secs(),
         );
 
-        let _ = IoDispatcher::with(
+        IoDispatcher::with(
             self.io,
             self.state,
             dispatcher,
@@ -94,22 +90,6 @@ where
         )
         .keepalive_timeout(self.keepalive)
         .disconnect_timeout(self.disconnect_timeout)
-        .await;
+        .await
     }
-}
-
-async fn keepalive(_sink: Connection, timeout: usize) {
-    log::debug!("start mqtt client keep-alive task");
-
-    let _keepalive = Duration::from_secs(timeout as u64);
-    // loop {
-    //     let expire = RtInstant::from_std(Instant::now() + keepalive);
-    //     delay_until(expire).await;
-
-    //     if !sink.ping() {
-    //         // connection is closed
-    //         log::debug!("mqtt client connection is closed, stopping keep-alive task");
-    //         break;
-    //     }
-    // }
 }

@@ -11,7 +11,7 @@ use crate::{io::DispatcherItem, types::packet_type, AHashSet};
 
 use super::control::{ControlMessage, ControlResult};
 
-/// mqtt5 protocol dispatcher
+/// amqp protocol dispatcher
 pub(super) fn create_dispatcher<T, C, E>(
     sink: MqttSink,
     max_receive: usize,

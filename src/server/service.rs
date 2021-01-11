@@ -259,7 +259,7 @@ where
         );
 
         Box::pin(async move {
-            let (io, state, sink, st) = if timeout == 0 {
+            let (io, state, sink, st, idle_timeout) = if timeout == 0 {
                 fut.await?
             } else {
                 ntex::rt::time::timeout(time::Duration::from_millis(timeout), fut)
@@ -279,7 +279,7 @@ where
                 ServerError::ControlServiceError
             })?;
 
-            let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv);
+            let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv, idle_timeout);
 
             IoDispatcher::with(io, state, dispatcher, inner.time.clone())
                 .keepalive_timeout(keepalive as u16)
@@ -295,7 +295,16 @@ async fn handshake<Io, St, H, Ctl, Pb>(
     max_size: usize,
     handshake: Rc<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-) -> Result<(Io, IoState<AmqpCodec<AmqpFrame>>, Connection, State<St>), ServerError<H::Error>>
+) -> Result<
+    (
+        Io,
+        IoState<AmqpCodec<AmqpFrame>>,
+        Connection,
+        State<St>,
+        usize,
+    ),
+    ServerError<H::Error>,
+>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
@@ -314,7 +323,7 @@ where
             HandshakeError::Disconnected
         })?;
 
-    let (io, sink, state, st) = match protocol {
+    let (io, sink, state, st, idle_timeout) = match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             state
@@ -339,7 +348,7 @@ where
                 .await
                 .map_err(ServerError::Service)?;
 
-            let (st, mut io, sink, state) = ack.into_inner();
+            let (st, mut io, sink, state, idle_timeout) = ack.into_inner();
             state.with_codec(|codec| codec.set_max_size(max_size));
 
             // confirm Open
@@ -351,7 +360,7 @@ where
 
             let st = State::new(st);
 
-            (io, sink, state, st)
+            (io, sink, state, st, idle_timeout)
         }
         ProtocolId::AmqpTls => {
             return Err(HandshakeError::from(ProtocolIdError::Unexpected {
@@ -362,5 +371,5 @@ where
         }
     };
 
-    Ok((io, state, sink, st))
+    Ok((io, state, sink, st, idle_timeout))
 }

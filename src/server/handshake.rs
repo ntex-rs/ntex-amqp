@@ -156,6 +156,7 @@ impl<Io> HandshakeAmqpOpened<Io> {
             io: self.io,
             sink: self.sink,
             state: self.state,
+            idle_timeout: self.remote_config.timeout_remote_secs(),
         }
     }
 }
@@ -166,10 +167,11 @@ pub struct HandshakeAck<Io, St> {
     io: Io,
     sink: Connection,
     state: IoState<AmqpCodec<AmqpFrame>>,
+    idle_timeout: usize,
 }
 
 impl<Io, St> HandshakeAck<Io, St> {
-    pub(crate) fn into_inner(self) -> (St, Io, Connection, IoState<AmqpCodec<AmqpFrame>>) {
-        (self.st, self.io, self.sink, self.state)
+    pub(crate) fn into_inner(self) -> (St, Io, Connection, IoState<AmqpCodec<AmqpFrame>>, usize) {
+        (self.st, self.io, self.sink, self.state, self.idle_timeout)
     }
 }
