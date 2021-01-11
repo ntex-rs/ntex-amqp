@@ -74,7 +74,7 @@ where
     ///
     /// Default handler closes connection on any control message.
     pub async fn start_default(self) {
-        let idle_timeout = self.remote_config.timeout_secs();
+        let idle_timeout = self.remote_config.timeout_remote_secs();
         if idle_timeout > 0 {
             ntex::rt::spawn(keepalive(self.connection.clone(), idle_timeout));
         }

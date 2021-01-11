@@ -18,7 +18,7 @@ use crate::codec::protocol::{Frame, Milliseconds, ProtocolId, SaslCode, SaslFram
 use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 use crate::{error::ProtocolIdError, io::IoState, utils::Select, Configuration, Connection};
 
-use super::{connection::Client, error::ClientError, SaslAuth};
+use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
 pub struct AmqpConnector<A, T> {
@@ -155,7 +155,7 @@ where
     }
 
     /// Connect to amqp server
-    pub fn connect(&self) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
+    pub fn connect(&self) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         if self.handshake_timeout > 0 {
             Either::Left(
                 Select::new(
@@ -163,7 +163,7 @@ where
                     self._connect(),
                 )
                 .map(|result| match result {
-                    either::Either::Left(_) => Err(ClientError::HandshakeTimeout),
+                    either::Either::Left(_) => Err(ConnectError::HandshakeTimeout),
                     either::Either::Right(res) => res.map_err(From::from),
                 }),
             )
@@ -172,7 +172,7 @@ where
         }
     }
 
-    fn _connect(&self) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
+    fn _connect(&self) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         let fut = self.connector.call(Connect::new(self.address.clone()));
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
@@ -190,7 +190,7 @@ where
     pub fn connect_sasl(
         &self,
         auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
+    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         if self.handshake_timeout > 0 {
             Either::Left(
                 Select::new(
@@ -198,7 +198,7 @@ where
                     self._connect_sasl(auth),
                 )
                 .map(|result| match result {
-                    either::Either::Left(_) => Err(ClientError::HandshakeTimeout),
+                    either::Either::Left(_) => Err(ConnectError::HandshakeTimeout),
                     either::Either::Right(res) => res.map_err(From::from),
                 }),
             )
@@ -210,7 +210,7 @@ where
     fn _connect_sasl(
         &self,
         auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client<T::Response>, ClientError>> {
+    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         let fut = self.connector.call(Connect::new(self.address.clone()));
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
@@ -225,15 +225,15 @@ where
             let proto = state
                 .next(&mut io)
                 .await
-                .map_err(ClientError::from)
+                .map_err(ConnectError::from)
                 .and_then(|res| {
                     res.ok_or_else(|| {
                         log::trace!("Amqp server is disconnected during handshake");
-                        ClientError::Disconnected
+                        ConnectError::Disconnected
                     })
                 })?;
             if proto != ProtocolId::AmqpSasl {
-                return Err(ClientError::from(ProtocolIdError::Unexpected {
+                return Err(ConnectError::from(ProtocolIdError::Unexpected {
                     exp: ProtocolId::AmqpSasl,
                     got: proto,
                 }));
@@ -245,8 +245,8 @@ where
             let _ = state
                 .next(&mut io)
                 .await
-                .map_err(ClientError::from)
-                .and_then(|res| res.ok_or(ClientError::Disconnected))?;
+                .map_err(ConnectError::from)
+                .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
 
             let initial_response =
                 SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
@@ -263,18 +263,18 @@ where
             let sasl_frame = state
                 .next(&mut io)
                 .await
-                .map_err(ClientError::from)
-                .and_then(|res| res.ok_or(ClientError::Disconnected))?;
+                .map_err(ConnectError::from)
+                .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
 
             if let SaslFrame {
                 body: SaslFrameBody::SaslOutcome(outcome),
             } = sasl_frame
             {
                 if outcome.code() != SaslCode::Ok {
-                    return Err(ClientError::Sasl(outcome.code()));
+                    return Err(ConnectError::Sasl(outcome.code()));
                 }
             } else {
-                return Err(ClientError::Disconnected);
+                return Err(ConnectError::Disconnected);
             }
             let state = state.map_codec(|_| ProtocolIdCodec);
 
@@ -288,7 +288,7 @@ async fn _connect_plain<T>(
     state: IoState<ProtocolIdCodec>,
     config: Configuration,
     disconnect_timeout: u16,
-) -> Result<Client<T>, ClientError>
+) -> Result<Client<T>, ConnectError>
 where
     T: AsyncRead + AsyncWrite + Unpin + 'static,
 {
@@ -299,16 +299,16 @@ where
     let proto = state
         .next(&mut io)
         .await
-        .map_err(ClientError::from)
+        .map_err(ConnectError::from)
         .and_then(|res| {
             res.ok_or_else(|| {
                 log::trace!("Amqp server is disconnected during handshake");
-                ClientError::Disconnected
+                ConnectError::Disconnected
             })
         })?;
 
     if proto != ProtocolId::Amqp {
-        return Err(ClientError::from(ProtocolIdError::Unexpected {
+        return Err(ConnectError::from(ProtocolIdError::Unexpected {
             exp: ProtocolId::Amqp,
             got: proto,
         }));
@@ -326,11 +326,11 @@ where
     let frame = state
         .next(&mut io)
         .await
-        .map_err(ClientError::from)
+        .map_err(ConnectError::from)
         .and_then(|res| {
             res.ok_or_else(|| {
                 log::trace!("Amqp server is disconnected during handshake");
-                ClientError::Disconnected
+                ConnectError::Disconnected
             })
         })?;
 
@@ -348,6 +348,6 @@ where
         );
         Ok(client)
     } else {
-        Err(ClientError::ExpectOpenFrame(frame))
+        Err(ConnectError::ExpectOpenFrame(frame))
     }
 }

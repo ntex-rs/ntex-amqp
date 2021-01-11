@@ -4,8 +4,7 @@ mod error;
 
 pub use self::connection::Client;
 pub use self::connector::AmqpConnector;
-pub use self::error::ClientError;
-pub use crate::router::Router;
+pub use self::error::ConnectError;
 
 #[derive(Debug)]
 /// Sasl authentication parameters
