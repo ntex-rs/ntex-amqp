@@ -1,18 +1,18 @@
-use std::io;
+use std::{convert::TryFrom, io};
 
 use bytestring::ByteString;
 use either::Either;
 
-use crate::codec::protocol;
 pub use crate::codec::protocol::Error;
 pub use crate::codec::{AmqpCodecError, AmqpParseError, ProtocolIdError};
+use crate::{codec::protocol, types::Outcome};
 
 /// Errors which can occur when attempting to handle amqp connection.
-#[derive(Debug, Display)]
-pub enum DispatcherError<E> {
-    #[display(fmt = "Message handler service error")]
-    /// Message handler service error
-    Service(E),
+#[derive(Debug, Display, From)]
+pub enum DispatcherError {
+    #[display(fmt = "Service error")]
+    /// Service error
+    Service,
     /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
@@ -25,35 +25,7 @@ pub enum DispatcherError<E> {
     Io(io::Error),
 }
 
-impl<E> Into<protocol::Error> for DispatcherError<E> {
-    fn into(self) -> protocol::Error {
-        protocol::Error {
-            condition: protocol::AmqpError::InternalError.into(),
-            description: Some(ByteString::from(format!("{}", self))),
-            info: None,
-        }
-    }
-}
-
-impl<E> From<AmqpCodecError> for DispatcherError<E> {
-    fn from(err: AmqpCodecError) -> Self {
-        DispatcherError::Codec(err)
-    }
-}
-
-impl<E> From<AmqpProtocolError> for DispatcherError<E> {
-    fn from(err: AmqpProtocolError) -> Self {
-        DispatcherError::Protocol(err)
-    }
-}
-
-impl<E> From<io::Error> for DispatcherError<E> {
-    fn from(err: io::Error) -> Self {
-        DispatcherError::Io(err)
-    }
-}
-
-impl<E> From<Either<AmqpCodecError, io::Error>> for DispatcherError<E> {
+impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
     fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
         match err {
             Either::Left(err) => DispatcherError::Codec(err),
@@ -183,16 +155,28 @@ impl AmqpError {
     }
 }
 
-impl Into<protocol::Error> for AmqpError {
-    fn into(self) -> protocol::Error {
-        let condition = match self.err {
+impl From<()> for AmqpError {
+    fn from(_: ()) -> AmqpError {
+        AmqpError::internal_error()
+    }
+}
+
+impl From<std::convert::Infallible> for AmqpError {
+    fn from(_: std::convert::Infallible) -> AmqpError {
+        unreachable!()
+    }
+}
+
+impl From<AmqpError> for protocol::Error {
+    fn from(e: AmqpError) -> protocol::Error {
+        let condition = match e.err {
             Either::Left(err) => err.into(),
             Either::Right(err) => err,
         };
         protocol::Error {
             condition,
-            description: self.description,
-            info: self.info,
+            description: e.description,
+            info: e.info,
         }
     }
 }
@@ -200,6 +184,14 @@ impl Into<protocol::Error> for AmqpError {
 impl From<AmqpError> for std::convert::Infallible {
     fn from(_: AmqpError) -> Self {
         unreachable!()
+    }
+}
+
+impl TryFrom<AmqpError> for Outcome {
+    type Error = Error;
+
+    fn try_from(err: AmqpError) -> Result<Self, Error> {
+        Ok(Outcome::Error(err.into()))
     }
 }
 
@@ -258,17 +250,17 @@ impl LinkError {
     }
 }
 
-impl Into<protocol::Error> for LinkError {
-    fn into(self) -> protocol::Error {
-        let condition = match self.err {
+impl From<LinkError> for protocol::Error {
+    fn from(e: LinkError) -> protocol::Error {
+        let condition = match e.err {
             Either::Left(err) => err.into(),
             Either::Right(err) => err,
         };
 
         protocol::Error {
             condition,
-            description: self.description,
-            info: self.info,
+            description: e.description,
+            info: e.info,
         }
     }
 }
@@ -276,5 +268,13 @@ impl Into<protocol::Error> for LinkError {
 impl From<LinkError> for std::convert::Infallible {
     fn from(_: LinkError) -> Self {
         unreachable!()
+    }
+}
+
+impl TryFrom<LinkError> for Outcome {
+    type Error = Error;
+
+    fn try_from(err: LinkError) -> Result<Self, Error> {
+        Ok(Outcome::Error(err.into()))
     }
 }

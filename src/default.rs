@@ -49,7 +49,7 @@ impl<S, E> Service for DefaultPublishService<S, E> {
 }
 
 /// Default control service
-pub(crate) struct DefaultControlService<S, E>(PhantomData<(S, E)>);
+pub struct DefaultControlService<S, E>(PhantomData<(S, E)>);
 
 impl<S, E> Default for DefaultControlService<S, E> {
     fn default() -> Self {
@@ -59,7 +59,7 @@ impl<S, E> Default for DefaultControlService<S, E> {
 
 impl<S, E> ServiceFactory for DefaultControlService<S, E> {
     type Config = State<S>;
-    type Request = ControlFrame<E>;
+    type Request = ControlFrame;
     type Response = ();
     type Error = E;
     type InitError = E;
@@ -72,7 +72,7 @@ impl<S, E> ServiceFactory for DefaultControlService<S, E> {
 }
 
 impl<S, E> Service for DefaultControlService<S, E> {
-    type Request = ControlFrame<E>;
+    type Request = ControlFrame;
     type Response = ();
     type Error = E;
     type Future = Ready<Result<Self::Response, Self::Error>>;
@@ -84,11 +84,6 @@ impl<S, E> Service for DefaultControlService<S, E> {
 
     #[inline]
     fn call(&self, _pkt: Self::Request) -> Self::Future {
-        log::warn!("AMQP Control service is not configured");
-
-        // ok(pkt.disconnect_with(super::codec::Disconnect::new(
-        //   super::codec::DisconnectReasonCode::UnspecifiedError,
-        // )))
         ok(())
     }
 }

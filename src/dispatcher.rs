@@ -1,4 +1,4 @@
-use std::{cell::RefCell, convert::TryFrom, future::Future, pin::Pin, task::Context, task::Poll};
+use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll};
 
 use futures::future::{ready, FutureExt, Ready};
 use ntex::service::Service;
@@ -6,31 +6,30 @@ use ntex_amqp_codec::protocol::{Frame, Role};
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame};
 
 use crate::cell::Cell;
-use crate::error::{AmqpProtocolError, DispatcherError, LinkError};
+use crate::error::{AmqpProtocolError, DispatcherError, Error};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{
     connection::Connection, io::DispatcherItem, types, ControlFrame, ControlFrameKind, State,
 };
 
 /// Amqp server dispatcher service.
-pub(crate) struct Dispatcher<St, Sr, Ctl: Service, E, E2> {
+pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {
     state: State<St>,
     sink: Connection,
     service: Sr,
     ctl_service: Ctl,
-    ctl_fut: RefCell<Option<(ControlFrame<E>, Pin<Box<Ctl::Future>>)>>,
+    ctl_fut: RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
     shutdown: std::cell::Cell<bool>,
-    _t: std::marker::PhantomData<E2>,
 }
 
-impl<St, Sr, Ctl, E, E2> Dispatcher<St, Sr, Ctl, E, E2>
+impl<St, Sr, Ctl> Dispatcher<St, Sr, Ctl>
 where
-    E: From<E2>,
-    E2: 'static,
-    Sr: Service<Request = types::Link<St>, Response = (), Error = E2>,
+    Sr: Service<Request = types::Link<St>, Response = ()>,
+    Sr::Error: 'static,
     Sr::Future: 'static,
-    Ctl: Service<Request = ControlFrame<E>, Response = (), Error = E2>,
-    LinkError: TryFrom<E2, Error = E>,
+    Ctl: Service<Request = ControlFrame, Response = ()>,
+    Ctl::Error: 'static,
+    Error: From<Sr::Error> + From<Ctl::Error>,
 {
     pub(crate) fn new(state: State<St>, sink: Connection, service: Sr, ctl_service: Ctl) -> Self {
         Dispatcher {
@@ -40,11 +39,10 @@ where
             ctl_service,
             ctl_fut: RefCell::new(None),
             shutdown: std::cell::Cell::new(false),
-            _t: std::marker::PhantomData,
         }
     }
 
-    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, DispatcherError<E>> {
+    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, DispatcherError> {
         let mut inner = self.ctl_fut.borrow_mut();
 
         // process control frame
@@ -57,7 +55,7 @@ where
                 Poll::Pending => return Ok(false),
                 Poll::Ready(Err(e)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(frame, Some(e))?
+                    self.handle_control_frame(frame, Some(e.into()))?
                 }
             }
         }
@@ -66,14 +64,10 @@ where
 
     fn handle_control_frame(
         &self,
-        frame: ControlFrame<E>,
-        err: Option<E2>,
-    ) -> Result<(), DispatcherError<E>> {
+        frame: ControlFrame,
+        err: Option<Error>,
+    ) -> Result<(), DispatcherError> {
         if let Some(err) = err {
-            let err = LinkError::try_from(err)
-                .map_err(DispatcherError::Service)?
-                .into();
-
             match &frame.0.get_mut().kind {
                 ControlFrameKind::AttachReceiver(ref link) => {
                     let _ = link.close_with_error(err);
@@ -106,10 +100,7 @@ where
                             .then(|res| async move {
                                 match res {
                                     Ok(_) => link.close().await,
-                                    Err(err) => match LinkError::try_from(err) {
-                                        Ok(err) => link.close_with_error(err.into()).await,
-                                        Err(_err) => link.close().await,
-                                    },
+                                    Err(err) => link.close_with_error(Error::from(err)).await,
                                 }
                             }),
                     );
@@ -137,19 +128,19 @@ where
     }
 }
 
-impl<St, Sr, Ctl, E, E2> Service for Dispatcher<St, Sr, Ctl, E, E2>
+impl<St, Sr, Ctl> Service for Dispatcher<St, Sr, Ctl>
 where
-    E: From<E2>,
-    E2: 'static,
-    Sr: Service<Request = types::Link<St>, Response = (), Error = E2>,
+    Sr: Service<Request = types::Link<St>, Response = ()>,
+    Sr::Error: fmt::Debug + 'static,
     Sr::Future: 'static,
-    Ctl: Service<Request = ControlFrame<E>, Response = (), Error = E2>,
+    Ctl: Service<Request = ControlFrame, Response = ()>,
+    Ctl::Error: fmt::Debug + 'static,
     Ctl::Future: 'static,
-    LinkError: TryFrom<E2, Error = E>,
+    Error: From<Sr::Error> + From<Ctl::Error>,
 {
     type Request = DispatcherItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
-    type Error = DispatcherError<E>;
+    type Error = DispatcherError;
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -157,14 +148,16 @@ where
         let res0 = !self.handle_control_fut(cx)?;
 
         // check readiness
-        let res1 = self
-            .service
-            .poll_ready(cx)
-            .map_err(|err| DispatcherError::Service(err.into()))?;
-        let res2 = self
-            .ctl_service
-            .poll_ready(cx)
-            .map_err(|err| DispatcherError::Service(err.into()))?;
+        let res1 = self.service.poll_ready(cx).map_err(|err| {
+            error!("Error during publish service readiness check: {:?}", err);
+            let _ = self.sink.close_with_error(err);
+            DispatcherError::Service
+        })?;
+        let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
+            error!("Error during control service readiness check: {:?}", err);
+            let _ = self.sink.close_with_error(err);
+            DispatcherError::Service
+        })?;
 
         if res0 || res1.is_pending() || res2.is_pending() {
             Poll::Pending

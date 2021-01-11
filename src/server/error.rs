@@ -1,10 +1,8 @@
-use std::io;
-
 use bytestring::ByteString;
 use derive_more::Display;
 use either::Either;
-use ntex_amqp_codec::{protocol, AmqpCodecError, ProtocolIdError, SaslFrame};
 
+use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame};
 use crate::error::AmqpProtocolError;
 
 /// Errors which can occur when attempting to handle amqp connection.
@@ -13,35 +11,23 @@ pub enum ServerError<E> {
     #[display(fmt = "Message handler service error")]
     /// Message handler service error
     Service(E),
-    #[display(fmt = "Protocol negotiation error: {}", _0)]
-    /// Amqp protocol negotiation error
-    Handshake(ProtocolIdError),
-    /// Amqp handshake timeout
-    HandshakeTimeout,
+    #[display(fmt = "Handshake error: {}", _0)]
+    /// Amqp handshake error
+    Handshake(HandshakeError),
     /// Amqp codec error
     #[display(fmt = "Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
     /// Amqp protocol error
     #[display(fmt = "Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
-    #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
-    UnexpectedSaslFrame(SaslFrame),
-    #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
-    UnexpectedSaslBodyFrame(protocol::SaslFrameBody),
+    /// Control service init error
+    #[display(fmt = "Control service init error")]
+    ControlServiceError,
+    /// Publish service init error
+    #[display(fmt = "Publish service init error")]
+    PublishServiceError,
     /// Peer disconnect
     Disconnected,
-    /// Unexpected io error
-    Io(io::Error),
-}
-
-impl<E> Into<protocol::Error> for ServerError<E> {
-    fn into(self) -> protocol::Error {
-        protocol::Error {
-            condition: protocol::AmqpError::InternalError.into(),
-            description: Some(ByteString::from(format!("{}", self))),
-            info: None,
-        }
-    }
 }
 
 impl<E> From<AmqpCodecError> for ServerError<E> {
@@ -56,38 +42,75 @@ impl<E> From<AmqpProtocolError> for ServerError<E> {
     }
 }
 
-impl<E> From<ProtocolIdError> for ServerError<E> {
-    fn from(err: ProtocolIdError) -> Self {
+impl<E> From<HandshakeError> for ServerError<E> {
+    fn from(err: HandshakeError) -> Self {
         ServerError::Handshake(err)
     }
 }
 
-impl<E> From<SaslFrame> for ServerError<E> {
-    fn from(err: SaslFrame) -> Self {
-        ServerError::UnexpectedSaslFrame(err)
-    }
+/// Errors which can occur when attempting to handle amqp handshake.
+#[derive(Debug, Display, From)]
+pub enum HandshakeError {
+    /// Amqp codec error
+    #[display(fmt = "Amqp codec error: {:?}", _0)]
+    Codec(AmqpCodecError),
+    /// Handshake timeout
+    #[display(fmt = "Handshake timeout")]
+    Timeout,
+    /// Protocol negotiation error
+    #[display(fmt = "Peer disconnected")]
+    ProtocolNegotiation(ProtocolIdError),
+    #[from(ignore)]
+    /// Expected open frame
+    #[display(fmt = "Expect open frame, got: {:?}", _0)]
+    ExpectOpenFrame(Box<AmqpFrame>),
+    #[display(fmt = "Unexpected frame, got: {:?}", _0)]
+    Unexpected(Box<protocol::Frame>),
+    #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
+    UnexpectedSaslFrame(SaslFrame),
+    #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
+    UnexpectedSaslBodyFrame(protocol::SaslFrameBody),
+    /// Sasl error code
+    #[display(fmt = "Sasl error code: {:?}", _0)]
+    Sasl(protocol::SaslCode),
+    #[display(fmt = "Peer disconnected")]
+    Disconnected,
+    /// Unexpected io error
+    Io(std::io::Error),
 }
 
-impl<E> From<io::Error> for ServerError<E> {
-    fn from(err: io::Error) -> Self {
-        ServerError::Io(err)
-    }
-}
+impl std::error::Error for HandshakeError {}
 
-impl<E> From<Either<AmqpCodecError, io::Error>> for ServerError<E> {
-    fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
+impl From<Either<AmqpCodecError, std::io::Error>> for HandshakeError {
+    fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {
         match err {
-            Either::Left(err) => ServerError::Codec(err),
-            Either::Right(err) => ServerError::Io(err),
+            Either::Left(err) => HandshakeError::Codec(err),
+            Either::Right(err) => HandshakeError::Io(err),
         }
     }
 }
 
-impl<E> From<Either<ProtocolIdError, io::Error>> for ServerError<E> {
-    fn from(err: Either<ProtocolIdError, io::Error>) -> Self {
+impl From<Either<ProtocolIdError, std::io::Error>> for HandshakeError {
+    fn from(err: Either<ProtocolIdError, std::io::Error>) -> Self {
         match err {
-            Either::Left(err) => ServerError::Handshake(err),
-            Either::Right(err) => ServerError::Io(err),
+            Either::Left(err) => HandshakeError::ProtocolNegotiation(err),
+            Either::Right(err) => HandshakeError::Io(err),
         }
+    }
+}
+
+impl From<HandshakeError> for protocol::Error {
+    fn from(err: HandshakeError) -> protocol::Error {
+        protocol::Error {
+            condition: protocol::AmqpError::InternalError.into(),
+            description: Some(ByteString::from(format!("{}", err))),
+            info: None,
+        }
+    }
+}
+
+impl From<std::convert::Infallible> for HandshakeError {
+    fn from(_: std::convert::Infallible) -> Self {
+        unreachable!()
     }
 }

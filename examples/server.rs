@@ -1,7 +1,7 @@
 use futures::future::Ready;
 
 use ntex::service::{fn_factory_with_config, Service};
-use ntex_amqp::server::{self, AmqpError, LinkError};
+use ntex_amqp::{error::AmqpError, error::LinkError, server};
 
 async fn server(
     link: server::Link<()>,
@@ -26,8 +26,8 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     ntex::server::Server::build()
-        .bind("amqp", "127.0.0.1:1883", || {
-            server::Server::new(|con: server::Handshake<_>| async move {
+        .bind("amqp", "127.0.0.1:5671", || {
+            let srv = server::Server::new(|con: server::Handshake<_>| async move {
                 println!("===============");
                 match con {
                     server::Handshake::Amqp(con) => {
@@ -36,9 +36,9 @@ async fn main() -> std::io::Result<()> {
                     }
                     server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
                 }
-            })
-            .finish(
-                server::App::<()>::new()
+            });
+            srv.finish(
+                server::Router::new()
                     .service("test", fn_factory_with_config(server))
                     .finish(),
             )

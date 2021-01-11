@@ -69,16 +69,19 @@ impl Connection {
     }
 
     /// Gracefully close connection
-    pub fn close(&mut self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         future::ok(())
     }
 
     // TODO: implement
     /// Close connection with error
-    pub fn close_with_error(
-        &mut self,
-        _err: Error,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
+    pub fn close_with_error<E>(
+        &self,
+        _err: E,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>>
+    where
+        Error: From<E>,
+    {
         future::ok(())
     }
 

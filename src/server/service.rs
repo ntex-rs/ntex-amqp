@@ -1,6 +1,4 @@
-use std::{
-    convert::TryFrom, fmt, marker::PhantomData, pin::Pin, rc::Rc, task::Context, task::Poll, time,
-};
+use std::{fmt, marker::PhantomData, pin::Pin, rc::Rc, task::Context, task::Poll, time};
 
 use futures::Future;
 use ntex::codec::{AsyncRead, AsyncWrite};
@@ -15,7 +13,7 @@ use crate::types::Link;
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
 
 use super::handshake::{Handshake, HandshakeAck};
-use super::{LinkError, ServerError};
+use super::{Error, HandshakeError, ServerError};
 
 /// Server dispatcher factory
 pub struct Server<Io, St, H: ServiceFactory, Ctl: ServiceFactory> {
@@ -28,8 +26,7 @@ pub struct Server<Io, St, H: ServiceFactory, Ctl: ServiceFactory> {
     _t: PhantomData<(Io, St)>,
 }
 
-pub(super) struct ServerInner<St, H: ServiceFactory, Ctl, Pb> {
-    handshake: H,
+pub(super) struct ServerInner<St, Ctl, Pb> {
     control: Ctl,
     publish: Pb,
     config: Rc<Configuration>,
@@ -46,6 +43,7 @@ where
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
     H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
         + 'static,
+    H::Error: fmt::Debug,
 {
     /// Create server factory and provide handshake service
     pub fn new<F>(handshake: F) -> Self
@@ -70,8 +68,11 @@ where
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
     H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
         + 'static,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame<H::Error>, Response = ()>
-        + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
+    Error: From<Ctl::Error>,
 {
     /// Provide connection configuration
     pub fn config(mut self, config: Configuration) -> Self {
@@ -113,9 +114,10 @@ where
     pub fn control<F, S>(self, service: F) -> Server<Io, St, H, S>
     where
         F: IntoServiceFactory<S>,
-        S: ServiceFactory<Config = State<St>, Request = ControlFrame<H::Error>, Response = ()>
-            + 'static,
-        H::Error: From<S::InitError>,
+        S: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+        S::Error: fmt::Debug,
+        S::InitError: fmt::Debug,
+        Error: From<S::Error>,
     {
         Server {
             config: self.config,
@@ -132,17 +134,23 @@ where
     pub fn finish<F, Pb>(
         self,
         service: F,
-    ) -> impl ServiceFactory<Config = (), Request = Io, Response = (), Error = ServerError<H::Error>>
+    ) -> impl ServiceFactory<
+        Config = (),
+        Request = Io,
+        Response = (),
+        Error = ServerError<H::Error>,
+        InitError = H::InitError,
+    >
     where
         F: IntoServiceFactory<Pb>,
-        H::Error: From<Ctl::InitError> + From<Pb::Error> + From<Pb::InitError> + fmt::Debug,
         Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
-        Pb::Error: fmt::Display + From<Ctl::Error>,
-        LinkError: TryFrom<Pb::Error, Error = H::Error>,
+        Pb::Error: fmt::Debug,
+        Pb::InitError: fmt::Debug,
+        Error: From<Pb::Error> + From<Ctl::Error>,
     {
         ServerImpl {
+            handshake: self.handshake,
             inner: Rc::new(ServerInner {
-                handshake: self.handshake,
                 handshake_timeout: self.handshake_timeout,
                 config: self.config,
                 publish: service.into_factory(),
@@ -157,8 +165,9 @@ where
     }
 }
 
-struct ServerImpl<Io, St, H: ServiceFactory, Ctl, Pb> {
-    inner: Rc<ServerInner<St, H, Ctl, Pb>>,
+struct ServerImpl<Io, St, H, Ctl, Pb> {
+    handshake: H,
+    inner: Rc<ServerInner<St, Ctl, Pb>>,
     _t: PhantomData<(Io,)>,
 }
 
@@ -168,41 +177,40 @@ where
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
     H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
         + 'static,
-    H::Error: From<Ctl::InitError> + From<Pb::Error> + From<Pb::InitError> + fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame<H::Error>, Response = ()>
-        + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Display + From<Ctl::Error>,
-    LinkError: TryFrom<Pb::Error, Error = H::Error>,
+    Pb::Error: fmt::Debug,
+    Pb::InitError: fmt::Debug,
+    Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Config = ();
     type Request = Io;
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Service = ServerImplService<Io, St, H, Ctl, Pb>;
+    type Service = ServerImplService<Io, St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
 
     fn new_service(&self, _: ()) -> Self::Future {
         let inner = self.inner.clone();
+        let fut = self.handshake.new_service(());
 
         Box::pin(async move {
-            inner
-                .handshake
-                .new_service(())
-                .await
-                .map(move |handshake| ServerImplService {
-                    inner,
-                    handshake: Rc::new(handshake),
-                    _t: PhantomData,
-                })
+            fut.await.map(move |handshake| ServerImplService {
+                inner,
+                handshake: Rc::new(handshake),
+                _t: PhantomData,
+            })
         })
     }
 }
 
-struct ServerImplService<Io, St, H: ServiceFactory, Ctl, Pb> {
-    handshake: Rc<H::Service>,
-    inner: Rc<ServerInner<St, H, Ctl, Pb>>,
+struct ServerImplService<Io, St, H, Ctl, Pb> {
+    handshake: Rc<H>,
+    inner: Rc<ServerInner<St, Ctl, Pb>>,
     _t: PhantomData<(Io,)>,
 }
 
@@ -210,14 +218,15 @@ impl<Io, St, H, Ctl, Pb> Service for ServerImplService<Io, St, H, Ctl, Pb>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
-        + 'static,
-    H::Error: From<Ctl::InitError> + From<Pb::Error> + From<Pb::InitError> + fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame<H::Error>, Response = ()>
-        + 'static,
+    H: Service<Request = Handshake<Io>, Response = HandshakeAck<Io, St>> + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Display + From<Ctl::Error>,
-    LinkError: TryFrom<Pb::Error, Error = H::Error>,
+    Pb::Error: fmt::Debug,
+    Pb::InitError: fmt::Debug,
+    Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Request = Io;
     type Response = ();
@@ -255,23 +264,20 @@ where
             } else {
                 ntex::rt::time::timeout(time::Duration::from_millis(timeout), fut)
                     .await
-                    .map_err(|_| ServerError::HandshakeTimeout)??
+                    .map_err(|_| HandshakeError::Timeout)??
             };
 
             // create publish service
-            let pb_srv = inner
-                .publish
-                .new_service(st.clone())
-                .await
-                .map_err(|e| ServerError::Service(e.into()))?;
+            let pb_srv = inner.publish.new_service(st.clone()).await.map_err(|e| {
+                error!("Publish service init error: {:?}", e);
+                ServerError::PublishServiceError
+            })?;
 
             // create control service
-            let ctl_srv = inner
-                .control
-                .new_service(st.clone())
-                .await
-                .map_err(|e| ServerError::Service(e.into()))?
-                .map_err(From::from);
+            let ctl_srv = inner.control.new_service(st.clone()).await.map_err(|e| {
+                error!("Control service init error: {:?}", e);
+                ServerError::ControlServiceError
+            })?;
 
             let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv);
 
@@ -287,30 +293,25 @@ where
 async fn handshake<Io, St, H, Ctl, Pb>(
     mut io: Io,
     max_size: usize,
-    handshake: Rc<H::Service>,
-    inner: Rc<ServerInner<St, H, Ctl, Pb>>,
+    handshake: Rc<H>,
+    inner: Rc<ServerInner<St, Ctl, Pb>>,
 ) -> Result<(Io, IoState<AmqpCodec<AmqpFrame>>, Connection, State<St>), ServerError<H::Error>>
 where
     St: 'static,
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>,
-    H::Error: 'static,
-    H::Error: From<Ctl::InitError> + From<Pb::Error> + From<Pb::InitError> + fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame<H::Error>, Response = ()>
-        + 'static,
+    H: Service<Request = Handshake<Io>, Response = HandshakeAck<Io, St>>,
+    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Display + From<Ctl::Error>,
-    LinkError: TryFrom<Pb::Error, Error = H::Error>,
 {
     let state = IoState::new(ProtocolIdCodec);
 
     let protocol = state
         .next(&mut io)
         .await
-        .map_err(ServerError::from)?
+        .map_err(HandshakeError::from)?
         .ok_or_else(|| {
             log::trace!("Server amqp is disconnected during handshake");
-            ServerError::Disconnected
+            HandshakeError::Disconnected
         })?;
 
     let (io, sink, state, st) = match protocol {
@@ -319,7 +320,7 @@ where
             state
                 .send(&mut io, protocol)
                 .await
-                .map_err(ServerError::from)?;
+                .map_err(HandshakeError::from)?;
 
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
@@ -346,17 +347,18 @@ where
             state
                 .send(&mut io, AmqpFrame::new(0, local.into()))
                 .await
-                .map_err(ServerError::from)?;
+                .map_err(HandshakeError::from)?;
 
             let st = State::new(st);
 
             (io, sink, state, st)
         }
         ProtocolId::AmqpTls => {
-            return Err(ServerError::from(ProtocolIdError::Unexpected {
+            return Err(HandshakeError::from(ProtocolIdError::Unexpected {
                 exp: ProtocolId::Amqp,
                 got: ProtocolId::AmqpTls,
-            }))
+            })
+            .into())
         }
     };
 

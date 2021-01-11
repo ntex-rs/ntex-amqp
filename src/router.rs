@@ -49,7 +49,7 @@ impl<S: 'static> Router<S> {
         Request = Link<S>,
         Response = (),
         Error = Error,
-        InitError = Error,
+        InitError = std::convert::Infallible,
     > {
         let mut router = PatternRouter::build();
         for (addr, hnd) in self.0 {
@@ -161,9 +161,7 @@ impl<S> Future for RouterServiceResponse<S> {
                         Poll::Ready(Err(e)) => {
                             log::trace!("Service readiness check failed: {:?}", e);
                             let _ = this.link.close_with_error(
-                                LinkError::force_detach()
-                                    .description(format!("error: {}", e))
-                                    .into(),
+                                LinkError::force_detach().description(format!("error: {}", e)),
                             );
                             return Poll::Ready(Ok(()));
                         }
@@ -175,8 +173,7 @@ impl<S> Future for RouterServiceResponse<S> {
                             if transfer.delivery_id.is_none() {
                                 let _ = this.link.close_with_error(
                                     LinkError::force_detach()
-                                        .description("delivery_id MUST be set")
-                                        .into(),
+                                        .description("delivery_id MUST be set"),
                                 );
                                 return Poll::Ready(Ok(()));
                             }
@@ -220,7 +217,7 @@ impl<S> Future for RouterServiceResponse<S> {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Some(Err(e))) => {
                             log::trace!("Link is failed: {:?}", e);
-                            let _ = this.link.close_with_error(LinkError::force_detach().into());
+                            let _ = this.link.close_with_error(LinkError::force_detach());
                             return Poll::Ready(Ok(()));
                         }
                     }

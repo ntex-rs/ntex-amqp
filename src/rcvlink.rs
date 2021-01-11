@@ -86,11 +86,14 @@ impl ReceiverLink {
         self.inner.get_mut().close(None)
     }
 
-    pub fn close_with_error(
+    pub fn close_with_error<E>(
         &self,
-        error: Error,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.inner.get_mut().close(Some(error))
+        error: E,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>>
+    where
+        Error: From<E>,
+    {
+        self.inner.get_mut().close(Some(error.into()))
     }
 
     pub(crate) fn remote_closed(&self, error: Option<Error>) {

@@ -4,8 +4,8 @@ use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex_amqp_codec::protocol::{Frame, Open};
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, SaslFrame};
 
-use super::{error::ServerError, sasl::Sasl};
-use crate::{connection::Connection, error::AmqpProtocolError, io::IoState, Configuration};
+use super::{error::HandshakeError, sasl::Sasl};
+use crate::{connection::Connection, io::IoState, Configuration};
 
 /// Connection handshake
 pub enum Handshake<Io> {
@@ -56,7 +56,7 @@ impl<Io> HandshakeAmqp<Io> {
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> HandshakeAmqp<Io> {
     /// Wait for connection open frame
-    pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, ServerError<()>> {
+    pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
         let local_config = self.local_config;
@@ -64,10 +64,10 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> HandshakeAmqp<Io> {
         let frame = state
             .next(&mut io)
             .await
-            .map_err(ServerError::from)?
+            .map_err(HandshakeError::from)?
             .ok_or_else(|| {
                 log::trace!("Server amqp is disconnected during open frame");
-                ServerError::Disconnected
+                HandshakeError::Disconnected
             })?;
 
         let frame = frame.into_parts().1;
@@ -85,7 +85,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> HandshakeAmqp<Io> {
                     remote_config,
                 })
             }
-            frame => Err(AmqpProtocolError::Unexpected(Box::new(frame)).into()),
+            frame => Err(HandshakeError::Unexpected(Box::new(frame))),
         }
     }
 }

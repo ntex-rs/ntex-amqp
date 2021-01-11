@@ -1,4 +1,5 @@
-use crate::protocol::ProtocolId;
+pub use crate::protocol::Error;
+use crate::protocol::{AmqpError, ProtocolId};
 use crate::types::Descriptor;
 
 #[derive(Debug, Display, From, Clone)]
@@ -49,4 +50,20 @@ pub enum ProtocolIdError {
         exp: ProtocolId,
         got: ProtocolId,
     },
+}
+
+impl From<()> for Error {
+    fn from(_: ()) -> Error {
+        Error {
+            condition: AmqpError::InternalError.into(),
+            description: None,
+            info: None,
+        }
+    }
+}
+
+impl From<Error> for std::convert::Infallible {
+    fn from(_: Error) -> Self {
+        unreachable!()
+    }
 }

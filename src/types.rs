@@ -93,15 +93,6 @@ pub enum Outcome {
     Error(Error),
 }
 
-impl<T> From<T> for Outcome
-where
-    T: Into<Error>,
-{
-    fn from(err: T) -> Self {
-        Outcome::Error(err.into())
-    }
-}
-
 impl Outcome {
     pub(crate) fn into_delivery_state(self) -> DeliveryState {
         match self {

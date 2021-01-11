@@ -30,16 +30,17 @@ async fn test_simple() -> std::io::Result<()> {
     env_logger::init();
 
     let srv = test_server(|| {
-        server::Server::new(|con: server::Handshake<_>| async move {
+        let srv = server::Server::new(|con: server::Handshake<_>| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
                     Ok(con.ack(()))
                 }
-                server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
+                server::Handshake::Sasl(_) => Err(()),
             }
-        })
-        .finish(
+        });
+
+        srv.finish(
             server::Router::<()>::new()
                 .service("test", fn_factory_with_config(server))
                 .finish(),
@@ -62,7 +63,7 @@ async fn test_simple() -> std::io::Result<()> {
 
 async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
     auth: server::Sasl<Io>,
-) -> Result<server::HandshakeAck<Io, ()>, server::ServerError<()>> {
+) -> Result<server::HandshakeAck<Io, ()>, server::HandshakeError> {
     let init = auth
         .mechanism("PLAIN")
         .mechanism("ANONYMOUS")
@@ -97,9 +98,7 @@ async fn test_sasl() -> std::io::Result<()> {
                     let conn = conn.open().await.unwrap();
                     Ok(conn.ack(()))
                 }
-                server::Handshake::Sasl(auth) => {
-                    sasl_auth(auth).await.map_err(|_| server::Error::from)
-                }
+                server::Handshake::Sasl(auth) => sasl_auth(auth).await.map_err(|_| ()),
             }
         })
         .finish(

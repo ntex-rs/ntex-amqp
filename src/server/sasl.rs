@@ -8,8 +8,8 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
-use super::{handshake::HandshakeAmqpOpened, ServerError};
-use crate::{connection::Connection, error::AmqpProtocolError, io::IoState, Configuration};
+use super::{handshake::HandshakeAmqpOpened, HandshakeError};
+use crate::{connection::Connection, io::IoState, Configuration};
 
 pub struct Sasl<Io> {
     io: Io,
@@ -62,7 +62,7 @@ where
     }
 
     /// Initialize sasl auth procedure
-    pub async fn init(self) -> Result<SaslInit<Io>, ServerError<()>> {
+    pub async fn init(self) -> Result<SaslInit<Io>, HandshakeError> {
         let Sasl {
             mut io,
             state,
@@ -79,12 +79,12 @@ where
         state
             .send(&mut io, frame)
             .await
-            .map_err(ServerError::from)?;
+            .map_err(HandshakeError::from)?;
         let frame = state
             .next(&mut io)
             .await
-            .map_err(ServerError::from)?
-            .ok_or(ServerError::Disconnected)?;
+            .map_err(HandshakeError::from)?
+            .ok_or(HandshakeError::Disconnected)?;
 
         match frame.body {
             SaslFrameBody::SaslInit(frame) => Ok(SaslInit {
@@ -93,7 +93,7 @@ where
                 state,
                 local_config,
             }),
-            body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
+            body => Err(HandshakeError::UnexpectedSaslBodyFrame(body)),
         }
     }
 }
@@ -144,7 +144,7 @@ where
     }
 
     /// Initiate sasl challenge
-    pub async fn challenge(self) -> Result<SaslResponse<Io>, ServerError<()>> {
+    pub async fn challenge(self) -> Result<SaslResponse<Io>, HandshakeError> {
         self.challenge_with(Bytes::new()).await
     }
 
@@ -152,7 +152,7 @@ where
     pub async fn challenge_with(
         self,
         challenge: Bytes,
-    ) -> Result<SaslResponse<Io>, ServerError<()>> {
+    ) -> Result<SaslResponse<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
         let local_config = self.local_config;
@@ -161,12 +161,12 @@ where
         state
             .send(&mut io, frame)
             .await
-            .map_err(ServerError::from)?;
+            .map_err(HandshakeError::from)?;
         let frame = state
             .next(&mut io)
             .await
-            .map_err(ServerError::from)?
-            .ok_or(ServerError::Disconnected)?;
+            .map_err(HandshakeError::from)?
+            .ok_or(HandshakeError::Disconnected)?;
 
         match frame.body {
             SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse {
@@ -175,12 +175,12 @@ where
                 state,
                 local_config,
             }),
-            body => Err(ServerError::UnexpectedSaslBodyFrame(body)),
+            body => Err(HandshakeError::UnexpectedSaslBodyFrame(body)),
         }
     }
 
     /// Sasl challenge outcome
-    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, ServerError<()>> {
+    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
         let local_config = self.local_config;
@@ -193,7 +193,7 @@ where
         state
             .send(&mut io, frame)
             .await
-            .map_err(ServerError::from)?;
+            .map_err(HandshakeError::from)?;
 
         Ok(SaslSuccess {
             io,
@@ -228,7 +228,7 @@ where
     }
 
     /// Sasl challenge outcome
-    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, ServerError<()>> {
+    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
         let local_config = self.local_config;
@@ -241,12 +241,12 @@ where
         state
             .send(&mut io, frame)
             .await
-            .map_err(ServerError::from)?;
+            .map_err(HandshakeError::from)?;
         state
             .next(&mut io)
             .await
-            .map_err(ServerError::from)?
-            .ok_or(ServerError::Disconnected)?;
+            .map_err(HandshakeError::from)?
+            .ok_or(HandshakeError::Disconnected)?;
 
         Ok(SaslSuccess {
             io,
@@ -277,15 +277,15 @@ where
     }
 
     /// Wait for connection open frame
-    pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, ServerError<()>> {
+    pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state.map_codec(|_| ProtocolIdCodec);
 
         let protocol = state
             .next(&mut io)
             .await
-            .map_err(ServerError::from)?
-            .ok_or(ServerError::Disconnected)?;
+            .map_err(HandshakeError::from)?
+            .ok_or(HandshakeError::Disconnected)?;
 
         match protocol {
             ProtocolId::Amqp => {
@@ -293,15 +293,15 @@ where
                 state
                     .send(&mut io, ProtocolId::Amqp)
                     .await
-                    .map_err(ServerError::from)?;
+                    .map_err(HandshakeError::from)?;
 
                 // Wait for connection open frame
                 let state = state.map_codec(|_| AmqpCodec::<AmqpFrame>::new());
                 let frame = state
                     .next(&mut io)
                     .await
-                    .map_err(ServerError::from)?
-                    .ok_or(ServerError::Disconnected)?;
+                    .map_err(HandshakeError::from)?
+                    .ok_or(HandshakeError::Disconnected)?;
 
                 let frame = frame.into_parts().1;
                 match frame {
@@ -321,7 +321,7 @@ where
                             remote_config,
                         ))
                     }
-                    frame => Err(AmqpProtocolError::Unexpected(Box::new(frame)).into()),
+                    frame => Err(HandshakeError::Unexpected(Box::new(frame))),
                 }
             }
             proto => Err(ProtocolIdError::Unexpected {

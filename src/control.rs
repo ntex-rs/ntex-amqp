@@ -8,14 +8,14 @@ use crate::rcvlink::ReceiverLink;
 use crate::session::SessionInner;
 use crate::sndlink::SenderLink;
 
-pub struct ControlFrame<E>(pub(super) Cell<FrameInner<E>>);
+pub struct ControlFrame(pub(super) Cell<FrameInner>);
 
-pub(super) struct FrameInner<E> {
-    pub(super) kind: ControlFrameKind<E>,
+pub(super) struct FrameInner {
+    pub(super) kind: ControlFrameKind,
     pub(super) session: Option<Cell<SessionInner>>,
 }
 
-impl<E: fmt::Debug> fmt::Debug for ControlFrame<E> {
+impl fmt::Debug for ControlFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlFrame")
             .field("kind", &self.0.get_ref().kind)
@@ -24,26 +24,25 @@ impl<E: fmt::Debug> fmt::Debug for ControlFrame<E> {
 }
 
 #[derive(Debug)]
-pub enum ControlFrameKind<E> {
+pub enum ControlFrameKind {
     AttachReceiver(ReceiverLink),
     AttachSender(Box<protocol::Attach>, SenderLink),
     Flow(protocol::Flow, SenderLink),
     DetachSender(protocol::Detach, SenderLink),
     DetachReceiver(protocol::Detach, ReceiverLink),
-    Error(E),
     ProtocolError(AmqpProtocolError),
     Closed(bool),
 }
 
-impl<E> ControlFrame<E> {
-    pub(crate) fn new(session: Cell<SessionInner>, kind: ControlFrameKind<E>) -> Self {
+impl ControlFrame {
+    pub(crate) fn new(session: Cell<SessionInner>, kind: ControlFrameKind) -> Self {
         ControlFrame(Cell::new(FrameInner {
             session: Some(session),
             kind,
         }))
     }
 
-    pub(crate) fn new_kind(kind: ControlFrameKind<E>) -> Self {
+    pub(crate) fn new_kind(kind: ControlFrameKind) -> Self {
         ControlFrame(Cell::new(FrameInner {
             session: None,
             kind,
@@ -59,7 +58,7 @@ impl<E> ControlFrame<E> {
     }
 
     #[inline]
-    pub fn frame(&self) -> &ControlFrameKind<E> {
+    pub fn frame(&self) -> &ControlFrameKind {
         &self.0.kind
     }
 }
