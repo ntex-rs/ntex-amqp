@@ -254,7 +254,7 @@ where
                                 )));
                                 let frame = ControlFrame::new(
                                     session,
-                                    ControlFrameKind::AttachSender(attach, link),
+                                    ControlFrameKind::AttachSender(Box::new(attach), link),
                                 );
 
                                 *self.ctl_fut.borrow_mut() =

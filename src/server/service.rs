@@ -271,7 +271,7 @@ where
                 .new_service(st.clone())
                 .await
                 .map_err(|e| ServerError::Service(e.into()))?
-                .map_err(|e| From::from(e));
+                .map_err(From::from);
 
             let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv);
 

@@ -17,7 +17,7 @@ pub enum ConnectError {
     #[from(ignore)]
     /// Expected open frame
     #[display(fmt = "Expect open frame, got: {:?}", _0)]
-    ExpectOpenFrame(AmqpFrame),
+    ExpectOpenFrame(Box<AmqpFrame>),
     /// Peer disconnected
     #[display(fmt = "Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),

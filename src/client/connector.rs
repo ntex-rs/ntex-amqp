@@ -348,6 +348,6 @@ where
         );
         Ok(client)
     } else {
-        Err(ConnectError::ExpectOpenFrame(frame))
+        Err(ConnectError::ExpectOpenFrame(Box::new(frame)))
     }
 }
