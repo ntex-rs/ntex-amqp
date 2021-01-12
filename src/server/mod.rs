@@ -4,7 +4,7 @@ pub mod sasl;
 mod service;
 
 pub use self::error::{HandshakeError, ServerError};
-pub use self::handshake::{Handshake, HandshakeAck, HandshakeAmqpOpened};
+pub use self::handshake::{Handshake, HandshakeAck, HandshakeAmqp, HandshakeAmqpOpened};
 pub use self::sasl::Sasl;
 pub use self::service::Server;
 pub use crate::control::{ControlFrame, ControlFrameKind};

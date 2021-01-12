@@ -16,7 +16,7 @@ use super::handshake::{Handshake, HandshakeAck};
 use super::{Error, HandshakeError, ServerError};
 
 /// Server dispatcher factory
-pub struct Server<Io, St, H: ServiceFactory, Ctl: ServiceFactory> {
+pub struct Server<Io, St, H, Ctl> {
     handshake: H,
     control: Ctl,
     config: Rc<Configuration>,
@@ -62,18 +62,7 @@ where
     }
 }
 
-impl<Io, St, H, Ctl> Server<Io, St, H, Ctl>
-where
-    St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
-        + 'static,
-    H::Error: fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
-    Ctl::InitError: fmt::Debug,
-    Error: From<Ctl::Error>,
-{
+impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
     /// Provide connection configuration
     pub fn config(mut self, config: Configuration) -> Self {
         self.config = Rc::new(config);
@@ -109,7 +98,20 @@ where
         self.disconnect_timeout = val;
         self
     }
+}
 
+impl<Io, St, H, Ctl> Server<Io, St, H, Ctl>
+where
+    St: 'static,
+    Io: AsyncRead + AsyncWrite + Unpin + 'static,
+    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
+        + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
+    Error: From<Ctl::Error>,
+{
     /// Service to call with control frames
     pub fn control<F, S>(self, service: F) -> Server<Io, St, H, S>
     where

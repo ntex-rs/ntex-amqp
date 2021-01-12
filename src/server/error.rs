@@ -70,6 +70,8 @@ pub enum HandshakeError {
     UnexpectedSaslFrame(SaslFrame),
     #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
     UnexpectedSaslBodyFrame(protocol::SaslFrameBody),
+    #[display(fmt = "Unsupported sasl mechanism: {}", _0)]
+    UnsupportedSaslMechanism(String),
     /// Sasl error code
     #[display(fmt = "Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),

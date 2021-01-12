@@ -5,7 +5,7 @@ use ntex_amqp_codec::protocol;
 use crate::cell::Cell;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::ReceiverLink;
-use crate::session::SessionInner;
+use crate::session::{Session, SessionInner};
 use crate::sndlink::SenderLink;
 
 pub struct ControlFrame(pub(super) Cell<FrameInner>);
@@ -53,12 +53,16 @@ impl ControlFrame {
         ControlFrame(self.0.clone())
     }
 
-    pub(crate) fn session(&self) -> &Cell<SessionInner> {
+    pub(crate) fn session_cell(&self) -> &Cell<SessionInner> {
         self.0.get_ref().session.as_ref().unwrap()
     }
 
     #[inline]
     pub fn frame(&self) -> &ControlFrameKind {
         &self.0.kind
+    }
+
+    pub fn session(&self) -> Option<Session> {
+        self.0.get_ref().session.clone().map(Session::new)
     }
 }

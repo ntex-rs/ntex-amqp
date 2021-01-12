@@ -63,11 +63,11 @@ impl Connection {
     }
 
     #[inline]
-    /// Drop connection
-    pub fn drop_connection(&mut self) {
+    /// Force close connection
+    pub fn force_close(&self) {
         let inner = self.0.get_mut();
         inner.st = ConnectionState::Drop;
-        inner.state.inner.borrow_mut().write_task.wake()
+        inner.state.inner.borrow_mut().force_close();
     }
 
     #[inline]

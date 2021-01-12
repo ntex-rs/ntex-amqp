@@ -97,7 +97,7 @@ where
                 }
                 ControlFrameKind::AttachSender(ref frm, _) => {
                     frame
-                        .session()
+                        .session_cell()
                         .get_mut()
                         .detach_unconfirmed_sender_link(&frm, Some(err));
                 }
@@ -130,18 +130,18 @@ where
                 }
                 ControlFrameKind::AttachSender(ref frm, ref link) => {
                     frame
-                        .session()
+                        .session_cell()
                         .get_mut()
                         .confirm_sender_link_inner(&frm, link.inner.clone());
                 }
                 ControlFrameKind::Flow(ref frm, _) => {
-                    frame.session().get_mut().apply_flow(frm);
+                    frame.session_cell().get_mut().apply_flow(frm);
                 }
                 ControlFrameKind::DetachSender(ref mut frm, _) => {
-                    frame.session().get_mut().handle_detach(frm);
+                    frame.session_cell().get_mut().handle_detach(frm);
                 }
                 ControlFrameKind::DetachReceiver(ref mut frm, _) => {
-                    frame.session().get_mut().handle_detach(frm);
+                    frame.session_cell().get_mut().handle_detach(frm);
                 }
                 ControlFrameKind::ProtocolError(ref err) => return Err(err.clone().into()),
                 _ => (),
@@ -197,6 +197,7 @@ where
                 sink.set_error(AmqpProtocolError::Disconnected);
             }
             sink.on_close.notify();
+            sink.set_error(AmqpProtocolError::Disconnected);
             ntex::rt::spawn(
                 self.ctl_service
                     .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)))

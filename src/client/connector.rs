@@ -170,6 +170,20 @@ where
         }
     }
 
+    /// Negotiate amqp protocol over opened socket
+    pub fn negotiate<Io>(&self, io: Io) -> impl Future<Output = Result<Client<Io>, ConnectError>>
+    where
+        Io: AsyncRead + AsyncWrite + Unpin + 'static,
+    {
+        trace!("Negotiation client protocol id: Amqp");
+
+        let config = self.config.clone();
+        let disconnect_timeout = self.disconnect_timeout;
+        let state = IoState::new(ProtocolIdCodec);
+
+        _connect_plain(io, state, config, disconnect_timeout)
+    }
+
     fn _connect(
         &self,
         address: A,
@@ -209,6 +223,23 @@ where
         }
     }
 
+    /// Negotiate amqp sasl protocol over opened socket
+    pub fn negotiate_sasl<Io>(
+        &self,
+        io: Io,
+        auth: SaslAuth,
+    ) -> impl Future<Output = Result<Client<Io>, ConnectError>>
+    where
+        Io: AsyncRead + AsyncWrite + Unpin + 'static,
+    {
+        trace!("Negotiation client protocol id: Amqp");
+
+        let config = self.config.clone();
+        let disconnect_timeout = self.disconnect_timeout;
+
+        _connect_sasl(io, auth, config, disconnect_timeout)
+    }
+
     fn _connect_sasl(
         &self,
         addr: A,
@@ -218,72 +249,81 @@ where
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
 
-        async move {
-            trace!("Negotiation client protocol id: AmqpSasl");
-
-            let mut io = fut.await?;
-            let state = IoState::new(ProtocolIdCodec);
-            state.send(&mut io, ProtocolId::AmqpSasl).await?;
-
-            let proto = state
-                .next(&mut io)
-                .await
-                .map_err(ConnectError::from)
-                .and_then(|res| {
-                    res.ok_or_else(|| {
-                        log::trace!("Amqp server is disconnected during handshake");
-                        ConnectError::Disconnected
-                    })
-                })?;
-            if proto != ProtocolId::AmqpSasl {
-                return Err(ConnectError::from(ProtocolIdError::Unexpected {
-                    exp: ProtocolId::AmqpSasl,
-                    got: proto,
-                }));
-            }
-
-            let state = state.map_codec(|_| AmqpCodec::<SaslFrame>::new());
-
-            // processing sasl-mechanisms
-            let _ = state
-                .next(&mut io)
-                .await
-                .map_err(ConnectError::from)
-                .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
-
-            let initial_response =
-                SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
-
-            let sasl_init = SaslInit {
-                hostname: config.hostname.clone(),
-                mechanism: Symbol::from("PLAIN"),
-                initial_response: Some(initial_response),
-            };
-
-            state.send(&mut io, sasl_init.into()).await?;
-
-            // processing sasl-outcome
-            let sasl_frame = state
-                .next(&mut io)
-                .await
-                .map_err(ConnectError::from)
-                .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
-
-            if let SaslFrame {
-                body: SaslFrameBody::SaslOutcome(outcome),
-            } = sasl_frame
-            {
-                if outcome.code() != SaslCode::Ok {
-                    return Err(ConnectError::Sasl(outcome.code()));
-                }
-            } else {
-                return Err(ConnectError::Disconnected);
-            }
-            let state = state.map_codec(|_| ProtocolIdCodec);
-
-            _connect_plain(io, state, config, disconnect_timeout).await
-        }
+        async move { _connect_sasl(fut.await?, auth, config, disconnect_timeout).await }
     }
+}
+
+async fn _connect_sasl<T>(
+    mut io: T,
+    auth: SaslAuth,
+    config: Configuration,
+    disconnect_timeout: u16,
+) -> Result<Client<T>, ConnectError>
+where
+    T: AsyncRead + AsyncWrite + Unpin + 'static,
+{
+    trace!("Negotiation client protocol id: AmqpSasl");
+
+    let state = IoState::new(ProtocolIdCodec);
+    state.send(&mut io, ProtocolId::AmqpSasl).await?;
+
+    let proto = state
+        .next(&mut io)
+        .await
+        .map_err(ConnectError::from)
+        .and_then(|res| {
+            res.ok_or_else(|| {
+                log::trace!("Amqp server is disconnected during handshake");
+                ConnectError::Disconnected
+            })
+        })?;
+    if proto != ProtocolId::AmqpSasl {
+        return Err(ConnectError::from(ProtocolIdError::Unexpected {
+            exp: ProtocolId::AmqpSasl,
+            got: proto,
+        }));
+    }
+
+    let state = state.map_codec(|_| AmqpCodec::<SaslFrame>::new());
+
+    // processing sasl-mechanisms
+    let _ = state
+        .next(&mut io)
+        .await
+        .map_err(ConnectError::from)
+        .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
+
+    let initial_response =
+        SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+
+    let sasl_init = SaslInit {
+        hostname: config.hostname.clone(),
+        mechanism: Symbol::from("PLAIN"),
+        initial_response: Some(initial_response),
+    };
+
+    state.send(&mut io, sasl_init.into()).await?;
+
+    // processing sasl-outcome
+    let sasl_frame = state
+        .next(&mut io)
+        .await
+        .map_err(ConnectError::from)
+        .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
+
+    if let SaslFrame {
+        body: SaslFrameBody::SaslOutcome(outcome),
+    } = sasl_frame
+    {
+        if outcome.code() != SaslCode::Ok {
+            return Err(ConnectError::Sasl(outcome.code()));
+        }
+    } else {
+        return Err(ConnectError::Disconnected);
+    }
+    let state = state.map_codec(|_| ProtocolIdCodec);
+
+    _connect_plain(io, state, config, disconnect_timeout).await
 }
 
 async fn _connect_plain<T>(
