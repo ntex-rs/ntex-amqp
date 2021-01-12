@@ -4,7 +4,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, BytesMut};
 use ntex_codec::{Decoder, Encoder};
 
-use super::errors::{AmqpCodecError, ProtocolIdError};
+use super::error::{AmqpCodecError, ProtocolIdError};
 use super::framing::HEADER_LEN;
 use crate::codec::{Decode, Encode};
 use crate::protocol::ProtocolId;
@@ -44,7 +44,16 @@ impl<T: Decode + Encode> AmqpCodec<T> {
     ///
     /// If max size is set to `0`, size is unlimited.
     /// By default max size is set to `0`
-    pub fn max_size(&mut self, size: usize) {
+    pub fn max_size(mut self, size: usize) -> Self {
+        self.max_size = size;
+        self
+    }
+
+    /// Set max inbound frame size.
+    ///
+    /// If max size is set to `0`, size is unlimited.
+    /// By default max size is set to `0`
+    pub fn set_max_size(&mut self, size: usize) {
         self.max_size = size;
     }
 }

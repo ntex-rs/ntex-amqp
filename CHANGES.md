@@ -1,5 +1,17 @@
 # Changes
 
+## [0.2.0] - 2021-01-xx
+
+* Refactor server and client api
+
+* Use ntex-codec 0.3
+
+* Use ahash instead of fxhash
+
+## [codec-0.3.0] - 2021-01-xx
+
+* Use ntex-codec 0.2
+
 ## [0.1.22] - 2020-12-19
 
 * Support partial transfers on receiver side

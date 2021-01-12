@@ -5,7 +5,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use bytestring::ByteString;
 use either::Either;
 use futures::future::ok;
-use fxhash::FxHashMap;
 use ntex::channel::oneshot;
 use slab::Slab;
 
@@ -17,23 +16,17 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::AmqpFrame;
 
 use crate::cell::Cell;
-use crate::connection::ConnectionController;
-use crate::errors::AmqpTransportError;
+use crate::connection::Connection;
+use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::{Configuration, DeliveryPromise};
+use crate::{DeliveryPromise, HashMap};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
 #[derive(Clone)]
 pub struct Session {
     pub(crate) inner: Cell<SessionInner>,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        self.inner.get_mut().drop_session()
-    }
 }
 
 impl std::fmt::Debug for Session {
@@ -47,13 +40,7 @@ impl Session {
         Session { inner }
     }
 
-    #[inline]
-    /// Get remote connection configuration
-    pub fn remote_config(&self) -> &Configuration {
-        self.inner.connection.remote_config()
-    }
-
-    pub fn close(&self) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         ok(())
     }
 
@@ -104,7 +91,7 @@ impl Session {
         &mut self,
         handle: Handle,
         error: Option<Error>,
-    ) -> impl Future<Output = Result<(), AmqpTransportError>> {
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
 
         self.inner
@@ -120,7 +107,7 @@ impl Session {
                 }
                 Err(_) => {
                     log::trace!("Cannot complete detach receiver link, connection is gone");
-                    Err(AmqpTransportError::Disconnected)
+                    Err(AmqpProtocolError::Disconnected)
                 }
             }
         }
@@ -129,7 +116,7 @@ impl Session {
     pub fn wait_disposition(
         &mut self,
         id: DeliveryNumber,
-    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
+    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
         self.inner.get_mut().wait_disposition(id)
     }
 }
@@ -137,8 +124,8 @@ impl Session {
 #[derive(Debug)]
 enum SenderLinkState {
     Established(SenderLink),
-    Opening(Option<oneshot::Sender<Result<SenderLink, AmqpTransportError>>>),
-    Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
+    Opening(Option<oneshot::Sender<Result<SenderLink, AmqpProtocolError>>>),
+    Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
 
 #[derive(Debug)]
@@ -147,11 +134,11 @@ enum ReceiverLinkState {
     OpeningLocal(
         Option<(
             Cell<ReceiverLinkInner>,
-            oneshot::Sender<Result<ReceiverLink, AmqpTransportError>>,
+            oneshot::Sender<Result<ReceiverLink, AmqpProtocolError>>,
         )>,
     ),
     Established(ReceiverLink),
-    Closing(Option<oneshot::Sender<Result<(), AmqpTransportError>>>),
+    Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
 
 impl SenderLinkState {
@@ -168,7 +155,7 @@ impl ReceiverLinkState {
 
 pub(crate) struct SessionInner {
     id: usize,
-    connection: ConnectionController,
+    sink: Connection,
     next_outgoing_id: TransferNumber,
     local: bool,
 
@@ -177,14 +164,14 @@ pub(crate) struct SessionInner {
     remote_outgoing_window: u32,
     remote_incoming_window: u32,
 
-    unsettled_deliveries: FxHashMap<DeliveryNumber, DeliveryPromise>,
+    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
-    links_by_name: FxHashMap<ByteString, usize>,
-    remote_handles: FxHashMap<Handle, usize>,
+    links_by_name: HashMap<ByteString, usize>,
+    remote_handles: HashMap<Handle, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
-    disposition_subscribers: FxHashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
-    error: Option<AmqpTransportError>,
+    disposition_subscribers: HashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
+    error: Option<AmqpProtocolError>,
 }
 
 struct PendingTransfer {
@@ -210,7 +197,7 @@ impl SessionInner {
     pub(crate) fn new(
         id: usize,
         local: bool,
-        connection: ConnectionController,
+        sink: Connection,
         remote_channel_id: u16,
         next_incoming_id: DeliveryNumber,
         remote_incoming_window: u32,
@@ -219,18 +206,18 @@ impl SessionInner {
         SessionInner {
             id,
             local,
-            connection,
+            sink,
             next_incoming_id,
             remote_channel_id,
             remote_incoming_window,
             remote_outgoing_window,
             next_outgoing_id: INITIAL_OUTGOING_ID,
-            unsettled_deliveries: FxHashMap::default(),
+            unsettled_deliveries: HashMap::default(),
             links: Slab::new(),
-            links_by_name: FxHashMap::default(),
-            remote_handles: FxHashMap::default(),
+            links_by_name: HashMap::default(),
+            remote_handles: HashMap::default(),
             pending_transfers: VecDeque::new(),
-            disposition_subscribers: FxHashMap::default(),
+            disposition_subscribers: HashMap::default(),
             error: None,
         }
     }
@@ -241,7 +228,7 @@ impl SessionInner {
     }
 
     /// Set error. New operations will return error.
-    pub(crate) fn set_error(&mut self, err: AmqpTransportError) {
+    pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("Connection is failed, dropping state: {:?}", err);
 
         // drop pending transfers
@@ -275,21 +262,17 @@ impl SessionInner {
         self.error = Some(err);
     }
 
-    fn drop_session(&mut self) {
-        self.connection.drop_session_copy(self.id);
-    }
-
     fn wait_disposition(
         &mut self,
         id: DeliveryNumber,
-    ) -> impl Future<Output = Result<Disposition, AmqpTransportError>> {
+    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
         self.disposition_subscribers.insert(id, tx);
-        async move { rx.await.map_err(|_| AmqpTransportError::Disconnected) }
+        async move { rx.await.map_err(|_| AmqpProtocolError::Disconnected) }
     }
 
     pub(crate) fn max_frame_size(&self) -> usize {
-        self.connection.remote_config().max_frame_size as usize
+        self.sink.0.max_frame_size
     }
 
     /// Detach unconfirmed sender link
@@ -378,7 +361,7 @@ impl SessionInner {
         &mut self,
         cell: Cell<SessionInner>,
         mut frame: Attach,
-    ) -> oneshot::Receiver<Result<ReceiverLink, AmqpTransportError>> {
+    ) -> oneshot::Receiver<Result<ReceiverLink, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
 
         let entry = self.links.vacant_entry();
@@ -430,7 +413,7 @@ impl SessionInner {
         id: Handle,
         closed: bool,
         error: Option<Error>,
-        tx: oneshot::Sender<Result<(), AmqpTransportError>>,
+        tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
@@ -471,7 +454,7 @@ impl SessionInner {
         id: usize,
         closed: bool,
         error: Option<Error>,
-        tx: oneshot::Sender<Result<(), AmqpTransportError>>,
+        tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
         if let Some(Either::Left(link)) = self.links.get_mut(id) {
             match link {
@@ -666,7 +649,7 @@ impl SessionInner {
                 Either::Left(link) => match link {
                     SenderLinkState::Opening(ref mut tx) => {
                         if let Some(tx) = tx.take() {
-                            let err = AmqpTransportError::LinkDetached(detach.error.clone());
+                            let err = AmqpProtocolError::LinkDetached(detach.error.clone());
                             let _ = tx.send(Err(err));
                         }
                         true
@@ -678,7 +661,7 @@ impl SessionInner {
                             closed: true,
                             error: detach.error.clone(),
                         };
-                        let err = AmqpTransportError::LinkDetached(detach.error.clone());
+                        let err = AmqpProtocolError::LinkDetached(detach.error.clone());
 
                         // remove name
                         self.links_by_name.remove(link.inner.name());
@@ -699,7 +682,7 @@ impl SessionInner {
 
                         // detach snd link
                         link.inner.get_mut().detached(err);
-                        self.connection
+                        self.sink
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
                         true
                     }
@@ -711,9 +694,9 @@ impl SessionInner {
                         let (inner, tx) = item.take().unwrap();
                         inner.get_mut().detached();
                         if let Some(err) = detach.error.clone() {
-                            let _ = tx.send(Err(AmqpTransportError::LinkDetached(Some(err))));
+                            let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
                         } else {
-                            let _ = tx.send(Err(AmqpTransportError::LinkDetached(None)));
+                            let _ = tx.send(Err(AmqpProtocolError::LinkDetached(None)));
                         }
 
                         true
@@ -729,7 +712,7 @@ impl SessionInner {
                         };
 
                         // detach rcv link
-                        self.connection
+                        self.sink
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
                         true
                     }
@@ -737,7 +720,7 @@ impl SessionInner {
                         // detach confirmation
                         if let Some(tx) = tx.take() {
                             if let Some(err) = detach.error.clone() {
-                                let _ = tx.send(Err(AmqpTransportError::LinkDetached(Some(err))));
+                                let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
                             } else {
                                 let _ = tx.send(Ok(()));
                             }
@@ -894,14 +877,14 @@ impl SessionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {
-        self.connection
+        self.sink
             .post_frame(AmqpFrame::new(self.remote_channel_id, frame));
     }
 
     pub(crate) fn open_sender_link(
         &mut self,
         mut frame: Attach,
-    ) -> oneshot::Receiver<Result<SenderLink, AmqpTransportError>> {
+    ) -> oneshot::Receiver<Result<SenderLink, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
 
         let entry = self.links.vacant_entry();

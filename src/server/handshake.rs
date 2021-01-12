@@ -1,50 +1,177 @@
-use ntex::service::{IntoServiceFactory, ServiceFactory};
+use std::rc::Rc;
 
-use super::connect::ConnectAck;
+use ntex::codec::{AsyncRead, AsyncWrite};
+use ntex_amqp_codec::protocol::{Frame, Open};
+use ntex_amqp_codec::{AmqpCodec, AmqpFrame, SaslFrame};
 
-pub fn handshake<Io, St, A, F>(srv: F) -> Handshake<Io, St, A>
-where
-    F: IntoServiceFactory<A>,
-    A: ServiceFactory<Config = (), Response = ConnectAck<Io, St>>,
-{
-    Handshake::new(srv)
+use super::{error::HandshakeError, sasl::Sasl};
+use crate::{connection::Connection, io::IoState, Configuration};
+
+/// Connection handshake
+pub enum Handshake<Io> {
+    Amqp(HandshakeAmqp<Io>),
+    Sasl(Sasl<Io>),
 }
 
-pub struct Handshake<Io, St, A> {
-    a: A,
-    _t: std::marker::PhantomData<(Io, St)>,
+impl<Io> Handshake<Io> {
+    pub(crate) fn new_plain(
+        io: Io,
+        state: IoState<AmqpCodec<AmqpFrame>>,
+        local_config: Rc<Configuration>,
+    ) -> Self {
+        Handshake::Amqp(HandshakeAmqp {
+            io,
+            state,
+            local_config,
+        })
+    }
+
+    pub(crate) fn new_sasl(
+        io: Io,
+        state: IoState<AmqpCodec<SaslFrame>>,
+        local_config: Rc<Configuration>,
+    ) -> Self {
+        Handshake::Sasl(Sasl::new(io, state, local_config))
+    }
 }
 
-impl<Io, St, A> Handshake<Io, St, A>
-where
-    A: ServiceFactory<Config = ()>,
-{
-    pub fn new<F>(srv: F) -> Handshake<Io, St, A>
-    where
-        F: IntoServiceFactory<A>,
-    {
-        Handshake {
-            a: srv.into_factory(),
-            _t: std::marker::PhantomData,
+/// Open new connection
+pub struct HandshakeAmqp<Io> {
+    io: Io,
+    state: IoState<AmqpCodec<AmqpFrame>>,
+    local_config: Rc<Configuration>,
+}
+
+impl<Io> HandshakeAmqp<Io> {
+    /// Returns reference to io object
+    pub fn get_ref(&self) -> &Io {
+        &self.io
+    }
+
+    /// Returns mutable reference to io object
+    pub fn get_mut(&mut self) -> &mut Io {
+        &mut self.io
+    }
+}
+
+impl<Io: AsyncRead + AsyncWrite + Unpin> HandshakeAmqp<Io> {
+    /// Wait for connection open frame
+    pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, HandshakeError> {
+        let mut io = self.io;
+        let state = self.state;
+        let local_config = self.local_config;
+
+        let frame = state
+            .next(&mut io)
+            .await
+            .map_err(HandshakeError::from)?
+            .ok_or_else(|| {
+                log::trace!("Server amqp is disconnected during open frame");
+                HandshakeError::Disconnected
+            })?;
+
+        let frame = frame.into_parts().1;
+        match frame {
+            Frame::Open(frame) => {
+                trace!("Got open frame: {:?}", frame);
+                let remote_config = (&frame).into();
+                let sink = Connection::new(state.clone(), &local_config, &remote_config);
+                Ok(HandshakeAmqpOpened {
+                    frame,
+                    io,
+                    sink,
+                    state,
+                    local_config,
+                    remote_config,
+                })
+            }
+            frame => Err(HandshakeError::Unexpected(Box::new(frame))),
         }
     }
 }
 
-impl<Io, St, A> Handshake<Io, St, A>
-where
-    A: ServiceFactory<Config = (), Response = ConnectAck<Io, St>>,
-{
-    pub fn sasl<F, B>(self, srv: F) -> ntex::util::either::Either<A, B>
-    where
-        F: IntoServiceFactory<B>,
-        B: ServiceFactory<
-            Config = (),
-            Response = A::Response,
-            Error = A::Error,
-            InitError = A::InitError,
-        >,
-        B::Error: Into<ntex_amqp_codec::protocol::Error>,
-    {
-        ntex::util::either(self.a, srv.into_factory())
+/// Connection is opened
+pub struct HandshakeAmqpOpened<Io> {
+    frame: Open,
+    io: Io,
+    sink: Connection,
+    state: IoState<AmqpCodec<AmqpFrame>>,
+    local_config: Rc<Configuration>,
+    remote_config: Configuration,
+}
+
+impl<Io> HandshakeAmqpOpened<Io> {
+    pub(crate) fn new(
+        frame: Open,
+        io: Io,
+        sink: Connection,
+        state: IoState<AmqpCodec<AmqpFrame>>,
+        local_config: Rc<Configuration>,
+        remote_config: Configuration,
+    ) -> Self {
+        Self {
+            frame,
+            io,
+            sink,
+            state,
+            local_config,
+            remote_config,
+        }
+    }
+
+    /// Get reference to remote `Open` frame
+    pub fn frame(&self) -> &Open {
+        &self.frame
+    }
+
+    /// Returns reference to io object
+    pub fn get_ref(&self) -> &Io {
+        &self.io
+    }
+
+    /// Returns mutable reference to io object
+    pub fn get_mut(&mut self) -> &mut Io {
+        &mut self.io
+    }
+
+    /// Get local configuration
+    pub fn local_config(&self) -> &Configuration {
+        self.local_config.as_ref()
+    }
+
+    /// Get remote configuration
+    pub fn remote_config(&self) -> &Configuration {
+        &self.remote_config
+    }
+
+    /// Connection sink
+    pub fn sink(&self) -> &Connection {
+        &self.sink
+    }
+
+    /// Ack connect message and set state
+    pub fn ack<St>(self, st: St) -> HandshakeAck<Io, St> {
+        HandshakeAck {
+            st,
+            io: self.io,
+            sink: self.sink,
+            state: self.state,
+            idle_timeout: self.remote_config.timeout_remote_secs(),
+        }
+    }
+}
+
+/// Handshake ack message
+pub struct HandshakeAck<Io, St> {
+    st: St,
+    io: Io,
+    sink: Connection,
+    state: IoState<AmqpCodec<AmqpFrame>>,
+    idle_timeout: usize,
+}
+
+impl<Io, St> HandshakeAck<Io, St> {
+    pub(crate) fn into_inner(self) -> (St, Io, Connection, IoState<AmqpCodec<AmqpFrame>>, usize) {
+        (self.st, self.io, self.sink, self.state, self.idle_timeout)
     }
 }

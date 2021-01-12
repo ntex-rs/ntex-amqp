@@ -1,7 +1,7 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
 use super::*;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
-use crate::errors::AmqpParseError;
+use crate::error::AmqpParseError;
 use bytes::{BufMut, Bytes, BytesMut};
 use bytestring::ByteString;
 use derive_more::From;

@@ -1,32 +1,27 @@
 use std::convert::TryFrom;
 
-use futures::future::{err, Ready};
-use futures::Future;
+use futures::future::Ready;
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::connect::Connector;
 use ntex::http::Uri;
 use ntex::server::test_server;
-use ntex::service::{fn_factory_with_config, pipeline_factory, Service};
-use ntex_amqp::server::{self, AmqpError, LinkError};
-use ntex_amqp::{sasl, Configuration};
+use ntex::service::{fn_factory_with_config, Service};
+use ntex_amqp::{client, error::LinkError, server, types};
 
-fn server(
-    link: server::Link<()>,
-) -> impl Future<
-    Output = Result<
-        Box<
-            dyn Service<
-                    Request = server::Message<()>,
-                    Response = server::Outcome,
-                    Error = AmqpError,
-                    Future = Ready<Result<server::Message<()>, server::Outcome>>,
-                > + 'static,
-        >,
-        LinkError,
+async fn server(
+    link: types::Link<()>,
+) -> Result<
+    Box<
+        dyn Service<
+                Request = types::Transfer<()>,
+                Response = types::Outcome,
+                Error = LinkError,
+                Future = Ready<Result<types::Outcome, LinkError>>,
+            > + 'static,
     >,
+    LinkError,
 > {
     println!("OPEN LINK: {:?}", link);
-    err(LinkError::force_detach().description("unimplemented"))
+    Err(LinkError::force_detach().description("unimplemented"))
 }
 
 #[ntex::test]
@@ -35,41 +30,43 @@ async fn test_simple() -> std::io::Result<()> {
     env_logger::init();
 
     let srv = test_server(|| {
-        server::Server::new(
-            server::Handshake::new(|conn: server::Connect<_>| async move {
-                let conn = conn.open().await.unwrap();
-                Ok::<_, AmqpError>(conn.ack(()))
-            })
-            .sasl(server::sasl::no_sasl()),
-        )
-        .finish(
-            server::App::<()>::new()
+        let srv = server::Server::new(|con: server::Handshake<_>| async move {
+            match con {
+                server::Handshake::Amqp(con) => {
+                    let con = con.open().await.unwrap();
+                    Ok(con.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            }
+        });
+
+        srv.finish(
+            server::Router::<()>::new()
                 .service("test", fn_factory_with_config(server))
                 .finish(),
         )
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let sasl_srv = sasl::connect_service(Connector::default());
-    let req = sasl::SaslConnect {
-        uri,
-        config: Configuration::default(),
-        time: None,
-        auth: sasl::SaslAuth {
-            authz_id: "".to_string(),
-            authn_id: "user1".to_string(),
-            password: "password1".to_string(),
-        },
-    };
-    let res = sasl_srv.call(req).await;
-    println!("E: {:?}", res.err());
+
+    let client = client::Connector::new()
+        .connect_sasl(
+            uri,
+            client::SaslAuth {
+                authz_id: "".into(),
+                authn_id: "user1".into(),
+                password: "password1".into(),
+            },
+        )
+        .await;
+    println!("E: {:?}", client.err());
 
     Ok(())
 }
 
 async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
     auth: server::Sasl<Io>,
-) -> Result<server::ConnectAck<Io, ()>, server::ServerError<()>> {
+) -> Result<server::HandshakeAck<Io, ()>, server::HandshakeError> {
     let init = auth
         .mechanism("PLAIN")
         .mechanism("ANONYMOUS")
@@ -98,35 +95,35 @@ async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
     let srv = test_server(|| {
-        server::Server::new(
-            server::Handshake::new(|conn: server::Connect<_>| async move {
-                let conn = conn.open().await.unwrap();
-                Ok::<_, server::Error>(conn.ack(()))
-            })
-            .sasl(pipeline_factory(sasl_auth).map_err(|e| e.into())),
-        )
+        server::Server::new(|conn: server::Handshake<_>| async move {
+            match conn {
+                server::Handshake::Amqp(conn) => {
+                    let conn = conn.open().await.unwrap();
+                    Ok(conn.ack(()))
+                }
+                server::Handshake::Sasl(auth) => sasl_auth(auth).await.map_err(|_| ()),
+            }
+        })
         .finish(
-            server::App::<()>::new()
+            server::Router::<()>::new()
                 .service("test", fn_factory_with_config(server))
                 .finish(),
         )
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let sasl_srv = sasl::connect_service(Connector::default());
 
-    let req = sasl::SaslConnect {
-        uri,
-        config: Configuration::default(),
-        time: None,
-        auth: sasl::SaslAuth {
-            authz_id: "".to_string(),
-            authn_id: "user1".to_string(),
-            password: "password1".to_string(),
-        },
-    };
-    let res = sasl_srv.call(req).await;
-    println!("E: {:?}", res.err());
+    let client = client::Connector::new()
+        .connect_sasl(
+            uri,
+            client::SaslAuth {
+                authz_id: "".into(),
+                authn_id: "user1".into(),
+                password: "password1".into(),
+            },
+        )
+        .await;
+    println!("E: {:?}", client.err());
 
     Ok(())
 }

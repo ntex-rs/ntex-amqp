@@ -3,7 +3,7 @@ use std::cell::Cell;
 use bytes::{Bytes, BytesMut};
 
 use crate::codec::{Decode, Encode};
-use crate::errors::AmqpParseError;
+use crate::error::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, TransferBody};
 use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap};
 
@@ -326,7 +326,7 @@ mod tests {
     use bytestring::ByteString;
 
     use crate::codec::{Decode, Encode};
-    use crate::errors::AmqpCodecError;
+    use crate::error::AmqpCodecError;
     use crate::protocol::Header;
     use crate::types::Variant;
 
