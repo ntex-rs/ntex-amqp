@@ -29,6 +29,7 @@ pub struct Connector<A, T> {
 }
 
 impl<A> Connector<A, ()> {
+    #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
