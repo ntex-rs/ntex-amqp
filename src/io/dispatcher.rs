@@ -216,13 +216,12 @@ where
         match this.st {
             IoDispatcherState::Processing => {
                 loop {
-                    let mut state = this.state.inner.borrow_mut();
-
                     // log::trace!("IO-DISP state :{:?}:", state.flags);
 
                     match this.service.poll_ready(cx) {
                         Poll::Ready(Ok(_)) => {
                             let mut retry = false;
+                            let mut state = this.state.inner.borrow_mut();
 
                             // service is ready, wake io read task
                             if state.flags.contains(Flags::RD_PAUSED) {
@@ -361,6 +360,7 @@ where
                         Poll::Pending => {
                             // pause io read task
                             log::trace!("service is not ready, register dispatch task");
+                            let mut state = this.state.inner.borrow_mut();
                             state.flags.insert(Flags::RD_PAUSED);
                             state.dispatch_task.register(cx.waker());
                             return Poll::Pending;
@@ -370,7 +370,7 @@ where
                             // service readiness error
                             *this.st = IoDispatcherState::Stop;
                             this.inner.borrow_mut().error = Some(IoDispatcherError::Service(err));
-                            state.flags.insert(Flags::DSP_STOP);
+                            this.state.inner.borrow_mut().flags.insert(Flags::DSP_STOP);
 
                             // unregister keep-alive timer
                             if *this.keepalive_timeout != 0 {
@@ -381,7 +381,6 @@ where
                                 );
                             }
 
-                            drop(state);
                             return self.poll(cx);
                         }
                     }
