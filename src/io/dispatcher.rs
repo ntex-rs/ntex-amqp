@@ -9,26 +9,28 @@ use ntex_codec::{AsyncRead, AsyncWrite, Decoder, Encoder};
 use super::state::Flags;
 use crate::io::{DispatcherItem, IoRead, IoState, IoWrite, Timer};
 
-/// Framed dispatcher - is a future that reads frames from Framed object
-/// and pass then to the service.
-#[pin_project::pin_project]
-pub(crate) struct IoDispatcher<S, U>
-where
-    S: Service<Request = DispatcherItem<U>, Response = ()>,
-    S::Error: 'static,
-    S::Future: 'static,
-    U: Encoder + Decoder,
-    <U as Encoder>::Item: 'static,
-{
-    service: S,
-    state: IoState<U>,
-    inner: Rc<RefCell<IoDispatcherInner<S, U>>>,
-    st: IoDispatcherState,
-    timer: Timer<U>,
-    updated: Instant,
-    keepalive_timeout: u16,
-    #[pin]
-    response: Option<S::Future>,
+pin_project_lite::pin_project! {
+    /// Framed dispatcher - is a future that reads frames from Framed object
+    /// and pass then to the service.
+    pub(crate) struct IoDispatcher<S, U>
+    where
+        S: Service<Request = DispatcherItem<U>, Response = ()>,
+        S::Error: 'static,
+        S::Future: 'static,
+        U: Encoder,
+        U: Decoder,
+       <U as Encoder>::Item: 'static,
+    {
+        service: S,
+        state: IoState<U>,
+        inner: Rc<RefCell<IoDispatcherInner<S, U>>>,
+        st: IoDispatcherState,
+        timer: Timer<U>,
+        updated: Instant,
+        keepalive_timeout: u16,
+        #[pin]
+        response: Option<S::Future>,
+    }
 }
 
 struct IoDispatcherInner<S, U>
