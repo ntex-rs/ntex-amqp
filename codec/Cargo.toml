@@ -14,7 +14,7 @@ bytestring = "0.1.5"
 chrono = "0.4"
 derive_more = "0.99.5"
 ahash = "0.6.2"
-ordered-float = "1.0"
+ordered-float = "2.0.1"
 uuid = { version = "0.8", features = ["v4"] }
 
 [build-dependencies]

@@ -46,7 +46,11 @@ pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
 pub type Annotations = HashMap<Symbol, Variant>;
 
-#[allow(clippy::unreadable_literal, clippy::match_bool)]
+#[allow(
+    clippy::unreadable_literal,
+    clippy::match_bool,
+    clippy::large_enum_variant
+)]
 mod definitions;
 pub use self::definitions::*;
 
@@ -231,7 +235,7 @@ impl Default for Properties {
 #[derive(Debug, Clone, From, PartialEq)]
 pub enum TransferBody {
     Data(Bytes),
-    Message(Message),
+    Message(Box<Message>),
 }
 
 impl TransferBody {
@@ -246,6 +250,12 @@ impl TransferBody {
             TransferBody::Data(_) => None,
             TransferBody::Message(ref data) => data.message_format,
         }
+    }
+}
+
+impl From<Message> for TransferBody {
+    fn from(msg: Message) -> Self {
+        Self::Message(Box::new(msg))
     }
 }
 

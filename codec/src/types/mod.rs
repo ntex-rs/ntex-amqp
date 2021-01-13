@@ -1,4 +1,4 @@
-use std::{borrow, fmt, hash, ops};
+use std::{borrow, fmt, hash, ops, str};
 
 use bytestring::ByteString;
 
@@ -76,6 +76,7 @@ pub enum Str {
 }
 
 impl Str {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Str {
         Str::ByteStr(ByteString::from(s))
     }

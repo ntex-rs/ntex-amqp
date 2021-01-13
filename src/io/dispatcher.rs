@@ -338,7 +338,7 @@ where
                                     this.response.set(Some(this.service.call(item)));
 
                                     let res = this.response.as_mut().as_pin_mut().unwrap().poll(cx);
-                                    if let Poll::Ready(_) = res {
+                                    if res.is_ready() {
                                         this.response.set(None);
                                     }
                                 } else {
