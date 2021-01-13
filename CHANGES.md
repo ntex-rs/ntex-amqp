@@ -1,6 +1,6 @@
 # Changes
 
-## [0.2.0] - 2021-01-xx
+## [0.2.0] - 2021-01-13
 
 * Refactor server and client api
 
@@ -8,7 +8,13 @@
 
 * Use ahash instead of fxhash
 
-## [codec-0.3.0] - 2021-01-xx
+## [codec-0.3.1] - 2021-01-13
+
+* Clippy warnings
+
+* Update deps
+
+## [codec-0.3.0] - 2021-01-12
 
 * Use ntex-codec 0.2
 
