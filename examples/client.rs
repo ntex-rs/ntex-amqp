@@ -13,7 +13,7 @@ async fn main() -> std::io::Result<()> {
 
     ntex::rt::spawn(driver.start_default());
 
-    let session = sink.open_session().await.unwrap();
+    let _session = sink.open_session().await.unwrap();
 
     Ok(())
 }
