@@ -25,7 +25,7 @@ frame-trace = []
 
 [dependencies]
 ntex = "0.1.26"
-ntex-amqp-codec = "0.3.0"
+ntex-amqp-codec = "0.3.1"
 ntex-router = "0.3.4"
 ntex-codec = "0.2.1"
 
@@ -38,8 +38,8 @@ either = "1.5.3"
 futures = "0.3.9"
 log = "0.4"
 pin-project-lite = "0.2.4"
-uuid = { version = "0.8", features = ["v4"] }
 slab = "0.4"
+uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
 env_logger = "0.8"
