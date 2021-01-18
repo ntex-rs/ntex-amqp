@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use futures::future::{err, ok};
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::service::fn_service;
+use ntex::framed::{Dispatcher as IoDispatcher, State as IoState, Timer};
+use ntex::service::{fn_service, Service};
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{DispatcherError, LinkError};
-use crate::io::{IoDispatcher, IoState, Timer};
 use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
 
 /// Mqtt client
@@ -80,7 +80,8 @@ where
             fn_service(|_| err::<_, LinkError>(LinkError::force_detach())),
             fn_service(|_| ok::<_, LinkError>(())),
             self.remote_config.timeout_remote_secs(),
-        );
+        )
+        .map(|_| Option::<AmqpFrame>::None);
 
         IoDispatcher::with(
             self.io,

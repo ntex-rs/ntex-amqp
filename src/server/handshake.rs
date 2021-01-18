@@ -1,11 +1,13 @@
 use std::rc::Rc;
 
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex_amqp_codec::protocol::{Frame, Open};
-use ntex_amqp_codec::{AmqpCodec, AmqpFrame, SaslFrame};
+use ntex::framed::State;
+
+use crate::codec::protocol::{Frame, Open};
+use crate::codec::{AmqpCodec, AmqpFrame, SaslFrame};
+use crate::{connection::Connection, Configuration};
 
 use super::{error::HandshakeError, sasl::Sasl};
-use crate::{connection::Connection, io::IoState, Configuration};
 
 /// Connection handshake
 pub enum Handshake<Io> {
@@ -16,7 +18,7 @@ pub enum Handshake<Io> {
 impl<Io> Handshake<Io> {
     pub(crate) fn new_plain(
         io: Io,
-        state: IoState<AmqpCodec<AmqpFrame>>,
+        state: State<AmqpCodec<AmqpFrame>>,
         local_config: Rc<Configuration>,
     ) -> Self {
         Handshake::Amqp(HandshakeAmqp {
@@ -28,7 +30,7 @@ impl<Io> Handshake<Io> {
 
     pub(crate) fn new_sasl(
         io: Io,
-        state: IoState<AmqpCodec<SaslFrame>>,
+        state: State<AmqpCodec<SaslFrame>>,
         local_config: Rc<Configuration>,
     ) -> Self {
         Handshake::Sasl(Sasl::new(io, state, local_config))
@@ -38,7 +40,7 @@ impl<Io> Handshake<Io> {
 /// Open new connection
 pub struct HandshakeAmqp<Io> {
     io: Io,
-    state: IoState<AmqpCodec<AmqpFrame>>,
+    state: State<AmqpCodec<AmqpFrame>>,
     local_config: Rc<Configuration>,
 }
 
@@ -95,7 +97,7 @@ pub struct HandshakeAmqpOpened<Io> {
     frame: Open,
     io: Io,
     sink: Connection,
-    state: IoState<AmqpCodec<AmqpFrame>>,
+    state: State<AmqpCodec<AmqpFrame>>,
     local_config: Rc<Configuration>,
     remote_config: Configuration,
 }
@@ -105,7 +107,7 @@ impl<Io> HandshakeAmqpOpened<Io> {
         frame: Open,
         io: Io,
         sink: Connection,
-        state: IoState<AmqpCodec<AmqpFrame>>,
+        state: State<AmqpCodec<AmqpFrame>>,
         local_config: Rc<Configuration>,
         remote_config: Configuration,
     ) -> Self {
@@ -166,12 +168,12 @@ pub struct HandshakeAck<Io, St> {
     st: St,
     io: Io,
     sink: Connection,
-    state: IoState<AmqpCodec<AmqpFrame>>,
+    state: State<AmqpCodec<AmqpFrame>>,
     idle_timeout: usize,
 }
 
 impl<Io, St> HandshakeAck<Io, St> {
-    pub(crate) fn into_inner(self) -> (St, Io, Connection, IoState<AmqpCodec<AmqpFrame>>, usize) {
+    pub(crate) fn into_inner(self) -> (St, Io, Connection, State<AmqpCodec<AmqpFrame>>, usize) {
         (self.st, self.io, self.sink, self.state, self.idle_timeout)
     }
 }

@@ -1,5 +1,9 @@
 # Changes
 
+## [0.3.0] - 2021-01-xx
+
+* Use ntex-0.2
+
 ## [0.2.0] - 2021-01-13
 
 * Refactor server and client api

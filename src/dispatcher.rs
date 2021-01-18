@@ -1,6 +1,7 @@
 use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll, time};
 
 use futures::future::{ready, FutureExt, Ready};
+use ntex::framed::DispatcherItem;
 use ntex::rt::time::{delay_for, Delay};
 use ntex::service::Service;
 
@@ -9,9 +10,7 @@ use crate::codec::protocol::{Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{AmqpProtocolError, DispatcherError, Error};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::{
-    connection::Connection, io::DispatcherItem, types, ControlFrame, ControlFrameKind, State,
-};
+use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, State};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {

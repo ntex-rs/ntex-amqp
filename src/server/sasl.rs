@@ -3,17 +3,19 @@ use std::{fmt, rc::Rc};
 use bytes::Bytes;
 use bytestring::ByteString;
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex_amqp_codec::protocol::{
+use ntex::framed::State;
+
+use crate::codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
-use ntex_amqp_codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
 use super::{handshake::HandshakeAmqpOpened, HandshakeError};
-use crate::{connection::Connection, io::IoState, Configuration};
+use crate::{connection::Connection, Configuration};
 
 pub struct Sasl<Io> {
     io: Io,
-    state: IoState<AmqpCodec<SaslFrame>>,
+    state: State<AmqpCodec<SaslFrame>>,
     mechanisms: Symbols,
     local_config: Rc<Configuration>,
 }
@@ -29,7 +31,7 @@ impl<Io> fmt::Debug for Sasl<Io> {
 impl<Io> Sasl<Io> {
     pub(crate) fn new(
         io: Io,
-        state: IoState<AmqpCodec<SaslFrame>>,
+        state: State<AmqpCodec<SaslFrame>>,
         local_config: Rc<Configuration>,
     ) -> Self {
         Sasl {
@@ -102,7 +104,7 @@ where
 pub struct SaslInit<Io> {
     frame: protocol::SaslInit,
     io: Io,
-    state: IoState<AmqpCodec<SaslFrame>>,
+    state: State<AmqpCodec<SaslFrame>>,
     local_config: Rc<Configuration>,
 }
 
@@ -206,7 +208,7 @@ where
 pub struct SaslResponse<Io> {
     frame: protocol::SaslResponse,
     io: Io,
-    state: IoState<AmqpCodec<SaslFrame>>,
+    state: State<AmqpCodec<SaslFrame>>,
     local_config: Rc<Configuration>,
 }
 
@@ -258,7 +260,7 @@ where
 
 pub struct SaslSuccess<Io> {
     io: Io,
-    state: IoState<AmqpCodec<SaslFrame>>,
+    state: State<AmqpCodec<SaslFrame>>,
     local_config: Rc<Configuration>,
 }
 

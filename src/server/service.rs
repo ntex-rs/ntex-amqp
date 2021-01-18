@@ -2,13 +2,13 @@ use std::{fmt, marker::PhantomData, pin::Pin, rc::Rc, task::Context, task::Poll,
 
 use futures::Future;
 use ntex::codec::{AsyncRead, AsyncWrite};
+use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
-use ntex_amqp_codec::{
+
+use crate::codec::{
     protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame,
 };
-
 use crate::dispatcher::Dispatcher;
-use crate::io::{IoDispatcher, IoState, Timer};
 use crate::types::Link;
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
 
@@ -281,9 +281,10 @@ where
                 ServerError::ControlServiceError
             })?;
 
-            let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv, idle_timeout);
+            let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv, idle_timeout)
+                .map(|_| Option::<AmqpFrame>::None);
 
-            IoDispatcher::with(io, state, dispatcher, inner.time.clone())
+            FramedDispatcher::with(io, state, dispatcher, inner.time.clone())
                 .keepalive_timeout(keepalive as u16)
                 .disconnect_timeout(disconnect_timeout)
                 .await

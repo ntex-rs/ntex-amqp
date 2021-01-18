@@ -1,20 +1,21 @@
 use futures::{future, Future};
-use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 
-use ntex_amqp_codec::protocol::{Begin, Close, End, Error, Frame};
-use ntex_amqp_codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
+use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
+use ntex::framed::State;
 
 use crate::cell::{Cell, WeakCell};
+use crate::codec::protocol::{Begin, Close, End, Error, Frame};
+use crate::codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
 use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner};
-use crate::{io::IoState, Configuration, HashMap};
+use crate::{Configuration, HashMap};
 
 #[derive(Clone)]
 pub struct Connection(pub(crate) Cell<ConnectionInner>);
 
 pub(crate) struct ConnectionInner {
     st: ConnectionState,
-    state: IoState<AmqpCodec<AmqpFrame>>,
+    state: State<AmqpCodec<AmqpFrame>>,
     pub(crate) sessions: slab::Slab<ChannelState>,
     pub(crate) sessions_map: HashMap<u16, usize>,
     pub(crate) on_close: Condition,
@@ -46,7 +47,7 @@ pub(crate) enum ConnectionState {
 
 impl Connection {
     pub(crate) fn new(
-        state: IoState<AmqpCodec<AmqpFrame>>,
+        state: State<AmqpCodec<AmqpFrame>>,
         local_config: &Configuration,
         remote_config: &Configuration,
     ) -> Connection {
@@ -67,7 +68,7 @@ impl Connection {
     pub fn force_close(&self) {
         let inner = self.0.get_mut();
         inner.st = ConnectionState::Drop;
-        inner.state.inner.borrow_mut().force_close();
+        inner.state.shutdown();
     }
 
     #[inline]
@@ -92,7 +93,7 @@ impl Connection {
 
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.0.get_mut().state.inner.borrow_mut().close();
+        self.0.get_ref().state.close();
         future::ok(())
     }
 
@@ -105,7 +106,7 @@ impl Connection {
     where
         Error: From<E>,
     {
-        self.0.get_mut().state.inner.borrow_mut().close();
+        self.0.get_ref().state.close();
         future::ok(())
     }
 
@@ -201,15 +202,12 @@ impl Connection {
 
         inner
             .state
-            .inner
-            .borrow_mut()
-            .send(AmqpFrame::new(token as u16, begin.into()))
+            .write_item(AmqpFrame::new(token as u16, begin.into()))
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
         let inner = self.0.get_mut();
-        let result = inner.state.inner.borrow_mut().send(frame);
-        if let Err(e) = result {
+        if let Err(e) = inner.state.write_item(frame) {
             inner.set_error(e.into())
         }
     }
@@ -235,8 +233,7 @@ impl ConnectionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
-        let result = self.state.inner.borrow_mut().send(frame);
-        if let Err(e) = result {
+        if let Err(e) = self.state.write_item(frame) {
             self.set_error(e.into())
         }
     }

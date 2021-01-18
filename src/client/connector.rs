@@ -4,6 +4,7 @@ use bytestring::ByteString;
 use futures::{future::Either, Future, FutureExt};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::connect::{self, Address, Connect};
+use ntex::framed::State;
 use ntex::rt::time::delay_for;
 use ntex::service::Service;
 
@@ -15,7 +16,7 @@ use ntex::connect::rustls::{ClientConfig, RustlsConnector};
 
 use crate::codec::protocol::{Frame, Milliseconds, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
-use crate::{error::ProtocolIdError, io::IoState, utils::Select, Configuration, Connection};
+use crate::{error::ProtocolIdError, utils::Select, Configuration, Connection};
 
 use super::{connection::Client, error::ConnectError, SaslAuth};
 
@@ -180,7 +181,7 @@ where
 
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
-        let state = IoState::new(ProtocolIdCodec);
+        let state = State::new(ProtocolIdCodec);
 
         _connect_plain(io, state, config, disconnect_timeout)
     }
@@ -197,7 +198,7 @@ where
             trace!("Negotiation client protocol id: Amqp");
 
             let io = fut.await?;
-            let state = IoState::new(ProtocolIdCodec);
+            let state = State::new(ProtocolIdCodec);
             _connect_plain(io, state, config, disconnect_timeout).await
         }
     }
@@ -265,7 +266,7 @@ where
 {
     trace!("Negotiation client protocol id: AmqpSasl");
 
-    let state = IoState::new(ProtocolIdCodec);
+    let state = State::new(ProtocolIdCodec);
     state.send(&mut io, ProtocolId::AmqpSasl).await?;
 
     let proto = state
@@ -329,7 +330,7 @@ where
 
 async fn _connect_plain<T>(
     mut io: T,
-    state: IoState<ProtocolIdCodec>,
+    state: State<ProtocolIdCodec>,
     config: Configuration,
     disconnect_timeout: u16,
 ) -> Result<Client<T>, ConnectError>

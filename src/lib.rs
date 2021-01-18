@@ -25,7 +25,6 @@ mod dispatcher;
 pub mod error;
 pub mod error_code;
 mod hb;
-mod io;
 mod rcvlink;
 mod router;
 pub mod server;
