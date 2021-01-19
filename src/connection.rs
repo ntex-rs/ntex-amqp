@@ -203,6 +203,7 @@ impl Connection {
         inner
             .state
             .write_item(AmqpFrame::new(token as u16, begin.into()))
+            .map(|_| ())
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {

@@ -83,7 +83,7 @@ where
         )
         .map(|_| Option::<AmqpFrame>::None);
 
-        IoDispatcher::with(
+        IoDispatcher::new(
             self.io,
             self.state,
             dispatcher,

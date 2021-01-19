@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "0.3.0"
+version = "0.3.0-b.1"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -24,11 +24,11 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = "0.2.0"
+ntex = "0.2.0-b.1"
 ntex-amqp-codec = "0.3.1"
-ntex-router = "0.3.4"
+ntex-router = "0.3.8"
 
-ahash = "0.6.2"
+ahash = "0.6.3"
 bitflags = "1.2.1"
 bytes = "0.5.6"
 bytestring = "0.1.5"
@@ -46,5 +46,3 @@ env_logger = "0.8"
 [patch.crates-io]
 ntex-amqp = { path = "." }
 ntex-amqp-codec = { path = "codec" }
-
-ntex = { git = "https://github.com/ntex-rs/ntex.git" }

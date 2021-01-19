@@ -284,7 +284,7 @@ where
             let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv, idle_timeout)
                 .map(|_| Option::<AmqpFrame>::None);
 
-            FramedDispatcher::with(io, state, dispatcher, inner.time.clone())
+            FramedDispatcher::new(io, state, dispatcher, inner.time.clone())
                 .keepalive_timeout(keepalive as u16)
                 .disconnect_timeout(disconnect_timeout)
                 .await
