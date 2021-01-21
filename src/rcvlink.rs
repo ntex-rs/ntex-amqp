@@ -230,7 +230,12 @@ impl ReceiverLinkInner {
             if let Some(ref mut body) = self.partial_body {
                 if transfer.delivery_id.is_some() {
                     // if delivery_id is set, then it should be equal to first transfer
-                    if self.queue.back().unwrap().delivery_id != transfer.delivery_id {
+                    if self
+                        .queue
+                        .back()
+                        .map(|back| back.delivery_id != transfer.delivery_id)
+                        .unwrap_or(true)
+                    {
                         let err = Error {
                             condition: LinkError::DetachForced.into(),
                             description: Some(ByteString::from_static("delivery_id is wrong")),
@@ -259,11 +264,22 @@ impl ReceiverLinkInner {
                 // received last partial transfer
                 if !transfer.more {
                     self.delivery_count += 1;
-                    self.queue.back_mut().unwrap().body = Some(TransferBody::Data(
-                        self.partial_body.take().unwrap().freeze(),
-                    ));
-                    if self.queue.len() == 1 {
-                        self.reader_task.wake()
+                    let partial_body = self.partial_body.take();
+                    if partial_body.is_some() && !self.queue.is_empty() {
+                        self.queue.back_mut().unwrap().body =
+                            Some(TransferBody::Data(partial_body.unwrap().freeze()));
+                        if self.queue.len() == 1 {
+                            self.reader_task.wake()
+                        }
+                    } else {
+                        log::error!("Inconsistent state, bug");
+                        let err = Error {
+                            condition: LinkError::DetachForced.into(),
+                            description: Some(ByteString::from_static("Internal error")),
+                            info: None,
+                        };
+                        let _ = self.close(Some(err));
+                        return;
                     }
                 }
             } else if transfer.more {

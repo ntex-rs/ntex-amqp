@@ -3,7 +3,7 @@ use futures::{future, Future};
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::framed::State;
 
-use crate::cell::{Cell, WeakCell};
+use crate::cell::Cell;
 use crate::codec::protocol::{Begin, Close, End, Error, Frame};
 use crate::codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
 use crate::error::AmqpProtocolError;
@@ -25,7 +25,7 @@ pub(crate) struct ConnectionInner {
 }
 
 pub(crate) enum ChannelState {
-    Opening(Option<oneshot::Sender<Session>>, WeakCell<ConnectionInner>),
+    Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
     Established(Cell<SessionInner>),
     #[allow(dead_code)]
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
@@ -112,7 +112,7 @@ impl Connection {
 
     /// Opens the session
     pub fn open_session(&self) -> impl Future<Output = Result<Session, AmqpProtocolError>> {
-        let cell = self.0.downgrade();
+        let cell = self.0.clone();
         let inner = self.0.clone();
 
         async move {
@@ -239,23 +239,27 @@ impl ConnectionInner {
         }
     }
 
-    pub(crate) fn complete_session_creation(&mut self, channel_id: u16, begin: &Begin) {
+    pub(crate) fn complete_session_creation(
+        &mut self,
+        channel_id: u16,
+        remote_channel_id: u16,
+        begin: &Begin,
+    ) {
         trace!(
             "Session opened: local {:?} remote {:?}",
             channel_id,
-            begin.remote_channel()
+            remote_channel_id,
         );
 
-        let id = begin.remote_channel().unwrap() as usize;
+        let id = remote_channel_id as usize;
 
         if let Some(channel) = self.sessions.get_mut(id) {
             if channel.is_opening() {
                 if let ChannelState::Opening(tx, cell) = channel {
-                    let cell = cell.upgrade().unwrap();
                     let session = Cell::new(SessionInner::new(
                         id,
                         true,
-                        Connection(cell),
+                        Connection(cell.clone()),
                         channel_id,
                         begin.next_outgoing_id(),
                         begin.incoming_window(),
@@ -263,21 +267,16 @@ impl ConnectionInner {
                     ));
                     self.sessions_map.insert(channel_id, id);
 
-                    if tx
-                        .take()
-                        .unwrap()
-                        .send(Session::new(session.clone()))
-                        .is_err()
-                    {
-                        // todo: send end session
-                    }
+                    // TODO: send end session if `tx` is None
+                    tx.take()
+                        .and_then(|tx| tx.send(Session::new(session.clone())).err());
                     *channel = ChannelState::Established(session)
                 }
             } else {
-                // send error response
+                // TODO: send error response
             }
         } else {
-            // todo: rogue begin right now - do nothing. in future might indicate incoming attach
+            // TODO: rogue begin right now - do nothing. in future might indicate incoming attach
         }
     }
 
@@ -310,14 +309,23 @@ impl ConnectionInner {
         }
 
         // get local session id
-        let channel_id = if let Some(token) = self.sessions_map.get(&frame.channel_id()) {
-            *token
+        let state = if let Some(token) = self.sessions_map.get(&frame.channel_id()) {
+            if let Some(state) = self.sessions.get_mut(*token) {
+                state
+            } else {
+                log::error!("Inconsistent internal state");
+                let (id, frame) = frame.into_parts();
+                return Err(AmqpProtocolError::UnknownSession(
+                    id as usize,
+                    Box::new(frame),
+                ));
+            }
         } else {
             // we dont have channel info, only Begin frame is allowed on new channel
             if let Frame::Begin(ref begin) = frame.performative() {
                 // response Begin for open session
-                if begin.remote_channel().is_some() {
-                    self.complete_session_creation(frame.channel_id(), begin);
+                if let Some(id) = begin.remote_channel() {
+                    self.complete_session_creation(frame.channel_id(), id, begin);
                     return Ok(None);
                 } else {
                     return Ok(Some(frame));
@@ -332,9 +340,9 @@ impl ConnectionInner {
         };
 
         // handle session frames
-        match self.sessions.get_mut(channel_id).unwrap() {
+        match state {
             ChannelState::Opening(_, _) => {
-                error!("Unexpected opening state: {}", channel_id);
+                error!("Unexpected opening state: {}", frame.channel_id());
                 Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(
                     frame.into_parts().1,
                 )))

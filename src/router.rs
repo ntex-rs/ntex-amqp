@@ -169,43 +169,51 @@ impl<S> Future for RouterServiceResponse<S> {
 
                     match Pin::new(&mut link).poll_next(cx) {
                         Poll::Ready(Some(Ok(transfer))) => {
-                            // #2.7.5 delivery_id MUST be set. batching is not supported atm
-                            if transfer.delivery_id.is_none() {
-                                let _ = this.link.close_with_error(
-                                    LinkError::force_detach()
-                                        .description("delivery_id MUST be set"),
-                                );
-                                return Poll::Ready(Ok(()));
-                            }
-                            if link.credit() == 0 {
-                                // self.has_credit = self.link.credit() != 0;
-                                link.set_link_credit(50);
-                            }
-
-                            let delivery_id = transfer.delivery_id.unwrap();
-                            let msg = Transfer::new(app_state.clone(), transfer, link.clone());
-
-                            let mut fut = srv.call(msg);
-                            match Pin::new(&mut fut).poll(cx) {
-                                Poll::Ready(Ok(outcome)) => settle(
-                                    &mut this.link,
-                                    delivery_id,
-                                    outcome.into_delivery_state(),
-                                ),
-                                Poll::Pending => {
-                                    ntex::rt::spawn(HandleMessage {
-                                        fut,
-                                        delivery_id,
-                                        link: this.link.clone(),
-                                    });
+                            match transfer.delivery_id {
+                                None => {
+                                    // #2.7.5 delivery_id MUST be set. batching is handled on lower level
+                                    if transfer.delivery_id.is_none() {
+                                        let _ = this.link.close_with_error(
+                                            LinkError::force_detach()
+                                                .description("delivery_id MUST be set"),
+                                        );
+                                        return Poll::Ready(Ok(()));
+                                    }
                                 }
-                                Poll::Ready(Err(e)) => {
-                                    log::trace!("Service response error: {:?}", e);
-                                    settle(
-                                        &mut this.link,
-                                        delivery_id,
-                                        DeliveryState::Rejected(Rejected { error: Some(e) }),
-                                    )
+                                Some(delivery_id) => {
+                                    if link.credit() == 0 {
+                                        // self.has_credit = self.link.credit() != 0;
+                                        link.set_link_credit(50);
+                                    }
+
+                                    let msg =
+                                        Transfer::new(app_state.clone(), transfer, link.clone());
+
+                                    let mut fut = srv.call(msg);
+                                    match Pin::new(&mut fut).poll(cx) {
+                                        Poll::Ready(Ok(outcome)) => settle(
+                                            &mut this.link,
+                                            delivery_id,
+                                            outcome.into_delivery_state(),
+                                        ),
+                                        Poll::Pending => {
+                                            ntex::rt::spawn(HandleMessage {
+                                                fut,
+                                                delivery_id,
+                                                link: this.link.clone(),
+                                            });
+                                        }
+                                        Poll::Ready(Err(e)) => {
+                                            log::trace!("Service response error: {:?}", e);
+                                            settle(
+                                                &mut this.link,
+                                                delivery_id,
+                                                DeliveryState::Rejected(Rejected {
+                                                    error: Some(e),
+                                                }),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

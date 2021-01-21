@@ -178,19 +178,27 @@ struct PendingTransfer {
     link_handle: Handle,
     idx: u32,
     body: Option<TransferBody>,
-    promise: Option<DeliveryPromise>,
+    state: TransferState,
     tag: Option<Bytes>,
     settled: Option<bool>,
-    more: TransferState,
     message_format: Option<MessageFormat>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum TransferState {
-    First,
+    First(DeliveryPromise),
     Continue,
     Last,
-    Only,
+    Only(DeliveryPromise),
+}
+
+impl TransferState {
+    fn more(&self) -> bool {
+        match self {
+            TransferState::Only(_) | TransferState::Last => false,
+            _ => true,
+        }
+    }
 }
 
 impl SessionInner {
@@ -233,7 +241,7 @@ impl SessionInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            if let Some(tx) = tr.promise {
+            if let TransferState::First(tx) | TransferState::Only(tx) = tr.state {
                 let _ = tx.send(Err(err.clone()));
             }
         }
@@ -383,28 +391,33 @@ impl SessionInner {
         if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
             match link {
                 ReceiverLinkState::Opening(l) => {
-                    let attach = Attach {
-                        name: attach.name.clone(),
-                        handle: token as Handle,
-                        role: Role::Receiver,
-                        snd_settle_mode: SenderSettleMode::Mixed,
-                        rcv_settle_mode: ReceiverSettleMode::First,
-                        source: attach.source.clone(),
-                        target: attach.target.clone(),
-                        unsettled: None,
-                        incomplete_unsettled: false,
-                        initial_delivery_count: Some(0),
-                        max_message_size: Some(65536),
-                        offered_capabilities: None,
-                        desired_capabilities: None,
-                        properties: None,
-                    };
-                    *link = ReceiverLinkState::Established(ReceiverLink::new(l.take().unwrap()));
-                    self.post_frame(attach.into());
+                    if let Some(l) = l.take() {
+                        let attach = Attach {
+                            name: attach.name.clone(),
+                            handle: token as Handle,
+                            role: Role::Receiver,
+                            snd_settle_mode: SenderSettleMode::Mixed,
+                            rcv_settle_mode: ReceiverSettleMode::First,
+                            source: attach.source.clone(),
+                            target: attach.target.clone(),
+                            unsettled: None,
+                            incomplete_unsettled: false,
+                            initial_delivery_count: Some(0),
+                            max_message_size: Some(65536),
+                            offered_capabilities: None,
+                            desired_capabilities: None,
+                            properties: None,
+                        };
+                        *link = ReceiverLinkState::Established(ReceiverLink::new(l));
+                        self.post_frame(attach.into());
+                        return;
+                    }
                 }
-                _ => error!("Unexpected receiver link state"),
+                _ => (),
             }
         }
+        // TODO: close session
+        error!("Unexpected receiver link state")
     }
 
     /// Close receiver link
@@ -612,11 +625,16 @@ impl SessionInner {
                             attach.handle()
                         );
                         if let ReceiverLinkState::OpeningLocal(opt_item) = item {
-                            let (link, tx) = opt_item.take().unwrap();
-                            self.remote_handles.insert(attach.handle(), *index);
+                            if let Some((link, tx)) = opt_item.take() {
+                                self.remote_handles.insert(attach.handle(), *index);
 
-                            *item = ReceiverLinkState::Established(ReceiverLink::new(link.clone()));
-                            let _ = tx.send(Ok(ReceiverLink::new(link)));
+                                *item =
+                                    ReceiverLinkState::Established(ReceiverLink::new(link.clone()));
+                                let _ = tx.send(Ok(ReceiverLink::new(link)));
+                            } else {
+                                // TODO: close session
+                                error!("Inconsistent session state, bug");
+                            }
                         }
                     }
                 }
@@ -672,7 +690,8 @@ impl SessionInner {
                         while idx < self.pending_transfers.len() {
                             if self.pending_transfers[idx].link_handle == handle {
                                 let tr = self.pending_transfers.remove(idx).unwrap();
-                                if let Some(tx) = tr.promise {
+                                if let TransferState::First(tx) | TransferState::Only(tx) = tr.state
+                                {
                                     let _ = tx.send(Err(err.clone()));
                                 }
                             } else {
@@ -691,12 +710,15 @@ impl SessionInner {
                 Either::Right(link) => match link {
                     ReceiverLinkState::Opening(_) => false,
                     ReceiverLinkState::OpeningLocal(ref mut item) => {
-                        let (inner, tx) = item.take().unwrap();
-                        inner.get_mut().detached();
-                        if let Some(err) = detach.error.clone() {
-                            let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
+                        if let Some((inner, tx)) = item.take() {
+                            inner.get_mut().detached();
+                            if let Some(err) = detach.error.clone() {
+                                let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
+                            } else {
+                                let _ = tx.send(Err(AmqpProtocolError::LinkDetached(None)));
+                            }
                         } else {
-                            let _ = tx.send(Err(AmqpProtocolError::LinkDetached(None)));
+                            error!("Inconsistent session state, bug");
                         }
 
                         true
@@ -805,10 +827,9 @@ impl SessionInner {
                 t.link_handle,
                 t.idx,
                 t.body,
-                t.promise,
+                t.state,
                 t.tag,
                 t.settled,
-                t.more,
                 t.message_format,
             );
             if self.remote_outgoing_window == 0 {
@@ -904,10 +925,9 @@ impl SessionInner {
         link_handle: Handle,
         idx: u32,
         body: Option<TransferBody>,
-        promise: Option<DeliveryPromise>,
+        state: TransferState,
         tag: Option<Bytes>,
         settled: Option<bool>,
-        more: TransferState,
         message_format: Option<MessageFormat>,
     ) {
         if self.remote_incoming_window == 0 {
@@ -919,22 +939,14 @@ impl SessionInner {
                 link_handle,
                 idx,
                 body,
-                promise,
+                state,
                 tag,
                 settled,
-                more,
                 message_format,
             });
         } else {
-            let frame = self.prepare_transfer(
-                link_handle,
-                body,
-                promise,
-                tag,
-                settled,
-                more,
-                message_format,
-            );
+            let frame =
+                self.prepare_transfer(link_handle, body, state, tag, settled, message_format);
             log::trace!(
                 "Sending transfer over {} window: {}",
                 link_handle,
@@ -949,10 +961,9 @@ impl SessionInner {
         &mut self,
         link_handle: Handle,
         body: Option<TransferBody>,
-        promise: Option<DeliveryPromise>,
+        tr_state: TransferState,
         delivery_tag: Option<Bytes>,
         settled: Option<bool>,
-        more: TransferState,
         message_format: Option<MessageFormat>,
     ) -> Frame {
         self.remote_incoming_window -= 1;
@@ -979,8 +990,9 @@ impl SessionInner {
             batchable: false,
         };
 
-        match more {
-            TransferState::First | TransferState::Only => {
+        let more = tr_state.more();
+        match tr_state {
+            TransferState::First(promise) | TransferState::Only(promise) => {
                 let delivery_id = self.next_outgoing_id;
                 self.next_outgoing_id += 1;
 
@@ -993,11 +1005,9 @@ impl SessionInner {
                     Some(buf.freeze())
                 };
 
-                transfer.more = more == TransferState::First;
-                transfer.batchable = more == TransferState::First;
-
-                self.unsettled_deliveries
-                    .insert(delivery_id, promise.unwrap());
+                transfer.more = more;
+                transfer.batchable = more;
+                self.unsettled_deliveries.insert(delivery_id, promise);
             }
             TransferState::Continue => {
                 transfer.more = true;

@@ -15,7 +15,7 @@ use ntex_amqp_codec::Encode;
 use crate::cell::Cell;
 use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner, TransferState};
-use crate::{Delivery, DeliveryPromise, Handle};
+use crate::{Delivery, Handle};
 
 #[derive(Clone)]
 pub struct SenderLink {
@@ -48,9 +48,8 @@ struct PendingTransfer {
     idx: u32,
     tag: Option<Bytes>,
     body: Option<TransferBody>,
-    promise: Option<DeliveryPromise>,
+    state: TransferState,
     settle: Option<bool>,
-    more: TransferState,
     message_format: Option<MessageFormat>,
 }
 
@@ -184,7 +183,7 @@ impl SenderLinkInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            if let Some(tx) = tr.promise {
+            if let TransferState::First(tx) | TransferState::Only(tx) = tr.state {
                 let _ = tx.send(Err(err.clone()));
             }
         }
@@ -249,10 +248,9 @@ impl SenderLinkInner {
                         self.id as u32,
                         transfer.idx,
                         transfer.body,
-                        transfer.promise,
+                        transfer.state,
                         transfer.tag,
                         transfer.settle,
-                        transfer.more,
                         transfer.message_format,
                     );
                 } else {
@@ -298,8 +296,7 @@ impl SenderLinkInner {
                 self.send_inner(
                     chunk.into(),
                     tag,
-                    TransferState::First,
-                    Some(delivery_tx),
+                    TransferState::First(delivery_tx),
                     message_format,
                 );
 
@@ -308,32 +305,19 @@ impl SenderLinkInner {
 
                     // last chunk
                     if body.is_empty() {
-                        self.send_inner(
-                            chunk.into(),
-                            None,
-                            TransferState::Last,
-                            None,
-                            message_format,
-                        );
+                        self.send_inner(chunk.into(), None, TransferState::Last, message_format);
                         break;
                     } else {
                         self.send_inner(
                             chunk.into(),
                             None,
                             TransferState::Continue,
-                            None,
                             message_format,
                         );
                     }
                 }
             } else {
-                self.send_inner(
-                    body,
-                    tag,
-                    TransferState::Only,
-                    Some(delivery_tx),
-                    message_format,
-                );
+                self.send_inner(body, tag, TransferState::Only(delivery_tx), message_format);
             }
 
             Delivery::Pending(delivery_rx)
@@ -344,8 +328,7 @@ impl SenderLinkInner {
         &mut self,
         body: TransferBody,
         tag: Option<Bytes>,
-        more: TransferState,
-        promise: Option<DeliveryPromise>,
+        state: TransferState,
         message_format: Option<MessageFormat>,
     ) {
         if self.link_credit == 0 {
@@ -357,8 +340,7 @@ impl SenderLinkInner {
             );
             self.pending_transfers.push_back(PendingTransfer {
                 tag,
-                promise,
-                more,
+                state,
                 message_format,
                 settle: Some(false),
                 body: Some(body),
@@ -371,10 +353,9 @@ impl SenderLinkInner {
                 self.id as u32,
                 self.idx,
                 Some(body),
-                promise,
+                state,
                 tag,
                 None,
-                more,
                 message_format,
             );
         }
