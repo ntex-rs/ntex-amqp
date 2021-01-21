@@ -254,14 +254,16 @@ where
                 let result = match frame {
                     Frame::Flow(frm) => {
                         // apply flow to specific link
-                        if let Some(link) = session.get_sender_link_by_handle(frm.handle.unwrap()) {
-                            let frame = ControlFrame::new(
-                                session.clone(),
-                                ControlFrameKind::Flow(frm, link.clone()),
-                            );
-                            *self.ctl_fut.borrow_mut() =
-                                Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                            return ready(Ok(()));
+                        if let Some(handle) = frm.handle {
+                            if let Some(link) = session.get_sender_link_by_handle(handle) {
+                                let frame = ControlFrame::new(
+                                    session.clone(),
+                                    ControlFrameKind::Flow(frm, link.clone()),
+                                );
+                                *self.ctl_fut.borrow_mut() =
+                                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                                return ready(Ok(()));
+                            }
                         }
                         session.get_mut().apply_flow(&frm);
                         Ok(())

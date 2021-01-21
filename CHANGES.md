@@ -1,5 +1,9 @@
 # Changes
 
+## [0.2.1] - 2021-01-21
+
+* Fix session level Flow frame handling
+
 ## [0.2.0] - 2021-01-13
 
 * Refactor server and client api
