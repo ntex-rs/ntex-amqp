@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.4.0-b.1] - 2021-01-24
+
+* Use ntex-codec v0.3
+
 ## [0.3.0-b.2] - 2021-01-21
 
 * Fix session level Flow frame handling

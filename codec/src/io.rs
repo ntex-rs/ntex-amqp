@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{cell::Cell, marker::PhantomData};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, BytesMut};
@@ -14,7 +14,7 @@ const SIZE_HIGH_WM: usize = 32768;
 
 #[derive(Debug)]
 pub struct AmqpCodec<T: Decode + Encode> {
-    state: DecodeState,
+    state: Cell<DecodeState>,
     max_size: usize,
     phantom: PhantomData<T>,
 }
@@ -34,7 +34,7 @@ impl<T: Decode + Encode> Default for AmqpCodec<T> {
 impl<T: Decode + Encode> AmqpCodec<T> {
     pub fn new() -> AmqpCodec<T> {
         AmqpCodec {
-            state: DecodeState::FrameHeader,
+            state: Cell::new(DecodeState::FrameHeader),
             max_size: 0,
             phantom: PhantomData,
         }
@@ -62,9 +62,9 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
     type Item = T;
     type Error = AmqpCodecError;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode(&self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
-            match self.state {
+            match self.state.get() {
                 DecodeState::FrameHeader => {
                     let len = src.len();
                     if len < HEADER_LEN {
@@ -76,7 +76,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     if self.max_size != 0 && size > self.max_size {
                         return Err(AmqpCodecError::MaxSizeExceeded);
                     }
-                    self.state = DecodeState::Frame(size - 4);
+                    self.state.set(DecodeState::Frame(size - 4));
                     src.advance(4);
 
                     if len < size {
@@ -98,7 +98,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                         // todo: could it really happen?
                         return Err(AmqpCodecError::UnparsedBytesLeft);
                     }
-                    self.state = DecodeState::FrameHeader;
+                    self.state.set(DecodeState::FrameHeader);
                     return Ok(Some(frame));
                 }
             }
@@ -110,7 +110,7 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
     type Item = T;
     type Error = AmqpCodecError;
 
-    fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let size = item.encoded_size();
         let need = std::cmp::max(SIZE_LOW_WM, size);
         if dst.remaining_mut() < need {
@@ -136,7 +136,7 @@ impl Decoder for ProtocolIdCodec {
     type Item = ProtocolId;
     type Error = ProtocolIdError;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+    fn decode(&self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.len() < PROTOCOL_HEADER_LEN {
             Ok(None)
         } else {
@@ -162,7 +162,7 @@ impl Encoder for ProtocolIdCodec {
     type Item = ProtocolId;
     type Error = ProtocolIdError;
 
-    fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         dst.reserve(PROTOCOL_HEADER_LEN);
         dst.put_slice(PROTOCOL_HEADER_PREFIX);
         dst.put_u8(item as u8);
