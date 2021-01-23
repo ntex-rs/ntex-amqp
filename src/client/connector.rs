@@ -179,11 +179,12 @@ where
     {
         trace!("Negotiation client protocol id: Amqp");
 
-        let config = self.config.clone();
-        let disconnect_timeout = self.disconnect_timeout;
-        let state = State::new(ProtocolIdCodec);
-
-        _connect_plain(io, state, config, disconnect_timeout)
+        _connect_plain(
+            io,
+            State::new(),
+            self.config.clone(),
+            self.disconnect_timeout,
+        )
     }
 
     fn _connect(
@@ -198,8 +199,7 @@ where
             trace!("Negotiation client protocol id: Amqp");
 
             let io = fut.await?;
-            let state = State::new(ProtocolIdCodec);
-            _connect_plain(io, state, config, disconnect_timeout).await
+            _connect_plain(io, State::new(), config, disconnect_timeout).await
         }
     }
 
@@ -266,11 +266,13 @@ where
 {
     trace!("Negotiation client protocol id: AmqpSasl");
 
-    let state = State::new(ProtocolIdCodec);
-    state.send(&mut io, ProtocolId::AmqpSasl).await?;
+    let state = State::new();
+    state
+        .send(&mut io, &ProtocolIdCodec, ProtocolId::AmqpSasl)
+        .await?;
 
     let proto = state
-        .next(&mut io)
+        .next(&mut io, &ProtocolIdCodec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| {
@@ -286,11 +288,11 @@ where
         }));
     }
 
-    let state = state.map_codec(|_| AmqpCodec::<SaslFrame>::new());
+    let codec = AmqpCodec::<SaslFrame>::new();
 
     // processing sasl-mechanisms
     let _ = state
-        .next(&mut io)
+        .next(&mut io, &codec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
@@ -304,11 +306,11 @@ where
         initial_response: Some(initial_response),
     };
 
-    state.send(&mut io, sasl_init.into()).await?;
+    state.send(&mut io, &codec, sasl_init.into()).await?;
 
     // processing sasl-outcome
     let sasl_frame = state
-        .next(&mut io)
+        .next(&mut io, &codec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
@@ -323,14 +325,13 @@ where
     } else {
         return Err(ConnectError::Disconnected);
     }
-    let state = state.map_codec(|_| ProtocolIdCodec);
 
     _connect_plain(io, state, config, disconnect_timeout).await
 }
 
 async fn _connect_plain<T>(
     mut io: T,
-    state: State<ProtocolIdCodec>,
+    state: State,
     config: Configuration,
     disconnect_timeout: u16,
 ) -> Result<Client<T>, ConnectError>
@@ -339,10 +340,12 @@ where
 {
     trace!("Negotiation client protocol id: Amqp");
 
-    state.send(&mut io, ProtocolId::Amqp).await?;
+    state
+        .send(&mut io, &ProtocolIdCodec, ProtocolId::Amqp)
+        .await?;
 
     let proto = state
-        .next(&mut io)
+        .next(&mut io, &ProtocolIdCodec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| {
@@ -359,17 +362,16 @@ where
         }));
     }
 
-    let state =
-        state.map_codec(|_| AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize));
-
     let open = config.to_open();
+    let codec = AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize);
+
     trace!("Open client amqp connection: {:?}", open);
     state
-        .send(&mut io, AmqpFrame::new(0, Frame::Open(open)))
+        .send(&mut io, &codec, AmqpFrame::new(0, Frame::Open(open)))
         .await?;
 
     let frame = state
-        .next(&mut io)
+        .next(&mut io, &codec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| {
@@ -386,6 +388,7 @@ where
         let client = Client::new(
             io,
             state,
+            codec,
             connection,
             config.timeout_secs() as u16,
             disconnect_timeout,

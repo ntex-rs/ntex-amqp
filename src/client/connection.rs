@@ -12,7 +12,8 @@ use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
 /// Mqtt client
 pub struct Client<Io, St = ()> {
     io: Io,
-    state: IoState<AmqpCodec<AmqpFrame>>,
+    state: IoState,
+    codec: AmqpCodec<AmqpFrame>,
     connection: Connection,
     keepalive: u16,
     disconnect_timeout: u16,
@@ -27,7 +28,8 @@ where
     /// Construct new `Dispatcher` instance with outgoing messages stream.
     pub(super) fn new(
         io: T,
-        state: IoState<AmqpCodec<AmqpFrame>>,
+        state: IoState,
+        codec: AmqpCodec<AmqpFrame>,
         connection: Connection,
         keepalive: u16,
         disconnect_timeout: u16,
@@ -36,6 +38,7 @@ where
         Client {
             io,
             state,
+            codec,
             connection,
             keepalive,
             disconnect_timeout,
@@ -62,6 +65,7 @@ where
         Client {
             io: self.io,
             state: self.state,
+            codec: self.codec,
             connection: self.connection,
             keepalive: self.keepalive,
             disconnect_timeout: self.disconnect_timeout,
@@ -85,6 +89,7 @@ where
 
         IoDispatcher::new(
             self.io,
+            self.codec,
             self.state,
             dispatcher,
             Timer::with(Duration::from_secs(1)),

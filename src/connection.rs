@@ -15,7 +15,8 @@ pub struct Connection(pub(crate) Cell<ConnectionInner>);
 
 pub(crate) struct ConnectionInner {
     st: ConnectionState,
-    state: State<AmqpCodec<AmqpFrame>>,
+    state: State,
+    codec: AmqpCodec<AmqpFrame>,
     pub(crate) sessions: slab::Slab<ChannelState>,
     pub(crate) sessions_map: HashMap<u16, usize>,
     pub(crate) on_close: Condition,
@@ -47,12 +48,13 @@ pub(crate) enum ConnectionState {
 
 impl Connection {
     pub(crate) fn new(
-        state: State<AmqpCodec<AmqpFrame>>,
+        state: State,
         local_config: &Configuration,
         remote_config: &Configuration,
     ) -> Connection {
         Connection(Cell::new(ConnectionInner {
             state,
+            codec: AmqpCodec::new(),
             st: ConnectionState::Normal,
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::default(),
@@ -202,13 +204,13 @@ impl Connection {
 
         inner
             .state
-            .write_item(AmqpFrame::new(token as u16, begin.into()))
+            .write_item(AmqpFrame::new(token as u16, begin.into()), &inner.codec)
             .map(|_| ())
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
         let inner = self.0.get_mut();
-        if let Err(e) = inner.state.write_item(frame) {
+        if let Err(e) = inner.state.write_item(frame, &inner.codec) {
             inner.set_error(e.into())
         }
     }
@@ -234,7 +236,7 @@ impl ConnectionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
-        if let Err(e) = self.state.write_item(frame) {
+        if let Err(e) = self.state.write_item(frame, &self.codec) {
             self.set_error(e.into())
         }
     }

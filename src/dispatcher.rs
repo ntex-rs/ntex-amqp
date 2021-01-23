@@ -1,7 +1,7 @@
 use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll, time};
 
 use futures::future::{ready, FutureExt, Ready};
-use ntex::framed::DispatcherItem;
+use ntex::framed::DispatchItem;
 use ntex::rt::time::{delay_for, Delay};
 use ntex::service::Service;
 
@@ -160,7 +160,7 @@ where
     Ctl::Future: 'static,
     Error: From<Sr::Error> + From<Ctl::Error>,
 {
-    type Request = DispatcherItem<AmqpCodec<AmqpFrame>>;
+    type Request = DispatchItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
     type Error = DispatcherError;
     type Future = Ready<Result<Self::Response, Self::Error>>;
@@ -215,7 +215,7 @@ where
 
     fn call(&self, request: Self::Request) -> Self::Future {
         match request {
-            DispatcherItem::Item(frame) => {
+            DispatchItem::Item(frame) => {
                 // trace!("incoming: {:#?}", frame);
                 let item = try_ready_err!(self
                     .sink
@@ -326,20 +326,20 @@ where
 
                 ready(result)
             }
-            DispatcherItem::EncoderError(err) | DispatcherItem::DecoderError(err) => {
+            DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
                 *self.ctl_fut.borrow_mut() =
                     Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                 ready(Ok(()))
             }
-            DispatcherItem::KeepAliveTimeout => {
+            DispatchItem::KeepAliveTimeout => {
                 self.sink
                     .0
                     .get_mut()
                     .set_error(AmqpProtocolError::KeepAliveTimeout);
                 ready(Ok(()))
             }
-            DispatcherItem::IoError(_) => {
+            DispatchItem::IoError(_) => {
                 self.sink
                     .0
                     .get_mut()

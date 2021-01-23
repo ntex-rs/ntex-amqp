@@ -15,7 +15,7 @@ use crate::{connection::Connection, Configuration};
 
 pub struct Sasl<Io> {
     io: Io,
-    state: State<AmqpCodec<SaslFrame>>,
+    state: State,
     mechanisms: Symbols,
     local_config: Rc<Configuration>,
 }
@@ -29,11 +29,7 @@ impl<Io> fmt::Debug for Sasl<Io> {
 }
 
 impl<Io> Sasl<Io> {
-    pub(crate) fn new(
-        io: Io,
-        state: State<AmqpCodec<SaslFrame>>,
-        local_config: Rc<Configuration>,
-    ) -> Self {
+    pub(crate) fn new(io: Io, state: State, local_config: Rc<Configuration>) -> Self {
         Sasl {
             io,
             state,
@@ -78,12 +74,13 @@ where
         }
         .into();
 
+        let codec = AmqpCodec::<SaslFrame>::new();
         state
-            .send(&mut io, frame)
+            .send(&mut io, &codec, frame)
             .await
             .map_err(HandshakeError::from)?;
         let frame = state
-            .next(&mut io)
+            .next(&mut io, &codec)
             .await
             .map_err(HandshakeError::from)?
             .ok_or(HandshakeError::Disconnected)?;
@@ -93,6 +90,7 @@ where
                 frame,
                 io,
                 state,
+                codec,
                 local_config,
             }),
             body => Err(HandshakeError::UnexpectedSaslBodyFrame(body)),
@@ -104,7 +102,8 @@ where
 pub struct SaslInit<Io> {
     frame: protocol::SaslInit,
     io: Io,
-    state: State<AmqpCodec<SaslFrame>>,
+    state: State,
+    codec: AmqpCodec<SaslFrame>,
     local_config: Rc<Configuration>,
 }
 
@@ -157,15 +156,16 @@ where
     ) -> Result<SaslResponse<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
+        let codec = self.codec;
         let local_config = self.local_config;
         let frame = SaslChallenge { challenge }.into();
 
         state
-            .send(&mut io, frame)
+            .send(&mut io, &codec, frame)
             .await
             .map_err(HandshakeError::from)?;
         let frame = state
-            .next(&mut io)
+            .next(&mut io, &codec)
             .await
             .map_err(HandshakeError::from)?
             .ok_or(HandshakeError::Disconnected)?;
@@ -175,6 +175,7 @@ where
                 frame,
                 io,
                 state,
+                codec,
                 local_config,
             }),
             body => Err(HandshakeError::UnexpectedSaslBodyFrame(body)),
@@ -185,6 +186,7 @@ where
     pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
+        let codec = self.codec;
         let local_config = self.local_config;
 
         let frame = SaslOutcome {
@@ -193,7 +195,7 @@ where
         }
         .into();
         state
-            .send(&mut io, frame)
+            .send(&mut io, &codec, frame)
             .await
             .map_err(HandshakeError::from)?;
 
@@ -208,7 +210,8 @@ where
 pub struct SaslResponse<Io> {
     frame: protocol::SaslResponse,
     io: Io,
-    state: State<AmqpCodec<SaslFrame>>,
+    state: State,
+    codec: AmqpCodec<SaslFrame>,
     local_config: Rc<Configuration>,
 }
 
@@ -233,6 +236,7 @@ where
     pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<Io>, HandshakeError> {
         let mut io = self.io;
         let state = self.state;
+        let codec = self.codec;
         let local_config = self.local_config;
 
         let frame = SaslOutcome {
@@ -241,11 +245,11 @@ where
         }
         .into();
         state
-            .send(&mut io, frame)
+            .send(&mut io, &codec, frame)
             .await
             .map_err(HandshakeError::from)?;
         state
-            .next(&mut io)
+            .next(&mut io, &codec)
             .await
             .map_err(HandshakeError::from)?
             .ok_or(HandshakeError::Disconnected)?;
@@ -260,7 +264,7 @@ where
 
 pub struct SaslSuccess<Io> {
     io: Io,
-    state: State<AmqpCodec<SaslFrame>>,
+    state: State,
     local_config: Rc<Configuration>,
 }
 
@@ -281,10 +285,10 @@ where
     /// Wait for connection open frame
     pub async fn open(self) -> Result<HandshakeAmqpOpened<Io>, HandshakeError> {
         let mut io = self.io;
-        let state = self.state.map_codec(|_| ProtocolIdCodec);
+        let state = self.state;
 
         let protocol = state
-            .next(&mut io)
+            .next(&mut io, &ProtocolIdCodec)
             .await
             .map_err(HandshakeError::from)?
             .ok_or(HandshakeError::Disconnected)?;
@@ -293,14 +297,14 @@ where
             ProtocolId::Amqp => {
                 // confirm protocol
                 state
-                    .send(&mut io, ProtocolId::Amqp)
+                    .send(&mut io, &ProtocolIdCodec, ProtocolId::Amqp)
                     .await
                     .map_err(HandshakeError::from)?;
 
                 // Wait for connection open frame
-                let state = state.map_codec(|_| AmqpCodec::<AmqpFrame>::new());
+                let codec = AmqpCodec::<AmqpFrame>::new();
                 let frame = state
-                    .next(&mut io)
+                    .next(&mut io, &codec)
                     .await
                     .map_err(HandshakeError::from)?
                     .ok_or(HandshakeError::Disconnected)?;

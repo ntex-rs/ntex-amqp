@@ -5,9 +5,7 @@ use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 
-use crate::codec::{
-    protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame,
-};
+use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::dispatcher::Dispatcher;
 use crate::types::Link;
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -33,7 +31,7 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     max_size: usize,
     handshake_timeout: u64,
     disconnect_timeout: u16,
-    time: Timer<AmqpCodec<AmqpFrame>>,
+    time: Timer,
     _t: PhantomData<St>,
 }
 
@@ -261,7 +259,7 @@ where
         );
 
         Box::pin(async move {
-            let (io, state, sink, st, idle_timeout) = if timeout == 0 {
+            let (io, state, codec, sink, st, idle_timeout) = if timeout == 0 {
                 fut.await?
             } else {
                 ntex::rt::time::timeout(time::Duration::from_millis(timeout), fut)
@@ -284,7 +282,7 @@ where
             let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv, idle_timeout)
                 .map(|_| Option::<AmqpFrame>::None);
 
-            FramedDispatcher::new(io, state, dispatcher, inner.time.clone())
+            FramedDispatcher::new(io, codec, state, dispatcher, inner.time.clone())
                 .keepalive_timeout(keepalive as u16)
                 .disconnect_timeout(disconnect_timeout)
                 .await
@@ -301,7 +299,8 @@ async fn handshake<Io, St, H, Ctl, Pb>(
 ) -> Result<
     (
         Io,
-        IoState<AmqpCodec<AmqpFrame>>,
+        IoState,
+        AmqpCodec<AmqpFrame>,
         Connection,
         State<St>,
         usize,
@@ -315,10 +314,10 @@ where
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
 {
-    let state = IoState::new(ProtocolIdCodec);
+    let state = IoState::new();
 
     let protocol = state
-        .next(&mut io)
+        .next(&mut io, &ProtocolIdCodec)
         .await
         .map_err(HandshakeError::from)?
         .ok_or_else(|| {
@@ -326,44 +325,37 @@ where
             HandshakeError::Disconnected
         })?;
 
-    let (io, sink, state, st, idle_timeout) = match protocol {
+    let (io, sink, state, codec, st, idle_timeout) = match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             state
-                .send(&mut io, protocol)
+                .send(&mut io, &ProtocolIdCodec, protocol)
                 .await
                 .map_err(HandshakeError::from)?;
 
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
-                    Handshake::new_plain(
-                        io,
-                        state.map_codec(|_| AmqpCodec::<AmqpFrame>::new()),
-                        inner.config.clone(),
-                    )
+                    Handshake::new_plain(io, state, inner.config.clone())
                 } else {
-                    Handshake::new_sasl(
-                        io,
-                        state.map_codec(|_| AmqpCodec::<SaslFrame>::new()),
-                        inner.config.clone(),
-                    )
+                    Handshake::new_sasl(io, state, inner.config.clone())
                 })
                 .await
                 .map_err(ServerError::Service)?;
 
             let (st, mut io, sink, state, idle_timeout) = ack.into_inner();
-            state.with_codec(|codec| codec.set_max_size(max_size));
+
+            let codec = AmqpCodec::new().max_size(max_size);
 
             // confirm Open
             let local = inner.config.to_open();
             state
-                .send(&mut io, AmqpFrame::new(0, local.into()))
+                .send(&mut io, &codec, AmqpFrame::new(0, local.into()))
                 .await
                 .map_err(HandshakeError::from)?;
 
             let st = State::new(st);
 
-            (io, sink, state, st, idle_timeout)
+            (io, sink, state, codec, st, idle_timeout)
         }
         ProtocolId::AmqpTls => {
             return Err(HandshakeError::from(ProtocolIdError::Unexpected {
@@ -374,5 +366,5 @@ where
         }
     };
 
-    Ok((io, state, sink, st, idle_timeout))
+    Ok((io, state, codec, sink, st, idle_timeout))
 }
