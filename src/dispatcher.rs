@@ -346,6 +346,9 @@ where
                     .set_error(AmqpProtocolError::Disconnected);
                 ready(Ok(()))
             }
+            DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
+                ready(Ok(()))
+            }
         }
     }
 }
