@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use futures::future::{err, ok};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as IoDispatcher, State as IoState, Timer};
@@ -18,6 +16,7 @@ pub struct Client<Io, St = ()> {
     keepalive: u16,
     disconnect_timeout: u16,
     remote_config: Configuration,
+    timer: Timer,
     st: State<St>,
 }
 
@@ -34,6 +33,7 @@ where
         keepalive: u16,
         disconnect_timeout: u16,
         remote_config: Configuration,
+        timer: Timer,
     ) -> Self {
         Client {
             io,
@@ -43,6 +43,7 @@ where
             keepalive,
             disconnect_timeout,
             remote_config,
+            timer,
             st: State::new(()),
         }
     }
@@ -70,6 +71,7 @@ where
             keepalive: self.keepalive,
             disconnect_timeout: self.disconnect_timeout,
             remote_config: self.remote_config,
+            timer: self.timer,
             st: State::new(st),
         }
     }
@@ -87,15 +89,13 @@ where
         )
         .map(|_| Option::<AmqpFrame>::None);
 
-        IoDispatcher::new(
-            self.io,
-            self.codec,
-            self.state,
-            dispatcher,
-            Timer::with(Duration::from_secs(1)),
-        )
-        .keepalive_timeout(self.keepalive)
-        .disconnect_timeout(self.disconnect_timeout)
-        .await
+        IoDispatcher::new(self.io, self.codec, self.state, dispatcher, self.timer)
+            .keepalive_timeout(if self.keepalive != 0 {
+                self.keepalive + 5
+            } else {
+                0
+            })
+            .disconnect_timeout(self.disconnect_timeout)
+            .await
     }
 }

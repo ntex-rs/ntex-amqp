@@ -1,5 +1,13 @@
 # Changes
 
+## [0.3.0-b.5] - 2021-02-04
+
+* Fix client idle timeout
+
+* Fix frame-trace feature
+
+* Re-use timer for client connector
+
 ## [0.3.0-b.4] - 2021-01-27
 
 * Upgrade to ntex v0.2.0-b.7

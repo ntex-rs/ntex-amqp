@@ -4,7 +4,7 @@ use bytestring::ByteString;
 use futures::{future::Either, Future, FutureExt};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::connect::{self, Address, Connect};
-use ntex::framed::State;
+use ntex::framed::{State, Timer};
 use ntex::rt::time::delay_for;
 use ntex::service::Service;
 
@@ -26,6 +26,7 @@ pub struct Connector<A, T> {
     config: Configuration,
     handshake_timeout: u16,
     disconnect_timeout: u16,
+    timer: Timer,
     _t: PhantomData<A>,
 }
 
@@ -38,6 +39,7 @@ impl<A> Connector<A, ()> {
             handshake_timeout: 0,
             disconnect_timeout: 3000,
             config: Configuration::default(),
+            timer: Timer::with(Duration::from_secs(1)),
             _t: PhantomData,
         }
     }
@@ -121,6 +123,7 @@ where
             config: self.config,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -133,6 +136,7 @@ where
             connector: OpensslConnector::new(connector),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -147,6 +151,7 @@ where
             connector: RustlsConnector::new(Arc::new(config)),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -184,6 +189,7 @@ where
             State::new(),
             self.config.clone(),
             self.disconnect_timeout,
+            self.timer.clone(),
         )
     }
 
@@ -194,12 +200,13 @@ where
         let fut = self.connector.call(Connect::new(address));
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
+        let timer = self.timer.clone();
 
         async move {
             trace!("Negotiation client protocol id: Amqp");
 
             let io = fut.await?;
-            _connect_plain(io, State::new(), config, disconnect_timeout).await
+            _connect_plain(io, State::new(), config, disconnect_timeout, timer).await
         }
     }
 
@@ -238,8 +245,9 @@ where
 
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
+        let timer = self.timer.clone();
 
-        _connect_sasl(io, auth, config, disconnect_timeout)
+        _connect_sasl(io, auth, config, disconnect_timeout, timer)
     }
 
     fn _connect_sasl(
@@ -250,8 +258,9 @@ where
         let fut = self.connector.call(Connect::new(addr));
         let config = self.config.clone();
         let disconnect_timeout = self.disconnect_timeout;
+        let timer = self.timer.clone();
 
-        async move { _connect_sasl(fut.await?, auth, config, disconnect_timeout).await }
+        async move { _connect_sasl(fut.await?, auth, config, disconnect_timeout, timer).await }
     }
 }
 
@@ -260,6 +269,7 @@ async fn _connect_sasl<T>(
     auth: SaslAuth,
     config: Configuration,
     disconnect_timeout: u16,
+    timer: Timer,
 ) -> Result<Client<T>, ConnectError>
 where
     T: AsyncRead + AsyncWrite + Unpin + 'static,
@@ -326,7 +336,7 @@ where
         return Err(ConnectError::Disconnected);
     }
 
-    _connect_plain(io, state, config, disconnect_timeout).await
+    _connect_plain(io, state, config, disconnect_timeout, timer).await
 }
 
 async fn _connect_plain<T>(
@@ -334,6 +344,7 @@ async fn _connect_plain<T>(
     state: State,
     config: Configuration,
     disconnect_timeout: u16,
+    timer: Timer,
 ) -> Result<Client<T>, ConnectError>
 where
     T: AsyncRead + AsyncWrite + Unpin + 'static,
@@ -393,6 +404,7 @@ where
             config.timeout_secs() as u16,
             disconnect_timeout,
             remote_config,
+            timer,
         );
         Ok(client)
     } else {

@@ -176,7 +176,7 @@ impl Configuration {
 
     pub(crate) fn timeout_remote_secs(&self) -> usize {
         if self.idle_time_out > 0 {
-            ((self.idle_time_out as f32) * 0.8 / 1000.0) as usize
+            ((self.idle_time_out as f32) * 0.75 / 1000.0) as usize
         } else {
             0
         }

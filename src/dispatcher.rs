@@ -57,6 +57,7 @@ where
         if idle_timeout > 0 {
             let mut expire = self.expire.borrow_mut();
             if Pin::new(&mut *expire).poll(cx).is_ready() {
+                log::trace!("Send keep-alive ping, timeout: {:?} secs", idle_timeout);
                 self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
                 *expire = delay_for(time::Duration::from_secs(idle_timeout as u64));
                 let _ = Pin::new(&mut *expire).poll(cx);
@@ -216,7 +217,9 @@ where
     fn call(&self, request: Self::Request) -> Self::Future {
         match request {
             DispatchItem::Item(frame) => {
-                // trace!("incoming: {:#?}", frame);
+                #[cfg(feature = "frame-trace")]
+                log::trace!("incoming: {:#?}", frame);
+
                 let item = try_ready_err!(self
                     .sink
                     .0

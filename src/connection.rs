@@ -209,6 +209,9 @@ impl Connection {
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
+        #[cfg(feature = "frame-trace")]
+        log::trace!("outcoming: {:#?}", frame);
+
         let inner = self.0.get_mut();
         if let Err(e) = inner.state.write_item(frame, &inner.codec) {
             inner.set_error(e.into())
