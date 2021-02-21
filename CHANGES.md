@@ -1,5 +1,13 @@
 # Changes
 
+## [0.3.0] - 2021-02-21
+
+* Update to ntex-0.2
+
+## [codec-0.4.0] - 2021-01-21
+
+* Use ntex-codec v0.3
+
 ## [0.3.0-b.5] - 2021-02-04
 
 * Fix client idle timeout
