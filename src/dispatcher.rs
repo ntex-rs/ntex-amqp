@@ -2,7 +2,7 @@ use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Pol
 
 use futures::future::{ready, FutureExt, Ready};
 use ntex::framed::DispatchItem;
-use ntex::rt::time::{delay_for, Delay};
+use ntex::rt::time::{sleep, Sleep};
 use ntex::service::Service;
 
 use crate::cell::Cell;
@@ -20,7 +20,7 @@ pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {
     ctl_service: Ctl,
     ctl_fut: RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
     shutdown: std::cell::Cell<bool>,
-    expire: RefCell<Delay>,
+    expire: RefCell<Pin<Box<Sleep>>>,
     idle_timeout: usize,
 }
 
@@ -48,7 +48,9 @@ where
             idle_timeout,
             ctl_fut: RefCell::new(None),
             shutdown: std::cell::Cell::new(false),
-            expire: RefCell::new(delay_for(time::Duration::from_secs(idle_timeout as u64))),
+            expire: RefCell::new(Box::pin(sleep(time::Duration::from_secs(
+                idle_timeout as u64,
+            )))),
         }
     }
 
@@ -59,7 +61,7 @@ where
             if Pin::new(&mut *expire).poll(cx).is_ready() {
                 log::trace!("Send keep-alive ping, timeout: {:?} secs", idle_timeout);
                 self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
-                *expire = delay_for(time::Duration::from_secs(idle_timeout as u64));
+                *expire = Box::pin(sleep(time::Duration::from_secs(idle_timeout as u64)));
                 let _ = Pin::new(&mut *expire).poll(cx);
             }
         }

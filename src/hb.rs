@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use ntex::rt::time::{delay_until, Delay, Instant};
+use ntex::rt::time::{sleep_until, Instant, Sleep};
 use ntex::util::time::LowResTimeService;
 
 pub(crate) enum HeartbeatAction {
@@ -18,16 +18,16 @@ pub(crate) struct Heartbeat {
     local: Duration,
     remote: Option<Duration>,
     time: LowResTimeService,
-    delay: Delay,
+    delay: Pin<Box<Sleep>>,
 }
 
 impl Heartbeat {
     pub(crate) fn new(local: Duration, remote: Option<Duration>, time: LowResTimeService) -> Self {
         let now = Instant::from_std(time.now());
         let delay = if let Some(remote) = remote {
-            delay_until(now + std::cmp::min(local, remote))
+            Box::pin(sleep_until(now + std::cmp::min(local, remote)))
         } else {
-            delay_until(now + local)
+            Box::pin(sleep_until(now + local))
         };
 
         Heartbeat {
@@ -81,7 +81,8 @@ impl Heartbeat {
                         act = HeartbeatAction::Heartbeat;
                     }
                 }
-                self.delay.reset(self.next_expire());
+                let expire = self.next_expire();
+                self.delay.as_mut().reset(expire);
                 let _ = Pin::new(&mut self.delay).poll(cx);
                 act
             }

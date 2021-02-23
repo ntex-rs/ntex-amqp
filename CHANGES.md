@@ -1,8 +1,12 @@
 # Changes
 
+## [0.4.0-b.1] - 2021-02-24
+
+* Upgrade to ntex-0.3
+
 ## [0.3.0] - 2021-02-21
 
-* Update to ntex-0.2
+* Upgrade to ntex-0.2
 
 ## [codec-0.4.0] - 2021-01-21
 
