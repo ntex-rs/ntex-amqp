@@ -1,4 +1,4 @@
-use bytestring::ByteString;
+use ntex::util::ByteString;
 
 mod connection;
 mod connector;

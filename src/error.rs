@@ -1,7 +1,6 @@
 use std::{convert::TryFrom, io};
 
-use bytestring::ByteString;
-use either::Either;
+use ntex::util::{ByteString, Either};
 
 pub use crate::codec::protocol::Error;
 pub use crate::codec::{AmqpCodecError, AmqpParseError, ProtocolIdError};

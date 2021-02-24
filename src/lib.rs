@@ -8,8 +8,8 @@ extern crate log;
 
 use std::{future::Future, pin::Pin, task::Context, task::Poll};
 
-use bytestring::ByteString;
 use ntex::channel::oneshot;
+use ntex::util::ByteString;
 use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use uuid::Uuid;
 
@@ -43,9 +43,6 @@ pub use self::state::State;
 pub mod codec {
     pub use ntex_amqp_codec::*;
 }
-
-type HashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;
-type HashSet<V> = std::collections::HashSet<V, ahash::RandomState>;
 
 pub enum Delivery {
     Resolved(Result<Disposition, error::AmqpProtocolError>),

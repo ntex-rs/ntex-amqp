@@ -1,8 +1,7 @@
 use std::{collections::VecDeque, future::Future, pin::Pin, task::Context, task::Poll};
 
-use bytes::BytesMut;
-use bytestring::ByteString;
 use futures::Stream;
+use ntex::util::{ByteString, BytesMut};
 use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,

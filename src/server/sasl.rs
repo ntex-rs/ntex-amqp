@@ -1,9 +1,8 @@
 use std::{fmt, rc::Rc};
 
-use bytes::Bytes;
-use bytestring::ByteString;
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::State;
+use ntex::util::{ByteString, Bytes};
 
 use crate::codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,

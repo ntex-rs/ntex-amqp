@@ -1,7 +1,7 @@
 use std::task::{Context, Poll};
 use std::{future::Future, pin::Pin};
 
-use either::Either;
+use ntex::util::Either;
 
 /// Unwrap result and return `err` future
 ///

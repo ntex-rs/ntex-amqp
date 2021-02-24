@@ -2,13 +2,14 @@ use futures::{future, Future};
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::framed::State;
+use ntex::util::HashMap;
 
 use crate::cell::Cell;
 use crate::codec::protocol::{Begin, Close, End, Error, Frame};
 use crate::codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
 use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner};
-use crate::{Configuration, HashMap};
+use crate::Configuration;
 
 #[derive(Clone)]
 pub struct Connection(pub(crate) Cell<ConnectionInner>);

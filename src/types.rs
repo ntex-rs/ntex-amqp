@@ -1,8 +1,7 @@
 use std::fmt;
 
-use bytes::Bytes;
-use bytestring::ByteString;
 use ntex::router::Path;
+use ntex::util::{ByteString, Bytes};
 
 use crate::codec::protocol::{
     self, Accepted, Attach, DeliveryState, Error, Rejected, TransferBody,

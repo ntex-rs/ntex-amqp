@@ -3,8 +3,8 @@ use std::{convert::TryFrom, future::Future, marker::PhantomData, pin::Pin};
 
 use futures::future::{err, ok, Either, Ready};
 use futures::Stream;
+use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
-use ntex_router::{IntoPattern, Router as PatternRouter};
 
 use crate::codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use crate::error::LinkError;

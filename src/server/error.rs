@@ -1,6 +1,5 @@
-use bytestring::ByteString;
 use derive_more::Display;
-use either::Either;
+use ntex::util::{ByteString, Either};
 
 use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame};
 use crate::error::AmqpProtocolError;

@@ -1,11 +1,9 @@
 use std::collections::VecDeque;
 use std::future::Future;
 
-use bytes::{BufMut, Bytes, BytesMut};
-use bytestring::ByteString;
-use either::Either;
 use futures::future::ok;
 use ntex::channel::oneshot;
+use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, HashMap};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -20,7 +18,7 @@ use crate::connection::Connection;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::{DeliveryPromise, HashMap};
+use crate::DeliveryPromise;
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 

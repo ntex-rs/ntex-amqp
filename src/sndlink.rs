@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
 use std::future::Future;
 
-use bytes::{Bytes, BytesMut};
-use bytestring::ByteString;
 use futures::future::{ok, Either};
 use ntex::channel::{condition, oneshot};
+use ntex::util::{ByteString, Bytes, BytesMut};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
     ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
