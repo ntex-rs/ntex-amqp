@@ -26,6 +26,9 @@ pub struct Connector<A, T> {
     config: Configuration,
     handshake_timeout: u16,
     disconnect_timeout: u16,
+    lw: u16,
+    read_hw: u16,
+    write_hw: u16,
     timer: Timer,
     _t: PhantomData<A>,
 }
@@ -37,7 +40,10 @@ impl<A> Connector<A, ()> {
         Connector {
             connector: connect::Connector::default(),
             handshake_timeout: 0,
-            disconnect_timeout: 3000,
+            disconnect_timeout: 3,
+            lw: 1024,
+            read_hw: 8 * 1024,
+            write_hw: 8 * 1024,
             config: Configuration::default(),
             timer: Timer::with(Duration::from_secs(1)),
             _t: PhantomData,
@@ -112,6 +118,34 @@ where
         self
     }
 
+    #[inline]
+    /// Set buffer low watermark size
+    ///
+    /// Low watermark is the same for read and write buffers.
+    /// By default lw value is 256 bytes.
+    pub fn low_watermark(mut self, lw: u16) -> Self {
+        self.lw = lw;
+        self
+    }
+
+    #[inline]
+    /// Set read buffer high water mark size
+    ///
+    /// By default read hw is 4kb
+    pub fn read_high_watermark(mut self, hw: u16) -> Self {
+        self.read_hw = hw;
+        self
+    }
+
+    #[inline]
+    /// Set write buffer high watermark size
+    ///
+    /// By default write hw is 4kb
+    pub fn write_high_watermark(mut self, hw: u16) -> Self {
+        self.write_hw = hw;
+        self
+    }
+
     /// Use custom connector
     pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
@@ -123,6 +157,9 @@ where
             config: self.config,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            lw: self.lw,
+            read_hw: self.read_hw,
+            write_hw: self.write_hw,
             timer: self.timer,
             _t: PhantomData,
         }
@@ -136,6 +173,9 @@ where
             connector: OpensslConnector::new(connector),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            lw: self.lw,
+            read_hw: self.read_hw,
+            write_hw: self.write_hw,
             timer: self.timer,
             _t: PhantomData,
         }
@@ -151,6 +191,9 @@ where
             connector: RustlsConnector::new(Arc::new(config)),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
+            lw: self.lw,
+            read_hw: self.read_hw,
+            write_hw: self.write_hw,
             timer: self.timer,
             _t: PhantomData,
         }
@@ -184,13 +227,14 @@ where
     {
         trace!("Negotiation client protocol id: Amqp");
 
-        _connect_plain(
-            io,
-            State::new(),
-            self.config.clone(),
+        let state = State::with_params(
+            self.read_hw,
+            self.write_hw,
+            self.lw,
             self.disconnect_timeout,
-            self.timer.clone(),
-        )
+        );
+
+        _connect_plain(io, state, self.config.clone(), self.timer.clone())
     }
 
     fn _connect(
@@ -199,14 +243,19 @@ where
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         let fut = self.connector.call(Connect::new(address));
         let config = self.config.clone();
-        let disconnect_timeout = self.disconnect_timeout;
         let timer = self.timer.clone();
+        let state = State::with_params(
+            self.read_hw,
+            self.write_hw,
+            self.lw,
+            self.disconnect_timeout,
+        );
 
         async move {
             trace!("Negotiation client protocol id: Amqp");
 
             let io = fut.await?;
-            _connect_plain(io, State::new(), config, disconnect_timeout, timer).await
+            _connect_plain(io, state, config, timer).await
         }
     }
 
@@ -244,10 +293,15 @@ where
         trace!("Negotiation client protocol id: Amqp");
 
         let config = self.config.clone();
-        let disconnect_timeout = self.disconnect_timeout;
         let timer = self.timer.clone();
+        let state = State::with_params(
+            self.read_hw,
+            self.write_hw,
+            self.lw,
+            self.disconnect_timeout,
+        );
 
-        _connect_sasl(io, auth, config, disconnect_timeout, timer)
+        _connect_sasl(io, state, auth, config, timer)
     }
 
     fn _connect_sasl(
@@ -257,18 +311,23 @@ where
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         let fut = self.connector.call(Connect::new(addr));
         let config = self.config.clone();
-        let disconnect_timeout = self.disconnect_timeout;
         let timer = self.timer.clone();
+        let state = State::with_params(
+            self.read_hw,
+            self.write_hw,
+            self.lw,
+            self.disconnect_timeout,
+        );
 
-        async move { _connect_sasl(fut.await?, auth, config, disconnect_timeout, timer).await }
+        async move { _connect_sasl(fut.await?, state, auth, config, timer).await }
     }
 }
 
 async fn _connect_sasl<T>(
     mut io: T,
+    state: State,
     auth: SaslAuth,
     config: Configuration,
-    disconnect_timeout: u16,
     timer: Timer,
 ) -> Result<Client<T>, ConnectError>
 where
@@ -276,7 +335,6 @@ where
 {
     trace!("Negotiation client protocol id: AmqpSasl");
 
-    let state = State::new();
     state
         .send(&mut io, &ProtocolIdCodec, ProtocolId::AmqpSasl)
         .await?;
@@ -336,14 +394,13 @@ where
         return Err(ConnectError::Disconnected);
     }
 
-    _connect_plain(io, state, config, disconnect_timeout, timer).await
+    _connect_plain(io, state, config, timer).await
 }
 
 async fn _connect_plain<T>(
     mut io: T,
     state: State,
     config: Configuration,
-    disconnect_timeout: u16,
     timer: Timer,
 ) -> Result<Client<T>, ConnectError>
 where
@@ -402,7 +459,6 @@ where
             codec,
             connection,
             config.timeout_secs() as u16,
-            disconnect_timeout,
             remote_config,
             timer,
         );

@@ -14,7 +14,6 @@ pub struct Client<Io, St = ()> {
     codec: AmqpCodec<AmqpFrame>,
     connection: Connection,
     keepalive: u16,
-    disconnect_timeout: u16,
     remote_config: Configuration,
     timer: Timer,
     st: State<St>,
@@ -31,7 +30,6 @@ where
         codec: AmqpCodec<AmqpFrame>,
         connection: Connection,
         keepalive: u16,
-        disconnect_timeout: u16,
         remote_config: Configuration,
         timer: Timer,
     ) -> Self {
@@ -41,7 +39,6 @@ where
             codec,
             connection,
             keepalive,
-            disconnect_timeout,
             remote_config,
             timer,
             st: State::new(()),
@@ -69,7 +66,6 @@ where
             codec: self.codec,
             connection: self.connection,
             keepalive: self.keepalive,
-            disconnect_timeout: self.disconnect_timeout,
             remote_config: self.remote_config,
             timer: self.timer,
             st: State::new(st),
@@ -95,7 +91,6 @@ where
             } else {
                 0
             })
-            .disconnect_timeout(self.disconnect_timeout)
             .await
     }
 }

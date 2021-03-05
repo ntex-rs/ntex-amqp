@@ -19,6 +19,9 @@ pub struct Server<Io, St, H, Ctl> {
     control: Ctl,
     config: Rc<Configuration>,
     max_size: usize,
+    lw: u16,
+    read_hw: u16,
+    write_hw: u16,
     handshake_timeout: u64,
     disconnect_timeout: u16,
     _t: PhantomData<(Io, St)>,
@@ -31,6 +34,9 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     max_size: usize,
     handshake_timeout: u64,
     disconnect_timeout: u16,
+    lw: u16,
+    read_hw: u16,
+    write_hw: u16,
     time: Timer,
     _t: PhantomData<St>,
 }
@@ -51,7 +57,10 @@ where
         Self {
             handshake: handshake.into_factory(),
             handshake_timeout: 5000,
-            disconnect_timeout: 30,
+            disconnect_timeout: 3,
+            lw: 1024,
+            read_hw: 8 * 1024,
+            write_hw: 8 * 1024,
             control: DefaultControlService::default(),
             max_size: 0,
             config: Rc::new(Configuration::default()),
@@ -96,6 +105,34 @@ impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
         self.disconnect_timeout = val;
         self
     }
+
+    #[inline]
+    /// Set buffer low watermark size
+    ///
+    /// Low watermark is the same for read and write buffers.
+    /// By default lw value is 256 bytes.
+    pub fn low_watermark(mut self, lw: u16) -> Self {
+        self.lw = lw;
+        self
+    }
+
+    #[inline]
+    /// Set read buffer high water mark size
+    ///
+    /// By default read hw is 4kb
+    pub fn read_high_watermark(mut self, hw: u16) -> Self {
+        self.read_hw = hw;
+        self
+    }
+
+    #[inline]
+    /// Set write buffer high watermark size
+    ///
+    /// By default write hw is 4kb
+    pub fn write_high_watermark(mut self, hw: u16) -> Self {
+        self.write_hw = hw;
+        self
+    }
 }
 
 impl<Io, St, H, Ctl> Server<Io, St, H, Ctl>
@@ -126,6 +163,9 @@ where
             disconnect_timeout: self.disconnect_timeout,
             control: service.into_factory(),
             max_size: self.max_size,
+            lw: self.lw,
+            read_hw: self.read_hw,
+            write_hw: self.write_hw,
             _t: PhantomData,
         }
     }
@@ -157,6 +197,9 @@ where
                 control: self.control,
                 disconnect_timeout: self.disconnect_timeout,
                 max_size: self.max_size,
+                lw: self.lw,
+                read_hw: self.read_hw,
+                write_hw: self.write_hw,
                 time: Timer::with(time::Duration::from_secs(1)),
                 _t: PhantomData,
             }),
@@ -314,7 +357,12 @@ where
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
 {
-    let state = IoState::new();
+    let state = IoState::with_params(
+        inner.read_hw,
+        inner.write_hw,
+        inner.lw,
+        inner.disconnect_timeout,
+    );
 
     let protocol = state
         .next(&mut io, &ProtocolIdCodec)

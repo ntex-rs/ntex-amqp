@@ -1,5 +1,9 @@
 # Changes
 
+## [0.4.2] - 2021-03-05
+
+* Allow to override io buffer params
+
 ## [0.4.1] - 2021-02-25
 
 * Cleanup dependencies
