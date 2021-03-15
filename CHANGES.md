@@ -1,5 +1,9 @@
 # Changes
 
+## [0.4.3] - 2021-03-15
+
+* Add `.buffer_params()` config method
+
 ## [0.4.2] - 2021-03-05
 
 * Allow to override io buffer params

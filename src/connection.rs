@@ -71,7 +71,7 @@ impl Connection {
     pub fn force_close(&self) {
         let inner = self.0.get_mut();
         inner.st = ConnectionState::Drop;
-        inner.state.shutdown();
+        inner.state.force_close();
     }
 
     #[inline]
@@ -205,7 +205,8 @@ impl Connection {
 
         inner
             .state
-            .write_item(AmqpFrame::new(token as u16, begin.into()), &inner.codec)
+            .write()
+            .encode(AmqpFrame::new(token as u16, begin.into()), &inner.codec)
             .map(|_| ())
     }
 
@@ -214,7 +215,7 @@ impl Connection {
         log::trace!("outcoming: {:#?}", frame);
 
         let inner = self.0.get_mut();
-        if let Err(e) = inner.state.write_item(frame, &inner.codec) {
+        if let Err(e) = inner.state.write().encode(frame, &inner.codec) {
             inner.set_error(e.into())
         }
     }
@@ -240,7 +241,7 @@ impl ConnectionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
-        if let Err(e) = self.state.write_item(frame, &self.codec) {
+        if let Err(e) = self.state.write().encode(frame, &self.codec) {
             self.set_error(e.into())
         }
     }

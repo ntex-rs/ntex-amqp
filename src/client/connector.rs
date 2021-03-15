@@ -119,28 +119,40 @@ where
     }
 
     #[inline]
-    /// Set buffer low watermark size
+    /// Set read/write buffer params
     ///
-    /// Low watermark is the same for read and write buffers.
-    /// By default lw value is 256 bytes.
+    /// By default read buffer is 8kb, write buffer is 8kb
+    pub fn buffer_params(
+        mut self,
+        max_read_buf_size: u16,
+        max_write_buf_size: u16,
+        min_buf_size: u16,
+    ) -> Self {
+        self.read_hw = max_read_buf_size;
+        self.write_hw = max_write_buf_size;
+        self.lw = min_buf_size;
+        self
+    }
+
+    #[inline]
+    #[doc(hidden)]
+    #[deprecated(since = "0.4.3")]
     pub fn low_watermark(mut self, lw: u16) -> Self {
         self.lw = lw;
         self
     }
 
     #[inline]
-    /// Set read buffer high water mark size
-    ///
-    /// By default read hw is 4kb
+    #[doc(hidden)]
+    #[deprecated(since = "0.4.3")]
     pub fn read_high_watermark(mut self, hw: u16) -> Self {
         self.read_hw = hw;
         self
     }
 
     #[inline]
-    /// Set write buffer high watermark size
-    ///
-    /// By default write hw is 4kb
+    #[doc(hidden)]
+    #[deprecated(since = "0.4.3")]
     pub fn write_high_watermark(mut self, hw: u16) -> Self {
         self.write_hw = hw;
         self
