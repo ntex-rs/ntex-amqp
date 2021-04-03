@@ -1,8 +1,8 @@
-use futures::{future, Future};
+use std::future::Future;
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::framed::State;
-use ntex::util::HashMap;
+use ntex::util::{HashMap, Ready};
 
 use crate::cell::Cell;
 use crate::codec::protocol::{Begin, Close, End, Error, Frame};
@@ -97,7 +97,7 @@ impl Connection {
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.0.get_ref().state.close();
-        future::ok(())
+        Ready::Ok(())
     }
 
     // TODO: implement
@@ -110,7 +110,7 @@ impl Connection {
         Error: From<E>,
     {
         self.0.get_ref().state.close();
-        future::ok(())
+        Ready::Ok(())
     }
 
     /// Opens the session

@@ -1,12 +1,11 @@
-use std::{marker::PhantomData, time::Duration};
+use std::{future::Future, marker::PhantomData, time::Duration};
 
-use futures::{future::Either, Future, FutureExt};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::connect::{self, Address, Connect};
 use ntex::framed::{State, Timer};
 use ntex::rt::time::delay_for;
 use ntex::service::Service;
-use ntex::util::ByteString;
+use ntex::util::{select, ByteString, Either};
 
 #[cfg(feature = "openssl")]
 use ntex::connect::openssl::{OpensslConnector, SslConnector};
@@ -16,7 +15,7 @@ use ntex::connect::rustls::{ClientConfig, RustlsConnector};
 
 use crate::codec::protocol::{Frame, Milliseconds, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
-use crate::{error::ProtocolIdError, utils::Select, Configuration, Connection};
+use crate::{error::ProtocolIdError, Configuration, Connection};
 
 use super::{connection::Client, error::ConnectError, SaslAuth};
 
@@ -217,16 +216,16 @@ where
         address: A,
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         if self.handshake_timeout > 0 {
-            Either::Left(
-                Select::new(
-                    delay_for(Duration::from_millis(self.handshake_timeout as u64)),
-                    self._connect(address),
-                )
-                .map(|result| match result {
-                    ntex::util::Either::Left(_) => Err(ConnectError::HandshakeTimeout),
-                    ntex::util::Either::Right(res) => res.map_err(From::from),
-                }),
-            )
+            let fut = select(
+                delay_for(Duration::from_millis(self.handshake_timeout as u64)),
+                self._connect(address),
+            );
+            Either::Left(async move {
+                match fut.await {
+                    Either::Left(_) => Err(ConnectError::HandshakeTimeout),
+                    Either::Right(res) => res.map_err(From::from),
+                }
+            })
         } else {
             Either::Right(self._connect(address))
         }
@@ -278,16 +277,16 @@ where
         auth: SaslAuth,
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
         if self.handshake_timeout > 0 {
-            Either::Left(
-                Select::new(
-                    delay_for(Duration::from_millis(self.handshake_timeout as u64)),
-                    self._connect_sasl(addr, auth),
-                )
-                .map(|result| match result {
-                    ntex::util::Either::Left(_) => Err(ConnectError::HandshakeTimeout),
-                    ntex::util::Either::Right(res) => res.map_err(From::from),
-                }),
-            )
+            let fut = select(
+                delay_for(Duration::from_millis(self.handshake_timeout as u64)),
+                self._connect_sasl(addr, auth),
+            );
+            Either::Left(async move {
+                match fut.await {
+                    Either::Left(_) => Err(ConnectError::HandshakeTimeout),
+                    Either::Right(res) => res.map_err(From::from),
+                }
+            })
         } else {
             Either::Right(self._connect_sasl(addr, auth))
         }

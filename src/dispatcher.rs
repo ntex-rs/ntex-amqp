@@ -1,9 +1,9 @@
 use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll, time};
 
-use futures::future::{ready, FutureExt, Ready};
 use ntex::framed::DispatchItem;
 use ntex::rt::time::{sleep, Sleep};
 use ntex::service::Service;
+use ntex::util::Ready;
 
 use crate::cell::Cell;
 use crate::codec::protocol::{Frame, Role};
@@ -119,16 +119,16 @@ where
             match frame.0.get_mut().kind {
                 ControlFrameKind::AttachReceiver(ref link) => {
                     let link = link.clone();
-                    ntex::rt::spawn(
-                        self.service
-                            .call(types::Link::new(link.clone(), self.state.clone()))
-                            .then(|res| async move {
-                                match res {
-                                    Ok(_) => link.close().await,
-                                    Err(err) => link.close_with_error(Error::from(err)).await,
-                                }
-                            }),
-                    );
+                    let fut = self
+                        .service
+                        .call(types::Link::new(link.clone(), self.state.clone()));
+                    ntex::rt::spawn(async move {
+                        let res = fut.await;
+                        match res {
+                            Ok(_) => link.close().await,
+                            Err(err) => link.close_with_error(Error::from(err)).await,
+                        }
+                    });
                 }
                 ControlFrameKind::AttachSender(ref frm, ref link) => {
                     frame
@@ -166,7 +166,7 @@ where
     type Request = DispatchItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
     type Error = DispatcherError;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
+    type Future = Ready<Self::Response, Self::Error>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // process control frame
@@ -200,11 +200,12 @@ where
             }
             sink.on_close.notify();
             sink.set_error(AmqpProtocolError::Disconnected);
-            ntex::rt::spawn(
-                self.ctl_service
-                    .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)))
-                    .map(|_| ()),
-            );
+            let fut = self
+                .ctl_service
+                .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)));
+            ntex::rt::spawn(async move {
+                let _ = fut.await;
+            });
         }
 
         let res1 = self.service.poll_shutdown(cx, is_error);
@@ -231,14 +232,14 @@ where
                 let frame = if let Some(item) = item {
                     item
                 } else {
-                    return ready(Ok(()));
+                    return Ready::Ok(());
                 };
 
                 let (channel_id, frame) = frame.into_parts();
 
                 // remote session
                 if let Frame::Begin(frm) = frame {
-                    return ready(
+                    return Ready::from(
                         self.sink
                             .register_remote_session(channel_id, &frm)
                             .map_err(DispatcherError::Codec),
@@ -249,9 +250,11 @@ where
                 let session = match self.sink.get_remote_session(id) {
                     Some(session) => session,
                     None => {
-                        return ready(Err(
-                            AmqpProtocolError::UnknownSession(id, Box::new(frame)).into()
-                        ))
+                        return Ready::from(Err(AmqpProtocolError::UnknownSession(
+                            id,
+                            Box::new(frame),
+                        )
+                        .into()))
                     }
                 };
 
@@ -267,7 +270,7 @@ where
                                 );
                                 *self.ctl_fut.borrow_mut() =
                                     Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                                return ready(Ok(()));
+                                return Ready::from(Ok(()));
                             }
                         }
                         session.get_mut().apply_flow(&frm);
@@ -329,30 +332,30 @@ where
                     _ => Err(AmqpProtocolError::Unexpected(Box::new(frame)).into()),
                 };
 
-                ready(result)
+                Ready::from(result)
             }
             DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
                 *self.ctl_fut.borrow_mut() =
                     Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                ready(Ok(()))
+                Ready::from(Ok(()))
             }
             DispatchItem::KeepAliveTimeout => {
                 self.sink
                     .0
                     .get_mut()
                     .set_error(AmqpProtocolError::KeepAliveTimeout);
-                ready(Ok(()))
+                Ready::from(Ok(()))
             }
             DispatchItem::IoError(_) => {
                 self.sink
                     .0
                     .get_mut()
                     .set_error(AmqpProtocolError::Disconnected);
-                ready(Ok(()))
+                Ready::from(Ok(()))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
-                ready(Ok(()))
+                Ready::from(Ok(()))
             }
         }
     }

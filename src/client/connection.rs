@@ -1,7 +1,7 @@
-use futures::future::{err, ok};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as IoDispatcher, State as IoState, Timer};
 use ntex::service::{fn_service, Service};
+use ntex::util::Ready;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{DispatcherError, LinkError};
@@ -79,8 +79,8 @@ where
         let dispatcher = Dispatcher::new(
             self.st,
             self.connection,
-            fn_service(|_| err::<_, LinkError>(LinkError::force_detach())),
-            fn_service(|_| ok::<_, LinkError>(())),
+            fn_service(|_| Ready::<_, LinkError>::Err(LinkError::force_detach())),
+            fn_service(|_| Ready::<_, LinkError>::Ok(())),
             self.remote_config.timeout_remote_secs(),
         )
         .map(|_| Option::<AmqpFrame>::None);

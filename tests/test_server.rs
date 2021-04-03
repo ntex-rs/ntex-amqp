@@ -1,10 +1,9 @@
 use std::convert::TryFrom;
 
-use futures::future::Ready;
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::http::Uri;
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, Service};
+use ntex::{http::Uri, util::Ready};
 use ntex_amqp::{client, error::LinkError, server, types};
 
 async fn server(
@@ -15,7 +14,7 @@ async fn server(
                 Request = types::Transfer<()>,
                 Response = types::Outcome,
                 Error = LinkError,
-                Future = Ready<Result<types::Outcome, LinkError>>,
+                Future = Ready<types::Outcome, LinkError>,
             > + 'static,
     >,
     LinkError,

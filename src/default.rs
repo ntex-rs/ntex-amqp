@@ -1,8 +1,7 @@
-use std::marker::PhantomData;
-use std::task::{Context, Poll};
+use std::{marker::PhantomData, task::Context, task::Poll};
 
-use futures::future::{err, ok, Ready};
 use ntex::service::{Service, ServiceFactory};
+use ntex::util::Ready;
 
 use crate::error::LinkError;
 use crate::{types::Link, ControlFrame, State};
@@ -23,10 +22,10 @@ impl<S, E> ServiceFactory for DefaultPublishService<S, E> {
     type Error = E;
     type InitError = LinkError;
     type Service = DefaultPublishService<S, E>;
-    type Future = Ready<Result<Self::Service, Self::InitError>>;
+    type Future = Ready<Self::Service, Self::InitError>;
 
     fn new_service(&self, _: State<S>) -> Self::Future {
-        err(LinkError::force_detach().description("not configured"))
+        Ready::Err(LinkError::force_detach().description("not configured"))
     }
 }
 
@@ -34,7 +33,7 @@ impl<S, E> Service for DefaultPublishService<S, E> {
     type Request = Link<S>;
     type Response = ();
     type Error = E;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
+    type Future = Ready<Self::Response, Self::Error>;
 
     #[inline]
     fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -44,7 +43,7 @@ impl<S, E> Service for DefaultPublishService<S, E> {
     #[inline]
     fn call(&self, _pkt: Self::Request) -> Self::Future {
         log::warn!("AMQP Publish service is not configured");
-        ok(())
+        Ready::Ok(())
     }
 }
 
@@ -64,10 +63,10 @@ impl<S, E> ServiceFactory for DefaultControlService<S, E> {
     type Error = E;
     type InitError = E;
     type Service = DefaultControlService<S, E>;
-    type Future = Ready<Result<Self::Service, Self::InitError>>;
+    type Future = Ready<Self::Service, Self::InitError>;
 
     fn new_service(&self, _: State<S>) -> Self::Future {
-        ok(DefaultControlService(PhantomData))
+        Ready::Ok(DefaultControlService(PhantomData))
     }
 }
 
@@ -75,7 +74,7 @@ impl<S, E> Service for DefaultControlService<S, E> {
     type Request = ControlFrame;
     type Response = ();
     type Error = E;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
+    type Future = Ready<Self::Response, Self::Error>;
 
     #[inline]
     fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -84,6 +83,6 @@ impl<S, E> Service for DefaultControlService<S, E> {
 
     #[inline]
     fn call(&self, _pkt: Self::Request) -> Self::Future {
-        ok(())
+        Ready::Ok(())
     }
 }

@@ -1,9 +1,8 @@
 use std::collections::VecDeque;
 use std::future::Future;
 
-use futures::future::ok;
 use ntex::channel::oneshot;
-use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, HashMap};
+use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, HashMap, Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -39,7 +38,7 @@ impl Session {
     }
 
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        ok(())
+        Ready::Ok(())
     }
 
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {

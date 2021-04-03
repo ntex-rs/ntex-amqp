@@ -1,6 +1,5 @@
-use futures::future::Ready;
-
 use ntex::service::{fn_factory_with_config, Service};
+use ntex::util::Ready;
 use ntex_amqp::{error::AmqpError, error::LinkError, server};
 
 async fn server(
@@ -11,7 +10,7 @@ async fn server(
                 Request = server::Transfer<()>,
                 Response = server::Outcome,
                 Error = AmqpError,
-                Future = Ready<Result<server::Outcome, AmqpError>>,
+                Future = Ready<server::Outcome, AmqpError>,
             > + 'static,
     >,
     LinkError,

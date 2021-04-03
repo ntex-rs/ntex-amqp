@@ -1,6 +1,5 @@
-use std::{fmt, marker::PhantomData, pin::Pin, rc::Rc, task::Context, task::Poll, time};
+use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll, time};
 
-use futures::Future;
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
@@ -24,7 +23,7 @@ pub struct Server<Io, St, H, Ctl> {
     write_hw: u16,
     handshake_timeout: u64,
     disconnect_timeout: u16,
-    _t: PhantomData<(Io, St)>,
+    _t: marker::PhantomData<(Io, St)>,
 }
 
 pub(super) struct ServerInner<St, Ctl, Pb> {
@@ -38,7 +37,7 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     read_hw: u16,
     write_hw: u16,
     time: Timer,
-    _t: PhantomData<St>,
+    _t: marker::PhantomData<St>,
 }
 
 impl<Io, St, H> Server<Io, St, H, DefaultControlService<St, H::Error>>
@@ -64,7 +63,7 @@ where
             control: DefaultControlService::default(),
             max_size: 0,
             config: Rc::new(Configuration::default()),
-            _t: PhantomData,
+            _t: marker::PhantomData,
         }
     }
 }
@@ -178,7 +177,7 @@ where
             lw: self.lw,
             read_hw: self.read_hw,
             write_hw: self.write_hw,
-            _t: PhantomData,
+            _t: marker::PhantomData,
         }
     }
 
@@ -213,9 +212,9 @@ where
                 read_hw: self.read_hw,
                 write_hw: self.write_hw,
                 time: Timer::with(time::Duration::from_secs(1)),
-                _t: PhantomData,
+                _t: marker::PhantomData,
             }),
-            _t: PhantomData,
+            _t: marker::PhantomData,
         }
     }
 }
@@ -223,7 +222,7 @@ where
 struct ServerImpl<Io, St, H, Ctl, Pb> {
     handshake: H,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-    _t: PhantomData<(Io,)>,
+    _t: marker::PhantomData<(Io,)>,
 }
 
 impl<Io, St, H, Ctl, Pb> ServiceFactory for ServerImpl<Io, St, H, Ctl, Pb>
@@ -257,7 +256,7 @@ where
             fut.await.map(move |handshake| ServerImplService {
                 inner,
                 handshake: Rc::new(handshake),
-                _t: PhantomData,
+                _t: marker::PhantomData,
             })
         })
     }
@@ -266,7 +265,7 @@ where
 struct ServerImplService<Io, St, H, Ctl, Pb> {
     handshake: Rc<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-    _t: PhantomData<(Io,)>,
+    _t: marker::PhantomData<(Io,)>,
 }
 
 impl<Io, St, H, Ctl, Pb> Service for ServerImplService<Io, St, H, Ctl, Pb>

@@ -1,10 +1,10 @@
 use std::task::{Context, Poll};
 use std::{convert::TryFrom, future::Future, marker::PhantomData, pin::Pin};
 
-use futures::future::{err, ok, Either, Ready};
-use futures::Stream;
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
+use ntex::util::{Either, Ready};
+use ntex::Stream;
 
 use crate::codec::protocol::{DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role};
 use crate::error::LinkError;
@@ -58,7 +58,7 @@ impl<S: 'static> Router<S> {
         let router = Cell::new(router.finish());
 
         fn_factory_with_config(move |_: State<S>| {
-            ok(RouterService {
+            Ready::Ok(RouterService {
                 router: router.clone(),
             })
         })
@@ -73,7 +73,7 @@ impl<S: 'static> Service for RouterService<S> {
     type Request = Link<S>;
     type Response = ();
     type Error = Error;
-    type Future = Either<Ready<Result<(), Error>>, RouterServiceResponse<S>>;
+    type Future = Either<Ready<(), Error>, RouterServiceResponse<S>>;
 
     #[inline]
     fn poll_ready(&self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -102,17 +102,21 @@ impl<S: 'static> Service for RouterService<S> {
                     "Target address is not recognized: {}",
                     link.path().get_ref()
                 );
-                Either::Left(err(LinkError::force_detach()
-                    .description(format!(
-                        "Target address is not supported: {}",
-                        link.path().get_ref()
-                    ))
-                    .into()))
+                Either::Left(Ready::Err(
+                    LinkError::force_detach()
+                        .description(format!(
+                            "Target address is not supported: {}",
+                            link.path().get_ref()
+                        ))
+                        .into(),
+                ))
             }
         } else {
-            Either::Left(err(LinkError::force_detach()
-                .description("Target address is required")
-                .into()))
+            Either::Left(Ready::Err(
+                LinkError::force_detach()
+                    .description("Target address is required")
+                    .into(),
+            ))
         }
     }
 }
@@ -391,9 +395,12 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-
+        let service = match this.fut.poll(cx).map_err(Error::from)? {
+            Poll::Ready(service) => service,
+            Poll::Pending => return Poll::Pending,
+        };
         Poll::Ready(Ok(ResourceService {
-            service: futures::ready!(this.fut.poll(cx)).map_err(Error::from)?,
+            service,
             _t: PhantomData,
         }))
     }
@@ -450,9 +457,10 @@ where
     type Output = Result<Outcome, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(match futures::ready!(self.project().fut.poll(cx)) {
-            Ok(res) => Ok(res),
-            Err(err) => Outcome::try_from(err),
+        Poll::Ready(match self.project().fut.poll(cx) {
+            Poll::Ready(Ok(res)) => Ok(res),
+            Poll::Ready(Err(err)) => Outcome::try_from(err),
+            Poll::Pending => return Poll::Pending,
         })
     }
 }
