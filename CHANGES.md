@@ -1,5 +1,9 @@
 # Changes
 
+## [0.4.5] - 2021-04-20
+
+* agree with remote terminus on snd-settle-mode #9
+
 ## [0.4.4] - 2021-04-03
 
 * upgrade ntex, drop direct futures dependency
