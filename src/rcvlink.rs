@@ -365,12 +365,8 @@ impl ReceiverLinkBuilder {
 
     /// Set or reset a receive link property
     pub fn property(mut self, name: &str, value: Option<&str>) -> Self {
-        let props = if let Some(ref mut props) = self.frame.properties {
-            props
-        } else {
-            self.frame.properties = Some(HashMap::default());
-            self.frame.properties.as_mut().unwrap()
-        };
+        let props = self.frame.properties.get_or_insert_with(HashMap::default);
+
         match value {
             Some(value) => props.insert(Symbol::from_slice(name), value.to_owned().into()),
             None => props.remove(&Symbol::from_slice(name)),
