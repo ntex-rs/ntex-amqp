@@ -8,7 +8,7 @@ use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
 };
-use ntex_amqp_codec::types::Symbol;
+use ntex_amqp_codec::types::{Symbol, Variant};
 use ntex_amqp_codec::Encode;
 
 use crate::cell::Cell;
@@ -364,12 +364,12 @@ impl ReceiverLinkBuilder {
     }
 
     /// Set or reset a receive link property
-    pub fn property(mut self, name: &str, value: Option<&str>) -> Self {
+    pub fn property(mut self, key: Symbol, value: Option<Variant>) -> Self {
         let props = self.frame.properties.get_or_insert_with(HashMap::default);
 
         match value {
-            Some(value) => props.insert(Symbol::from_slice(name), value.to_owned().into()),
-            None => props.remove(&Symbol::from_slice(name)),
+            Some(value) => props.insert(key, value),
+            None => props.remove(&key),
         };
         self
     }
