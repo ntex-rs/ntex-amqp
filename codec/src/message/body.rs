@@ -1,4 +1,4 @@
-use bytes::{BufMut, Bytes, BytesMut};
+use ntex_bytes::{BufMut, Bytes, BytesMut};
 
 use crate::codec::{Encode, FORMATCODE_BINARY32, FORMATCODE_BINARY8};
 use crate::protocol::TransferBody;

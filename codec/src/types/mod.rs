@@ -1,6 +1,6 @@
 use std::{borrow, fmt, hash, ops, str};
 
-use bytestring::ByteString;
+use ntex_bytes::ByteString;
 
 mod symbol;
 mod variant;
@@ -88,7 +88,7 @@ impl Str {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             Str::String(s) => s.as_ref(),
-            Str::ByteStr(s) => s.as_ref(),
+            Str::ByteStr(s) => s.as_ref().as_ref(),
             Str::Static(s) => s.as_bytes(),
         }
     }

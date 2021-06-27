@@ -1,4 +1,4 @@
-use bytes::BytesMut;
+use ntex_bytes::BytesMut;
 use std::marker::Sized;
 
 use crate::error::AmqpParseError;
@@ -104,7 +104,7 @@ pub const FORMATCODE_ARRAY32: u8 = 0xf0;
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Bytes, BytesMut};
+    use ntex_bytes::{Bytes, BytesMut};
 
     use crate::codec::{Decode, Encode};
     use crate::error::AmqpCodecError;

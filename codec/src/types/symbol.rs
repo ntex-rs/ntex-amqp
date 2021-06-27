@@ -1,6 +1,6 @@
 use std::{borrow, str};
 
-use bytestring::ByteString;
+use ntex_bytes::ByteString;
 
 use super::Str;
 

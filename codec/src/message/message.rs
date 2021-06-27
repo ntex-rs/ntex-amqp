@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use bytes::{Bytes, BytesMut};
+use ntex_bytes::{Bytes, BytesMut};
 
 use crate::codec::{Decode, Encode};
 use crate::error::AmqpParseError;
@@ -322,8 +322,7 @@ impl Encode for Message {
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Bytes, BytesMut};
-    use bytestring::ByteString;
+    use ntex_bytes::{ByteString, Bytes, BytesMut};
 
     use crate::codec::{Decode, Encode};
     use crate::error::AmqpCodecError;

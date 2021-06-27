@@ -2,8 +2,7 @@
 
 use std::u8;
 use derive_more::From;
-use bytes::{BufMut, Bytes, BytesMut};
-use bytestring::ByteString;
+use ntex_bytes::{BufMut, Bytes, BytesMut, ByteString};
 use uuid::Uuid;
 
 use super::*;

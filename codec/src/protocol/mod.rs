@@ -1,9 +1,8 @@
 use std::fmt;
 
-use bytes::{BufMut, Bytes, BytesMut};
-use bytestring::ByteString;
 use chrono::{DateTime, Utc};
 use derive_more::From;
+use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use uuid::Uuid;
 
 use super::codec::{self, DecodeFormatted, Encode};

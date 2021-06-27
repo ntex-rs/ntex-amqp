@@ -1,5 +1,15 @@
 # Changes
 
+## [codec-0.6.0] - 2021-06-27
+
+* Replace bytes witth ntex-bytes
+
+* Use ntex-codec v0.5
+
+## [0.5.0-b.1] - 2021-06-27
+
+* Upgrade to ntex-0.4
+
 ## [0.4.5] - 2021-04-20
 
 * agree with remote terminus on snd-settle-mode #9

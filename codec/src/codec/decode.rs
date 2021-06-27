@@ -1,9 +1,8 @@
 use std::{char, collections, convert::TryFrom, hash::BuildHasher, hash::Hash, str, u8};
 
 use byteorder::{BigEndian, ByteOrder};
-use bytes::Bytes;
-use bytestring::ByteString;
 use chrono::{DateTime, TimeZone, Utc};
+use ntex_bytes::{ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
@@ -587,7 +586,7 @@ fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
 mod tests {
     use super::*;
     use crate::codec::{Decode, Encode};
-    use bytes::{BufMut, BytesMut};
+    use ntex_bytes::{BufMut, BytesMut};
 
     const LOREM: &str = include_str!("lorem.txt");
 

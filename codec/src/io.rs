@@ -1,7 +1,7 @@
 use std::{cell::Cell, marker::PhantomData};
 
 use byteorder::{BigEndian, ByteOrder};
-use bytes::{Buf, BufMut, BytesMut};
+use ntex_bytes::{Buf, BufMut, BytesMut};
 use ntex_codec::{Decoder, Encoder};
 
 use super::error::{AmqpCodecError, ProtocolIdError};

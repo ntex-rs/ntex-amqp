@@ -2,9 +2,8 @@
 use super::*;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 use crate::error::AmqpParseError;
-use bytes::{BufMut, Bytes, BytesMut};
-use bytestring::ByteString;
 use derive_more::From;
+use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use std::u8;
 use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq, From)]

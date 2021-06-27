@@ -1,10 +1,8 @@
-use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
-use std::{i8, u8};
+use std::{collections::HashMap, i8, u8};
 
-use bytes::{BufMut, Bytes, BytesMut};
-use bytestring::ByteString;
 use chrono::{DateTime, Utc};
+use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Encode};

@@ -1,8 +1,7 @@
 use std::hash::{Hash, Hasher};
 
-use bytes::Bytes;
-use bytestring::ByteString;
 use chrono::{DateTime, Utc};
+use ntex_bytes::{ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
