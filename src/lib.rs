@@ -8,7 +8,7 @@ extern crate log;
 
 use std::{future::Future, pin::Pin, task::Context, task::Poll};
 
-use ntex::channel::oneshot;
+use ntex::channel::pool;
 use ntex::util::ByteString;
 use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
 use uuid::Uuid;
@@ -46,11 +46,11 @@ pub mod codec {
 
 pub enum Delivery {
     Resolved(Result<Disposition, error::AmqpProtocolError>),
-    Pending(oneshot::Receiver<Result<Disposition, error::AmqpProtocolError>>),
+    Pending(pool::Receiver<Result<Disposition, error::AmqpProtocolError>>),
     Gone,
 }
 
-type DeliveryPromise = oneshot::Sender<Result<Disposition, error::AmqpProtocolError>>;
+type DeliveryPromise = pool::Sender<Result<Disposition, error::AmqpProtocolError>>;
 
 impl Future for Delivery {
     type Output = Result<Disposition, error::AmqpProtocolError>;

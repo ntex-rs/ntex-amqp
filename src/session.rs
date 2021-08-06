@@ -1,7 +1,6 @@
-use std::collections::VecDeque;
-use std::future::Future;
+use std::{collections::VecDeque, fmt, future::Future};
 
-use ntex::channel::oneshot;
+use ntex::channel::{oneshot, pool};
 use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, HashMap, Ready};
 use slab::Slab;
 
@@ -26,8 +25,8 @@ pub struct Session {
     pub(crate) inner: Cell<SessionInner>,
 }
 
-impl std::fmt::Debug for Session {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Session {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Session").finish()
     }
 }
@@ -167,8 +166,11 @@ pub(crate) struct SessionInner {
     links_by_name: HashMap<ByteString, usize>,
     remote_handles: HashMap<Handle, usize>,
     pending_transfers: VecDeque<PendingTransfer>,
-    disposition_subscribers: HashMap<DeliveryNumber, oneshot::Sender<Disposition>>,
+    disposition_subscribers: HashMap<DeliveryNumber, pool::Sender<Disposition>>,
     error: Option<AmqpProtocolError>,
+
+    pub(crate) pool: pool::Pool<Result<Disposition, AmqpProtocolError>>,
+    pool_disp: pool::Pool<Disposition>,
 }
 
 struct PendingTransfer {
@@ -224,6 +226,8 @@ impl SessionInner {
             pending_transfers: VecDeque::new(),
             disposition_subscribers: HashMap::default(),
             error: None,
+            pool: pool::new(),
+            pool_disp: pool::new(),
         }
     }
 
@@ -242,6 +246,11 @@ impl SessionInner {
                 let _ = tx.send(Err(err.clone()));
             }
         }
+
+        // drop unsettled deliveries
+        self.unsettled_deliveries.clear();
+
+        self.disposition_subscribers.clear();
 
         // drop links
         self.links_by_name.clear();
@@ -271,7 +280,7 @@ impl SessionInner {
         &mut self,
         id: DeliveryNumber,
     ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = self.pool_disp.channel();
         self.disposition_subscribers.insert(id, tx);
         async move { rx.await.map_err(|_| AmqpProtocolError::Disconnected) }
     }

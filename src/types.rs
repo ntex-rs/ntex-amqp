@@ -123,6 +123,14 @@ impl<S> Transfer<S> {
         self.link.session_mut()
     }
 
+    pub fn receiver(&self) -> &ReceiverLink {
+        &self.link
+    }
+
+    pub fn receiver_mut(&mut self) -> &mut ReceiverLink {
+        &mut self.link
+    }
+
     pub fn frame(&self) -> &protocol::Transfer {
         &self.frame
     }

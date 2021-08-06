@@ -268,7 +268,7 @@ impl SenderLinkInner {
         } else {
             let body = body.into();
             let message_format = body.message_format();
-            let (delivery_tx, delivery_rx) = oneshot::channel();
+            let (delivery_tx, delivery_rx) = self.session.inner.get_ref().pool.channel();
 
             let max_frame_size = self.session.inner.get_ref().max_frame_size();
             let max_frame_size = if max_frame_size > 2048 {

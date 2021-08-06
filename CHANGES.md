@@ -1,5 +1,11 @@
 # Changes
 
+## [0.5.0-b.2] - 2021-08-06
+
+* Cleanup Session internal state on disconnect
+
+* Use ntex::channel::pool instead of oneshot
+
 ## [codec-0.6.0] - 2021-06-27
 
 * Replace bytes witth ntex-bytes
