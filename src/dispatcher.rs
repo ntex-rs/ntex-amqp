@@ -101,7 +101,7 @@ where
                     frame
                         .session_cell()
                         .get_mut()
-                        .detach_unconfirmed_sender_link(&frm, Some(err));
+                        .detach_unconfirmed_sender_link(frm, Some(err));
                 }
                 ControlFrameKind::Flow(_, ref link) => {
                     let _ = link.close_with_error(err);
@@ -134,7 +134,7 @@ where
                     frame
                         .session_cell()
                         .get_mut()
-                        .confirm_sender_link_inner(&frm, link.inner.clone());
+                        .confirm_sender_link_inner(frm, link.inner.clone());
                 }
                 ControlFrameKind::Flow(ref frm, _) => {
                     frame.session_cell().get_mut().apply_flow(frm);

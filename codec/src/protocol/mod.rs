@@ -267,7 +267,7 @@ impl Encode for TransferBody {
     }
     fn encode(&self, dst: &mut BytesMut) {
         match *self {
-            TransferBody::Data(ref data) => dst.put_slice(&data),
+            TransferBody::Data(ref data) => dst.put_slice(data),
             TransferBody::Message(ref data) => data.encode(dst),
         }
     }

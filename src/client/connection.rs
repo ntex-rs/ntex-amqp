@@ -86,10 +86,10 @@ where
         .map(|_| Option::<AmqpFrame>::None);
 
         IoDispatcher::new(self.io, self.codec, self.state, dispatcher, self.timer)
-            .keepalive_timeout(if self.keepalive != 0 {
-                self.keepalive + 5
-            } else {
+            .keepalive_timeout(if self.keepalive == 0 {
                 0
+            } else {
+                self.keepalive + 5
             })
             .await
     }

@@ -305,14 +305,9 @@ impl SenderLinkInner {
                     if body.is_empty() {
                         self.send_inner(chunk.into(), None, TransferState::Last, message_format);
                         break;
-                    } else {
-                        self.send_inner(
-                            chunk.into(),
-                            None,
-                            TransferState::Continue,
-                            message_format,
-                        );
                     }
+
+                    self.send_inner(chunk.into(), None, TransferState::Continue, message_format);
                 }
             } else {
                 self.send_inner(body, tag, TransferState::Only(delivery_tx), message_format);

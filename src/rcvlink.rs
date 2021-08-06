@@ -166,7 +166,7 @@ impl ReceiverLinkInner {
             credit: 0,
             error: None,
             partial_body: None,
-            partial_body_max: 262144,
+            partial_body_max: 262_144,
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
             attach,
         }
@@ -214,6 +214,7 @@ impl ReceiverLinkInner {
             .rcv_link_flow(self.handle as u32, self.delivery_count, credit);
     }
 
+    #[allow(clippy::unnecessary_unwrap)]
     pub(crate) fn handle_transfer(&mut self, mut transfer: Transfer) {
         if self.credit == 0 {
             // check link credit
@@ -278,7 +279,6 @@ impl ReceiverLinkInner {
                             info: None,
                         };
                         let _ = self.close(Some(err));
-                        return;
                     }
                 }
             } else if transfer.more {

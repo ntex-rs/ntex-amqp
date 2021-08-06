@@ -313,7 +313,7 @@ impl ArrayEncode for Bytes {
     }
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_u32(self.len() as u32);
-        buf.put_slice(&self);
+        buf.put_slice(self);
     }
 }
 

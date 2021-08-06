@@ -193,10 +193,7 @@ pub(crate) enum TransferState {
 
 impl TransferState {
     fn more(&self) -> bool {
-        match self {
-            TransferState::Only(_) | TransferState::Last => false,
-            _ => true,
-        }
+        !matches!(self, TransferState::Only(_) | TransferState::Last)
     }
 }
 
@@ -395,31 +392,28 @@ impl SessionInner {
 
     pub(crate) fn confirm_receiver_link(&mut self, token: Handle, attach: &Attach) {
         if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
-            match link {
-                ReceiverLinkState::Opening(l) => {
-                    if let Some(l) = l.take() {
-                        let attach = Attach {
-                            name: attach.name.clone(),
-                            handle: token as Handle,
-                            role: Role::Receiver,
-                            snd_settle_mode: attach.snd_settle_mode(),
-                            rcv_settle_mode: ReceiverSettleMode::First,
-                            source: attach.source.clone(),
-                            target: attach.target.clone(),
-                            unsettled: None,
-                            incomplete_unsettled: false,
-                            initial_delivery_count: Some(0),
-                            max_message_size: Some(65536),
-                            offered_capabilities: None,
-                            desired_capabilities: None,
-                            properties: None,
-                        };
-                        *link = ReceiverLinkState::Established(ReceiverLink::new(l));
-                        self.post_frame(attach.into());
-                        return;
-                    }
+            if let ReceiverLinkState::Opening(l) = link {
+                if let Some(l) = l.take() {
+                    let attach = Attach {
+                        name: attach.name.clone(),
+                        handle: token as Handle,
+                        role: Role::Receiver,
+                        snd_settle_mode: attach.snd_settle_mode(),
+                        rcv_settle_mode: ReceiverSettleMode::First,
+                        source: attach.source.clone(),
+                        target: attach.target.clone(),
+                        unsettled: None,
+                        incomplete_unsettled: false,
+                        initial_delivery_count: Some(0),
+                        max_message_size: Some(65536),
+                        offered_capabilities: None,
+                        desired_capabilities: None,
+                        properties: None,
+                    };
+                    *link = ReceiverLinkState::Established(ReceiverLink::new(l));
+                    self.post_frame(attach.into());
+                    return;
                 }
-                _ => (),
             }
         }
         // TODO: close session
@@ -851,7 +845,7 @@ impl SessionInner {
         {
             match link {
                 SenderLinkState::Established(ref mut link) => {
-                    link.inner.get_mut().apply_flow(&flow);
+                    link.inner.get_mut().apply_flow(flow);
                 }
                 _ => warn!("Received flow frame"),
             }
@@ -974,7 +968,7 @@ impl SessionInner {
     ) -> Frame {
         self.remote_incoming_window -= 1;
 
-        let settled2 = settled.clone().unwrap_or(false);
+        let settled2 = settled.unwrap_or(false);
         let state = if settled2 {
             Some(DeliveryState::Accepted(Accepted {}))
         } else {

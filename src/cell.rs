@@ -64,10 +64,6 @@ impl<T: std::fmt::Debug> std::fmt::Debug for WeakCell<T> {
 
 impl<T> WeakCell<T> {
     pub(crate) fn upgrade(&self) -> Option<Cell<T>> {
-        if let Some(inner) = self.inner.upgrade() {
-            Some(Cell { inner })
-        } else {
-            None
-        }
+        self.inner.upgrade().map(|inner| Cell { inner })
     }
 }

@@ -329,21 +329,21 @@ impl ConnectionInner {
             }
         } else {
             // we dont have channel info, only Begin frame is allowed on new channel
-            if let Frame::Begin(ref begin) = frame.performative() {
+            return if let Frame::Begin(ref begin) = frame.performative() {
                 // response Begin for open session
                 if let Some(id) = begin.remote_channel() {
                     self.complete_session_creation(frame.channel_id(), id, begin);
-                    return Ok(None);
+                    Ok(None)
                 } else {
-                    return Ok(Some(frame));
+                    Ok(Some(frame))
                 }
             } else {
                 let (id, frame) = frame.into_parts();
-                return Err(AmqpProtocolError::UnknownSession(
+                Err(AmqpProtocolError::UnknownSession(
                     id as usize,
                     Box::new(frame),
-                ));
-            }
+                ))
+            };
         };
 
         // handle session frames
@@ -357,10 +357,10 @@ impl ConnectionInner {
             ChannelState::Established(ref mut session) => match frame.performative() {
                 Frame::Attach(attach) => {
                     let cell = session.clone();
-                    if !session.get_mut().handle_attach(attach, cell) {
-                        Ok(Some(frame))
-                    } else {
+                    if session.get_mut().handle_attach(attach, cell) {
                         Ok(None)
+                    } else {
+                        Ok(Some(frame))
                     }
                 }
                 Frame::Flow(_) | Frame::Detach(_) => Ok(Some(frame)),
