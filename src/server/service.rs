@@ -120,30 +120,6 @@ impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
         self.lw = min_buf_size;
         self
     }
-
-    #[inline]
-    #[doc(hidden)]
-    #[deprecated(since = "0.4.3")]
-    pub fn low_watermark(mut self, lw: u16) -> Self {
-        self.lw = lw;
-        self
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    #[deprecated(since = "0.4.3")]
-    pub fn read_high_watermark(mut self, hw: u16) -> Self {
-        self.read_hw = hw;
-        self
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    #[deprecated(since = "0.4.3")]
-    pub fn write_high_watermark(mut self, hw: u16) -> Self {
-        self.write_hw = hw;
-        self
-    }
 }
 
 impl<Io, St, H, Ctl> Server<Io, St, H, Ctl>
