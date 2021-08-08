@@ -1,9 +1,9 @@
-use std::convert::TryFrom;
+use std::{cell::Cell, convert::TryFrom, rc::Rc, time::Duration};
 
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::server::test_server;
-use ntex::service::{fn_factory_with_config, Service};
-use ntex::{http::Uri, util::Ready};
+use ntex::service::{fn_factory_with_config, fn_service, Service};
+use ntex::{http::Uri, rt::time::sleep, util::Bytes, util::Ready};
 use ntex_amqp::{client, error::LinkError, server, types};
 
 async fn server(
@@ -20,7 +20,9 @@ async fn server(
     LinkError,
 > {
     println!("OPEN LINK: {:?}", link);
-    Err(LinkError::force_detach().description("unimplemented"))
+    Ok(Box::new(fn_service(|_req| {
+        Ready::Ok(types::Outcome::Accept)
+    })))
 }
 
 #[ntex::test]
@@ -48,17 +50,33 @@ async fn test_simple() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::Connector::new()
-        .connect_sasl(
-            uri,
-            client::SaslAuth {
-                authz_id: "".into(),
-                authn_id: "user1".into(),
-                password: "password1".into(),
-            },
-        )
-        .await;
-    println!("E: {:?}", client.err());
+    let client = client::Connector::new().connect(uri).await.unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    link.send(Bytes::from(b"test".as_ref())).await.unwrap();
+
+    let res = Rc::new(Cell::new(false));
+    let res2 = res.clone();
+
+    link.on_disposition(move |_tag, result| {
+        if result.is_ok() {
+            res2.set(true);
+        }
+    });
+    link.send_no_block(Bytes::from(b"test".as_ref())).unwrap();
+    sleep(Duration::from_millis(500)).await;
+    assert!(res.get());
 
     Ok(())
 }

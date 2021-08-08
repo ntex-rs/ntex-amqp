@@ -6,11 +6,8 @@ extern crate derive_more;
 #[macro_use]
 extern crate log;
 
-use std::{future::Future, pin::Pin, task::Context, task::Poll};
-
-use ntex::channel::pool;
 use ntex::util::ByteString;
-use ntex_amqp_codec::protocol::{Disposition, Handle, Milliseconds, Open};
+use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open};
 use uuid::Uuid;
 
 #[macro_use]
@@ -42,40 +39,6 @@ pub use self::state::State;
 
 pub mod codec {
     pub use ntex_amqp_codec::*;
-}
-
-pub enum Delivery {
-    Resolved(Result<Disposition, error::AmqpProtocolError>),
-    Pending(pool::Receiver<Result<Disposition, error::AmqpProtocolError>>),
-    Gone,
-}
-
-type DeliveryPromise = pool::Sender<Result<Disposition, error::AmqpProtocolError>>;
-
-impl Future for Delivery {
-    type Output = Result<Disposition, error::AmqpProtocolError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Delivery::Pending(ref mut receiver) = *self {
-            return match Pin::new(receiver).poll(cx) {
-                Poll::Ready(Ok(r)) => Poll::Ready(r),
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(e)) => {
-                    trace!("delivery oneshot is gone: {:?}", e);
-                    Poll::Ready(Err(error::AmqpProtocolError::Disconnected))
-                }
-            };
-        }
-
-        let old_v = ::std::mem::replace(&mut *self, Delivery::Gone);
-        if let Delivery::Resolved(r) = old_v {
-            return match r {
-                Ok(state) => Poll::Ready(Ok(state)),
-                Err(e) => Poll::Ready(Err(e)),
-            };
-        }
-        panic!("Polling Delivery after it was polled as ready is an error.");
-    }
 }
 
 /// Amqp1 transport configuration.

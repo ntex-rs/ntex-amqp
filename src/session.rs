@@ -15,8 +15,7 @@ use crate::cell::Cell;
 use crate::connection::Connection;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
-use crate::sndlink::{SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::DeliveryPromise;
+use crate::sndlink::{DeliveryPromise, SenderLink, SenderLinkBuilder, SenderLinkInner};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
@@ -62,7 +61,7 @@ impl Session {
 
     /// Open sender link
     pub fn build_sender_link<T: Into<ByteString>, U: Into<ByteString>>(
-        &mut self,
+        &self,
         name: U,
         address: T,
     ) -> SenderLinkBuilder {
@@ -160,14 +159,14 @@ pub(crate) struct SessionInner {
     remote_outgoing_window: u32,
     remote_incoming_window: u32,
 
-    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
-
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
     links_by_name: HashMap<ByteString, usize>,
     remote_handles: HashMap<Handle, usize>,
-    pending_transfers: VecDeque<PendingTransfer>,
-    disposition_subscribers: HashMap<DeliveryNumber, pool::Sender<Disposition>>,
     error: Option<AmqpProtocolError>,
+
+    pending_transfers: VecDeque<PendingTransfer>,
+    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
+    disposition_subscribers: HashMap<DeliveryNumber, pool::Sender<Disposition>>,
 
     pub(crate) pool: pool::Pool<Result<Disposition, AmqpProtocolError>>,
     pool_disp: pool::Pool<Disposition>,
@@ -238,12 +237,14 @@ impl SessionInner {
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
             if let TransferState::First(tx, _) | TransferState::Only(tx, _) = tr.state {
-                let _ = tx.send(Err(err.clone()));
+                tx.ready(Err(err.clone()));
             }
         }
 
         // drop unsettled deliveries
-        self.unsettled_deliveries.clear();
+        for (_, promise) in self.unsettled_deliveries.drain() {
+            promise.ready(Err(err.clone()))
+        }
 
         self.disposition_subscribers.clear();
 
@@ -699,7 +700,7 @@ impl SessionInner {
                                 if let TransferState::First(tx, _) | TransferState::Only(tx, _) =
                                     tr.state
                                 {
-                                    let _ = tx.send(Err(err.clone()));
+                                    tx.ready(Err(err.clone()));
                                 }
                             } else {
                                 idx += 1;
@@ -792,7 +793,7 @@ impl SessionInner {
                     disp.state = Some(DeliveryState::Accepted(Accepted {}));
                     self.post_frame(Frame::Disposition(disp));
                 }
-                let _ = val.send(Ok(disposition));
+                val.ready(Ok(disposition));
             }
         } else {
             if !disposition.settled {
@@ -805,7 +806,7 @@ impl SessionInner {
 
             for k in from..=to {
                 if let Some(val) = self.unsettled_deliveries.remove(&k) {
-                    let _ = val.send(Ok(disposition.clone()));
+                    val.ready(Ok(disposition.clone()));
                 }
             }
         }
