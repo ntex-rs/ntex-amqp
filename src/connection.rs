@@ -216,7 +216,7 @@ impl Connection {
 
         let inner = self.0.get_mut();
         if let Err(e) = inner.state.write().encode(frame, &inner.codec) {
-            inner.set_error(e.into())
+            inner.set_error(e.into());
         }
     }
 }
@@ -242,7 +242,7 @@ impl ConnectionInner {
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
         if let Err(e) = self.state.write().encode(frame, &self.codec) {
-            self.set_error(e.into())
+            self.set_error(e.into());
         }
     }
 
@@ -277,7 +277,7 @@ impl ConnectionInner {
                     // TODO: send end session if `tx` is None
                     tx.take()
                         .and_then(|tx| tx.send(Session::new(session.clone())).err());
-                    *channel = ChannelState::Established(session)
+                    *channel = ChannelState::Established(session);
                 }
             } else {
                 // TODO: send error response

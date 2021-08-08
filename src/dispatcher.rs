@@ -75,12 +75,12 @@ where
             match Pin::new(&mut item.1).poll(cx) {
                 Poll::Ready(Ok(_)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(frame, None)?
+                    self.handle_control_frame(frame, None)?;
                 }
                 Poll::Pending => return Ok(false),
                 Poll::Ready(Err(e)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(frame, Some(e.into()))?
+                    self.handle_control_frame(frame, Some(e.into()))?;
                 }
             }
         }
@@ -113,7 +113,7 @@ where
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::ProtocolError(ref err) => return Err(err.clone().into()),
-                _ => (),
+                ControlFrameKind::Closed(_) => (),
             }
         } else {
             match frame.0.get_mut().kind {
@@ -134,7 +134,7 @@ where
                     frame
                         .session_cell()
                         .get_mut()
-                        .confirm_sender_link_inner(frm, link.inner.clone());
+                        .attach_remote_sender_link(frm, link.inner.clone());
                 }
                 ControlFrameKind::Flow(ref frm, _) => {
                     frame.session_cell().get_mut().apply_flow(frm);
@@ -146,7 +146,7 @@ where
                     frame.session_cell().get_mut().handle_detach(frm);
                 }
                 ControlFrameKind::ProtocolError(ref err) => return Err(err.clone().into()),
-                _ => (),
+                ControlFrameKind::Closed(_) => (),
             }
         }
         Ok(())
@@ -297,7 +297,7 @@ where
                                 // receiver link
                                 let link = session
                                     .get_mut()
-                                    .open_receiver_link(session.clone(), attach);
+                                    .attach_remote_receiver_link(session.clone(), attach);
 
                                 let frame = ControlFrame::new(
                                     session,

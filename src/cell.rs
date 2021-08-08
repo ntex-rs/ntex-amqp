@@ -40,12 +40,6 @@ impl<T> Cell<T> {
         }
     }
 
-    pub(crate) fn downgrade(&self) -> WeakCell<T> {
-        WeakCell {
-            inner: Rc::downgrade(&self.inner),
-        }
-    }
-
     pub(crate) fn get_ref(&self) -> &T {
         unsafe { &*self.inner.as_ref().get() }
     }
@@ -59,11 +53,5 @@ impl<T> Cell<T> {
 impl<T: std::fmt::Debug> std::fmt::Debug for WeakCell<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.inner.fmt(f)
-    }
-}
-
-impl<T> WeakCell<T> {
-    pub(crate) fn upgrade(&self) -> Option<Cell<T>> {
-        self.inner.upgrade().map(|inner| Cell { inner })
     }
 }

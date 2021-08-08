@@ -1,5 +1,5 @@
-#![deny(rust_2018_idioms, unreachable_pub, clippy::pedantic)]
-#![allow(clippy::type_complexity, dead_code)]
+#![deny(rust_2018_idioms, unreachable_pub)]
+#![allow(clippy::type_complexity)]
 
 #[macro_use]
 extern crate derive_more;

@@ -43,7 +43,7 @@ impl ReceiverLink {
         &self.inner.get_ref().attach
     }
 
-    pub fn open(&mut self) {
+    pub(crate) fn open(&mut self) {
         let inner = self.inner.get_mut();
         inner
             .session
@@ -361,12 +361,12 @@ impl ReceiverLinkBuilder {
         self
     }
 
-    pub async fn open(self) -> Result<ReceiverLink, AmqpProtocolError> {
+    pub async fn attach(self) -> Result<ReceiverLink, AmqpProtocolError> {
         let cell = self.session.clone();
         let res = self
             .session
             .get_mut()
-            .open_local_receiver_link(cell, self.frame)
+            .attach_local_receiver_link(cell, self.frame)
             .await;
 
         match res {

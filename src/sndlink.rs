@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 
 use ntex::channel::{condition, oneshot};
-use ntex::util::{ByteString, Bytes, BytesMut, Either, Ready};
+use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, Ready};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
     ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
@@ -28,13 +28,21 @@ impl std::fmt::Debug for SenderLink {
     }
 }
 
+impl std::fmt::Debug for SenderLinkInner {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_tuple("SenderLinkInner")
+            .field(&std::ops::Deref::deref(&self.name))
+            .finish()
+    }
+}
+
 pub(crate) struct SenderLinkInner {
     pub(crate) id: usize,
-    idx: u32,
     name: ByteString,
     session: Session,
     remote_handle: Handle,
     delivery_count: SequenceNo,
+    delivery_tag: u32,
     link_credit: u32,
     pending_transfers: VecDeque<PendingTransfer>,
     error: Option<AmqpProtocolError>,
@@ -43,8 +51,6 @@ pub(crate) struct SenderLinkInner {
 }
 
 struct PendingTransfer {
-    idx: u32,
-    tag: Option<Bytes>,
     body: Option<TransferBody>,
     state: TransferState,
     settle: Option<bool>,
@@ -129,13 +135,13 @@ impl SenderLinkInner {
             id,
             name,
             delivery_count,
-            idx: 0,
             session: Session::new(session),
             remote_handle: handle,
             link_credit: 0,
             pending_transfers: VecDeque::new(),
             error: None,
             closed: false,
+            delivery_tag: 0,
             on_close: condition::Condition::new(),
         }
     }
@@ -152,11 +158,11 @@ impl SenderLinkInner {
         SenderLinkInner {
             delivery_count,
             id: 0,
-            idx: 0,
             name: name.unwrap_or_else(ByteString::default),
             session: Session::new(session),
             remote_handle: frame.handle(),
             link_credit: 0,
+            delivery_tag: 0,
             pending_transfers: VecDeque::new(),
             error: None,
             closed: false,
@@ -181,7 +187,7 @@ impl SenderLinkInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            if let TransferState::First(tx) | TransferState::Only(tx) = tr.state {
+            if let TransferState::First(tx, _) | TransferState::Only(tx, _) = tr.state {
                 let _ = tx.send(Err(err.clone()));
             }
         }
@@ -244,10 +250,8 @@ impl SenderLinkInner {
                     self.delivery_count = self.delivery_count.saturating_add(1);
                     session.send_transfer(
                         self.id as u32,
-                        transfer.idx,
                         transfer.body,
                         transfer.state,
-                        transfer.tag,
                         transfer.settle,
                         transfer.message_format,
                     );
@@ -291,10 +295,11 @@ impl SenderLinkInner {
                 };
 
                 let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+                let tag = self.get_tag(tag);
+
                 self.send_inner(
                     chunk.into(),
-                    tag,
-                    TransferState::First(delivery_tx),
+                    TransferState::First(delivery_tx, tag),
                     message_format,
                 );
 
@@ -303,14 +308,15 @@ impl SenderLinkInner {
 
                     // last chunk
                     if body.is_empty() {
-                        self.send_inner(chunk.into(), None, TransferState::Last, message_format);
+                        self.send_inner(chunk.into(), TransferState::Last, message_format);
                         break;
                     }
 
-                    self.send_inner(chunk.into(), None, TransferState::Continue, message_format);
+                    self.send_inner(chunk.into(), TransferState::Continue, message_format);
                 }
             } else {
-                self.send_inner(body, tag, TransferState::Only(delivery_tx), message_format);
+                let state = TransferState::Only(delivery_tx, self.get_tag(tag));
+                self.send_inner(body, state, message_format);
             }
 
             Delivery::Pending(delivery_rx)
@@ -320,7 +326,6 @@ impl SenderLinkInner {
     fn send_inner(
         &mut self,
         body: TransferBody,
-        tag: Option<Bytes>,
         state: TransferState,
         message_format: Option<MessageFormat>,
     ) {
@@ -328,31 +333,26 @@ impl SenderLinkInner {
             log::trace!(
                 "Sender link credit is 0, push to pending queue hnd:{} {:?}, queue size: {}",
                 self.id as u32,
-                tag,
+                state,
                 self.pending_transfers.len()
             );
             self.pending_transfers.push_back(PendingTransfer {
-                tag,
                 state,
                 message_format,
                 settle: Some(false),
                 body: Some(body),
-                idx: self.idx,
             });
         } else {
             self.link_credit -= 1;
             self.delivery_count = self.delivery_count.saturating_add(1);
             self.session.inner.get_mut().send_transfer(
                 self.id as u32,
-                self.idx,
                 Some(body),
                 state,
-                tag,
                 None,
                 message_format,
             );
         }
-        self.idx = self.idx.saturating_add(1);
     }
 
     pub(crate) fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
@@ -365,6 +365,17 @@ impl SenderLinkInner {
             batchable: false,
         };
         let _ = self.session.inner.get_mut().post_frame(disp.into());
+    }
+
+    fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {
+        tag.unwrap_or_else(|| {
+            let delivery_tag = self.delivery_tag;
+            self.delivery_tag = delivery_tag.saturating_add(1);
+
+            let mut buf = BytesMut::new();
+            buf.put_u32(delivery_tag);
+            buf.freeze()
+        })
     }
 }
 
@@ -417,11 +428,29 @@ impl SenderLinkBuilder {
         self
     }
 
-    pub async fn open(self) -> Result<SenderLink, AmqpProtocolError> {
-        let result = self.session.get_mut().open_sender_link(self.frame).await;
+    pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
+        let result = self
+            .session
+            .get_mut()
+            .attach_local_sender_link(self.frame)
+            .await;
 
         match result {
-            Ok(Ok(link)) => Ok(link),
+            Ok(Ok(inner)) => Ok(SenderLink { inner }),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(AmqpProtocolError::Disconnected),
+        }
+    }
+
+    pub async fn attach_simple(self) -> Result<SenderLink, AmqpProtocolError> {
+        let result = self
+            .session
+            .get_mut()
+            .attach_local_sender_link(self.frame)
+            .await;
+
+        match result {
+            Ok(Ok(inner)) => Ok(SenderLink { inner }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
