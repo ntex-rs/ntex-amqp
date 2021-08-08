@@ -298,6 +298,7 @@ impl {{list.name}} {
     {{#each list.fields as |field|}}
         {{#if field.is_str}}
             {{#if field.optional}}
+                #[inline]
                 pub fn {{field.name}}(&self) -> Option<&str> {
                     match self.{{field.name}} {
                         None => None,
@@ -305,19 +306,24 @@ impl {{list.name}} {
                     }
                 }
             {{else}}
+                #[inline]
                 pub fn {{field.name}}(&self) -> &str { self.{{field.name}}.as_str() }
             {{/if}}
         {{else}}
             {{#if field.is_ref}}
                 {{#if field.optional}}
+                   #[inline]
                     pub fn {{field.name}}(&self) -> Option<&{{{field.ty}}}> { self.{{field.name}}.as_ref() }
                 {{else}}
+                    #[inline]
                     pub fn {{field.name}}(&self) -> &{{{field.ty}}} { &self.{{field.name}} }
                 {{/if}}
             {{else}}
                 {{#if field.optional}}
+                    #[inline]
                     pub fn {{field.name}}(&self) -> Option<{{{field.ty}}}> { self.{{field.name}} }
                 {{else}}
+                   #[inline]
                     pub fn {{field.name}}(&self) -> {{{field.ty}}} { self.{{field.name}} }
                 {{/if}}
             {{/if}}
@@ -325,6 +331,7 @@ impl {{list.name}} {
     {{/each}}
 
     {{#if list.transfer}}
+    #[inline]
     pub fn body(&self) -> Option<&TransferBody> {
         self.body.as_ref()
     }

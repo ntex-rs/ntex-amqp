@@ -128,6 +128,131 @@ impl Encode for Frame {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeliveryState {
+    Received(Received),
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for DeliveryState {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(35) => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+        }
+    }
+}
+impl Encode for DeliveryState {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
+            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
+            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
+            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
+            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
+            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
+            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
+            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
+            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
 pub enum Section {
     Header(Header),
     DeliveryAnnotations(DeliveryAnnotations),
@@ -225,131 +350,6 @@ impl Encode for Section {
             Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
             Section::Footer(ref v) => encode_footer_inner(v, buf),
             Section::Properties(ref v) => encode_properties_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum DeliveryState {
-    Received(Received),
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for DeliveryState {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(35) => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
-                decode_received_inner(input).map(|(i, r)| (i, DeliveryState::Received(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, DeliveryState::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, DeliveryState::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, DeliveryState::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for DeliveryState {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
-            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
-            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
-            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
-            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
-            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
-            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
-            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
-            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for Outcome {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for Outcome {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -1070,12 +1070,15 @@ pub struct Error {
     pub info: Option<Fields>,
 }
 impl Error {
+    #[inline]
     pub fn condition(&self) -> &ErrorCondition {
         &self.condition
     }
+    #[inline]
     pub fn description(&self) -> Option<&ByteString> {
         self.description.as_ref()
     }
+    #[inline]
     pub fn info(&self) -> Option<&Fields> {
         self.info.as_ref()
     }
@@ -1196,33 +1199,43 @@ pub struct Open {
     pub properties: Option<Fields>,
 }
 impl Open {
+    #[inline]
     pub fn container_id(&self) -> &ByteString {
         &self.container_id
     }
+    #[inline]
     pub fn hostname(&self) -> Option<&ByteString> {
         self.hostname.as_ref()
     }
+    #[inline]
     pub fn max_frame_size(&self) -> u32 {
         self.max_frame_size
     }
+    #[inline]
     pub fn channel_max(&self) -> u16 {
         self.channel_max
     }
+    #[inline]
     pub fn idle_time_out(&self) -> Option<Milliseconds> {
         self.idle_time_out
     }
+    #[inline]
     pub fn outgoing_locales(&self) -> Option<&IetfLanguageTags> {
         self.outgoing_locales.as_ref()
     }
+    #[inline]
     pub fn incoming_locales(&self) -> Option<&IetfLanguageTags> {
         self.incoming_locales.as_ref()
     }
+    #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
         self.offered_capabilities.as_ref()
     }
+    #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
         self.desired_capabilities.as_ref()
     }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
@@ -1432,27 +1445,35 @@ pub struct Begin {
     pub properties: Option<Fields>,
 }
 impl Begin {
+    #[inline]
     pub fn remote_channel(&self) -> Option<u16> {
         self.remote_channel
     }
+    #[inline]
     pub fn next_outgoing_id(&self) -> TransferNumber {
         self.next_outgoing_id
     }
+    #[inline]
     pub fn incoming_window(&self) -> u32 {
         self.incoming_window
     }
+    #[inline]
     pub fn outgoing_window(&self) -> u32 {
         self.outgoing_window
     }
+    #[inline]
     pub fn handle_max(&self) -> Handle {
         self.handle_max
     }
+    #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
         self.offered_capabilities.as_ref()
     }
+    #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
         self.desired_capabilities.as_ref()
     }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
@@ -1642,45 +1663,59 @@ pub struct Attach {
     pub properties: Option<Fields>,
 }
 impl Attach {
+    #[inline]
     pub fn name(&self) -> &ByteString {
         &self.name
     }
+    #[inline]
     pub fn handle(&self) -> Handle {
         self.handle
     }
+    #[inline]
     pub fn role(&self) -> Role {
         self.role
     }
+    #[inline]
     pub fn snd_settle_mode(&self) -> SenderSettleMode {
         self.snd_settle_mode
     }
+    #[inline]
     pub fn rcv_settle_mode(&self) -> ReceiverSettleMode {
         self.rcv_settle_mode
     }
+    #[inline]
     pub fn source(&self) -> Option<&Source> {
         self.source.as_ref()
     }
+    #[inline]
     pub fn target(&self) -> Option<&Target> {
         self.target.as_ref()
     }
+    #[inline]
     pub fn unsettled(&self) -> Option<&Map> {
         self.unsettled.as_ref()
     }
+    #[inline]
     pub fn incomplete_unsettled(&self) -> bool {
         self.incomplete_unsettled
     }
+    #[inline]
     pub fn initial_delivery_count(&self) -> Option<SequenceNo> {
         self.initial_delivery_count
     }
+    #[inline]
     pub fn max_message_size(&self) -> Option<u64> {
         self.max_message_size
     }
+    #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
         self.offered_capabilities.as_ref()
     }
+    #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
         self.desired_capabilities.as_ref()
     }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
@@ -1945,36 +1980,47 @@ pub struct Flow {
     pub properties: Option<Fields>,
 }
 impl Flow {
+    #[inline]
     pub fn next_incoming_id(&self) -> Option<TransferNumber> {
         self.next_incoming_id
     }
+    #[inline]
     pub fn incoming_window(&self) -> u32 {
         self.incoming_window
     }
+    #[inline]
     pub fn next_outgoing_id(&self) -> TransferNumber {
         self.next_outgoing_id
     }
+    #[inline]
     pub fn outgoing_window(&self) -> u32 {
         self.outgoing_window
     }
+    #[inline]
     pub fn handle(&self) -> Option<Handle> {
         self.handle
     }
+    #[inline]
     pub fn delivery_count(&self) -> Option<SequenceNo> {
         self.delivery_count
     }
+    #[inline]
     pub fn link_credit(&self) -> Option<u32> {
         self.link_credit
     }
+    #[inline]
     pub fn available(&self) -> Option<u32> {
         self.available
     }
+    #[inline]
     pub fn drain(&self) -> bool {
         self.drain
     }
+    #[inline]
     pub fn echo(&self) -> bool {
         self.echo
     }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.properties.as_ref()
     }
@@ -2201,39 +2247,51 @@ pub struct Transfer {
     pub body: Option<TransferBody>,
 }
 impl Transfer {
+    #[inline]
     pub fn handle(&self) -> Handle {
         self.handle
     }
+    #[inline]
     pub fn delivery_id(&self) -> Option<DeliveryNumber> {
         self.delivery_id
     }
+    #[inline]
     pub fn delivery_tag(&self) -> Option<&DeliveryTag> {
         self.delivery_tag.as_ref()
     }
+    #[inline]
     pub fn message_format(&self) -> Option<MessageFormat> {
         self.message_format
     }
+    #[inline]
     pub fn settled(&self) -> Option<bool> {
         self.settled
     }
+    #[inline]
     pub fn more(&self) -> bool {
         self.more
     }
+    #[inline]
     pub fn rcv_settle_mode(&self) -> Option<ReceiverSettleMode> {
         self.rcv_settle_mode
     }
+    #[inline]
     pub fn state(&self) -> Option<&DeliveryState> {
         self.state.as_ref()
     }
+    #[inline]
     pub fn resume(&self) -> bool {
         self.resume
     }
+    #[inline]
     pub fn aborted(&self) -> bool {
         self.aborted
     }
+    #[inline]
     pub fn batchable(&self) -> bool {
         self.batchable
     }
+    #[inline]
     pub fn body(&self) -> Option<&TransferBody> {
         self.body.as_ref()
     }
@@ -2466,21 +2524,27 @@ pub struct Disposition {
     pub batchable: bool,
 }
 impl Disposition {
+    #[inline]
     pub fn role(&self) -> Role {
         self.role
     }
+    #[inline]
     pub fn first(&self) -> DeliveryNumber {
         self.first
     }
+    #[inline]
     pub fn last(&self) -> Option<DeliveryNumber> {
         self.last
     }
+    #[inline]
     pub fn settled(&self) -> bool {
         self.settled
     }
+    #[inline]
     pub fn state(&self) -> Option<&DeliveryState> {
         self.state.as_ref()
     }
+    #[inline]
     pub fn batchable(&self) -> bool {
         self.batchable
     }
@@ -2633,12 +2697,15 @@ pub struct Detach {
     pub error: Option<Error>,
 }
 impl Detach {
+    #[inline]
     pub fn handle(&self) -> Handle {
         self.handle
     }
+    #[inline]
     pub fn closed(&self) -> bool {
         self.closed
     }
+    #[inline]
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
@@ -2746,6 +2813,7 @@ pub struct End {
     pub error: Option<Error>,
 }
 impl End {
+    #[inline]
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
@@ -2824,6 +2892,7 @@ pub struct Close {
     pub error: Option<Error>,
 }
 impl Close {
+    #[inline]
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
@@ -2902,6 +2971,7 @@ pub struct SaslMechanisms {
     pub sasl_server_mechanisms: Symbols,
 }
 impl SaslMechanisms {
+    #[inline]
     pub fn sasl_server_mechanisms(&self) -> &Symbols {
         &self.sasl_server_mechanisms
     }
@@ -2989,12 +3059,15 @@ pub struct SaslInit {
     pub hostname: Option<ByteString>,
 }
 impl SaslInit {
+    #[inline]
     pub fn mechanism(&self) -> &Symbol {
         &self.mechanism
     }
+    #[inline]
     pub fn initial_response(&self) -> Option<&Bytes> {
         self.initial_response.as_ref()
     }
+    #[inline]
     pub fn hostname(&self) -> Option<&ByteString> {
         self.hostname.as_ref()
     }
@@ -3106,6 +3179,7 @@ pub struct SaslChallenge {
     pub challenge: Bytes,
 }
 impl SaslChallenge {
+    #[inline]
     pub fn challenge(&self) -> &Bytes {
         &self.challenge
     }
@@ -3184,6 +3258,7 @@ pub struct SaslResponse {
     pub response: Bytes,
 }
 impl SaslResponse {
+    #[inline]
     pub fn response(&self) -> &Bytes {
         &self.response
     }
@@ -3263,9 +3338,11 @@ pub struct SaslOutcome {
     pub additional_data: Option<Bytes>,
 }
 impl SaslOutcome {
+    #[inline]
     pub fn code(&self) -> SaslCode {
         self.code
     }
+    #[inline]
     pub fn additional_data(&self) -> Option<&Bytes> {
         self.additional_data.as_ref()
     }
@@ -3370,36 +3447,47 @@ pub struct Source {
     pub capabilities: Option<Symbols>,
 }
 impl Source {
+    #[inline]
     pub fn address(&self) -> Option<&Address> {
         self.address.as_ref()
     }
+    #[inline]
     pub fn durable(&self) -> TerminusDurability {
         self.durable
     }
+    #[inline]
     pub fn expiry_policy(&self) -> TerminusExpiryPolicy {
         self.expiry_policy
     }
+    #[inline]
     pub fn timeout(&self) -> Seconds {
         self.timeout
     }
+    #[inline]
     pub fn dynamic(&self) -> bool {
         self.dynamic
     }
+    #[inline]
     pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> {
         self.dynamic_node_properties.as_ref()
     }
+    #[inline]
     pub fn distribution_mode(&self) -> Option<&DistributionMode> {
         self.distribution_mode.as_ref()
     }
+    #[inline]
     pub fn filter(&self) -> Option<&FilterSet> {
         self.filter.as_ref()
     }
+    #[inline]
     pub fn default_outcome(&self) -> Option<&Outcome> {
         self.default_outcome.as_ref()
     }
+    #[inline]
     pub fn outcomes(&self) -> Option<&Symbols> {
         self.outcomes.as_ref()
     }
+    #[inline]
     pub fn capabilities(&self) -> Option<&Symbols> {
         self.capabilities.as_ref()
     }
@@ -3621,24 +3709,31 @@ pub struct Target {
     pub capabilities: Option<Symbols>,
 }
 impl Target {
+    #[inline]
     pub fn address(&self) -> Option<&Address> {
         self.address.as_ref()
     }
+    #[inline]
     pub fn durable(&self) -> TerminusDurability {
         self.durable
     }
+    #[inline]
     pub fn expiry_policy(&self) -> TerminusExpiryPolicy {
         self.expiry_policy
     }
+    #[inline]
     pub fn timeout(&self) -> Seconds {
         self.timeout
     }
+    #[inline]
     pub fn dynamic(&self) -> bool {
         self.dynamic
     }
+    #[inline]
     pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> {
         self.dynamic_node_properties.as_ref()
     }
+    #[inline]
     pub fn capabilities(&self) -> Option<&Symbols> {
         self.capabilities.as_ref()
     }
@@ -3806,18 +3901,23 @@ pub struct Header {
     pub delivery_count: u32,
 }
 impl Header {
+    #[inline]
     pub fn durable(&self) -> bool {
         self.durable
     }
+    #[inline]
     pub fn priority(&self) -> u8 {
         self.priority
     }
+    #[inline]
     pub fn ttl(&self) -> Option<Milliseconds> {
         self.ttl
     }
+    #[inline]
     pub fn first_acquirer(&self) -> bool {
         self.first_acquirer
     }
+    #[inline]
     pub fn delivery_count(&self) -> u32 {
         self.delivery_count
     }
@@ -3967,42 +4067,55 @@ pub struct Properties {
     pub reply_to_group_id: Option<ByteString>,
 }
 impl Properties {
+    #[inline]
     pub fn message_id(&self) -> Option<&MessageId> {
         self.message_id.as_ref()
     }
+    #[inline]
     pub fn user_id(&self) -> Option<&Bytes> {
         self.user_id.as_ref()
     }
+    #[inline]
     pub fn to(&self) -> Option<&Address> {
         self.to.as_ref()
     }
+    #[inline]
     pub fn subject(&self) -> Option<&ByteString> {
         self.subject.as_ref()
     }
+    #[inline]
     pub fn reply_to(&self) -> Option<&Address> {
         self.reply_to.as_ref()
     }
+    #[inline]
     pub fn correlation_id(&self) -> Option<&MessageId> {
         self.correlation_id.as_ref()
     }
+    #[inline]
     pub fn content_type(&self) -> Option<&Symbol> {
         self.content_type.as_ref()
     }
+    #[inline]
     pub fn content_encoding(&self) -> Option<&Symbol> {
         self.content_encoding.as_ref()
     }
+    #[inline]
     pub fn absolute_expiry_time(&self) -> Option<Timestamp> {
         self.absolute_expiry_time
     }
+    #[inline]
     pub fn creation_time(&self) -> Option<Timestamp> {
         self.creation_time
     }
+    #[inline]
     pub fn group_id(&self) -> Option<&ByteString> {
         self.group_id.as_ref()
     }
+    #[inline]
     pub fn group_sequence(&self) -> Option<SequenceNo> {
         self.group_sequence
     }
+    #[inline]
     pub fn reply_to_group_id(&self) -> Option<&ByteString> {
         self.reply_to_group_id.as_ref()
     }
@@ -4245,9 +4358,11 @@ pub struct Received {
     pub section_offset: u64,
 }
 impl Received {
+    #[inline]
     pub fn section_number(&self) -> u32 {
         self.section_number
     }
+    #[inline]
     pub fn section_offset(&self) -> u64 {
         self.section_offset
     }
@@ -4404,6 +4519,7 @@ pub struct Rejected {
     pub error: Option<Error>,
 }
 impl Rejected {
+    #[inline]
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
@@ -4546,12 +4662,15 @@ pub struct Modified {
     pub message_annotations: Option<Fields>,
 }
 impl Modified {
+    #[inline]
     pub fn delivery_failed(&self) -> Option<bool> {
         self.delivery_failed
     }
+    #[inline]
     pub fn undeliverable_here(&self) -> Option<bool> {
         self.undeliverable_here
     }
+    #[inline]
     pub fn message_annotations(&self) -> Option<&Fields> {
         self.message_annotations.as_ref()
     }
