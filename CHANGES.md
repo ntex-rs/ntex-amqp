@@ -1,12 +1,14 @@
 # Changes
 
-## [0.5.0-b.3] - 2021-08-xx
+## [0.5.0-b.3] - 2021-08-10
+
+* Add Session::connection() method, returns ref to Connection
 
 * Add stream handling for transfer dispositions
 
 * Refactor sender link disposition handling
 
-## [codec-0.6.1] - 2021-08-0x
+## [codec-0.6.1] - 2021-08-10
 
 * Regenerate spec with inlines
 

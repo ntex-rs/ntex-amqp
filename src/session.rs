@@ -35,6 +35,10 @@ impl Session {
         Session { inner }
     }
 
+    pub fn connection(&self) -> &Connection {
+        &self.inner.get_ref().sink
+    }
+
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         Ready::Ok(())
     }
