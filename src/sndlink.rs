@@ -552,6 +552,11 @@ impl SenderLinkBuilder {
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
     }
+
+    #[doc(hidden)]
+    pub async fn open(self) -> Result<SenderLink, AmqpProtocolError> {
+        self.attach().await
+    }
 }
 
 enum Delivery {

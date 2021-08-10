@@ -375,4 +375,9 @@ impl ReceiverLinkBuilder {
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
     }
+
+    #[doc(hidden)]
+    pub async fn open(self) -> Result<ReceiverLink, AmqpProtocolError> {
+        self.attach().await
+    }
 }
