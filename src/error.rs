@@ -41,6 +41,12 @@ pub enum AmqpProtocolError {
     Disconnected,
     #[display(fmt = "Unknown session: {} {:?}", _0, _1)]
     UnknownSession(usize, Box<protocol::Frame>),
+    #[display(fmt = "Session {}, Unknown link: {} {:?}", session, link_handle, frame)]
+    UnknownLink {
+        session: usize,
+        link_handle: u32,
+        frame: Box<protocol::Frame>,
+    },
     #[display(fmt = "Connection closed, error: {:?}", _0)]
     Closed(Option<protocol::Error>),
     #[display(fmt = "Session ended, error: {:?}", _0)]
@@ -49,8 +55,8 @@ pub enum AmqpProtocolError {
     LinkDetached(Option<protocol::Error>),
     #[display(fmt = "Unexpected frame for opening state, got: {:?}", _0)]
     UnexpectedOpeningState(Box<protocol::Frame>),
-    #[display(fmt = "Unexpected frame, got: {:?}", _0)]
-    Unexpected(Box<protocol::Frame>),
+    #[display(fmt = "{}, Unexpected frame: {:?}", _0, _1)]
+    Unexpected(&'static str, Box<protocol::Frame>),
 }
 
 impl From<AmqpCodecError> for AmqpProtocolError {

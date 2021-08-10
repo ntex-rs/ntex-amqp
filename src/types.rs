@@ -4,10 +4,26 @@ use ntex::router::Path;
 use ntex::util::{ByteString, Bytes};
 
 use crate::codec::protocol::{
-    self, Accepted, Attach, DeliveryState, Error, Rejected, TransferBody,
+    self, Accepted, Attach, DeliveryState, Detach, Error, Flow, Rejected, TransferBody,
 };
 use crate::codec::{AmqpParseError, Decode};
-use crate::{rcvlink::ReceiverLink, session::Session, Handle, State};
+use crate::{rcvlink::ReceiverLink, session::Session, sndlink::SenderLink, Handle, State};
+
+pub enum Message {
+    Attached(ReceiverLink),
+    Detached(ReceiverLink),
+    Transfer(protocol::Transfer),
+}
+
+pub(crate) enum Action {
+    None,
+    AttachSender(SenderLink, Attach),
+    AttachReceiver(ReceiverLink),
+    DetachSender(SenderLink, Detach),
+    DetachReceiver(ReceiverLink, Detach),
+    Flow(SenderLink, Flow),
+    Transfer(ReceiverLink),
+}
 
 pub struct Link<S> {
     pub(crate) state: State<S>,

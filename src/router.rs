@@ -57,8 +57,9 @@ impl<S: 'static> Router<S> {
         }
         let router = Cell::new(router.finish());
 
-        fn_factory_with_config(move |_: State<S>| {
+        fn_factory_with_config(move |state: State<S>| {
             Ready::Ok(RouterService {
+                state,
                 router: router.clone(),
             })
         })
@@ -66,6 +67,7 @@ impl<S: 'static> Router<S> {
 }
 
 struct RouterService<S> {
+    state: State<S>,
     router: Cell<PatternRouter<Handle<S>>>,
 }
 

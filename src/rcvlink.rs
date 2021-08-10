@@ -1,17 +1,15 @@
-use std::{collections::VecDeque, future::Future, pin::Pin, task::Context, task::Poll};
+use std::{collections::VecDeque, future::Future};
 
+use ntex::channel::oneshot;
 use ntex::util::{ByteString, BytesMut};
-use ntex::Stream;
-use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
 };
 use ntex_amqp_codec::Encode;
 
-use crate::cell::Cell;
-use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner};
+use crate::{cell::Cell, error::AmqpProtocolError, types::Action};
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
@@ -43,7 +41,7 @@ impl ReceiverLink {
         &self.inner.get_ref().attach
     }
 
-    pub(crate) fn open(&mut self) {
+    pub(crate) fn confirm_receiver_link(&self) {
         let inner = self.inner.get_mut();
         inner
             .session
@@ -100,39 +98,6 @@ impl ReceiverLink {
         let inner = self.inner.get_mut();
         inner.closed = true;
         inner.error = error;
-        inner.reader_task.wake();
-    }
-}
-
-impl Stream for ReceiverLink {
-    type Item = Result<Transfer, AmqpProtocolError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let inner = self.inner.get_mut();
-
-        if inner.partial_body.is_some() && inner.queue.len() == 1 {
-            if inner.closed {
-                if let Some(err) = inner.error.take() {
-                    Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
-                } else {
-                    Poll::Ready(None)
-                }
-            } else {
-                inner.reader_task.register(cx.waker());
-                Poll::Pending
-            }
-        } else if let Some(tr) = inner.queue.pop_front() {
-            Poll::Ready(Some(Ok(tr)))
-        } else if inner.closed {
-            if let Some(err) = inner.error.take() {
-                Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
-            } else {
-                Poll::Ready(None)
-            }
-        } else {
-            inner.reader_task.register(cx.waker());
-            Poll::Pending
-        }
     }
 }
 
@@ -142,7 +107,6 @@ pub(crate) struct ReceiverLinkInner {
     attach: Attach,
     session: Session,
     closed: bool,
-    reader_task: LocalWaker,
     queue: VecDeque<Transfer>,
     credit: u32,
     delivery_count: u32,
@@ -161,7 +125,6 @@ impl ReceiverLinkInner {
             handle,
             session: Session::new(session),
             closed: false,
-            reader_task: LocalWaker::new(),
             queue: VecDeque::with_capacity(4),
             credit: 0,
             error: None,
@@ -191,7 +154,6 @@ impl ReceiverLinkInner {
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }
-        self.reader_task.wake();
 
         async move {
             match rx.await {
@@ -215,7 +177,11 @@ impl ReceiverLinkInner {
     }
 
     #[allow(clippy::unnecessary_unwrap)]
-    pub(crate) fn handle_transfer(&mut self, mut transfer: Transfer) {
+    pub(crate) fn handle_transfer(
+        &mut self,
+        mut transfer: Transfer,
+        inner: &Cell<ReceiverLinkInner>,
+    ) -> Result<Action, AmqpProtocolError> {
         if self.credit == 0 {
             // check link credit
             let err = Error {
@@ -224,6 +190,7 @@ impl ReceiverLinkInner {
                 info: None,
             };
             let _ = self.close(Some(err));
+            Ok(Action::None)
         } else {
             self.credit -= 1;
 
@@ -242,7 +209,7 @@ impl ReceiverLinkInner {
                             info: None,
                         };
                         let _ = self.close(Some(err));
-                        return;
+                        return Ok(Action::None);
                     }
                 }
 
@@ -255,7 +222,7 @@ impl ReceiverLinkInner {
                             info: None,
                         };
                         let _ = self.close(Some(err));
-                        return;
+                        return Ok(Action::None);
                     }
 
                     transfer_body.encode(body);
@@ -268,9 +235,9 @@ impl ReceiverLinkInner {
                     if partial_body.is_some() && !self.queue.is_empty() {
                         self.queue.back_mut().unwrap().body =
                             Some(TransferBody::Data(partial_body.unwrap().freeze()));
-                        if self.queue.len() == 1 {
-                            self.reader_task.wake()
-                        }
+                        Ok(Action::Transfer(ReceiverLink {
+                            inner: inner.clone(),
+                        }))
                     } else {
                         log::error!("Inconsistent state, bug");
                         let err = Error {
@@ -279,7 +246,10 @@ impl ReceiverLinkInner {
                             info: None,
                         };
                         let _ = self.close(Some(err));
+                        Ok(Action::None)
                     }
+                } else {
+                    Ok(Action::None)
                 }
             } else if transfer.more {
                 if transfer.delivery_id.is_none() {
@@ -289,6 +259,7 @@ impl ReceiverLinkInner {
                         info: None,
                     };
                     let _ = self.close(Some(err));
+                    Ok(Action::None)
                 } else {
                     let body = if let Some(body) = transfer.body.take() {
                         match body {
@@ -304,13 +275,14 @@ impl ReceiverLinkInner {
                     };
                     self.partial_body = Some(body);
                     self.queue.push_back(transfer);
+                    Ok(Action::None)
                 }
             } else {
                 self.delivery_count += 1;
                 self.queue.push_back(transfer);
-                if self.queue.len() == 1 {
-                    self.reader_task.wake()
-                }
+                Ok(Action::Transfer(ReceiverLink {
+                    inner: inner.clone(),
+                }))
             }
         }
     }

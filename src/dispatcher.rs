@@ -5,11 +5,9 @@ use ntex::rt::time::{sleep, Sleep};
 use ntex::service::Service;
 use ntex::util::Ready;
 
-use crate::cell::Cell;
-use crate::codec::protocol::{Frame, Role};
+use crate::codec::protocol::Frame;
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{AmqpProtocolError, DispatcherError, Error};
-use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, State};
 
 /// Amqp server dispatcher service.
@@ -26,7 +24,7 @@ pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {
 
 impl<St, Sr, Ctl> Dispatcher<St, Sr, Ctl>
 where
-    Sr: Service<Request = types::Link<St>, Response = ()>,
+    Sr: Service<Request = types::Message, Response = ()>,
     Sr::Error: 'static,
     Sr::Future: 'static,
     Ctl: Service<Request = ControlFrame, Response = ()>,
@@ -119,14 +117,11 @@ where
             match frame.0.get_mut().kind {
                 ControlFrameKind::AttachReceiver(ref link) => {
                     let link = link.clone();
-                    let fut = self
-                        .service
-                        .call(types::Link::new(link.clone(), self.state.clone()));
+                    link.confirm_receiver_link();
+                    let fut = self.service.call(types::Message::Attached(link.clone()));
                     ntex::rt::spawn(async move {
-                        let res = fut.await;
-                        match res {
-                            Ok(_) => link.close().await,
-                            Err(err) => link.close_with_error(Error::from(err)).await,
+                        if let Err(err) = fut.await {
+                            link.close_with_error(Error::from(err)).await;
                         }
                     });
                 }
@@ -136,14 +131,14 @@ where
                         .get_mut()
                         .attach_remote_sender_link(frm, link.inner.clone());
                 }
-                ControlFrameKind::Flow(ref frm, _) => {
-                    frame.session_cell().get_mut().apply_flow(frm);
+                ControlFrameKind::Flow(ref frm, ref link) => {
+                    frame.session_cell().get_mut().handle_flow(frm, Some(&link));
                 }
-                ControlFrameKind::DetachSender(ref mut frm, _) => {
-                    frame.session_cell().get_mut().handle_detach(frm);
+                ControlFrameKind::DetachSender(_, _) => {
+                    // frame.session_cell().get_mut().handle_detach(frm);
                 }
-                ControlFrameKind::DetachReceiver(ref mut frm, _) => {
-                    frame.session_cell().get_mut().handle_detach(frm);
+                ControlFrameKind::DetachReceiver(_, _) => {
+                    // frame.session_cell().get_mut().handle_detach(frm);
                 }
                 ControlFrameKind::ProtocolError(ref err) => return Err(err.clone().into()),
                 ControlFrameKind::Closed(_) => (),
@@ -155,7 +150,7 @@ where
 
 impl<St, Sr, Ctl> Service for Dispatcher<St, Sr, Ctl>
 where
-    Sr: Service<Request = types::Link<St>, Response = ()>,
+    Sr: Service<Request = types::Message, Response = ()>,
     Sr::Error: fmt::Debug + 'static,
     Sr::Future: 'static,
     Ctl: Service<Request = ControlFrame, Response = ()>,
@@ -174,12 +169,12 @@ where
 
         // check readiness
         let res1 = self.service.poll_ready(cx).map_err(|err| {
-            error!("Error during publish service readiness check: {:?}", err);
+            error!("Publish service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err);
             DispatcherError::Service
         })?;
         let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
-            error!("Error during control service readiness check: {:?}", err);
+            error!("Control service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err);
             DispatcherError::Service
         })?;
@@ -223,113 +218,62 @@ where
                 #[cfg(feature = "frame-trace")]
                 log::trace!("incoming: {:#?}", frame);
 
-                let item = try_ready_err!(self
+                let action = try_ready_err!(self
                     .sink
                     .0
                     .get_mut()
-                    .handle_frame(frame)
+                    .handle_frame(frame, &self.sink.0)
                     .map_err(DispatcherError::Protocol));
-                let frame = if let Some(item) = item {
-                    item
-                } else {
-                    return Ready::Ok(());
-                };
 
-                let (channel_id, frame) = frame.into_parts();
-
-                // remote session
-                if let Frame::Begin(frm) = frame {
-                    return Ready::from(
-                        self.sink
-                            .register_remote_session(channel_id, &frm)
-                            .map_err(DispatcherError::Codec),
-                    );
-                }
-
-                let id = channel_id as usize;
-                let session = match self.sink.get_remote_session(id) {
-                    Some(session) => session,
-                    None => {
-                        return Ready::from(Err(AmqpProtocolError::UnknownSession(
-                            id,
-                            Box::new(frame),
-                        )
-                        .into()))
-                    }
-                };
-
-                let result = match frame {
-                    Frame::Flow(frm) => {
+                let result = match action {
+                    types::Action::Flow(link, frm) => {
                         // apply flow to specific link
-                        if let Some(link_id) = frm.handle {
-                            // TODO: close session if link is not found
-                            if let Some(link) = session.get_sender_link_by_handle(link_id) {
-                                let frame = ControlFrame::new(
-                                    session.clone(),
-                                    ControlFrameKind::Flow(frm, link.clone()),
-                                );
-                                *self.ctl_fut.borrow_mut() =
-                                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                                return Ready::from(Ok(()));
-                            }
-                        }
-                        session.get_mut().apply_flow(&frm);
+                        let frame = ControlFrame::new(
+                            link.session().inner.clone(),
+                            ControlFrameKind::Flow(frm, link.clone()),
+                        );
+                        *self.ctl_fut.borrow_mut() =
+                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                         Ok(())
                     }
-                    Frame::Attach(attach) => {
-                        match attach.role {
-                            Role::Receiver => {
-                                // remotly opened sender link
-                                let link = SenderLink::new(Cell::new(SenderLinkInner::with(
-                                    &attach,
-                                    session.clone(),
-                                )));
-                                let frame = ControlFrame::new(
-                                    session,
-                                    ControlFrameKind::AttachSender(Box::new(attach), link),
-                                );
+                    types::Action::AttachSender(link, frame) => {
+                        let frame = ControlFrame::new(
+                            link.session().inner.clone(),
+                            ControlFrameKind::AttachSender(Box::new(frame), link),
+                        );
 
-                                *self.ctl_fut.borrow_mut() =
-                                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                                Ok(())
-                            }
-                            Role::Sender => {
-                                // receiver link
-                                let link = session
-                                    .get_mut()
-                                    .attach_remote_receiver_link(session.clone(), attach);
-
-                                let frame = ControlFrame::new(
-                                    session,
-                                    ControlFrameKind::AttachReceiver(link),
-                                );
-                                *self.ctl_fut.borrow_mut() =
-                                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                                Ok(())
-                            }
-                        }
-                    }
-                    Frame::Detach(frm) => {
-                        if let Some(link) = session.get_sender_link_by_handle(frm.handle) {
-                            let frame = ControlFrame::new(
-                                session.clone(),
-                                ControlFrameKind::DetachSender(frm, link.clone()),
-                            );
-                            *self.ctl_fut.borrow_mut() =
-                                Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        } else if let Some(link) = session.get_receiver_link_by_handle(frm.handle) {
-                            let frame = ControlFrame::new(
-                                session.clone(),
-                                ControlFrameKind::DetachReceiver(frm, link.clone()),
-                            );
-                            *self.ctl_fut.borrow_mut() =
-                                Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        } else {
-                            session.get_mut().handle_frame(Frame::Detach(frm));
-                        }
+                        *self.ctl_fut.borrow_mut() =
+                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                         Ok(())
                     }
-                    _ => Err(AmqpProtocolError::Unexpected(Box::new(frame)).into()),
+                    types::Action::AttachReceiver(link) => {
+                        let frame = ControlFrame::new(
+                            link.session().inner.clone(),
+                            ControlFrameKind::AttachReceiver(link),
+                        );
+                        *self.ctl_fut.borrow_mut() =
+                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                        Ok(())
+                    }
+                    types::Action::DetachSender(link, frm) => {
+                        let frame = ControlFrame::new(
+                            link.session().inner.clone(),
+                            ControlFrameKind::DetachSender(frm, link.clone()),
+                        );
+                        *self.ctl_fut.borrow_mut() =
+                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                        Ok(())
+                    }
+                    types::Action::DetachReceiver(link, frm) => {
+                        let frame = ControlFrame::new(
+                            link.session().inner.clone(),
+                            ControlFrameKind::DetachReceiver(frm, link.clone()),
+                        );
+                        *self.ctl_fut.borrow_mut() =
+                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                        Ok(())
+                    }
+                    types::Action::None => Ok(()),
                 };
 
                 Ready::from(result)
