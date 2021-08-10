@@ -153,20 +153,6 @@ impl Connection {
         }
     }
 
-    /// Get session by remote id. This method panics if session does not exists or in opening/closing state.
-    pub(crate) fn get_remote_session(&self, id: usize) -> Option<Cell<SessionInner>> {
-        let inner = self.0.get_ref();
-        inner.sessions_map.get(&(id as u16)).and_then(|token| {
-            inner.sessions.get(*token).and_then(|channel| {
-                if let ChannelState::Established(ref session) = channel {
-                    Some(session.clone())
-                } else {
-                    None
-                }
-            })
-        })
-    }
-
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
         #[cfg(feature = "frame-trace")]
         log::trace!("outcoming: {:#?}", frame);

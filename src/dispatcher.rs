@@ -1,18 +1,17 @@
-use std::{cell::RefCell, fmt, future::Future, pin::Pin, task::Context, task::Poll, time};
+use std::{cell::RefCell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll, time};
 
 use ntex::framed::DispatchItem;
 use ntex::rt::time::{sleep, Sleep};
 use ntex::service::Service;
-use ntex::util::Ready;
+use ntex::util::{Either, Ready};
 
 use crate::codec::protocol::Frame;
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{AmqpProtocolError, DispatcherError, Error};
-use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, State};
+use crate::{connection::Connection, types, ControlFrame, ControlFrameKind};
 
 /// Amqp server dispatcher service.
-pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {
-    state: State<St>,
+pub(crate) struct Dispatcher<Sr, Ctl: Service> {
     sink: Connection,
     service: Sr,
     ctl_service: Ctl,
@@ -22,7 +21,7 @@ pub(crate) struct Dispatcher<St, Sr, Ctl: Service> {
     idle_timeout: usize,
 }
 
-impl<St, Sr, Ctl> Dispatcher<St, Sr, Ctl>
+impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
     Sr: Service<Request = types::Message, Response = ()>,
     Sr::Error: 'static,
@@ -32,7 +31,6 @@ where
     Error: From<Sr::Error> + From<Ctl::Error>,
 {
     pub(crate) fn new(
-        state: State<St>,
         sink: Connection,
         service: Sr,
         ctl_service: Ctl,
@@ -40,7 +38,6 @@ where
     ) -> Self {
         Dispatcher {
             sink,
-            state,
             service,
             ctl_service,
             idle_timeout,
@@ -121,7 +118,7 @@ where
                     let fut = self.service.call(types::Message::Attached(link.clone()));
                     ntex::rt::spawn(async move {
                         if let Err(err) = fut.await {
-                            link.close_with_error(Error::from(err)).await;
+                            let _ = link.close_with_error(Error::from(err)).await;
                         }
                     });
                 }
@@ -148,7 +145,7 @@ where
     }
 }
 
-impl<St, Sr, Ctl> Service for Dispatcher<St, Sr, Ctl>
+impl<Sr, Ctl> Service for Dispatcher<Sr, Ctl>
 where
     Sr: Service<Request = types::Message, Response = ()>,
     Sr::Error: fmt::Debug + 'static,
@@ -161,7 +158,7 @@ where
     type Request = DispatchItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
     type Error = DispatcherError;
-    type Future = Ready<Self::Response, Self::Error>;
+    type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // process control frame
@@ -218,14 +215,24 @@ where
                 #[cfg(feature = "frame-trace")]
                 log::trace!("incoming: {:#?}", frame);
 
-                let action = try_ready_err!(self
+                let action = match self
                     .sink
                     .0
                     .get_mut()
                     .handle_frame(frame, &self.sink.0)
-                    .map_err(DispatcherError::Protocol));
+                    .map_err(DispatcherError::Protocol)
+                {
+                    Ok(a) => a,
+                    Err(e) => return Either::Right(Ready::Err(e)),
+                };
 
-                let result = match action {
+                match action {
+                    types::Action::Transfer(link) => {
+                        return Either::Left(ServiceResult {
+                            fut: self.service.call(types::Message::Transfer(link)),
+                            _t: marker::PhantomData,
+                        });
+                    }
                     types::Action::Flow(link, frm) => {
                         // apply flow to specific link
                         let frame = ControlFrame::new(
@@ -234,7 +241,6 @@ where
                         );
                         *self.ctl_fut.borrow_mut() =
                             Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        Ok(())
                     }
                     types::Action::AttachSender(link, frame) => {
                         let frame = ControlFrame::new(
@@ -244,7 +250,6 @@ where
 
                         *self.ctl_fut.borrow_mut() =
                             Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        Ok(())
                     }
                     types::Action::AttachReceiver(link) => {
                         let frame = ControlFrame::new(
@@ -253,7 +258,6 @@ where
                         );
                         *self.ctl_fut.borrow_mut() =
                             Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        Ok(())
                     }
                     types::Action::DetachSender(link, frm) => {
                         let frame = ControlFrame::new(
@@ -262,7 +266,6 @@ where
                         );
                         *self.ctl_fut.borrow_mut() =
                             Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        Ok(())
                     }
                     types::Action::DetachReceiver(link, frm) => {
                         let frame = ControlFrame::new(
@@ -271,36 +274,59 @@ where
                         );
                         *self.ctl_fut.borrow_mut() =
                             Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                        Ok(())
                     }
-                    types::Action::None => Ok(()),
+                    types::Action::None => (),
                 };
 
-                Ready::from(result)
+                Either::Right(Ready::Ok(()))
             }
             DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
                 *self.ctl_fut.borrow_mut() =
                     Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
-                Ready::from(Ok(()))
+                Either::Right(Ready::Ok(()))
             }
             DispatchItem::KeepAliveTimeout => {
                 self.sink
                     .0
                     .get_mut()
                     .set_error(AmqpProtocolError::KeepAliveTimeout);
-                Ready::from(Ok(()))
+                Either::Right(Ready::Ok(()))
             }
             DispatchItem::IoError(_) => {
                 self.sink
                     .0
                     .get_mut()
                     .set_error(AmqpProtocolError::Disconnected);
-                Ready::from(Ok(()))
+                Either::Right(Ready::Ok(()))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
-                Ready::from(Ok(()))
+                Either::Right(Ready::Ok(()))
             }
         }
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub struct ServiceResult<F, E> {
+        #[pin]
+        fut: F,
+        _t: marker::PhantomData<E>,
+    }
+}
+
+impl<F, E> Future for ServiceResult<F, E>
+where
+    F: Future<Output = Result<(), E>>,
+    E: fmt::Debug,
+{
+    type Output = Result<(), DispatcherError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        this.fut.poll(cx).map_err(|e| {
+            log::error!("Service error {:?}", e);
+            DispatcherError::Service
+        })
     }
 }

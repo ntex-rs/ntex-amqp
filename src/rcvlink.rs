@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, future::Future};
+use std::{collections::VecDeque, future::Future, hash::Hash, hash::Hasher};
 
 use ntex::channel::oneshot;
 use ntex::util::{ByteString, BytesMut};
@@ -14,6 +14,20 @@ use crate::{cell::Cell, error::AmqpProtocolError, types::Action};
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
     pub(crate) inner: Cell<ReceiverLinkInner>,
+}
+
+impl Eq for ReceiverLink {}
+
+impl PartialEq<ReceiverLink> for ReceiverLink {
+    fn eq(&self, other: &ReceiverLink) -> bool {
+        (self.inner.get_ref() as *const _ as usize) == (other.inner.get_ref() as *const _ as usize)
+    }
+}
+
+impl Hash for ReceiverLink {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.inner.get_ref() as *const _ as usize).hash(state);
+    }
 }
 
 impl ReceiverLink {
@@ -59,6 +73,16 @@ impl ReceiverLink {
     /// Default is 256Kb
     pub fn set_max_partial_transfer_size(&self, size: usize) {
         self.inner.get_mut().set_max_partial_transfer(size);
+    }
+
+    /// Check transfer frame
+    pub fn has_transfers(&self) -> bool {
+        !self.inner.get_mut().queue.is_empty()
+    }
+
+    /// Get transfer frame
+    pub fn get_transfer(&self) -> Option<Transfer> {
+        self.inner.get_mut().queue.pop_front()
     }
 
     /// Send disposition frame
