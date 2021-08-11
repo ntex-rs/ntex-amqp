@@ -11,7 +11,7 @@ async fn server(
 ) -> Result<
     Box<
         dyn Service<
-                Request = types::Transfer<()>,
+                Request = types::Transfer,
                 Response = types::Outcome,
                 Error = LinkError,
                 Future = Ready<types::Outcome, LinkError>,

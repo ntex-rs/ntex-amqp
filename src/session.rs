@@ -11,11 +11,11 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_amqp_codec::AmqpFrame;
 
-use crate::cell::Cell;
 use crate::connection::Connection;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{DeliveryPromise, SenderLink, SenderLinkBuilder, SenderLinkInner};
+use crate::{cell::Cell, types::Action};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
@@ -532,28 +532,54 @@ impl SessionInner {
         None
     }
 
-    pub(crate) fn handle_frame(&mut self, frame: Frame) {
+    pub(crate) fn handle_frame(&mut self, frame: Frame) -> Result<Action, AmqpProtocolError> {
         if self.error.is_none() {
             match frame {
-                Frame::Flow(flow) => self.apply_flow(&flow),
+                Frame::Flow(flow) => {
+                    // apply link flow
+                    if let Some(Either::Left(link)) = flow
+                        .handle()
+                        .and_then(|h| self.remote_handles.get(&h).copied())
+                        .and_then(|h| self.links.get_mut(h))
+                    {
+                        if let SenderLinkState::Established(ref mut link) = link {
+                            return Ok(Action::Flow(link.clone(), flow));
+                        } else {
+                            warn!("Received flow frame");
+                        }
+                    }
+                    self.handle_flow(&flow, None);
+                    Ok(Action::None)
+                }
                 Frame::Disposition(disp) => {
                     if let Some(sender) = self.disposition_subscribers.remove(&disp.first) {
                         let _ = sender.send(disp);
                     } else {
                         self.settle_deliveries(disp);
                     }
+                    Ok(Action::None)
                 }
                 Frame::Transfer(transfer) => {
                     let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
                         *idx
                     } else {
                         error!("Transfer's link {:?} is unknown", transfer.handle());
-                        return;
+                        return Err(AmqpProtocolError::UnknownLink {
+                            session: self.id,
+                            link_handle: transfer.handle(),
+                            frame: Box::new(Frame::Transfer(transfer)),
+                        });
                     };
 
                     if let Some(link) = self.links.get_mut(idx) {
                         match link {
-                            Either::Left(_) => error!("Got trasfer from sender link"),
+                            Either::Left(_) => {
+                                error!("Got trasfer from sender link");
+                                Err(AmqpProtocolError::Unexpected(
+                                    "Got trasfer from sender link",
+                                    Box::new(Frame::Transfer(transfer)),
+                                ))
+                            }
                             Either::Right(link) => match link {
                                 ReceiverLinkState::Opening(_) => {
                                     error!(
@@ -561,6 +587,9 @@ impl SessionInner {
                                         transfer.handle(),
                                         idx
                                     );
+                                    Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(
+                                        Frame::Transfer(transfer),
+                                    )))
                                 }
                                 ReceiverLinkState::OpeningLocal(_) => {
                                     error!(
@@ -568,28 +597,34 @@ impl SessionInner {
                                         transfer.handle(),
                                         idx
                                     );
+                                    Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(
+                                        Frame::Transfer(transfer),
+                                    )))
                                 }
                                 ReceiverLinkState::Established(link) => {
                                     // self.outgoing_window -= 1;
                                     let _ = self.next_incoming_id.wrapping_add(1);
-                                    link.inner.get_mut().handle_transfer(transfer);
+                                    link.inner.get_mut().handle_transfer(transfer, &link.inner)
                                 }
-                                ReceiverLinkState::Closing(_) => (),
+                                ReceiverLinkState::Closing(_) => Ok(Action::None),
                             },
                         }
                     } else {
-                        error!(
-                            "Remote link handle mapped to non-existing link: {} -> {}",
-                            transfer.handle(),
-                            idx
-                        );
+                        Err(AmqpProtocolError::UnknownLink {
+                            session: self.id,
+                            link_handle: transfer.handle(),
+                            frame: Box::new(Frame::Transfer(transfer)),
+                        })
                     }
                 }
-                Frame::Detach(mut detach) => {
-                    self.handle_detach(&mut detach);
+                Frame::Detach(detach) => Ok(self.handle_detach(detach)),
+                frame => {
+                    error!("Unexpected frame: {:?}", frame);
+                    Ok(Action::None)
                 }
-                frame => error!("Unexpected frame: {:?}", frame),
             }
+        } else {
+            Ok(Action::None)
         }
     }
 
@@ -661,24 +696,27 @@ impl SessionInner {
     }
 
     /// Handle `Detach` frame.
-    pub(crate) fn handle_detach(&mut self, detach: &mut Detach) {
+    pub(crate) fn handle_detach(&mut self, mut frame: Detach) -> Action {
         // get local link instance
-        let idx = if let Some(idx) = self.remote_handles.get(&detach.handle()) {
+        let idx = if let Some(idx) = self.remote_handles.get(&frame.handle()) {
             *idx
-        } else if self.links.contains(detach.handle() as usize) {
-            detach.handle() as usize
+        } else if self.links.contains(frame.handle() as usize) {
+            frame.handle() as usize
         } else {
             // should not happen, error
-            log::info!("Detaching unknown link: {:?}", detach);
-            return;
+            log::info!("Detaching unknown link: {:?}", frame);
+            return Action::None;
         };
+
+        let handle = frame.handle();
+        let mut action = Action::None;
 
         let remove = if let Some(link) = self.links.get_mut(idx) {
             match link {
                 Either::Left(link) => match link {
                     SenderLinkState::Opening(ref mut tx) => {
                         if let Some(tx) = tx.take() {
-                            let err = AmqpProtocolError::LinkDetached(detach.error.clone());
+                            let err = AmqpProtocolError::LinkDetached(frame.error.clone());
                             let _ = tx.send(Err(err));
                         }
                         true
@@ -688,7 +726,7 @@ impl SessionInner {
                         let detach = Detach {
                             handle: link.inner.get_ref().id(),
                             closed: true,
-                            error: detach.error.clone(),
+                            error: frame.error.clone(),
                         };
                         let err = AmqpProtocolError::LinkDetached(detach.error.clone());
 
@@ -715,6 +753,7 @@ impl SessionInner {
                         link.inner.get_mut().detached(err);
                         self.sink
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
+                        action = Action::DetachSender(link.clone(), frame);
                         true
                     }
                     SenderLinkState::Closing(_) => true,
@@ -724,7 +763,7 @@ impl SessionInner {
                     ReceiverLinkState::OpeningLocal(ref mut item) => {
                         if let Some((inner, tx)) = item.take() {
                             inner.get_mut().detached();
-                            if let Some(err) = detach.error.clone() {
+                            if let Some(err) = frame.error.clone() {
                                 let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
                             } else {
                                 let _ = tx.send(Err(AmqpProtocolError::LinkDetached(None)));
@@ -736,7 +775,7 @@ impl SessionInner {
                         true
                     }
                     ReceiverLinkState::Established(link) => {
-                        link.remote_closed(detach.error.take());
+                        link.remote_closed(frame.error.take());
 
                         // detach from remote endpoint
                         let detach = Detach {
@@ -748,12 +787,14 @@ impl SessionInner {
                         // detach rcv link
                         self.sink
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
+
+                        action = Action::DetachReceiver(link.clone(), frame);
                         true
                     }
                     ReceiverLinkState::Closing(tx) => {
                         // detach confirmation
                         if let Some(tx) = tx.take() {
-                            if let Some(err) = detach.error.clone() {
+                            if let Some(err) = frame.error.clone() {
                                 let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
                             } else {
                                 let _ = tx.send(Ok(()));
@@ -769,8 +810,9 @@ impl SessionInner {
 
         if remove {
             self.links.remove(idx);
-            self.remote_handles.remove(&detach.handle());
+            self.remote_handles.remove(&handle);
         }
+        action
     }
 
     fn settle_deliveries(&mut self, disposition: Disposition) {
@@ -816,7 +858,7 @@ impl SessionInner {
         }
     }
 
-    pub(crate) fn apply_flow(&mut self, flow: &Flow) {
+    pub(crate) fn handle_flow(&mut self, flow: &Flow, link: Option<&SenderLink>) {
         // # AMQP1.0 2.5.6
         self.next_incoming_id = flow.next_outgoing_id();
         self.remote_outgoing_window = flow.outgoing_window();
@@ -841,18 +883,6 @@ impl SessionInner {
             }
         }
 
-        // apply link flow
-        if let Some(Either::Left(link)) = flow
-            .handle()
-            .and_then(|h| self.remote_handles.get(&h).copied())
-            .and_then(|h| self.links.get_mut(h))
-        {
-            if let SenderLinkState::Established(ref mut link) = link {
-                link.inner.get_mut().apply_flow(flow);
-            } else {
-                warn!("Received flow frame");
-            }
-        }
         if flow.echo() {
             let flow = Flow {
                 next_incoming_id: if self.local {
@@ -872,6 +902,11 @@ impl SessionInner {
                 properties: None,
             };
             self.post_frame(flow.into());
+        }
+
+        // apply link flow
+        if let Some(link) = link {
+            link.inner.get_mut().apply_flow(&flow);
         }
     }
 

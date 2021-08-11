@@ -4,12 +4,11 @@ use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::framed::State;
 use ntex::util::{HashMap, Ready};
 
-use crate::cell::Cell;
-use crate::codec::protocol::{Begin, Close, End, Error, Frame};
-use crate::codec::{AmqpCodec, AmqpCodecError, AmqpFrame};
-use crate::error::AmqpProtocolError;
+use crate::codec::protocol::{Begin, Close, End, Error, Frame, Role};
+use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::session::{Session, SessionInner};
-use crate::Configuration;
+use crate::sndlink::{SenderLink, SenderLinkInner};
+use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
 
 #[derive(Clone)]
 pub struct Connection(pub(crate) Cell<ConnectionInner>);
@@ -154,62 +153,6 @@ impl Connection {
         }
     }
 
-    /// Get session by remote id. This method panics if session does not exists or in opening/closing state.
-    pub(crate) fn get_remote_session(&self, id: usize) -> Option<Cell<SessionInner>> {
-        let inner = self.0.get_ref();
-        inner.sessions_map.get(&(id as u16)).and_then(|token| {
-            inner.sessions.get(*token).and_then(|channel| {
-                if let ChannelState::Established(ref session) = channel {
-                    Some(session.clone())
-                } else {
-                    None
-                }
-            })
-        })
-    }
-
-    pub(crate) fn register_remote_session(
-        &self,
-        channel_id: u16,
-        begin: &Begin,
-    ) -> Result<(), AmqpCodecError> {
-        trace!("remote session opened: {:?}", channel_id);
-
-        let cell = self.0.clone();
-        let inner = self.0.get_mut();
-        let entry = inner.sessions.vacant_entry();
-        let token = entry.key();
-
-        let session = Cell::new(SessionInner::new(
-            token,
-            false,
-            Connection(cell),
-            token as u16,
-            begin.next_outgoing_id(),
-            begin.incoming_window(),
-            begin.outgoing_window(),
-        ));
-        entry.insert(ChannelState::Established(session));
-        inner.sessions_map.insert(channel_id, token);
-
-        let begin = Begin {
-            remote_channel: Some(channel_id),
-            next_outgoing_id: 1,
-            incoming_window: std::u32::MAX,
-            outgoing_window: begin.incoming_window(),
-            handle_max: std::u32::MAX,
-            offered_capabilities: None,
-            desired_capabilities: None,
-            properties: None,
-        };
-
-        inner
-            .state
-            .write()
-            .encode(AmqpFrame::new(token as u16, begin.into()), &inner.codec)
-            .map(|_| ())
-    }
-
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
         #[cfg(feature = "frame-trace")]
         log::trace!("outcoming: {:#?}", frame);
@@ -244,6 +187,47 @@ impl ConnectionInner {
         if let Err(e) = self.state.write().encode(frame, &self.codec) {
             self.set_error(e.into());
         }
+    }
+
+    pub(crate) fn register_remote_session(
+        &mut self,
+        channel_id: u16,
+        begin: &Begin,
+        cell: &Cell<ConnectionInner>,
+    ) -> Result<(), AmqpProtocolError> {
+        trace!("remote session opened: {:?}", channel_id);
+
+        let entry = self.sessions.vacant_entry();
+        let token = entry.key();
+
+        let session = Cell::new(SessionInner::new(
+            token,
+            false,
+            Connection(cell.clone()),
+            token as u16,
+            begin.next_outgoing_id(),
+            begin.incoming_window(),
+            begin.outgoing_window(),
+        ));
+        entry.insert(ChannelState::Established(session));
+        self.sessions_map.insert(channel_id, token);
+
+        let begin = Begin {
+            remote_channel: Some(channel_id),
+            next_outgoing_id: 1,
+            incoming_window: std::u32::MAX,
+            outgoing_window: begin.incoming_window(),
+            handle_max: std::u32::MAX,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        };
+
+        self.state
+            .write()
+            .encode(AmqpFrame::new(token as u16, begin.into()), &self.codec)
+            .map(|_| ())
+            .map_err(AmqpProtocolError::Codec)
     }
 
     pub(crate) fn complete_session_creation(
@@ -290,12 +274,15 @@ impl ConnectionInner {
     pub(crate) fn handle_frame(
         &mut self,
         frame: AmqpFrame,
-    ) -> Result<Option<AmqpFrame>, AmqpProtocolError> {
-        if let Frame::Empty = frame.performative() {
-            return Ok(None);
+        inner: &Cell<ConnectionInner>,
+    ) -> Result<Action, AmqpProtocolError> {
+        let (channel_id, frame) = frame.into_parts();
+
+        if let Frame::Empty = frame {
+            return Ok(Action::None);
         }
 
-        if let Frame::Close(ref close) = frame.performative() {
+        if let Frame::Close(ref close) = frame {
             self.set_error(AmqpProtocolError::Closed(close.error.clone()));
 
             if self.st == ConnectionState::Closing {
@@ -307,40 +294,38 @@ impl ConnectionInner {
                 self.post_frame(AmqpFrame::new(0, close.into()));
                 self.st = ConnectionState::RemoteClose;
             }
-            return Ok(None);
+            return Ok(Action::None);
         }
 
         if self.error.is_some() {
             error!("Connection closed but new framed is received: {:?}", frame);
-            return Ok(None);
+            return Ok(Action::None);
         }
 
         // get local session id
-        let state = if let Some(token) = self.sessions_map.get(&frame.channel_id()) {
+        let state = if let Some(token) = self.sessions_map.get(&channel_id) {
             if let Some(state) = self.sessions.get_mut(*token) {
                 state
             } else {
                 log::error!("Inconsistent internal state");
-                let (id, frame) = frame.into_parts();
                 return Err(AmqpProtocolError::UnknownSession(
-                    id as usize,
+                    channel_id as usize,
                     Box::new(frame),
                 ));
             }
         } else {
             // we dont have channel info, only Begin frame is allowed on new channel
-            return if let Frame::Begin(ref begin) = frame.performative() {
+            return if let Frame::Begin(begin) = frame {
                 // response Begin for open session
                 if let Some(id) = begin.remote_channel() {
-                    self.complete_session_creation(frame.channel_id(), id, begin);
-                    Ok(None)
+                    self.complete_session_creation(channel_id, id, &begin);
                 } else {
-                    Ok(Some(frame))
+                    self.register_remote_session(channel_id, &begin, inner)?;
                 }
+                Ok(Action::None)
             } else {
-                let (id, frame) = frame.into_parts();
                 Err(AmqpProtocolError::UnknownSession(
-                    id as usize,
+                    channel_id as usize,
                     Box::new(frame),
                 ))
             };
@@ -349,53 +334,64 @@ impl ConnectionInner {
         // handle session frames
         match state {
             ChannelState::Opening(_, _) => {
-                error!("Unexpected opening state: {}", frame.channel_id());
-                Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(
-                    frame.into_parts().1,
-                )))
+                error!("Unexpected opening state: {}", channel_id);
+                Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(frame)))
             }
-            ChannelState::Established(ref mut session) => match frame.performative() {
+            ChannelState::Established(ref mut session) => match frame {
                 Frame::Attach(attach) => {
                     let cell = session.clone();
-                    if session.get_mut().handle_attach(attach, cell) {
-                        Ok(None)
+                    if session.get_mut().handle_attach(&attach, cell) {
+                        Ok(Action::None)
                     } else {
-                        Ok(Some(frame))
+                        match attach.role {
+                            Role::Receiver => {
+                                // remotly opened sender link
+                                let link = SenderLink::new(Cell::new(SenderLinkInner::with(
+                                    &attach,
+                                    session.clone(),
+                                )));
+                                Ok(Action::AttachSender(link, attach))
+                            }
+                            Role::Sender => {
+                                // receiver link
+                                let link = session
+                                    .get_mut()
+                                    .attach_remote_receiver_link(session.clone(), attach);
+                                Ok(Action::AttachReceiver(link))
+                            }
+                        }
                     }
                 }
-                Frame::Flow(_) | Frame::Detach(_) => Ok(Some(frame)),
+                // Frame::Detach(frm) => Ok(Action::Detach(frm)),
                 Frame::End(remote_end) => {
-                    trace!("Remote session end: {}", frame.channel_id());
+                    trace!("Remote session end: {}", channel_id);
                     let end = End { error: None };
                     session
                         .get_mut()
                         .set_error(AmqpProtocolError::SessionEnded(remote_end.error.clone()));
                     let id = session.get_mut().id();
                     self.post_frame(AmqpFrame::new(id, end.into()));
-                    if let Some(token) = self.sessions_map.remove(&frame.channel_id()) {
+                    if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
-                    Ok(None)
+                    Ok(Action::None)
                 }
-                _ => {
-                    session.get_mut().handle_frame(frame.into_parts().1);
-                    Ok(None)
-                }
+                _ => session.get_mut().handle_frame(frame),
             },
-            ChannelState::Closing(ref mut tx) => match frame.performative() {
+            ChannelState::Closing(ref mut tx) => match frame {
                 Frame::End(frm) => {
                     trace!("Session end is confirmed: {:?}", frm);
                     if let Some(tx) = tx.take() {
                         let _ = tx.send(Ok(()));
                     }
-                    if let Some(token) = self.sessions_map.remove(&frame.channel_id()) {
+                    if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
-                    Ok(None)
+                    Ok(Action::None)
                 }
                 frm => {
                     trace!("Got frame after initiated session end: {:?}", frm);
-                    Ok(None)
+                    Ok(Action::None)
                 }
             },
         }

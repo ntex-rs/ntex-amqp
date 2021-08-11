@@ -10,9 +10,6 @@ use ntex::util::ByteString;
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open};
 use uuid::Uuid;
 
-#[macro_use]
-mod utils;
-
 mod cell;
 pub mod client;
 mod connection;
@@ -21,7 +18,6 @@ mod default;
 mod dispatcher;
 pub mod error;
 pub mod error_code;
-mod hb;
 mod rcvlink;
 mod router;
 pub mod server;

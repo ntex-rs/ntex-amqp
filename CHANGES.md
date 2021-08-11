@@ -1,5 +1,13 @@
 # Changes
 
+## [0.5.0-b.5] - 2021-08-11
+
+* Refactor server dispatch process
+
+## [codec-0.6.2] - 2021-08-11
+
+* Add helper methods to Transfer type
+
 ## [0.5.0-b.3] - 2021-08-10
 
 * Add Session::connection() method, returns ref to Connection

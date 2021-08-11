@@ -5,9 +5,8 @@ use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
-use crate::dispatcher::Dispatcher;
-use crate::types::Link;
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
+use crate::{dispatcher::Dispatcher, types::Message};
 
 use super::handshake::{Handshake, HandshakeAck};
 use super::{Error, HandshakeError, ServerError};
@@ -170,7 +169,7 @@ where
     >
     where
         F: IntoServiceFactory<Pb>,
-        Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
+        Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
         Pb::Error: fmt::Debug,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
@@ -211,7 +210,7 @@ where
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
     Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
@@ -253,7 +252,7 @@ where
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
     Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
@@ -309,7 +308,7 @@ where
                 ServerError::ControlServiceError
             })?;
 
-            let dispatcher = Dispatcher::new(st, sink, pb_srv, ctl_srv, idle_timeout)
+            let dispatcher = Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout)
                 .map(|_| Option::<AmqpFrame>::None);
 
             FramedDispatcher::new(io, codec, state, dispatcher, inner.time.clone())
@@ -342,7 +341,7 @@ where
     Io: AsyncRead + AsyncWrite + Unpin + 'static,
     H: Service<Request = Handshake<Io>, Response = HandshakeAck<Io, St>>,
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
-    Pb: ServiceFactory<Config = State<St>, Request = Link<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
 {
     let state = IoState::with_params(
         inner.read_hw,
