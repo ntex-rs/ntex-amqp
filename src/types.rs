@@ -8,6 +8,7 @@ use crate::{rcvlink::ReceiverLink, session::Session, sndlink::SenderLink, Handle
 
 pub use crate::codec::protocol::Transfer;
 
+#[derive(Debug)]
 pub enum Message {
     Attached(ReceiverLink),
     // Detached(ReceiverLink),
@@ -51,8 +52,8 @@ impl<S> Link<S> {
         self.link.frame()
     }
 
-    pub fn state(&self) -> &S {
-        self.state.get_ref()
+    pub fn state(&self) -> &State<S> {
+        &self.state
     }
 
     pub fn handle(&self) -> Handle {

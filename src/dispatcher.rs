@@ -8,7 +8,7 @@ use ntex::util::{Either, Ready};
 use crate::codec::protocol::Frame;
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::error::{AmqpProtocolError, DispatcherError, Error};
-use crate::{connection::Connection, types, ControlFrame, ControlFrameKind};
+use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr, Ctl: Service> {
@@ -114,11 +114,13 @@ where
             match frame.0.get_mut().kind {
                 ControlFrameKind::AttachReceiver(ref link) => {
                     let link = link.clone();
-                    link.confirm_receiver_link();
                     let fut = self.service.call(types::Message::Attached(link.clone()));
                     ntex::rt::spawn(async move {
                         if let Err(err) = fut.await {
                             let _ = link.close_with_error(Error::from(err)).await;
+                        } else {
+                            link.confirm_receiver_link();
+                            link.set_link_credit(50);
                         }
                     });
                 }
@@ -212,7 +214,7 @@ where
     fn call(&self, request: Self::Request) -> Self::Future {
         match request {
             DispatchItem::Item(frame) => {
-                #[cfg(feature = "frame-trace")]
+                // #[cfg(feature = "frame-trace")]
                 log::trace!("incoming: {:#?}", frame);
 
                 let action = match self
@@ -229,6 +231,7 @@ where
                 match action {
                     types::Action::Transfer(link) => {
                         return Either::Left(ServiceResult {
+                            link: link.clone(),
                             fut: self.service.call(types::Message::Transfer(link)),
                             _t: marker::PhantomData,
                         });
@@ -311,6 +314,7 @@ pin_project_lite::pin_project! {
     pub struct ServiceResult<F, E> {
         #[pin]
         fut: F,
+        link: ReceiverLink,
         _t: marker::PhantomData<E>,
     }
 }
@@ -319,14 +323,21 @@ impl<F, E> Future for ServiceResult<F, E>
 where
     F: Future<Output = Result<(), E>>,
     E: fmt::Debug,
+    Error: From<E>,
 {
     type Output = Result<(), DispatcherError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        this.fut.poll(cx).map_err(|e| {
-            log::error!("Service error {:?}", e);
-            DispatcherError::Service
-        })
+
+        match this.fut.poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => {
+                log::trace!("Service error {:?}", e);
+                let _ = this.link.close_with_error(e);
+                Poll::Ready(Ok::<_, DispatcherError>(()))
+            }
+        }
     }
 }

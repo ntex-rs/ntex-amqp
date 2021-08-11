@@ -5,7 +5,7 @@ use derive_more::From;
 use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use uuid::Uuid;
 
-use super::codec::{self, DecodeFormatted, Encode};
+use super::codec::{self, Decode, DecodeFormatted, Encode};
 use super::error::AmqpParseError;
 use super::message::Message;
 use super::types::*;
@@ -253,22 +253,44 @@ impl TransferBody {
 }
 
 impl From<Message> for TransferBody {
+    #[inline]
     fn from(msg: Message) -> Self {
         Self::Message(Box::new(msg))
     }
 }
 
 impl Encode for TransferBody {
+    #[inline]
     fn encoded_size(&self) -> usize {
         match self {
             TransferBody::Data(ref data) => data.len(),
             TransferBody::Message(ref data) => data.encoded_size(),
         }
     }
+    #[inline]
     fn encode(&self, dst: &mut BytesMut) {
         match *self {
             TransferBody::Data(ref data) => dst.put_slice(data),
             TransferBody::Message(ref data) => data.encode(dst),
+        }
+    }
+}
+
+impl Transfer {
+    #[inline]
+    pub fn get_body(&self) -> Option<&Bytes> {
+        match self.body {
+            Some(TransferBody::Data(ref b)) => Some(b),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn load_message<T: Decode>(&self) -> Result<T, AmqpParseError> {
+        if let Some(TransferBody::Data(ref b)) = self.body {
+            Ok(T::decode(b)?.1)
+        } else {
+            Err(AmqpParseError::UnexpectedType("body"))
         }
     }
 }

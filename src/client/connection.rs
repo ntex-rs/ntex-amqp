@@ -78,7 +78,7 @@ where
     pub async fn start_default(self) -> Result<(), DispatcherError> {
         let dispatcher = Dispatcher::new(
             self.connection,
-            fn_service(|_| Ready::<_, LinkError>::Err(LinkError::force_detach())),
+            fn_service(|_| Ready::<_, LinkError>::Ok(())),
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             self.remote_config.timeout_remote_secs(),
         )

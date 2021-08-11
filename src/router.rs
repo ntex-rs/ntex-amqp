@@ -1,5 +1,4 @@
-use std::task::{Context, Poll};
-use std::{cell::RefCell, convert::TryFrom, future::Future, marker::PhantomData, pin::Pin};
+use std::{convert::TryFrom, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
@@ -57,12 +56,12 @@ impl<S: 'static> Router<S> {
         for (addr, hnd) in self.0 {
             router.path(addr, hnd);
         }
-        let router = RefCell::new(Some(router.finish()));
+        let router = Rc::new(router.finish());
 
         fn_factory_with_config(move |state: State<S>| {
             Ready::Ok(RouterService(Cell::new(RouterServiceInner {
                 state,
-                router: router.borrow_mut().take().unwrap(),
+                router: router.clone(),
                 handlers: HashMap::default(),
             })))
         })
@@ -73,7 +72,7 @@ struct RouterService<S>(Cell<RouterServiceInner<S>>);
 
 struct RouterServiceInner<S> {
     state: State<S>,
-    router: PatternRouter<Handle<S>>,
+    router: Rc<PatternRouter<Handle<S>>>,
     handlers: HashMap<ReceiverLink, Option<HandleService>>,
 }
 
@@ -136,7 +135,7 @@ impl<S: 'static> Service for RouterService<S> {
                     if let Some(tr) = link.get_transfer() {
                         return Either::Right(RouterServiceResponse {
                             inner: self.0.clone(),
-                            link: link,
+                            link,
                             state: RouterServiceResponseState::Service(Some(tr)),
                         });
                     }
@@ -269,7 +268,6 @@ impl<S> Future for RouterServiceResponse<S> {
                                 .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
                                 .unwrap_or("")
                         );
-                        this.link.set_link_credit(50);
                         this.inner
                             .get_mut()
                             .handlers
@@ -367,7 +365,7 @@ fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
 
 struct ResourceServiceFactory<S, T> {
     factory: T,
-    _t: PhantomData<S>,
+    _t: marker::PhantomData<S>,
 }
 
 impl<S, T> ResourceServiceFactory<S, T>
@@ -380,7 +378,7 @@ where
     fn create(factory: T) -> Handle<S> {
         boxed::factory(ResourceServiceFactory {
             factory,
-            _t: PhantomData,
+            _t: marker::PhantomData,
         })
     }
 }
@@ -402,7 +400,7 @@ where
     fn new_service(&self, cfg: Link<S>) -> Self::Future {
         ResourceServiceFactoryFut {
             fut: self.factory.new_service(cfg),
-            _t: PhantomData,
+            _t: marker::PhantomData,
         }
     }
 }
@@ -410,7 +408,7 @@ where
 pin_project_lite::pin_project! {
     struct ResourceServiceFactoryFut<S, T: ServiceFactory> {
         #[pin] fut: T::Future,
-        _t: PhantomData<S>,
+        _t: marker::PhantomData<S>,
     }
 }
 
@@ -430,14 +428,14 @@ where
         };
         Poll::Ready(Ok(ResourceService {
             service,
-            _t: PhantomData,
+            _t: marker::PhantomData,
         }))
     }
 }
 
 struct ResourceService<S, T> {
     service: T,
-    _t: PhantomData<S>,
+    _t: marker::PhantomData<S>,
 }
 
 impl<S, T> Service for ResourceService<S, T>
@@ -465,7 +463,7 @@ where
     fn call(&self, req: Transfer) -> Self::Future {
         ResourceServiceFut {
             fut: self.service.call(req),
-            _t: PhantomData,
+            _t: marker::PhantomData,
         }
     }
 }
@@ -473,7 +471,7 @@ where
 pin_project_lite::pin_project! {
     struct ResourceServiceFut<S, T: Service> {
         #[pin] fut: T::Future,
-        _t: PhantomData<S>,
+        _t: marker::PhantomData<S>,
     }
 }
 

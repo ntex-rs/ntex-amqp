@@ -543,7 +543,6 @@ impl SessionInner {
                         .and_then(|h| self.links.get_mut(h))
                     {
                         if let SenderLinkState::Established(ref mut link) = link {
-                            link.inner.get_mut().apply_flow(&flow);
                             return Ok(Action::Flow(link.clone(), flow));
                         } else {
                             warn!("Received flow frame");

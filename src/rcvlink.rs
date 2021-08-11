@@ -1,7 +1,7 @@
-use std::{collections::VecDeque, future::Future, hash::Hash, hash::Hasher};
+use std::{collections::VecDeque, future::Future, hash, pin::Pin, task::Context, task::Poll};
 
-use ntex::channel::oneshot;
 use ntex::util::{ByteString, BytesMut};
+use ntex::{channel::oneshot, task::LocalWaker, Stream};
 use ntex_amqp_codec::protocol::{
     Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
@@ -24,8 +24,8 @@ impl PartialEq<ReceiverLink> for ReceiverLink {
     }
 }
 
-impl Hash for ReceiverLink {
-    fn hash<H: Hasher>(&self, state: &mut H) {
+impl hash::Hash for ReceiverLink {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
         (self.inner.get_ref() as *const _ as usize).hash(state);
     }
 }
@@ -122,6 +122,39 @@ impl ReceiverLink {
         let inner = self.inner.get_mut();
         inner.closed = true;
         inner.error = error;
+        inner.wake();
+    }
+}
+
+impl Stream for ReceiverLink {
+    type Item = Result<Transfer, AmqpProtocolError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let inner = self.inner.get_mut();
+
+        if inner.partial_body.is_some() && inner.queue.len() == 1 {
+            if inner.closed {
+                if let Some(err) = inner.error.take() {
+                    Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
+                } else {
+                    Poll::Ready(None)
+                }
+            } else {
+                inner.reader_task.register(cx.waker());
+                Poll::Pending
+            }
+        } else if let Some(tr) = inner.queue.pop_front() {
+            Poll::Ready(Some(Ok(tr)))
+        } else if inner.closed {
+            if let Some(err) = inner.error.take() {
+                Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
+            } else {
+                Poll::Ready(None)
+            }
+        } else {
+            inner.reader_task.register(cx.waker());
+            Poll::Pending
+        }
     }
 }
 
@@ -131,6 +164,7 @@ pub(crate) struct ReceiverLinkInner {
     attach: Attach,
     session: Session,
     closed: bool,
+    reader_task: LocalWaker,
     queue: VecDeque<Transfer>,
     credit: u32,
     delivery_count: u32,
@@ -155,8 +189,13 @@ impl ReceiverLinkInner {
             partial_body: None,
             partial_body_max: 262_144,
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
+            reader_task: LocalWaker::new(),
             attach,
         }
+    }
+
+    fn wake(&self) {
+        self.reader_task.wake();
     }
 
     pub(crate) fn detached(&mut self) {
@@ -178,6 +217,7 @@ impl ReceiverLinkInner {
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }
+        self.wake();
 
         async move {
             match rx.await {
@@ -259,6 +299,9 @@ impl ReceiverLinkInner {
                     if partial_body.is_some() && !self.queue.is_empty() {
                         self.queue.back_mut().unwrap().body =
                             Some(TransferBody::Data(partial_body.unwrap().freeze()));
+                        if self.queue.len() == 1 {
+                            self.wake();
+                        }
                         Ok(Action::Transfer(ReceiverLink {
                             inner: inner.clone(),
                         }))
@@ -304,6 +347,9 @@ impl ReceiverLinkInner {
             } else {
                 self.delivery_count += 1;
                 self.queue.push_back(transfer);
+                if self.queue.len() == 1 {
+                    self.wake();
+                }
                 Ok(Action::Transfer(ReceiverLink {
                     inner: inner.clone(),
                 }))
