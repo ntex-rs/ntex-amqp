@@ -794,7 +794,7 @@ impl SessionInner {
                     ReceiverLinkState::Closing(tx) => {
                         // detach confirmation
                         if let Some(tx) = tx.take() {
-                            if let Some(err) = frame.error.clone() {
+                            if let Some(err) = frame.error {
                                 let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
                             } else {
                                 let _ = tx.send(Ok(()));
@@ -906,7 +906,7 @@ impl SessionInner {
 
         // apply link flow
         if let Some(link) = link {
-            link.inner.get_mut().apply_flow(&flow);
+            link.inner.get_mut().apply_flow(flow);
         }
     }
 

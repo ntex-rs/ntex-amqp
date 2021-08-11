@@ -17,7 +17,7 @@ pub enum Message {
 
 pub(crate) enum Action {
     None,
-    AttachSender(SenderLink, Attach),
+    AttachSender(SenderLink, Box<Attach>),
     AttachReceiver(ReceiverLink),
     DetachSender(SenderLink, Detach),
     DetachReceiver(ReceiverLink, Detach),

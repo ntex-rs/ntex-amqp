@@ -131,7 +131,7 @@ where
                         .attach_remote_sender_link(frm, link.inner.clone());
                 }
                 ControlFrameKind::Flow(ref frm, ref link) => {
-                    frame.session_cell().get_mut().handle_flow(frm, Some(&link));
+                    frame.session_cell().get_mut().handle_flow(frm, Some(link));
                 }
                 ControlFrameKind::DetachSender(_, _) => {
                     // frame.session_cell().get_mut().handle_detach(frm);
@@ -251,7 +251,7 @@ where
                     types::Action::AttachSender(link, frame) => {
                         let frame = ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::AttachSender(Box::new(frame), link),
+                            ControlFrameKind::AttachSender(frame, link),
                         );
 
                         *self.ctl_fut.borrow_mut() =

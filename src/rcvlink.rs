@@ -20,7 +20,7 @@ impl Eq for ReceiverLink {}
 
 impl PartialEq<ReceiverLink> for ReceiverLink {
     fn eq(&self, other: &ReceiverLink) -> bool {
-        (self.inner.get_ref() as *const _ as usize) == (other.inner.get_ref() as *const _ as usize)
+        std::ptr::eq(self.inner.get_ref(), other.inner.get_ref())
     }
 }
 

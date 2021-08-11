@@ -350,7 +350,7 @@ impl ConnectionInner {
                                     &attach,
                                     session.clone(),
                                 )));
-                                Ok(Action::AttachSender(link, attach))
+                                Ok(Action::AttachSender(link, Box::new(attach)))
                             }
                             Role::Sender => {
                                 // receiver link
@@ -368,7 +368,7 @@ impl ConnectionInner {
                     let end = End { error: None };
                     session
                         .get_mut()
-                        .set_error(AmqpProtocolError::SessionEnded(remote_end.error.clone()));
+                        .set_error(AmqpProtocolError::SessionEnded(remote_end.error));
                     let id = session.get_mut().id();
                     self.post_frame(AmqpFrame::new(id, end.into()));
                     if let Some(token) = self.sessions_map.remove(&channel_id) {
