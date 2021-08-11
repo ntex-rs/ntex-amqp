@@ -163,6 +163,9 @@ where
     type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // idle ttimeout
+        self.handle_idle_timeout(cx);
+
         // process control frame
         let res0 = !self.handle_control_fut(cx)?;
 

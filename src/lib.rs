@@ -18,7 +18,6 @@ mod default;
 mod dispatcher;
 pub mod error;
 pub mod error_code;
-mod hb;
 mod rcvlink;
 mod router;
 pub mod server;

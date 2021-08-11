@@ -16,7 +16,7 @@ pub struct Client<Io, St = ()> {
     keepalive: u16,
     remote_config: Configuration,
     timer: Timer,
-    st: State<St>,
+    _st: State<St>,
 }
 
 impl<T> Client<T, ()>
@@ -41,7 +41,7 @@ where
             keepalive,
             remote_config,
             timer,
-            st: State::new(()),
+            _st: State::new(()),
         }
     }
 }
@@ -68,7 +68,7 @@ where
             keepalive: self.keepalive,
             remote_config: self.remote_config,
             timer: self.timer,
-            st: State::new(st),
+            _st: State::new(st),
         }
     }
 
