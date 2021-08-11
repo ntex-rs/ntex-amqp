@@ -247,7 +247,7 @@ impl SessionInner {
 
         // drop unsettled deliveries
         for (_, promise) in self.unsettled_deliveries.drain() {
-            promise.ready(Err(err.clone()))
+            promise.ready(Err(err.clone()));
         }
 
         self.disposition_subscribers.clear();
@@ -266,7 +266,7 @@ impl SessionInner {
                     }
                 }
                 Either::Right(ReceiverLinkState::Established(ref mut link)) => {
-                    link.remote_closed(None)
+                    link.remote_closed(None);
                 }
                 _ => (),
             }
@@ -360,16 +360,7 @@ impl SessionInner {
     ) {
         if let Some(Either::Left(link)) = self.links.get_mut(id) {
             match link {
-                SenderLinkState::Opening(_) => {
-                    let detach = Detach {
-                        handle: id as u32,
-                        closed,
-                        error,
-                    };
-                    *link = SenderLinkState::Closing(Some(tx));
-                    self.post_frame(detach.into());
-                }
-                SenderLinkState::Established(_) => {
+                SenderLinkState::Opening(_) | SenderLinkState::Established(_) => {
                     let detach = Detach {
                         handle: id as u32,
                         closed,
@@ -543,10 +534,9 @@ impl SessionInner {
                         .and_then(|h| self.links.get_mut(h))
                     {
                         if let SenderLinkState::Established(ref mut link) = link {
-                            return Ok(Action::Flow(link.clone(), flow));
-                        } else {
-                            warn!("Received flow frame");
+                            return Ok(Action::Flow(link.clone(), Box::new(flow)));
                         }
+                        warn!("Received flow frame");
                     }
                     self.handle_flow(&flow, None);
                     Ok(Action::None)

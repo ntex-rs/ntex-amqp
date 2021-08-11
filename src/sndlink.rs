@@ -144,7 +144,7 @@ impl SenderLink {
     }
 
     pub fn settle_message(&self, id: DeliveryNumber, state: DeliveryState) {
-        self.inner.get_mut().settle_message(id, state)
+        self.inner.get_mut().settle_message(id, state);
     }
 
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
@@ -475,7 +475,7 @@ impl SenderLinkInner {
             state: Some(state),
             batchable: false,
         };
-        let _ = self.session.inner.get_mut().post_frame(disp.into());
+        self.session.inner.get_mut().post_frame(disp.into());
     }
 
     fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {

@@ -264,8 +264,7 @@ impl ReceiverLinkInner {
                     if self
                         .queue
                         .back()
-                        .map(|back| back.delivery_id != transfer.delivery_id)
-                        .unwrap_or(true)
+                        .map_or(true, |back| back.delivery_id != transfer.delivery_id)
                     {
                         let err = Error {
                             condition: LinkError::DetachForced.into(),
@@ -293,7 +292,9 @@ impl ReceiverLinkInner {
                 }
 
                 // received last partial transfer
-                if !transfer.more {
+                if transfer.more {
+                    Ok(Action::None)
+                } else {
                     self.delivery_count += 1;
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
@@ -315,8 +316,6 @@ impl ReceiverLinkInner {
                         let _ = self.close(Some(err));
                         Ok(Action::None)
                     }
-                } else {
-                    Ok(Action::None)
                 }
             } else if transfer.more {
                 if transfer.delivery_id.is_none() {

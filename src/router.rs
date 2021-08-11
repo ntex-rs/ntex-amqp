@@ -178,16 +178,10 @@ impl<S> Future for RouterServiceResponse<S> {
                             Poll::Pending => {
                                 log::trace!(
                                     "Handler service is not ready for {}",
-                                    this.link
-                                        .frame()
-                                        .target
+                                    this.link.frame().target.as_ref().map_or("", |t| t
+                                        .address
                                         .as_ref()
-                                        .map(|t| t
-                                            .address
-                                            .as_ref()
-                                            .map(|s| s.as_ref())
-                                            .unwrap_or(""))
-                                        .unwrap_or("")
+                                        .map_or("", AsRef::as_ref))
                                 );
                                 return Poll::Pending;
                             }
@@ -235,8 +229,7 @@ impl<S> Future for RouterServiceResponse<S> {
                                     .frame()
                                     .target
                                     .as_ref()
-                                    .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
-                                    .unwrap_or("")
+                                    .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
                             );
                             settle(&mut this.link, delivery_id, outcome.into_delivery_state());
                         }
@@ -265,8 +258,7 @@ impl<S> Future for RouterServiceResponse<S> {
                                 .frame()
                                 .target
                                 .as_ref()
-                                .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
-                                .unwrap_or("")
+                                .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
                         );
                         this.inner
                             .get_mut()
@@ -285,8 +277,7 @@ impl<S> Future for RouterServiceResponse<S> {
                                 .frame()
                                 .target
                                 .as_ref()
-                                .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
-                                .unwrap_or(""),
+                                .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref)),
                             e
                         );
                         return Poll::Ready(Err(e));
@@ -320,8 +311,7 @@ impl Future for HandleMessage {
                         .frame()
                         .target
                         .as_ref()
-                        .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
-                        .unwrap_or("")
+                        .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
                 );
                 let delivery_id = this.delivery_id;
                 settle(&mut this.link, delivery_id, outcome.into_delivery_state());
@@ -335,8 +325,7 @@ impl Future for HandleMessage {
                         .frame()
                         .target
                         .as_ref()
-                        .map(|t| t.address.as_ref().map(|s| s.as_ref()).unwrap_or(""))
-                        .unwrap_or("")
+                        .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
                 );
 
                 let delivery_id = this.delivery_id;

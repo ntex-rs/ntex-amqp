@@ -27,7 +27,7 @@ impl fmt::Debug for ControlFrame {
 pub enum ControlFrameKind {
     AttachReceiver(ReceiverLink),
     AttachSender(Box<protocol::Attach>, SenderLink),
-    Flow(protocol::Flow, SenderLink),
+    Flow(Box<protocol::Flow>, SenderLink),
     DetachSender(protocol::Detach, SenderLink),
     DetachReceiver(protocol::Detach, ReceiverLink),
     ProtocolError(AmqpProtocolError),

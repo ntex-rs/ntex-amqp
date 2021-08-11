@@ -83,7 +83,7 @@ impl Connection {
         inner.error.is_none()
     }
 
-    /// Get waiter for on_close event
+    /// Get waiter for `on_close` event
     pub fn on_close(&self) -> Waiter {
         self.0.get_ref().on_close.wait()
     }
@@ -103,7 +103,7 @@ impl Connection {
     /// Close connection with error
     pub fn close_with_error<E>(
         &self,
-        _err: E,
+        _err: &E,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>>
     where
         Error: From<E>,

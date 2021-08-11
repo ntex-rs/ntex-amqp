@@ -21,7 +21,7 @@ pub(crate) enum Action {
     AttachReceiver(ReceiverLink),
     DetachSender(SenderLink, Detach),
     DetachReceiver(ReceiverLink, Detach),
-    Flow(SenderLink, Flow),
+    Flow(SenderLink, Box<Flow>),
     Transfer(ReceiverLink),
 }
 

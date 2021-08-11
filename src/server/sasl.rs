@@ -125,12 +125,12 @@ where
 
     /// Sasl initial response
     pub fn initial_response(&self) -> Option<&[u8]> {
-        self.frame.initial_response.as_ref().map(|b| b.as_ref())
+        self.frame.initial_response.as_ref().map(AsRef::as_ref)
     }
 
     /// Sasl initial response
     pub fn hostname(&self) -> Option<&str> {
-        self.frame.hostname.as_ref().map(|b| b.as_ref())
+        self.frame.hostname.as_ref().map(AsRef::as_ref)
     }
 
     /// Returns reference to io object

@@ -70,12 +70,12 @@ where
             match Pin::new(&mut item.1).poll(cx) {
                 Poll::Ready(Ok(_)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(frame, None)?;
+                    self.handle_control_frame(&frame, None)?;
                 }
                 Poll::Pending => return Ok(false),
                 Poll::Ready(Err(e)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(frame, Some(e.into()))?;
+                    self.handle_control_frame(&frame, Some(e.into()))?;
                 }
             }
         }
@@ -84,7 +84,7 @@ where
 
     fn handle_control_frame(
         &self,
-        frame: ControlFrame,
+        frame: &ControlFrame,
         err: Option<Error>,
     ) -> Result<(), DispatcherError> {
         if let Some(err) = err {
@@ -172,12 +172,12 @@ where
         // check readiness
         let res1 = self.service.poll_ready(cx).map_err(|err| {
             error!("Publish service readiness check failed: {:?}", err);
-            let _ = self.sink.close_with_error(err);
+            let _ = self.sink.close_with_error(&err);
             DispatcherError::Service
         })?;
         let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
             error!("Control service readiness check failed: {:?}", err);
-            let _ = self.sink.close_with_error(err);
+            let _ = self.sink.close_with_error(&err);
             DispatcherError::Service
         })?;
 
