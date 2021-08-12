@@ -409,8 +409,6 @@ impl SessionInner {
             error,
         };
         self.post_frame(detach.into());
-
-        self.links.remove(token);
     }
 
     pub(crate) fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
