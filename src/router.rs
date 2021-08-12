@@ -289,57 +289,6 @@ impl<S> Future for RouterServiceResponse<S> {
     }
 }
 
-struct HandleMessage {
-    link: ReceiverLink,
-    delivery_id: DeliveryNumber,
-    fut: Pin<Box<dyn Future<Output = Result<Outcome, Error>>>>,
-}
-
-impl Future for HandleMessage {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.as_mut();
-
-        match Pin::new(&mut this.fut).poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(outcome)) => {
-                log::trace!(
-                    "Outcome is ready {:?} for {}",
-                    outcome,
-                    this.link
-                        .frame()
-                        .target
-                        .as_ref()
-                        .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
-                );
-                let delivery_id = this.delivery_id;
-                settle(&mut this.link, delivery_id, outcome.into_delivery_state());
-                Poll::Ready(())
-            }
-            Poll::Ready(Err(e)) => {
-                log::trace!(
-                    "Outcome is failed {:?} for {}",
-                    e,
-                    this.link
-                        .frame()
-                        .target
-                        .as_ref()
-                        .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
-                );
-
-                let delivery_id = this.delivery_id;
-                settle(
-                    &mut this.link,
-                    delivery_id,
-                    DeliveryState::Rejected(Rejected { error: Some(e) }),
-                );
-                Poll::Ready(())
-            }
-        }
-    }
-}
-
 fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
     let disposition = Disposition {
         state: Some(state),

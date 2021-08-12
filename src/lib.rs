@@ -1,4 +1,4 @@
-#![deny(rust_2018_idioms, unreachable_pub)]
+#![deny(rust_2018_idioms)]
 #![allow(clippy::type_complexity)]
 
 #[macro_use]
