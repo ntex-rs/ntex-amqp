@@ -20,30 +20,6 @@ pub struct SenderLink {
     pub(crate) inner: Cell<SenderLinkInner>,
 }
 
-#[derive(Debug)]
-pub(crate) struct DeliveryPromise(
-    Either<pool::Sender<Result<Disposition, AmqpProtocolError>>, (Cell<SenderLinkInner>, Bytes)>,
-);
-
-impl DeliveryPromise {
-    fn new(tx: pool::Sender<Result<Disposition, AmqpProtocolError>>) -> Self {
-        DeliveryPromise(Either::Left(tx))
-    }
-
-    fn new_link(link: Cell<SenderLinkInner>, tag: Bytes) -> Self {
-        DeliveryPromise(Either::Right((link, tag)))
-    }
-
-    pub(crate) fn ready(self, result: Result<Disposition, AmqpProtocolError>) {
-        match self.0 {
-            Either::Left(tx) => {
-                let _r = tx.send(result);
-            }
-            Either::Right((inner, tag)) => (*inner.get_ref().on_disposition)(tag, result),
-        }
-    }
-}
-
 pub(crate) struct SenderLinkInner {
     pub(crate) id: usize,
     name: ByteString,
@@ -588,5 +564,29 @@ impl Future for Delivery {
             };
         }
         panic!("Polling Delivery after it was polled as ready is an error.");
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct DeliveryPromise(
+    Either<pool::Sender<Result<Disposition, AmqpProtocolError>>, (Cell<SenderLinkInner>, Bytes)>,
+);
+
+impl DeliveryPromise {
+    fn new(tx: pool::Sender<Result<Disposition, AmqpProtocolError>>) -> Self {
+        DeliveryPromise(Either::Left(tx))
+    }
+
+    fn new_link(link: Cell<SenderLinkInner>, tag: Bytes) -> Self {
+        DeliveryPromise(Either::Right((link, tag)))
+    }
+
+    pub(crate) fn ready(self, result: Result<Disposition, AmqpProtocolError>) {
+        match self.0 {
+            Either::Left(tx) => {
+                let _r = tx.send(result);
+            }
+            Either::Right((inner, tag)) => (*inner.get_ref().on_disposition)(tag, result),
+        }
     }
 }

@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
-use ntex::framed::State;
+use ntex::framed::State as IoState;
 use ntex::util::{HashMap, Ready};
 
 use crate::codec::protocol::{Begin, Close, End, Error, Frame, Role};
@@ -14,10 +14,10 @@ use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
 pub struct Connection(pub(crate) Cell<ConnectionInner>);
 
 pub(crate) struct ConnectionInner {
-    st: ConnectionState,
-    state: State,
+    io: IoState,
+    state: ConnectionState,
     codec: AmqpCodec<AmqpFrame>,
-    pub(crate) sessions: slab::Slab<ChannelState>,
+    pub(crate) sessions: slab::Slab<SessionState>,
     pub(crate) sessions_map: HashMap<u16, usize>,
     pub(crate) on_close: Condition,
     pub(crate) error: Option<AmqpProtocolError>,
@@ -25,16 +25,16 @@ pub(crate) struct ConnectionInner {
     pub(crate) max_frame_size: usize,
 }
 
-pub(crate) enum ChannelState {
+pub(crate) enum SessionState {
     Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
     Established(Cell<SessionInner>),
     #[allow(dead_code)]
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
 
-impl ChannelState {
+impl SessionState {
     fn is_opening(&self) -> bool {
-        matches!(self, ChannelState::Opening(_, _))
+        matches!(self, SessionState::Opening(_, _))
     }
 }
 
@@ -48,14 +48,14 @@ pub(crate) enum ConnectionState {
 
 impl Connection {
     pub(crate) fn new(
-        state: State,
+        io: IoState,
         local_config: &Configuration,
         remote_config: &Configuration,
     ) -> Connection {
         Connection(Cell::new(ConnectionInner {
-            state,
+            io,
             codec: AmqpCodec::new(),
-            st: ConnectionState::Normal,
+            state: ConnectionState::Normal,
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::default(),
             error: None,
@@ -69,15 +69,15 @@ impl Connection {
     /// Force close connection
     pub fn force_close(&self) {
         let inner = self.0.get_mut();
-        inner.st = ConnectionState::Drop;
-        inner.state.force_close();
+        inner.state = ConnectionState::Drop;
+        inner.io.force_close();
     }
 
     #[inline]
     /// Check connection state
     pub fn is_opened(&mut self) -> bool {
         let inner = self.0.get_mut();
-        if inner.st != ConnectionState::Normal {
+        if inner.state != ConnectionState::Normal {
             return false;
         }
         inner.error.is_none()
@@ -95,7 +95,7 @@ impl Connection {
 
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.0.get_ref().state.close();
+        self.0.get_ref().io.close();
         Ready::Ok(())
     }
 
@@ -108,7 +108,7 @@ impl Connection {
     where
         Error: From<E>,
     {
-        self.0.get_ref().state.close();
+        self.0.get_ref().io.close();
         Ready::Ok(())
     }
 
@@ -133,7 +133,7 @@ impl Connection {
                     log::trace!("Too many channels: {:?}", token);
                     Err(AmqpProtocolError::TooManyChannels)
                 } else {
-                    entry.insert(ChannelState::Opening(Some(tx), cell));
+                    entry.insert(SessionState::Opening(Some(tx), cell));
 
                     let begin = Begin {
                         remote_channel: None,
@@ -158,9 +158,17 @@ impl Connection {
         log::trace!("outcoming: {:#?}", frame);
 
         let inner = self.0.get_mut();
-        if let Err(e) = inner.state.write().encode(frame, &inner.codec) {
+        if let Err(e) = inner.io.write().encode(frame, &inner.codec) {
             inner.set_error(e.into());
         }
+    }
+
+    pub(crate) fn set_error(&self, err: AmqpProtocolError) {
+        self.0.get_mut().set_error(err)
+    }
+
+    pub(crate) fn handle_frame(&self, frame: AmqpFrame) -> Result<Action, AmqpProtocolError> {
+        self.0.get_mut().handle_frame(frame, &self.0)
     }
 }
 
@@ -169,8 +177,8 @@ impl ConnectionInner {
         log::trace!("Set connection error: {:?}", err);
         for (_, channel) in self.sessions.iter_mut() {
             match channel {
-                ChannelState::Opening(_, _) | ChannelState::Closing(_) => (),
-                ChannelState::Established(ref mut ses) => {
+                SessionState::Opening(_, _) | SessionState::Closing(_) => (),
+                SessionState::Established(ref mut ses) => {
                     ses.get_mut().set_error(err.clone());
                 }
             }
@@ -184,7 +192,7 @@ impl ConnectionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
-        if let Err(e) = self.state.write().encode(frame, &self.codec) {
+        if let Err(e) = self.io.write().encode(frame, &self.codec) {
             self.set_error(e.into());
         }
     }
@@ -209,7 +217,7 @@ impl ConnectionInner {
             begin.incoming_window(),
             begin.outgoing_window(),
         ));
-        entry.insert(ChannelState::Established(session));
+        entry.insert(SessionState::Established(session));
         self.sessions_map.insert(channel_id, token);
 
         let begin = Begin {
@@ -223,7 +231,7 @@ impl ConnectionInner {
             properties: None,
         };
 
-        self.state
+        self.io
             .write()
             .encode(AmqpFrame::new(token as u16, begin.into()), &self.codec)
             .map(|_| ())
@@ -246,7 +254,7 @@ impl ConnectionInner {
 
         if let Some(channel) = self.sessions.get_mut(id) {
             if channel.is_opening() {
-                if let ChannelState::Opening(tx, cell) = channel {
+                if let SessionState::Opening(tx, cell) = channel {
                     let session = Cell::new(SessionInner::new(
                         id,
                         true,
@@ -261,7 +269,7 @@ impl ConnectionInner {
                     // TODO: send end session if `tx` is None
                     tx.take()
                         .and_then(|tx| tx.send(Session::new(session.clone())).err());
-                    *channel = ChannelState::Established(session);
+                    *channel = SessionState::Established(session);
                 }
             } else {
                 // TODO: send error response
@@ -271,7 +279,7 @@ impl ConnectionInner {
         }
     }
 
-    pub(crate) fn handle_frame(
+    fn handle_frame(
         &mut self,
         frame: AmqpFrame,
         inner: &Cell<ConnectionInner>,
@@ -285,14 +293,14 @@ impl ConnectionInner {
         if let Frame::Close(ref close) = frame {
             self.set_error(AmqpProtocolError::Closed(close.error.clone()));
 
-            if self.st == ConnectionState::Closing {
+            if self.state == ConnectionState::Closing {
                 log::trace!("Connection closed: {:?}", close);
                 self.set_error(AmqpProtocolError::Disconnected);
             } else {
                 log::trace!("Connection closed remotely: {:?}", close);
                 let close = Close { error: None };
                 self.post_frame(AmqpFrame::new(0, close.into()));
-                self.st = ConnectionState::RemoteClose;
+                self.state = ConnectionState::RemoteClose;
             }
             return Ok(Action::None);
         }
@@ -333,11 +341,11 @@ impl ConnectionInner {
 
         // handle session frames
         match state {
-            ChannelState::Opening(_, _) => {
+            SessionState::Opening(_, _) => {
                 error!("Unexpected opening state: {}", channel_id);
                 Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(frame)))
             }
-            ChannelState::Established(ref mut session) => match frame {
+            SessionState::Established(ref mut session) => match frame {
                 Frame::Attach(attach) => {
                     let cell = session.clone();
                     if session.get_mut().handle_attach(&attach, cell) {
@@ -378,7 +386,7 @@ impl ConnectionInner {
                 }
                 _ => session.get_mut().handle_frame(frame),
             },
-            ChannelState::Closing(ref mut tx) => match frame {
+            SessionState::Closing(ref mut tx) => match frame {
                 Frame::End(frm) => {
                     trace!("Session end is confirmed: {:?}", frm);
                     if let Some(tx) = tx.take() {

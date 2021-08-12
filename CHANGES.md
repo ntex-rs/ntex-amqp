@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.0-b.6] - 2021-08-xx
+
+* Various cleanups
+
 ## [0.5.0-b.5] - 2021-08-11
 
 * Refactor server dispatch process

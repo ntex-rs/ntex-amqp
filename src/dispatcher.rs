@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll, time};
+use std::{cell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll, time};
 
 use ntex::framed::DispatchItem;
 use ntex::rt::time::{sleep, Sleep};
@@ -15,11 +15,13 @@ pub(crate) struct Dispatcher<Sr, Ctl: Service> {
     sink: Connection,
     service: Sr,
     ctl_service: Ctl,
-    ctl_fut: RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
-    shutdown: std::cell::Cell<bool>,
-    expire: RefCell<Pin<Box<Sleep>>>,
-    idle_timeout: usize,
+    ctl_fut: cell::RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
+    shutdown: cell::Cell<bool>,
+    expire: cell::RefCell<Pin<Box<Sleep>>>,
+    idle_timeout: time::Duration,
 }
+
+const ZERO: time::Duration = time::Duration::from_nanos(0);
 
 impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
@@ -36,27 +38,29 @@ where
         ctl_service: Ctl,
         idle_timeout: usize,
     ) -> Self {
+        let idle_timeout = time::Duration::from_secs(idle_timeout as u64);
+
         Dispatcher {
             sink,
             service,
             ctl_service,
             idle_timeout,
-            ctl_fut: RefCell::new(None),
-            shutdown: std::cell::Cell::new(false),
-            expire: RefCell::new(Box::pin(sleep(time::Duration::from_secs(
-                idle_timeout as u64,
-            )))),
+            ctl_fut: cell::RefCell::new(None),
+            shutdown: cell::Cell::new(false),
+            expire: cell::RefCell::new(Box::pin(sleep(idle_timeout))),
         }
     }
 
     fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
         let idle_timeout = self.idle_timeout;
-        if idle_timeout > 0 {
+        if idle_timeout > ZERO {
             let mut expire = self.expire.borrow_mut();
             if Pin::new(&mut *expire).poll(cx).is_ready() {
                 log::trace!("Send keep-alive ping, timeout: {:?} secs", idle_timeout);
                 self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
-                *expire = Box::pin(sleep(time::Duration::from_secs(idle_timeout as u64)));
+                expire
+                    .as_mut()
+                    .reset((time::Instant::now() + idle_timeout).into());
                 let _ = Pin::new(&mut *expire).poll(cx);
             }
         }
@@ -192,9 +196,6 @@ where
         if !self.shutdown.get() {
             self.shutdown.set(true);
             let sink = self.sink.0.get_mut();
-            if is_error {
-                sink.set_error(AmqpProtocolError::Disconnected);
-            }
             sink.on_close.notify();
             sink.set_error(AmqpProtocolError::Disconnected);
             let fut = self
@@ -217,14 +218,12 @@ where
     fn call(&self, request: Self::Request) -> Self::Future {
         match request {
             DispatchItem::Item(frame) => {
-                // #[cfg(feature = "frame-trace")]
+                #[cfg(feature = "frame-trace")]
                 log::trace!("incoming: {:#?}", frame);
 
                 let action = match self
                     .sink
-                    .0
-                    .get_mut()
-                    .handle_frame(frame, &self.sink.0)
+                    .handle_frame(frame)
                     .map_err(DispatcherError::Protocol)
                 {
                     Ok(a) => a,
@@ -253,7 +252,6 @@ where
                             link.session().inner.clone(),
                             ControlFrameKind::AttachSender(frame, link),
                         );
-
                         *self.ctl_fut.borrow_mut() =
                             Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                     }
@@ -293,17 +291,11 @@ where
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::KeepAliveTimeout => {
-                self.sink
-                    .0
-                    .get_mut()
-                    .set_error(AmqpProtocolError::KeepAliveTimeout);
+                self.sink.set_error(AmqpProtocolError::KeepAliveTimeout);
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::IoError(_) => {
-                self.sink
-                    .0
-                    .get_mut()
-                    .set_error(AmqpProtocolError::Disconnected);
+                self.sink.set_error(AmqpProtocolError::Disconnected);
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
