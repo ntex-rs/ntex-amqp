@@ -55,6 +55,14 @@ impl ReceiverLink {
         &self.inner.get_ref().attach
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.inner.get_ref().closed
+    }
+
+    pub fn error(&self) -> Option<&Error> {
+        self.inner.get_ref().error.as_ref()
+    }
+
     pub(crate) fn confirm_receiver_link(&self) {
         let inner = self.inner.get_mut();
         inner
