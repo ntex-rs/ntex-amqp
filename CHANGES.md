@@ -1,6 +1,10 @@
 # Changes
 
-## [0.5.0-b.6] - 2021-08-xx
+## [0.5.0-b.7] - 2021-08-13
+
+* Fix handling for error during opennig link
+
+## [0.5.0-b.6] - 2021-08-12
 
 * Various cleanups
 

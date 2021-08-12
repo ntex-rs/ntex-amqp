@@ -382,12 +382,35 @@ impl SessionInner {
 
     /// Detach unconfirmed sender link
     pub(crate) fn detach_unconfirmed_sender_link(&mut self, attach: &Attach, error: Option<Error>) {
+        let entry = self.links.vacant_entry();
+        let token = entry.key();
+
+        let attach = Attach {
+            name: attach.name.clone(),
+            handle: token as Handle,
+            role: attach.role,
+            snd_settle_mode: SenderSettleMode::Unsettled,
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: None,
+            target: None,
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: None,
+            max_message_size: None,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        };
+        self.post_frame(attach.into());
+
         let detach = Detach {
-            handle: attach.handle(),
+            handle: token as Handle,
             closed: true,
             error,
         };
         self.post_frame(detach.into());
+
+        self.links.remove(token);
     }
 
     pub(crate) fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
