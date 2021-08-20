@@ -5,9 +5,8 @@ use ntex_bytes::{ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::protocol::Annotations;
 use crate::types::{Descriptor, List, StaticSymbol, Str, Symbol};
-use crate::HashMap;
+use crate::{protocol::Annotations, HashMap};
 
 /// Represents an AMQP type for use in polymorphic collections
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Display, From)]
@@ -187,6 +186,12 @@ impl Default for VecSymbolMap {
 impl From<Annotations> for VecSymbolMap {
     fn from(anns: Annotations) -> VecSymbolMap {
         VecSymbolMap(anns.into_iter().collect())
+    }
+}
+
+impl From<Vec<(Symbol, Variant)>> for VecSymbolMap {
+    fn from(data: Vec<(Symbol, Variant)>) -> VecSymbolMap {
+        VecSymbolMap(data)
     }
 }
 

@@ -62,13 +62,13 @@ pub enum HandshakeError {
     #[from(ignore)]
     /// Expected open frame
     #[display(fmt = "Expect open frame, got: {:?}", _0)]
-    ExpectOpenFrame(Box<AmqpFrame>),
+    ExpectOpenFrame(AmqpFrame),
     #[display(fmt = "Unexpected frame, got: {:?}", _0)]
-    Unexpected(Box<protocol::Frame>),
+    Unexpected(protocol::Frame),
     #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
-    UnexpectedSaslFrame(SaslFrame),
+    UnexpectedSaslFrame(Box<SaslFrame>),
     #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
-    UnexpectedSaslBodyFrame(protocol::SaslFrameBody),
+    UnexpectedSaslBodyFrame(Box<protocol::SaslFrameBody>),
     #[display(fmt = "Unsupported sasl mechanism: {}", _0)]
     UnsupportedSaslMechanism(String),
     /// Sasl error code
@@ -102,10 +102,10 @@ impl From<Either<ProtocolIdError, std::io::Error>> for HandshakeError {
 
 impl From<HandshakeError> for protocol::Error {
     fn from(err: HandshakeError) -> protocol::Error {
-        protocol::Error {
+        protocol::Error(Box::new(protocol::ErrorInner {
             condition: protocol::AmqpError::InternalError.into(),
             description: Some(ByteString::from(format!("{}", err))),
             info: None,
-        }
+        }))
     }
 }

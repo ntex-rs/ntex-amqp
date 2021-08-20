@@ -6,10 +6,7 @@ use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use uuid::Uuid;
 
 use super::codec::{self, Decode, DecodeFormatted, Encode};
-use super::error::AmqpParseError;
-use super::message::Message;
-use super::types::*;
-use crate::HashMap;
+use crate::{error::AmqpParseError, message::Message, types::*, HashMap};
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -40,6 +37,7 @@ pub type Map = HashMap<Variant, Variant>;
 pub type StringVariantMap = HashMap<Str, Variant>;
 pub type Fields = HashMap<Symbol, Variant>;
 pub type FilterSet = HashMap<Symbol, Option<ByteString>>;
+pub type FieldsVec = VecSymbolMap;
 pub type Timestamp = DateTime<Utc>;
 pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
@@ -126,6 +124,12 @@ pub enum ErrorCondition {
     SessionError(SessionError),
     LinkError(LinkError),
     Custom(Symbol),
+}
+
+impl Default for ErrorCondition {
+    fn default() -> ErrorCondition {
+        ErrorCondition::Custom(Symbol(Str::from("Unknown")))
+    }
 }
 
 impl DecodeFormatted for ErrorCondition {
@@ -236,7 +240,7 @@ impl Default for Properties {
 #[derive(Debug, Clone, From, PartialEq)]
 pub enum TransferBody {
     Data(Bytes),
-    Message(Box<Message>),
+    Message(Message),
 }
 
 impl TransferBody {
@@ -249,15 +253,8 @@ impl TransferBody {
     pub fn message_format(&self) -> Option<MessageFormat> {
         match self {
             TransferBody::Data(_) => None,
-            TransferBody::Message(ref data) => data.message_format,
+            TransferBody::Message(ref data) => data.0.message_format,
         }
-    }
-}
-
-impl From<Message> for TransferBody {
-    #[inline]
-    fn from(msg: Message) -> Self {
-        Self::Message(Box::new(msg))
     }
 }
 
@@ -281,7 +278,7 @@ impl Encode for TransferBody {
 impl Transfer {
     #[inline]
     pub fn get_body(&self) -> Option<&Bytes> {
-        match self.body {
+        match self.body() {
             Some(TransferBody::Data(ref b)) => Some(b),
             _ => None,
         }
@@ -289,10 +286,28 @@ impl Transfer {
 
     #[inline]
     pub fn load_message<T: Decode>(&self) -> Result<T, AmqpParseError> {
-        if let Some(TransferBody::Data(ref b)) = self.body {
+        if let Some(TransferBody::Data(ref b)) = self.body() {
             Ok(T::decode(b)?.1)
         } else {
             Err(AmqpParseError::UnexpectedType("body"))
         }
+    }
+}
+
+impl Default for Role {
+    fn default() -> Role {
+        Role::Sender
+    }
+}
+
+impl Default for SenderSettleMode {
+    fn default() -> SenderSettleMode {
+        SenderSettleMode::Mixed
+    }
+}
+
+impl Default for ReceiverSettleMode {
+    fn default() -> ReceiverSettleMode {
+        ReceiverSettleMode::First
     }
 }

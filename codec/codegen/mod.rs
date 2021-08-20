@@ -35,7 +35,8 @@ lazy_static! {
             "Symbols",
             "IetfLanguageTags",
             "ErrorCondition",
-            "DistributionMode"
+            "DistributionMode",
+            "FieldsVec",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -111,6 +112,7 @@ struct _Field {
     #[serde(deserialize_with = "string_as_bool")]
     multiple: bool,
     requires: Option<String>,
+    collection: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +176,8 @@ pub struct Described {
     descriptor: Descriptor,
     fields: Vec<Field>,
     transfer: bool,
+    boxed: bool,
+    inner: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +196,7 @@ pub struct Field {
     optional: bool,
     default: String,
     multiple: bool,
+    collection: bool,
 }
 
 impl Definitions {
@@ -321,13 +326,31 @@ impl Enum {
 impl Described {
     fn list(d: _Described) -> Described {
         let transfer = d.name == "transfer";
+        let boxed = match d.name.as_str() {
+            "error" => true,
+            "close" | "end" => false,
+            _ => d
+                .provides
+                .as_ref()
+                .map(|item| item == "frame")
+                .unwrap_or(false),
+        };
         Described {
             name: camel_case(&d.name),
             ty: String::new(),
             provides: parse_provides(d.provides),
             descriptor: Descriptor::from(d.descriptor),
             fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
+            inner: {
+                if boxed {
+                    "0."
+                } else {
+                    ""
+                }
+            }
+            .to_string(),
             transfer,
+            boxed,
         }
     }
     fn alias(d: _Described) -> Described {
@@ -338,6 +361,8 @@ impl Described {
             descriptor: Descriptor::from(d.descriptor),
             fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
             transfer: false,
+            boxed: false,
+            inner: "".to_string(),
         }
     }
 }
@@ -375,6 +400,7 @@ impl Field {
             is_str,
             optional: !field.mandatory && default.len() == 0,
             multiple: field.multiple,
+            collection: field.collection.unwrap_or(false),
             default,
         }
     }

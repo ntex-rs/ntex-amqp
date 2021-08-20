@@ -119,7 +119,7 @@
       },
       {
         "name": "info",
-        "type": "fields"
+        "type": "fieldsVec"
       }
     ]
   },
@@ -1227,7 +1227,7 @@
       },
       {
         "name": "message-annotations",
-        "type": "fields"
+        "type": "fieldsVec"
       }
     ]
   }

@@ -92,7 +92,7 @@ impl Decode for Frame {
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => {
                     decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
                 }
-                _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+                _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
             }
         }
     }
@@ -124,64 +124,6 @@ impl Encode for Frame {
             Frame::End(ref v) => encode_end_inner(v, buf),
             Frame::Close(ref v) => encode_close_inner(v, buf),
             Frame::Empty => (),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for Outcome {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
-        }
-    }
-}
-impl Encode for Outcome {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -228,7 +170,7 @@ impl DecodeFormatted for DeliveryState {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
                 decode_modified_inner(input).map(|(i, r)| (i, DeliveryState::Modified(r)))
             }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
         }
     }
 }
@@ -321,7 +263,7 @@ impl DecodeFormatted for Section {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:properties:list" => {
                 decode_properties_inner(input).map(|(i, r)| (i, Section::Properties(r)))
             }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
         }
     }
 }
@@ -350,6 +292,64 @@ impl Encode for Section {
             Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
             Section::Footer(ref v) => encode_footer_inner(v, buf),
             Section::Properties(ref v) => encode_properties_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -396,7 +396,7 @@ impl DecodeFormatted for SaslFrameBody {
             Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
                 decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
             }
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
         }
     }
 }
@@ -1064,26 +1064,56 @@ fn encode_footer_inner(dr: &Footer, buf: &mut BytesMut) {
     dr.encode(buf);
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Error {
+pub struct Error(pub Box<ErrorInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct ErrorBuilder(pub Box<ErrorInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ErrorInner {
     pub condition: ErrorCondition,
     pub description: Option<ByteString>,
-    pub info: Option<Fields>,
+    pub info: Option<FieldsVec>,
 }
 impl Error {
+    pub fn build() -> ErrorBuilder {
+        ErrorBuilder(Box::new(ErrorInner::default()))
+    }
     #[inline]
     pub fn condition(&self) -> &ErrorCondition {
-        &self.condition
+        &self.0.condition
     }
     #[inline]
     pub fn description(&self) -> Option<&ByteString> {
-        self.description.as_ref()
+        self.0.description.as_ref()
     }
     #[inline]
-    pub fn info(&self) -> Option<&Fields> {
-        self.info.as_ref()
+    pub fn info(&self) -> Option<&FieldsVec> {
+        self.0.info.as_ref()
+    }
+    pub fn into_inner(self) -> Box<ErrorInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
+}
+impl ErrorBuilder {
+    #[inline]
+    pub fn condition(mut self, val: ErrorCondition) -> Self {
+        self.0.condition = val;
+        self
+    }
+    #[inline]
+    pub fn description(mut self, val: ByteString) -> Self {
+        self.0.description = Some(val);
+        self
+    }
+    #[inline]
+    pub fn info(mut self, val: FieldsVec) -> Self {
+        self.0.info = Some(val);
+        self
+    }
+    pub fn finish(self) -> Error {
+        Error(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error), AmqpParseError> {
@@ -1111,9 +1141,9 @@ fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error), AmqpParseError> {
     } else {
         description = None;
     }
-    let info: Option<Fields>;
+    let info: Option<FieldsVec>;
     if count > 0 {
-        let decoded = Option::<Fields>::decode(input)?;
+        let decoded = Option::<FieldsVec>::decode(input)?;
         input = decoded.0;
         info = decoded.1;
         count -= 1;
@@ -1122,19 +1152,19 @@ fn decode_error_inner(input: &[u8]) -> Result<(&[u8], Error), AmqpParseError> {
     }
     Ok((
         remainder,
-        Error {
+        Error(Box::new(ErrorInner {
             condition,
             description,
             info,
-        },
+        })),
     ))
 }
 fn encoded_size_error_inner(list: &Error) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.condition.encoded_size()
-        + list.description.encoded_size()
-        + list.info.encoded_size();
+        + list.0.condition.encoded_size()
+        + list.0.description.encoded_size()
+        + list.0.info.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1146,9 +1176,9 @@ fn encode_error_inner(list: &Error, buf: &mut BytesMut) {
     Descriptor::Ulong(29).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.condition.encoded_size()
-        + list.description.encoded_size()
-        + list.info.encoded_size();
+        + list.0.condition.encoded_size()
+        + list.0.description.encoded_size()
+        + list.0.info.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -1158,9 +1188,9 @@ fn encode_error_inner(list: &Error, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Error::FIELD_COUNT as u8);
     }
-    list.condition.encode(buf);
-    list.description.encode(buf);
-    list.info.encode(buf);
+    list.0.condition.encode(buf);
+    list.0.description.encode(buf);
+    list.0.info.encode(buf);
 }
 impl DecodeFormatted for Error {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1171,7 +1201,7 @@ impl DecodeFormatted for Error {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:error:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_error_inner(input)
         }
@@ -1186,7 +1216,11 @@ impl Encode for Error {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Open {
+pub struct Open(pub Box<OpenInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpenBuilder(pub Box<OpenInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct OpenInner {
     pub container_id: ByteString,
     pub hostname: Option<ByteString>,
     pub max_frame_size: u32,
@@ -1199,48 +1233,109 @@ pub struct Open {
     pub properties: Option<Fields>,
 }
 impl Open {
+    pub fn build() -> OpenBuilder {
+        OpenBuilder(Box::new(OpenInner::default()))
+    }
     #[inline]
     pub fn container_id(&self) -> &ByteString {
-        &self.container_id
+        &self.0.container_id
     }
     #[inline]
     pub fn hostname(&self) -> Option<&ByteString> {
-        self.hostname.as_ref()
+        self.0.hostname.as_ref()
     }
     #[inline]
     pub fn max_frame_size(&self) -> u32 {
-        self.max_frame_size
+        self.0.max_frame_size
     }
     #[inline]
     pub fn channel_max(&self) -> u16 {
-        self.channel_max
+        self.0.channel_max
     }
     #[inline]
     pub fn idle_time_out(&self) -> Option<Milliseconds> {
-        self.idle_time_out
+        self.0.idle_time_out
     }
     #[inline]
     pub fn outgoing_locales(&self) -> Option<&IetfLanguageTags> {
-        self.outgoing_locales.as_ref()
+        self.0.outgoing_locales.as_ref()
     }
     #[inline]
     pub fn incoming_locales(&self) -> Option<&IetfLanguageTags> {
-        self.incoming_locales.as_ref()
+        self.0.incoming_locales.as_ref()
     }
     #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
-        self.offered_capabilities.as_ref()
+        self.0.offered_capabilities.as_ref()
     }
     #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
-        self.desired_capabilities.as_ref()
+        self.0.desired_capabilities.as_ref()
     }
     #[inline]
     pub fn properties(&self) -> Option<&Fields> {
-        self.properties.as_ref()
+        self.0.properties.as_ref()
+    }
+    pub fn into_inner(self) -> Box<OpenInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+}
+impl OpenBuilder {
+    #[inline]
+    pub fn container_id(mut self, val: ByteString) -> Self {
+        self.0.container_id = val;
+        self
+    }
+    #[inline]
+    pub fn hostname(mut self, val: ByteString) -> Self {
+        self.0.hostname = Some(val);
+        self
+    }
+    #[inline]
+    pub fn max_frame_size(mut self, val: u32) -> Self {
+        self.0.max_frame_size = val;
+        self
+    }
+    #[inline]
+    pub fn channel_max(mut self, val: u16) -> Self {
+        self.0.channel_max = val;
+        self
+    }
+    #[inline]
+    pub fn idle_time_out(mut self, val: Milliseconds) -> Self {
+        self.0.idle_time_out = Some(val);
+        self
+    }
+    #[inline]
+    pub fn outgoing_locales(mut self, val: IetfLanguageTags) -> Self {
+        self.0.outgoing_locales = Some(val);
+        self
+    }
+    #[inline]
+    pub fn incoming_locales(mut self, val: IetfLanguageTags) -> Self {
+        self.0.incoming_locales = Some(val);
+        self
+    }
+    #[inline]
+    pub fn offered_capabilities(mut self, val: Symbols) -> Self {
+        self.0.offered_capabilities = Some(val);
+        self
+    }
+    #[inline]
+    pub fn desired_capabilities(mut self, val: Symbols) -> Self {
+        self.0.desired_capabilities = Some(val);
+        self
+    }
+    #[inline]
+    pub fn properties(mut self, val: Fields) -> Self {
+        self.0.properties = Some(val);
+        self
+    }
+    pub fn finish(self) -> Open {
+        Open(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open), AmqpParseError> {
@@ -1342,7 +1437,7 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open), AmqpParseError> {
     }
     Ok((
         remainder,
-        Open {
+        Open(Box::new(OpenInner {
             container_id,
             hostname,
             max_frame_size,
@@ -1353,22 +1448,22 @@ fn decode_open_inner(input: &[u8]) -> Result<(&[u8], Open), AmqpParseError> {
             offered_capabilities,
             desired_capabilities,
             properties,
-        },
+        })),
     ))
 }
 fn encoded_size_open_inner(list: &Open) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.container_id.encoded_size()
-        + list.hostname.encoded_size()
-        + list.max_frame_size.encoded_size()
-        + list.channel_max.encoded_size()
-        + list.idle_time_out.encoded_size()
-        + list.outgoing_locales.encoded_size()
-        + list.incoming_locales.encoded_size()
-        + list.offered_capabilities.encoded_size()
-        + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.container_id.encoded_size()
+        + list.0.hostname.encoded_size()
+        + list.0.max_frame_size.encoded_size()
+        + list.0.channel_max.encoded_size()
+        + list.0.idle_time_out.encoded_size()
+        + list.0.outgoing_locales.encoded_size()
+        + list.0.incoming_locales.encoded_size()
+        + list.0.offered_capabilities.encoded_size()
+        + list.0.desired_capabilities.encoded_size()
+        + list.0.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1380,16 +1475,16 @@ fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
     Descriptor::Ulong(16).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.container_id.encoded_size()
-        + list.hostname.encoded_size()
-        + list.max_frame_size.encoded_size()
-        + list.channel_max.encoded_size()
-        + list.idle_time_out.encoded_size()
-        + list.outgoing_locales.encoded_size()
-        + list.incoming_locales.encoded_size()
-        + list.offered_capabilities.encoded_size()
-        + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.container_id.encoded_size()
+        + list.0.hostname.encoded_size()
+        + list.0.max_frame_size.encoded_size()
+        + list.0.channel_max.encoded_size()
+        + list.0.idle_time_out.encoded_size()
+        + list.0.outgoing_locales.encoded_size()
+        + list.0.incoming_locales.encoded_size()
+        + list.0.offered_capabilities.encoded_size()
+        + list.0.desired_capabilities.encoded_size()
+        + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -1399,16 +1494,16 @@ fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Open::FIELD_COUNT as u8);
     }
-    list.container_id.encode(buf);
-    list.hostname.encode(buf);
-    list.max_frame_size.encode(buf);
-    list.channel_max.encode(buf);
-    list.idle_time_out.encode(buf);
-    list.outgoing_locales.encode(buf);
-    list.incoming_locales.encode(buf);
-    list.offered_capabilities.encode(buf);
-    list.desired_capabilities.encode(buf);
-    list.properties.encode(buf);
+    list.0.container_id.encode(buf);
+    list.0.hostname.encode(buf);
+    list.0.max_frame_size.encode(buf);
+    list.0.channel_max.encode(buf);
+    list.0.idle_time_out.encode(buf);
+    list.0.outgoing_locales.encode(buf);
+    list.0.incoming_locales.encode(buf);
+    list.0.offered_capabilities.encode(buf);
+    list.0.desired_capabilities.encode(buf);
+    list.0.properties.encode(buf);
 }
 impl DecodeFormatted for Open {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1419,7 +1514,7 @@ impl DecodeFormatted for Open {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:open:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_open_inner(input)
         }
@@ -1434,7 +1529,11 @@ impl Encode for Open {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Begin {
+pub struct Begin(pub Box<BeginInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeginBuilder(pub Box<BeginInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct BeginInner {
     pub remote_channel: Option<u16>,
     pub next_outgoing_id: TransferNumber,
     pub incoming_window: u32,
@@ -1445,40 +1544,91 @@ pub struct Begin {
     pub properties: Option<Fields>,
 }
 impl Begin {
+    pub fn build() -> BeginBuilder {
+        BeginBuilder(Box::new(BeginInner::default()))
+    }
     #[inline]
     pub fn remote_channel(&self) -> Option<u16> {
-        self.remote_channel
+        self.0.remote_channel
     }
     #[inline]
     pub fn next_outgoing_id(&self) -> TransferNumber {
-        self.next_outgoing_id
+        self.0.next_outgoing_id
     }
     #[inline]
     pub fn incoming_window(&self) -> u32 {
-        self.incoming_window
+        self.0.incoming_window
     }
     #[inline]
     pub fn outgoing_window(&self) -> u32 {
-        self.outgoing_window
+        self.0.outgoing_window
     }
     #[inline]
     pub fn handle_max(&self) -> Handle {
-        self.handle_max
+        self.0.handle_max
     }
     #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
-        self.offered_capabilities.as_ref()
+        self.0.offered_capabilities.as_ref()
     }
     #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
-        self.desired_capabilities.as_ref()
+        self.0.desired_capabilities.as_ref()
     }
     #[inline]
     pub fn properties(&self) -> Option<&Fields> {
-        self.properties.as_ref()
+        self.0.properties.as_ref()
+    }
+    pub fn into_inner(self) -> Box<BeginInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+}
+impl BeginBuilder {
+    #[inline]
+    pub fn remote_channel(mut self, val: u16) -> Self {
+        self.0.remote_channel = Some(val);
+        self
+    }
+    #[inline]
+    pub fn next_outgoing_id(mut self, val: TransferNumber) -> Self {
+        self.0.next_outgoing_id = val;
+        self
+    }
+    #[inline]
+    pub fn incoming_window(mut self, val: u32) -> Self {
+        self.0.incoming_window = val;
+        self
+    }
+    #[inline]
+    pub fn outgoing_window(mut self, val: u32) -> Self {
+        self.0.outgoing_window = val;
+        self
+    }
+    #[inline]
+    pub fn handle_max(mut self, val: Handle) -> Self {
+        self.0.handle_max = val;
+        self
+    }
+    #[inline]
+    pub fn offered_capabilities(mut self, val: Symbols) -> Self {
+        self.0.offered_capabilities = Some(val);
+        self
+    }
+    #[inline]
+    pub fn desired_capabilities(mut self, val: Symbols) -> Self {
+        self.0.desired_capabilities = Some(val);
+        self
+    }
+    #[inline]
+    pub fn properties(mut self, val: Fields) -> Self {
+        self.0.properties = Some(val);
+        self
+    }
+    pub fn finish(self) -> Begin {
+        Begin(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin), AmqpParseError> {
@@ -1562,7 +1712,7 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin), AmqpParseError> {
     }
     Ok((
         remainder,
-        Begin {
+        Begin(Box::new(BeginInner {
             remote_channel,
             next_outgoing_id,
             incoming_window,
@@ -1571,20 +1721,20 @@ fn decode_begin_inner(input: &[u8]) -> Result<(&[u8], Begin), AmqpParseError> {
             offered_capabilities,
             desired_capabilities,
             properties,
-        },
+        })),
     ))
 }
 fn encoded_size_begin_inner(list: &Begin) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.remote_channel.encoded_size()
-        + list.next_outgoing_id.encoded_size()
-        + list.incoming_window.encoded_size()
-        + list.outgoing_window.encoded_size()
-        + list.handle_max.encoded_size()
-        + list.offered_capabilities.encoded_size()
-        + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.remote_channel.encoded_size()
+        + list.0.next_outgoing_id.encoded_size()
+        + list.0.incoming_window.encoded_size()
+        + list.0.outgoing_window.encoded_size()
+        + list.0.handle_max.encoded_size()
+        + list.0.offered_capabilities.encoded_size()
+        + list.0.desired_capabilities.encoded_size()
+        + list.0.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1596,14 +1746,14 @@ fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
     Descriptor::Ulong(17).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.remote_channel.encoded_size()
-        + list.next_outgoing_id.encoded_size()
-        + list.incoming_window.encoded_size()
-        + list.outgoing_window.encoded_size()
-        + list.handle_max.encoded_size()
-        + list.offered_capabilities.encoded_size()
-        + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.remote_channel.encoded_size()
+        + list.0.next_outgoing_id.encoded_size()
+        + list.0.incoming_window.encoded_size()
+        + list.0.outgoing_window.encoded_size()
+        + list.0.handle_max.encoded_size()
+        + list.0.offered_capabilities.encoded_size()
+        + list.0.desired_capabilities.encoded_size()
+        + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -1613,14 +1763,14 @@ fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Begin::FIELD_COUNT as u8);
     }
-    list.remote_channel.encode(buf);
-    list.next_outgoing_id.encode(buf);
-    list.incoming_window.encode(buf);
-    list.outgoing_window.encode(buf);
-    list.handle_max.encode(buf);
-    list.offered_capabilities.encode(buf);
-    list.desired_capabilities.encode(buf);
-    list.properties.encode(buf);
+    list.0.remote_channel.encode(buf);
+    list.0.next_outgoing_id.encode(buf);
+    list.0.incoming_window.encode(buf);
+    list.0.outgoing_window.encode(buf);
+    list.0.handle_max.encode(buf);
+    list.0.offered_capabilities.encode(buf);
+    list.0.desired_capabilities.encode(buf);
+    list.0.properties.encode(buf);
 }
 impl DecodeFormatted for Begin {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1631,7 +1781,7 @@ impl DecodeFormatted for Begin {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:begin:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_begin_inner(input)
         }
@@ -1646,7 +1796,11 @@ impl Encode for Begin {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Attach {
+pub struct Attach(pub Box<AttachInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttachBuilder(pub Box<AttachInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct AttachInner {
     pub name: ByteString,
     pub handle: Handle,
     pub role: Role,
@@ -1663,64 +1817,145 @@ pub struct Attach {
     pub properties: Option<Fields>,
 }
 impl Attach {
+    pub fn build() -> AttachBuilder {
+        AttachBuilder(Box::new(AttachInner::default()))
+    }
     #[inline]
     pub fn name(&self) -> &ByteString {
-        &self.name
+        &self.0.name
     }
     #[inline]
     pub fn handle(&self) -> Handle {
-        self.handle
+        self.0.handle
     }
     #[inline]
     pub fn role(&self) -> Role {
-        self.role
+        self.0.role
     }
     #[inline]
     pub fn snd_settle_mode(&self) -> SenderSettleMode {
-        self.snd_settle_mode
+        self.0.snd_settle_mode
     }
     #[inline]
     pub fn rcv_settle_mode(&self) -> ReceiverSettleMode {
-        self.rcv_settle_mode
+        self.0.rcv_settle_mode
     }
     #[inline]
     pub fn source(&self) -> Option<&Source> {
-        self.source.as_ref()
+        self.0.source.as_ref()
     }
     #[inline]
     pub fn target(&self) -> Option<&Target> {
-        self.target.as_ref()
+        self.0.target.as_ref()
     }
     #[inline]
     pub fn unsettled(&self) -> Option<&Map> {
-        self.unsettled.as_ref()
+        self.0.unsettled.as_ref()
     }
     #[inline]
     pub fn incomplete_unsettled(&self) -> bool {
-        self.incomplete_unsettled
+        self.0.incomplete_unsettled
     }
     #[inline]
     pub fn initial_delivery_count(&self) -> Option<SequenceNo> {
-        self.initial_delivery_count
+        self.0.initial_delivery_count
     }
     #[inline]
     pub fn max_message_size(&self) -> Option<u64> {
-        self.max_message_size
+        self.0.max_message_size
     }
     #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
-        self.offered_capabilities.as_ref()
+        self.0.offered_capabilities.as_ref()
     }
     #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
-        self.desired_capabilities.as_ref()
+        self.0.desired_capabilities.as_ref()
     }
     #[inline]
     pub fn properties(&self) -> Option<&Fields> {
-        self.properties.as_ref()
+        self.0.properties.as_ref()
+    }
+    pub fn into_inner(self) -> Box<AttachInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+}
+impl AttachBuilder {
+    #[inline]
+    pub fn name(mut self, val: ByteString) -> Self {
+        self.0.name = val;
+        self
+    }
+    #[inline]
+    pub fn handle(mut self, val: Handle) -> Self {
+        self.0.handle = val;
+        self
+    }
+    #[inline]
+    pub fn role(mut self, val: Role) -> Self {
+        self.0.role = val;
+        self
+    }
+    #[inline]
+    pub fn snd_settle_mode(mut self, val: SenderSettleMode) -> Self {
+        self.0.snd_settle_mode = val;
+        self
+    }
+    #[inline]
+    pub fn rcv_settle_mode(mut self, val: ReceiverSettleMode) -> Self {
+        self.0.rcv_settle_mode = val;
+        self
+    }
+    #[inline]
+    pub fn source(mut self, val: Source) -> Self {
+        self.0.source = Some(val);
+        self
+    }
+    #[inline]
+    pub fn target(mut self, val: Target) -> Self {
+        self.0.target = Some(val);
+        self
+    }
+    #[inline]
+    pub fn unsettled(mut self, val: Map) -> Self {
+        self.0.unsettled = Some(val);
+        self
+    }
+    #[inline]
+    pub fn incomplete_unsettled(mut self, val: bool) -> Self {
+        self.0.incomplete_unsettled = val;
+        self
+    }
+    #[inline]
+    pub fn initial_delivery_count(mut self, val: SequenceNo) -> Self {
+        self.0.initial_delivery_count = Some(val);
+        self
+    }
+    #[inline]
+    pub fn max_message_size(mut self, val: u64) -> Self {
+        self.0.max_message_size = Some(val);
+        self
+    }
+    #[inline]
+    pub fn offered_capabilities(mut self, val: Symbols) -> Self {
+        self.0.offered_capabilities = Some(val);
+        self
+    }
+    #[inline]
+    pub fn desired_capabilities(mut self, val: Symbols) -> Self {
+        self.0.desired_capabilities = Some(val);
+        self
+    }
+    #[inline]
+    pub fn properties(mut self, val: Fields) -> Self {
+        self.0.properties = Some(val);
+        self
+    }
+    pub fn finish(self) -> Attach {
+        Attach(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach), AmqpParseError> {
@@ -1858,7 +2093,7 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach), AmqpParseError> 
     }
     Ok((
         remainder,
-        Attach {
+        Attach(Box::new(AttachInner {
             name,
             handle,
             role,
@@ -1873,26 +2108,26 @@ fn decode_attach_inner(input: &[u8]) -> Result<(&[u8], Attach), AmqpParseError> 
             offered_capabilities,
             desired_capabilities,
             properties,
-        },
+        })),
     ))
 }
 fn encoded_size_attach_inner(list: &Attach) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.name.encoded_size()
-        + list.handle.encoded_size()
-        + list.role.encoded_size()
-        + list.snd_settle_mode.encoded_size()
-        + list.rcv_settle_mode.encoded_size()
-        + list.source.encoded_size()
-        + list.target.encoded_size()
-        + list.unsettled.encoded_size()
-        + list.incomplete_unsettled.encoded_size()
-        + list.initial_delivery_count.encoded_size()
-        + list.max_message_size.encoded_size()
-        + list.offered_capabilities.encoded_size()
-        + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.name.encoded_size()
+        + list.0.handle.encoded_size()
+        + list.0.role.encoded_size()
+        + list.0.snd_settle_mode.encoded_size()
+        + list.0.rcv_settle_mode.encoded_size()
+        + list.0.source.encoded_size()
+        + list.0.target.encoded_size()
+        + list.0.unsettled.encoded_size()
+        + list.0.incomplete_unsettled.encoded_size()
+        + list.0.initial_delivery_count.encoded_size()
+        + list.0.max_message_size.encoded_size()
+        + list.0.offered_capabilities.encoded_size()
+        + list.0.desired_capabilities.encoded_size()
+        + list.0.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -1904,20 +2139,20 @@ fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
     Descriptor::Ulong(18).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.name.encoded_size()
-        + list.handle.encoded_size()
-        + list.role.encoded_size()
-        + list.snd_settle_mode.encoded_size()
-        + list.rcv_settle_mode.encoded_size()
-        + list.source.encoded_size()
-        + list.target.encoded_size()
-        + list.unsettled.encoded_size()
-        + list.incomplete_unsettled.encoded_size()
-        + list.initial_delivery_count.encoded_size()
-        + list.max_message_size.encoded_size()
-        + list.offered_capabilities.encoded_size()
-        + list.desired_capabilities.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.name.encoded_size()
+        + list.0.handle.encoded_size()
+        + list.0.role.encoded_size()
+        + list.0.snd_settle_mode.encoded_size()
+        + list.0.rcv_settle_mode.encoded_size()
+        + list.0.source.encoded_size()
+        + list.0.target.encoded_size()
+        + list.0.unsettled.encoded_size()
+        + list.0.incomplete_unsettled.encoded_size()
+        + list.0.initial_delivery_count.encoded_size()
+        + list.0.max_message_size.encoded_size()
+        + list.0.offered_capabilities.encoded_size()
+        + list.0.desired_capabilities.encoded_size()
+        + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -1927,20 +2162,20 @@ fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Attach::FIELD_COUNT as u8);
     }
-    list.name.encode(buf);
-    list.handle.encode(buf);
-    list.role.encode(buf);
-    list.snd_settle_mode.encode(buf);
-    list.rcv_settle_mode.encode(buf);
-    list.source.encode(buf);
-    list.target.encode(buf);
-    list.unsettled.encode(buf);
-    list.incomplete_unsettled.encode(buf);
-    list.initial_delivery_count.encode(buf);
-    list.max_message_size.encode(buf);
-    list.offered_capabilities.encode(buf);
-    list.desired_capabilities.encode(buf);
-    list.properties.encode(buf);
+    list.0.name.encode(buf);
+    list.0.handle.encode(buf);
+    list.0.role.encode(buf);
+    list.0.snd_settle_mode.encode(buf);
+    list.0.rcv_settle_mode.encode(buf);
+    list.0.source.encode(buf);
+    list.0.target.encode(buf);
+    list.0.unsettled.encode(buf);
+    list.0.incomplete_unsettled.encode(buf);
+    list.0.initial_delivery_count.encode(buf);
+    list.0.max_message_size.encode(buf);
+    list.0.offered_capabilities.encode(buf);
+    list.0.desired_capabilities.encode(buf);
+    list.0.properties.encode(buf);
 }
 impl DecodeFormatted for Attach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -1951,7 +2186,7 @@ impl DecodeFormatted for Attach {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:attach:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_attach_inner(input)
         }
@@ -1966,7 +2201,11 @@ impl Encode for Attach {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Flow {
+pub struct Flow(pub Box<FlowInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlowBuilder(pub Box<FlowInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct FlowInner {
     pub next_incoming_id: Option<TransferNumber>,
     pub incoming_window: u32,
     pub next_outgoing_id: TransferNumber,
@@ -1980,52 +2219,118 @@ pub struct Flow {
     pub properties: Option<Fields>,
 }
 impl Flow {
+    pub fn build() -> FlowBuilder {
+        FlowBuilder(Box::new(FlowInner::default()))
+    }
     #[inline]
     pub fn next_incoming_id(&self) -> Option<TransferNumber> {
-        self.next_incoming_id
+        self.0.next_incoming_id
     }
     #[inline]
     pub fn incoming_window(&self) -> u32 {
-        self.incoming_window
+        self.0.incoming_window
     }
     #[inline]
     pub fn next_outgoing_id(&self) -> TransferNumber {
-        self.next_outgoing_id
+        self.0.next_outgoing_id
     }
     #[inline]
     pub fn outgoing_window(&self) -> u32 {
-        self.outgoing_window
+        self.0.outgoing_window
     }
     #[inline]
     pub fn handle(&self) -> Option<Handle> {
-        self.handle
+        self.0.handle
     }
     #[inline]
     pub fn delivery_count(&self) -> Option<SequenceNo> {
-        self.delivery_count
+        self.0.delivery_count
     }
     #[inline]
     pub fn link_credit(&self) -> Option<u32> {
-        self.link_credit
+        self.0.link_credit
     }
     #[inline]
     pub fn available(&self) -> Option<u32> {
-        self.available
+        self.0.available
     }
     #[inline]
     pub fn drain(&self) -> bool {
-        self.drain
+        self.0.drain
     }
     #[inline]
     pub fn echo(&self) -> bool {
-        self.echo
+        self.0.echo
     }
     #[inline]
     pub fn properties(&self) -> Option<&Fields> {
-        self.properties.as_ref()
+        self.0.properties.as_ref()
+    }
+    pub fn into_inner(self) -> Box<FlowInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+}
+impl FlowBuilder {
+    #[inline]
+    pub fn next_incoming_id(mut self, val: TransferNumber) -> Self {
+        self.0.next_incoming_id = Some(val);
+        self
+    }
+    #[inline]
+    pub fn incoming_window(mut self, val: u32) -> Self {
+        self.0.incoming_window = val;
+        self
+    }
+    #[inline]
+    pub fn next_outgoing_id(mut self, val: TransferNumber) -> Self {
+        self.0.next_outgoing_id = val;
+        self
+    }
+    #[inline]
+    pub fn outgoing_window(mut self, val: u32) -> Self {
+        self.0.outgoing_window = val;
+        self
+    }
+    #[inline]
+    pub fn handle(mut self, val: Handle) -> Self {
+        self.0.handle = Some(val);
+        self
+    }
+    #[inline]
+    pub fn delivery_count(mut self, val: SequenceNo) -> Self {
+        self.0.delivery_count = Some(val);
+        self
+    }
+    #[inline]
+    pub fn link_credit(mut self, val: u32) -> Self {
+        self.0.link_credit = Some(val);
+        self
+    }
+    #[inline]
+    pub fn available(mut self, val: u32) -> Self {
+        self.0.available = Some(val);
+        self
+    }
+    #[inline]
+    pub fn drain(mut self, val: bool) -> Self {
+        self.0.drain = val;
+        self
+    }
+    #[inline]
+    pub fn echo(mut self, val: bool) -> Self {
+        self.0.echo = val;
+        self
+    }
+    #[inline]
+    pub fn properties(mut self, val: Fields) -> Self {
+        self.0.properties = Some(val);
+        self
+    }
+    pub fn finish(self) -> Flow {
+        Flow(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow), AmqpParseError> {
@@ -2136,7 +2441,7 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow), AmqpParseError> {
     }
     Ok((
         remainder,
-        Flow {
+        Flow(Box::new(FlowInner {
             next_incoming_id,
             incoming_window,
             next_outgoing_id,
@@ -2148,23 +2453,23 @@ fn decode_flow_inner(input: &[u8]) -> Result<(&[u8], Flow), AmqpParseError> {
             drain,
             echo,
             properties,
-        },
+        })),
     ))
 }
 fn encoded_size_flow_inner(list: &Flow) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.next_incoming_id.encoded_size()
-        + list.incoming_window.encoded_size()
-        + list.next_outgoing_id.encoded_size()
-        + list.outgoing_window.encoded_size()
-        + list.handle.encoded_size()
-        + list.delivery_count.encoded_size()
-        + list.link_credit.encoded_size()
-        + list.available.encoded_size()
-        + list.drain.encoded_size()
-        + list.echo.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.next_incoming_id.encoded_size()
+        + list.0.incoming_window.encoded_size()
+        + list.0.next_outgoing_id.encoded_size()
+        + list.0.outgoing_window.encoded_size()
+        + list.0.handle.encoded_size()
+        + list.0.delivery_count.encoded_size()
+        + list.0.link_credit.encoded_size()
+        + list.0.available.encoded_size()
+        + list.0.drain.encoded_size()
+        + list.0.echo.encoded_size()
+        + list.0.properties.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2176,17 +2481,17 @@ fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
     Descriptor::Ulong(19).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.next_incoming_id.encoded_size()
-        + list.incoming_window.encoded_size()
-        + list.next_outgoing_id.encoded_size()
-        + list.outgoing_window.encoded_size()
-        + list.handle.encoded_size()
-        + list.delivery_count.encoded_size()
-        + list.link_credit.encoded_size()
-        + list.available.encoded_size()
-        + list.drain.encoded_size()
-        + list.echo.encoded_size()
-        + list.properties.encoded_size();
+        + list.0.next_incoming_id.encoded_size()
+        + list.0.incoming_window.encoded_size()
+        + list.0.next_outgoing_id.encoded_size()
+        + list.0.outgoing_window.encoded_size()
+        + list.0.handle.encoded_size()
+        + list.0.delivery_count.encoded_size()
+        + list.0.link_credit.encoded_size()
+        + list.0.available.encoded_size()
+        + list.0.drain.encoded_size()
+        + list.0.echo.encoded_size()
+        + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -2196,17 +2501,17 @@ fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Flow::FIELD_COUNT as u8);
     }
-    list.next_incoming_id.encode(buf);
-    list.incoming_window.encode(buf);
-    list.next_outgoing_id.encode(buf);
-    list.outgoing_window.encode(buf);
-    list.handle.encode(buf);
-    list.delivery_count.encode(buf);
-    list.link_credit.encode(buf);
-    list.available.encode(buf);
-    list.drain.encode(buf);
-    list.echo.encode(buf);
-    list.properties.encode(buf);
+    list.0.next_incoming_id.encode(buf);
+    list.0.incoming_window.encode(buf);
+    list.0.next_outgoing_id.encode(buf);
+    list.0.outgoing_window.encode(buf);
+    list.0.handle.encode(buf);
+    list.0.delivery_count.encode(buf);
+    list.0.link_credit.encode(buf);
+    list.0.available.encode(buf);
+    list.0.drain.encode(buf);
+    list.0.echo.encode(buf);
+    list.0.properties.encode(buf);
 }
 impl DecodeFormatted for Flow {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2217,7 +2522,7 @@ impl DecodeFormatted for Flow {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:flow:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_flow_inner(input)
         }
@@ -2232,7 +2537,11 @@ impl Encode for Flow {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Transfer {
+pub struct Transfer(pub Box<TransferInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransferBuilder(pub Box<TransferInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct TransferInner {
     pub handle: Handle,
     pub delivery_id: Option<DeliveryNumber>,
     pub delivery_tag: Option<DeliveryTag>,
@@ -2247,56 +2556,127 @@ pub struct Transfer {
     pub body: Option<TransferBody>,
 }
 impl Transfer {
+    pub fn build() -> TransferBuilder {
+        TransferBuilder(Box::new(TransferInner::default()))
+    }
     #[inline]
     pub fn handle(&self) -> Handle {
-        self.handle
+        self.0.handle
     }
     #[inline]
     pub fn delivery_id(&self) -> Option<DeliveryNumber> {
-        self.delivery_id
+        self.0.delivery_id
     }
     #[inline]
     pub fn delivery_tag(&self) -> Option<&DeliveryTag> {
-        self.delivery_tag.as_ref()
+        self.0.delivery_tag.as_ref()
     }
     #[inline]
     pub fn message_format(&self) -> Option<MessageFormat> {
-        self.message_format
+        self.0.message_format
     }
     #[inline]
     pub fn settled(&self) -> Option<bool> {
-        self.settled
+        self.0.settled
     }
     #[inline]
     pub fn more(&self) -> bool {
-        self.more
+        self.0.more
     }
     #[inline]
     pub fn rcv_settle_mode(&self) -> Option<ReceiverSettleMode> {
-        self.rcv_settle_mode
+        self.0.rcv_settle_mode
     }
     #[inline]
     pub fn state(&self) -> Option<&DeliveryState> {
-        self.state.as_ref()
+        self.0.state.as_ref()
     }
     #[inline]
     pub fn resume(&self) -> bool {
-        self.resume
+        self.0.resume
     }
     #[inline]
     pub fn aborted(&self) -> bool {
-        self.aborted
+        self.0.aborted
     }
     #[inline]
     pub fn batchable(&self) -> bool {
-        self.batchable
+        self.0.batchable
     }
     #[inline]
     pub fn body(&self) -> Option<&TransferBody> {
-        self.body.as_ref()
+        self.0.body.as_ref()
+    }
+    pub fn into_inner(self) -> Box<TransferInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+}
+impl TransferBuilder {
+    #[inline]
+    pub fn handle(mut self, val: Handle) -> Self {
+        self.0.handle = val;
+        self
+    }
+    #[inline]
+    pub fn delivery_id(mut self, val: DeliveryNumber) -> Self {
+        self.0.delivery_id = Some(val);
+        self
+    }
+    #[inline]
+    pub fn delivery_tag(mut self, val: DeliveryTag) -> Self {
+        self.0.delivery_tag = Some(val);
+        self
+    }
+    #[inline]
+    pub fn message_format(mut self, val: MessageFormat) -> Self {
+        self.0.message_format = Some(val);
+        self
+    }
+    #[inline]
+    pub fn settled(mut self, val: bool) -> Self {
+        self.0.settled = Some(val);
+        self
+    }
+    #[inline]
+    pub fn more(mut self, val: bool) -> Self {
+        self.0.more = val;
+        self
+    }
+    #[inline]
+    pub fn rcv_settle_mode(mut self, val: ReceiverSettleMode) -> Self {
+        self.0.rcv_settle_mode = Some(val);
+        self
+    }
+    #[inline]
+    pub fn state(mut self, val: DeliveryState) -> Self {
+        self.0.state = Some(val);
+        self
+    }
+    #[inline]
+    pub fn resume(mut self, val: bool) -> Self {
+        self.0.resume = val;
+        self
+    }
+    #[inline]
+    pub fn aborted(mut self, val: bool) -> Self {
+        self.0.aborted = val;
+        self
+    }
+    #[inline]
+    pub fn batchable(mut self, val: bool) -> Self {
+        self.0.batchable = val;
+        self
+    }
+    #[inline]
+    pub fn body(mut self, body: TransferBody) -> Self {
+        self.0.body = Some(body);
+        self
+    }
+    pub fn finish(self) -> Transfer {
+        Transfer(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseError> {
@@ -2414,7 +2794,7 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseErr
     };
     Ok((
         remainder,
-        Transfer {
+        Transfer(Box::new(TransferInner {
             handle,
             delivery_id,
             delivery_tag,
@@ -2427,46 +2807,46 @@ fn decode_transfer_inner(input: &[u8]) -> Result<(&[u8], Transfer), AmqpParseErr
             aborted,
             batchable,
             body,
-        },
+        })),
     ))
 }
 fn encoded_size_transfer_inner(list: &Transfer) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.handle.encoded_size()
-        + list.delivery_id.encoded_size()
-        + list.delivery_tag.encoded_size()
-        + list.message_format.encoded_size()
-        + list.settled.encoded_size()
-        + list.more.encoded_size()
-        + list.rcv_settle_mode.encoded_size()
-        + list.state.encoded_size()
-        + list.resume.encoded_size()
-        + list.aborted.encoded_size()
-        + list.batchable.encoded_size();
+        + list.0.handle.encoded_size()
+        + list.0.delivery_id.encoded_size()
+        + list.0.delivery_tag.encoded_size()
+        + list.0.message_format.encoded_size()
+        + list.0.settled.encoded_size()
+        + list.0.more.encoded_size()
+        + list.0.rcv_settle_mode.encoded_size()
+        + list.0.state.encoded_size()
+        + list.0.resume.encoded_size()
+        + list.0.aborted.encoded_size()
+        + list.0.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
     } else {
         6
     }) + content_size
-        + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
+        + list.0.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
 fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
     Descriptor::Ulong(20).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.handle.encoded_size()
-        + list.delivery_id.encoded_size()
-        + list.delivery_tag.encoded_size()
-        + list.message_format.encoded_size()
-        + list.settled.encoded_size()
-        + list.more.encoded_size()
-        + list.rcv_settle_mode.encoded_size()
-        + list.state.encoded_size()
-        + list.resume.encoded_size()
-        + list.aborted.encoded_size()
-        + list.batchable.encoded_size();
+        + list.0.handle.encoded_size()
+        + list.0.delivery_id.encoded_size()
+        + list.0.delivery_tag.encoded_size()
+        + list.0.message_format.encoded_size()
+        + list.0.settled.encoded_size()
+        + list.0.more.encoded_size()
+        + list.0.rcv_settle_mode.encoded_size()
+        + list.0.state.encoded_size()
+        + list.0.resume.encoded_size()
+        + list.0.aborted.encoded_size()
+        + list.0.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -2476,18 +2856,18 @@ fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Transfer::FIELD_COUNT as u8);
     }
-    list.handle.encode(buf);
-    list.delivery_id.encode(buf);
-    list.delivery_tag.encode(buf);
-    list.message_format.encode(buf);
-    list.settled.encode(buf);
-    list.more.encode(buf);
-    list.rcv_settle_mode.encode(buf);
-    list.state.encode(buf);
-    list.resume.encode(buf);
-    list.aborted.encode(buf);
-    list.batchable.encode(buf);
-    if let Some(ref body) = list.body {
+    list.0.handle.encode(buf);
+    list.0.delivery_id.encode(buf);
+    list.0.delivery_tag.encode(buf);
+    list.0.message_format.encode(buf);
+    list.0.settled.encode(buf);
+    list.0.more.encode(buf);
+    list.0.rcv_settle_mode.encode(buf);
+    list.0.state.encode(buf);
+    list.0.resume.encode(buf);
+    list.0.aborted.encode(buf);
+    list.0.batchable.encode(buf);
+    if let Some(body) = list.body() {
         body.encode(buf)
     }
 }
@@ -2500,7 +2880,7 @@ impl DecodeFormatted for Transfer {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:transfer:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_transfer_inner(input)
         }
@@ -2515,7 +2895,11 @@ impl Encode for Transfer {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Disposition {
+pub struct Disposition(pub Box<DispositionInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct DispositionBuilder(pub Box<DispositionInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct DispositionInner {
     pub role: Role,
     pub first: DeliveryNumber,
     pub last: Option<DeliveryNumber>,
@@ -2524,32 +2908,73 @@ pub struct Disposition {
     pub batchable: bool,
 }
 impl Disposition {
+    pub fn build() -> DispositionBuilder {
+        DispositionBuilder(Box::new(DispositionInner::default()))
+    }
     #[inline]
     pub fn role(&self) -> Role {
-        self.role
+        self.0.role
     }
     #[inline]
     pub fn first(&self) -> DeliveryNumber {
-        self.first
+        self.0.first
     }
     #[inline]
     pub fn last(&self) -> Option<DeliveryNumber> {
-        self.last
+        self.0.last
     }
     #[inline]
     pub fn settled(&self) -> bool {
-        self.settled
+        self.0.settled
     }
     #[inline]
     pub fn state(&self) -> Option<&DeliveryState> {
-        self.state.as_ref()
+        self.0.state.as_ref()
     }
     #[inline]
     pub fn batchable(&self) -> bool {
-        self.batchable
+        self.0.batchable
+    }
+    pub fn into_inner(self) -> Box<DispositionInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1;
+}
+impl DispositionBuilder {
+    #[inline]
+    pub fn role(mut self, val: Role) -> Self {
+        self.0.role = val;
+        self
+    }
+    #[inline]
+    pub fn first(mut self, val: DeliveryNumber) -> Self {
+        self.0.first = val;
+        self
+    }
+    #[inline]
+    pub fn last(mut self, val: DeliveryNumber) -> Self {
+        self.0.last = Some(val);
+        self
+    }
+    #[inline]
+    pub fn settled(mut self, val: bool) -> Self {
+        self.0.settled = val;
+        self
+    }
+    #[inline]
+    pub fn state(mut self, val: DeliveryState) -> Self {
+        self.0.state = Some(val);
+        self
+    }
+    #[inline]
+    pub fn batchable(mut self, val: bool) -> Self {
+        self.0.batchable = val;
+        self
+    }
+    pub fn finish(self) -> Disposition {
+        Disposition(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition), AmqpParseError> {
@@ -2615,25 +3040,25 @@ fn decode_disposition_inner(input: &[u8]) -> Result<(&[u8], Disposition), AmqpPa
     }
     Ok((
         remainder,
-        Disposition {
+        Disposition(Box::new(DispositionInner {
             role,
             first,
             last,
             settled,
             state,
             batchable,
-        },
+        })),
     ))
 }
 fn encoded_size_disposition_inner(list: &Disposition) -> usize {
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.role.encoded_size()
-        + list.first.encoded_size()
-        + list.last.encoded_size()
-        + list.settled.encoded_size()
-        + list.state.encoded_size()
-        + list.batchable.encoded_size();
+        + list.0.role.encoded_size()
+        + list.0.first.encoded_size()
+        + list.0.last.encoded_size()
+        + list.0.settled.encoded_size()
+        + list.0.state.encoded_size()
+        + list.0.batchable.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2645,12 +3070,12 @@ fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
     Descriptor::Ulong(21).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
-        + list.role.encoded_size()
-        + list.first.encoded_size()
-        + list.last.encoded_size()
-        + list.settled.encoded_size()
-        + list.state.encoded_size()
-        + list.batchable.encoded_size();
+        + list.0.role.encoded_size()
+        + list.0.first.encoded_size()
+        + list.0.last.encoded_size()
+        + list.0.settled.encoded_size()
+        + list.0.state.encoded_size()
+        + list.0.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -2660,12 +3085,12 @@ fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Disposition::FIELD_COUNT as u8);
     }
-    list.role.encode(buf);
-    list.first.encode(buf);
-    list.last.encode(buf);
-    list.settled.encode(buf);
-    list.state.encode(buf);
-    list.batchable.encode(buf);
+    list.0.role.encode(buf);
+    list.0.first.encode(buf);
+    list.0.last.encode(buf);
+    list.0.settled.encode(buf);
+    list.0.state.encode(buf);
+    list.0.batchable.encode(buf);
 }
 impl DecodeFormatted for Disposition {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2676,7 +3101,7 @@ impl DecodeFormatted for Disposition {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:disposition:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_disposition_inner(input)
         }
@@ -2691,26 +3116,56 @@ impl Encode for Disposition {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Detach {
+pub struct Detach(pub Box<DetachInner>);
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetachBuilder(pub Box<DetachInner>);
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct DetachInner {
     pub handle: Handle,
     pub closed: bool,
     pub error: Option<Error>,
 }
 impl Detach {
+    pub fn build() -> DetachBuilder {
+        DetachBuilder(Box::new(DetachInner::default()))
+    }
     #[inline]
     pub fn handle(&self) -> Handle {
-        self.handle
+        self.0.handle
     }
     #[inline]
     pub fn closed(&self) -> bool {
-        self.closed
+        self.0.closed
     }
     #[inline]
     pub fn error(&self) -> Option<&Error> {
-        self.error.as_ref()
+        self.0.error.as_ref()
+    }
+    pub fn into_inner(self) -> Box<DetachInner> {
+        self.0
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
+}
+impl DetachBuilder {
+    #[inline]
+    pub fn handle(mut self, val: Handle) -> Self {
+        self.0.handle = val;
+        self
+    }
+    #[inline]
+    pub fn closed(mut self, val: bool) -> Self {
+        self.0.closed = val;
+        self
+    }
+    #[inline]
+    pub fn error(mut self, val: Error) -> Self {
+        self.0.error = Some(val);
+        self
+    }
+    pub fn finish(self) -> Detach {
+        Detach(self.0)
+    }
 }
 #[allow(unused_mut)]
 fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach), AmqpParseError> {
@@ -2749,17 +3204,19 @@ fn decode_detach_inner(input: &[u8]) -> Result<(&[u8], Detach), AmqpParseError> 
     }
     Ok((
         remainder,
-        Detach {
+        Detach(Box::new(DetachInner {
             handle,
             closed,
             error,
-        },
+        })),
     ))
 }
 fn encoded_size_detach_inner(list: &Detach) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size =
-        0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size = 0
+        + list.0.handle.encoded_size()
+        + list.0.closed.encoded_size()
+        + list.0.error.encoded_size();
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize {
         12
@@ -2770,8 +3227,10 @@ fn encoded_size_detach_inner(list: &Detach) -> usize {
 fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
     Descriptor::Ulong(22).encode(buf);
     #[allow(clippy::identity_op)]
-    let content_size =
-        0 + list.handle.encoded_size() + list.closed.encoded_size() + list.error.encoded_size();
+    let content_size = 0
+        + list.0.handle.encoded_size()
+        + list.0.closed.encoded_size()
+        + list.0.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -2781,9 +3240,9 @@ fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
         buf.put_u8((content_size + 1) as u8);
         buf.put_u8(Detach::FIELD_COUNT as u8);
     }
-    list.handle.encode(buf);
-    list.closed.encode(buf);
-    list.error.encode(buf);
+    list.0.handle.encode(buf);
+    list.0.closed.encode(buf);
+    list.0.error.encode(buf);
 }
 impl DecodeFormatted for Detach {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
@@ -2794,7 +3253,7 @@ impl DecodeFormatted for Detach {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:detach:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_detach_inner(input)
         }
@@ -2873,7 +3332,7 @@ impl DecodeFormatted for End {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:end:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_end_inner(input)
         }
@@ -2952,7 +3411,7 @@ impl DecodeFormatted for Close {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:close:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_close_inner(input)
         }
@@ -3038,7 +3497,7 @@ impl DecodeFormatted for SaslMechanisms {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:sasl-mechanisms:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_sasl_mechanisms_inner(input)
         }
@@ -3160,7 +3619,7 @@ impl DecodeFormatted for SaslInit {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:sasl-init:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_sasl_init_inner(input)
         }
@@ -3239,7 +3698,7 @@ impl DecodeFormatted for SaslChallenge {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:sasl-challenge:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_sasl_challenge_inner(input)
         }
@@ -3318,7 +3777,7 @@ impl DecodeFormatted for SaslResponse {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:sasl-response:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_sasl_response_inner(input)
         }
@@ -3418,7 +3877,7 @@ impl DecodeFormatted for SaslOutcome {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:sasl-outcome:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_sasl_outcome_inner(input)
         }
@@ -3684,7 +4143,7 @@ impl DecodeFormatted for Source {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:source:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_source_inner(input)
         }
@@ -3878,7 +4337,7 @@ impl DecodeFormatted for Target {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:target:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_target_inner(input)
         }
@@ -4036,7 +4495,7 @@ impl DecodeFormatted for Header {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:header:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_header_inner(input)
         }
@@ -4338,7 +4797,7 @@ impl DecodeFormatted for Properties {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:properties:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_properties_inner(input)
         }
@@ -4438,7 +4897,7 @@ impl DecodeFormatted for Received {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:received:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_received_inner(input)
         }
@@ -4500,7 +4959,7 @@ impl DecodeFormatted for Accepted {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:accepted:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_accepted_inner(input)
         }
@@ -4579,7 +5038,7 @@ impl DecodeFormatted for Rejected {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:rejected:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_rejected_inner(input)
         }
@@ -4641,7 +5100,7 @@ impl DecodeFormatted for Released {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:released:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_released_inner(input)
         }
@@ -4659,7 +5118,7 @@ impl Encode for Released {
 pub struct Modified {
     pub delivery_failed: Option<bool>,
     pub undeliverable_here: Option<bool>,
-    pub message_annotations: Option<Fields>,
+    pub message_annotations: Option<FieldsVec>,
 }
 impl Modified {
     #[inline]
@@ -4671,7 +5130,7 @@ impl Modified {
         self.undeliverable_here
     }
     #[inline]
-    pub fn message_annotations(&self) -> Option<&Fields> {
+    pub fn message_annotations(&self) -> Option<&FieldsVec> {
         self.message_annotations.as_ref()
     }
     #[allow(clippy::identity_op)]
@@ -4703,9 +5162,9 @@ fn decode_modified_inner(input: &[u8]) -> Result<(&[u8], Modified), AmqpParseErr
     } else {
         undeliverable_here = None;
     }
-    let message_annotations: Option<Fields>;
+    let message_annotations: Option<FieldsVec>;
     if count > 0 {
-        let decoded = Option::<Fields>::decode(input)?;
+        let decoded = Option::<FieldsVec>::decode(input)?;
         input = decoded.0;
         message_annotations = decoded.1;
         count -= 1;
@@ -4763,7 +5222,7 @@ impl DecodeFormatted for Modified {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"amqp:modified:list",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_modified_inner(input)
         }

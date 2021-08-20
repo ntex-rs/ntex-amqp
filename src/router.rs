@@ -5,7 +5,7 @@ use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, 
 use ntex::util::{Either, HashMap, Ready};
 
 use crate::codec::protocol::{
-    DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
+    self as codec, DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
 };
 use crate::error::LinkError;
 use crate::types::{Link, Message, Outcome};
@@ -92,8 +92,7 @@ impl<S: 'static> Service for RouterService<S> {
             Message::Attached(link) => {
                 let path = link
                     .frame()
-                    .target
-                    .as_ref()
+                    .target()
                     .and_then(|target| target.address.as_ref().cloned());
 
                 if let Some(path) = path {
@@ -178,7 +177,7 @@ impl<S> Future for RouterServiceResponse<S> {
                             Poll::Pending => {
                                 log::trace!(
                                     "Handler service is not ready for {}",
-                                    this.link.frame().target.as_ref().map_or("", |t| t
+                                    this.link.frame().target().map_or("", |t| t
                                         .address
                                         .as_ref()
                                         .map_or("", AsRef::as_ref))
@@ -195,7 +194,7 @@ impl<S> Future for RouterServiceResponse<S> {
                         }
 
                         let tr = tr.take().unwrap();
-                        let delivery_id = match tr.delivery_id {
+                        let delivery_id = match tr.delivery_id() {
                             None => {
                                 // #2.7.5 delivery_id MUST be set. batching is handled on lower level
                                 let _ = this.link.close_with_error(
@@ -227,8 +226,7 @@ impl<S> Future for RouterServiceResponse<S> {
                                 outcome,
                                 this.link
                                     .frame()
-                                    .target
-                                    .as_ref()
+                                    .target()
                                     .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
                             );
                             settle(&mut this.link, delivery_id, outcome.into_delivery_state());
@@ -256,8 +254,7 @@ impl<S> Future for RouterServiceResponse<S> {
                             "Handler service is created for {}",
                             this.link
                                 .frame()
-                                .target
-                                .as_ref()
+                                .target()
                                 .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
                         );
                         this.inner
@@ -275,8 +272,7 @@ impl<S> Future for RouterServiceResponse<S> {
                             "Failed to create link service for {} err: {:?}",
                             this.link
                                 .frame()
-                                .target
-                                .as_ref()
+                                .target()
                                 .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref)),
                             e
                         );
@@ -290,14 +286,14 @@ impl<S> Future for RouterServiceResponse<S> {
 }
 
 fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
-    let disposition = Disposition {
+    let disposition = Disposition(Box::new(codec::DispositionInner {
         state: Some(state),
         role: Role::Receiver,
         first: id,
         last: None,
         settled: true,
         batchable: false,
-    };
+    }));
     link.send_disposition(disposition);
 }
 

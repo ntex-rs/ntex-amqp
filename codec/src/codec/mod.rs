@@ -6,7 +6,7 @@ use crate::error::AmqpParseError;
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
         if $buf.len() < $size {
-            return Err(AmqpParseError::Incomplete(Some($size)));
+            return Err(AmqpParseError::Incomplete($size));
         }
     };
 }

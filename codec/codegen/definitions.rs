@@ -97,7 +97,7 @@ impl Decode for Frame {
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => {
                     decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
                 }
-                _ => Err(AmqpParseError::InvalidDescriptor(descriptor)),
+                _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
             }
         }
     }
@@ -154,7 +154,7 @@ impl DecodeFormatted for {{provide.name}} {
             {{#each provide.options as |option|}}
             Descriptor::Symbol(ref a) if a.as_str() == "{{option.descriptor.name}}" => decode_{{snake option.ty}}_inner(input).map(|(i, r)| (i, {{provide.name}}::{{option.ty}}(r))),
             {{/each}}
-            _ => Err(AmqpParseError::InvalidDescriptor(descriptor))
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         }
     }
 }
@@ -280,6 +280,27 @@ fn encode_{{snake dr.name}}_inner(dr: &{{dr.name}}, buf: &mut BytesMut) {
 {{/each}}
 
 {{#each defs.lists as |list|}}
+{{#if list.boxed}}
+#[derive(Clone, Debug, PartialEq)]
+pub struct {{list.name}}(pub Box<{{list.name}}Inner>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct {{list.name}}Builder(pub Box<{{list.name}}Inner>);
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct {{list.name}}Inner {
+    {{#each list.fields as |field|}}
+    {{#if field.optional}}
+    pub {{field.name}}: Option<{{{field.ty}}}>,
+    {{else}}
+    pub {{field.name}}: {{{field.ty}}},
+    {{/if}}
+    {{/each}}
+    {{#if list.transfer}}
+    pub body: Option<TransferBody>,
+    {{/if}}
+}
+{{else}}
 #[derive(Clone, Debug, PartialEq)]
 pub struct {{list.name}} {
     {{#each list.fields as |field|}}
@@ -293,38 +314,45 @@ pub struct {{list.name}} {
     pub body: Option<TransferBody>,
     {{/if}}
 }
+{{/if}}
 
 impl {{list.name}} {
+    {{#if list.boxed}}
+    pub fn build() -> {{list.name}}Builder {
+        {{list.name}}Builder(Box::new({{list.name}}Inner::default()))
+    }
+    {{/if}}
+
     {{#each list.fields as |field|}}
         {{#if field.is_str}}
             {{#if field.optional}}
                 #[inline]
                 pub fn {{field.name}}(&self) -> Option<&str> {
-                    match self.{{field.name}} {
+                    match self.{{list.inner}}{{field.name}} {
                         None => None,
                         Some(ref s) => Some(s.as_str())
                     }
                 }
             {{else}}
                 #[inline]
-                pub fn {{field.name}}(&self) -> &str { self.{{field.name}}.as_str() }
+                pub fn {{field.name}}(&self) -> &str { self.{{list.inner}}{{field.name}}.as_str() }
             {{/if}}
         {{else}}
             {{#if field.is_ref}}
                 {{#if field.optional}}
                    #[inline]
-                    pub fn {{field.name}}(&self) -> Option<&{{{field.ty}}}> { self.{{field.name}}.as_ref() }
+                    pub fn {{field.name}}(&self) -> Option<&{{{field.ty}}}> { self.{{list.inner}}{{field.name}}.as_ref() }
                 {{else}}
                     #[inline]
-                    pub fn {{field.name}}(&self) -> &{{{field.ty}}} { &self.{{field.name}} }
+                    pub fn {{field.name}}(&self) -> &{{{field.ty}}} { &self.{{list.inner}}{{field.name}} }
                 {{/if}}
             {{else}}
                 {{#if field.optional}}
                     #[inline]
-                    pub fn {{field.name}}(&self) -> Option<{{{field.ty}}}> { self.{{field.name}} }
+                    pub fn {{field.name}}(&self) -> Option<{{{field.ty}}}> { self.{{list.inner}}{{field.name}} }
                 {{else}}
                    #[inline]
-                    pub fn {{field.name}}(&self) -> {{{field.ty}}} { self.{{field.name}} }
+                    pub fn {{field.name}}(&self) -> {{{field.ty}}} { self.{{list.inner}}{{field.name}} }
                 {{/if}}
             {{/if}}
         {{/if}}
@@ -333,13 +361,48 @@ impl {{list.name}} {
     {{#if list.transfer}}
     #[inline]
     pub fn body(&self) -> Option<&TransferBody> {
-        self.body.as_ref()
+        self.{{list.inner}}body.as_ref()
+    }
+    {{/if}}
+
+    {{#if list.boxed}}
+    pub fn into_inner(self) -> Box<{{list.name}}Inner> {
+        self.0
     }
     {{/if}}
 
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 {{#each list.fields as |field|}} + 1{{/each}};
 }
+
+{{#if list.boxed}}
+impl {{list.name}}Builder {
+    {{#each list.fields as |field|}}
+    #[inline]
+    pub fn {{field.name}}(mut self, val: {{field.ty}}) -> Self {
+        {{#if field.optional}}
+        self.0.{{field.name}} = Some(val);
+        {{else}}
+        self.0.{{field.name}} = val;
+        {{/if}}
+        self
+    }
+    {{/each}}
+
+    {{#if list.transfer}}
+    #[inline]
+    pub fn body(mut self, body: TransferBody) -> Self {
+        self.0.body = Some(body);
+        self
+    }
+    {{/if}}
+
+    pub fn finish(self) -> {{list.name}} {
+        {{list.name}}(self.0)
+    }
+}
+{{/if}}
+
 #[allow(unused_mut)]
 fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}}), AmqpParseError> {
     let (input, format) = decode_format_code(input)?;
@@ -397,6 +460,16 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
         };
     {{/if}}
 
+    {{#if list.boxed}}
+    Ok((remainder, {{list.name}}(Box::new({{list.name}}Inner {
+    {{#each list.fields as |field|}}
+    {{field.name}},
+    {{/each}}
+        {{#if list.transfer}}
+        body
+        {{/if}}
+    }))))
+    {{else}}
     Ok((remainder, {{list.name}} {
     {{#each list.fields as |field|}}
     {{field.name}},
@@ -405,23 +478,24 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
         body
         {{/if}}
     }))
+    {{/if}}
 }
 
 fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
     #[allow(clippy::identity_op)]
-    let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
+    let content_size = 0 {{#each list.fields as |field|}} + list.{{list.inner}}{{field.name}}.encoded_size(){{/each}};
     // header: 0x00 0x53 <descriptor code> format_code size count
     (if content_size + 1 > u8::MAX as usize { 12 } else { 6 })
         + content_size
 
     {{#if list.transfer}}
-    + list.body.as_ref().map(|b| b.len()).unwrap_or(0)
+    + list.{{list.inner}}body.as_ref().map(|b| b.len()).unwrap_or(0)
     {{/if}}
 }
 fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
     Descriptor::Ulong({{list.descriptor.code}}).encode(buf);
     #[allow(clippy::identity_op)]
-    let content_size = 0 {{#each list.fields as |field|}} + list.{{field.name}}.encoded_size(){{/each}};
+    let content_size = 0 {{#each list.fields as |field|}} + list.{{list.inner}}{{field.name}}.encoded_size(){{/each}};
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
         buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
@@ -433,10 +507,10 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
         buf.put_u8({{list.name}}::FIELD_COUNT as u8);
     }
     {{#each list.fields as |field|}}
-    list.{{field.name}}.encode(buf);
+    list.{{list.inner}}{{field.name}}.encode(buf);
     {{/each}}
     {{#if list.transfer}}
-    if let Some(ref body) = list.body {
+    if let Some(body) = list.body() {
         body.encode(buf)
     }
     {{/if}}
@@ -451,7 +525,7 @@ impl DecodeFormatted for {{list.name}} {
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"{{list.descriptor.name}}",
         };
         if !is_match {
-            Err(AmqpParseError::InvalidDescriptor(descriptor))
+            Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         } else {
             decode_{{snake list.name}}_inner(input)
         }

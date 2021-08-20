@@ -19,4 +19,4 @@ pub use self::io::{AmqpCodec, ProtocolIdCodec};
 pub use self::message::{Message, MessageBody};
 
 /// A `HashMap` using a ahash::RandomState hasher.
-type HashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;
+type HashMap<K, V> = std::collections::HashMap<K, V, fxhash::FxBuildHasher>;

@@ -4,7 +4,7 @@ use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::framed::State as IoState;
 use ntex::util::{HashMap, Ready};
 
-use crate::codec::protocol::{Begin, Close, End, Error, Frame, Role};
+use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::session::{Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
@@ -135,7 +135,7 @@ impl Connection {
                 } else {
                     entry.insert(SessionState::Opening(Some(tx), cell));
 
-                    let begin = Begin {
+                    let begin = Begin(Box::new(codec::BeginInner {
                         remote_channel: None,
                         next_outgoing_id: 1,
                         incoming_window: std::u32::MAX,
@@ -144,7 +144,7 @@ impl Connection {
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,
-                    };
+                    }));
                     inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
 
                     rx.await.map_err(|_| AmqpProtocolError::Disconnected)
@@ -220,7 +220,7 @@ impl ConnectionInner {
         entry.insert(SessionState::Established(session));
         self.sessions_map.insert(channel_id, token);
 
-        let begin = Begin {
+        let begin = Begin(Box::new(codec::BeginInner {
             remote_channel: Some(channel_id),
             next_outgoing_id: 1,
             incoming_window: std::u32::MAX,
@@ -229,7 +229,7 @@ impl ConnectionInner {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-        };
+        }));
 
         self.io
             .write()
@@ -316,10 +316,7 @@ impl ConnectionInner {
                 state
             } else {
                 log::error!("Inconsistent internal state");
-                return Err(AmqpProtocolError::UnknownSession(
-                    channel_id as usize,
-                    Box::new(frame),
-                ));
+                return Err(AmqpProtocolError::UnknownSession(frame));
             }
         } else {
             // we dont have channel info, only Begin frame is allowed on new channel
@@ -332,10 +329,7 @@ impl ConnectionInner {
                 }
                 Ok(Action::None)
             } else {
-                Err(AmqpProtocolError::UnknownSession(
-                    channel_id as usize,
-                    Box::new(frame),
-                ))
+                Err(AmqpProtocolError::UnknownSession(frame))
             };
         };
 
@@ -343,7 +337,7 @@ impl ConnectionInner {
         match state {
             SessionState::Opening(_, _) => {
                 error!("Unexpected opening state: {}", channel_id);
-                Err(AmqpProtocolError::UnexpectedOpeningState(Box::new(frame)))
+                Err(AmqpProtocolError::UnexpectedOpeningState(frame))
             }
             SessionState::Established(ref mut session) => match frame {
                 Frame::Attach(attach) => {
@@ -351,14 +345,14 @@ impl ConnectionInner {
                     if session.get_mut().handle_attach(&attach, cell) {
                         Ok(Action::None)
                     } else {
-                        match attach.role {
+                        match attach.0.role {
                             Role::Receiver => {
                                 // remotly opened sender link
                                 let link = SenderLink::new(Cell::new(SenderLinkInner::with(
                                     &attach,
                                     session.clone(),
                                 )));
-                                Ok(Action::AttachSender(link, Box::new(attach)))
+                                Ok(Action::AttachSender(link, attach))
                             }
                             Role::Sender => {
                                 // receiver link

@@ -3,8 +3,9 @@ use std::{collections::VecDeque, future::Future, hash, pin::Pin, task::Context, 
 use ntex::util::{ByteString, BytesMut};
 use ntex::{channel::oneshot, task::LocalWaker, Stream};
 use ntex_amqp_codec::protocol::{
-    Attach, DeliveryNumber, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
+    self as codec, Attach, DeliveryNumber, Disposition, Error, Handle, LinkError,
+    ReceiverSettleMode, Role, SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy,
+    Transfer, TransferBody,
 };
 use ntex_amqp_codec::Encode;
 
@@ -256,42 +257,42 @@ impl ReceiverLinkInner {
     ) -> Result<Action, AmqpProtocolError> {
         if self.credit == 0 {
             // check link credit
-            let err = Error {
+            let err = Error(Box::new(codec::ErrorInner {
                 condition: LinkError::TransferLimitExceeded.into(),
                 description: None,
                 info: None,
-            };
+            }));
             let _ = self.close(Some(err));
             Ok(Action::None)
         } else {
             self.credit -= 1;
 
             if let Some(ref mut body) = self.partial_body {
-                if transfer.delivery_id.is_some() {
+                if transfer.0.delivery_id.is_some() {
                     // if delivery_id is set, then it should be equal to first transfer
                     if self
                         .queue
                         .back()
-                        .map_or(true, |back| back.delivery_id != transfer.delivery_id)
+                        .map_or(true, |back| back.0.delivery_id != transfer.0.delivery_id)
                     {
-                        let err = Error {
+                        let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::DetachForced.into(),
                             description: Some(ByteString::from_static("delivery_id is wrong")),
                             info: None,
-                        };
+                        }));
                         let _ = self.close(Some(err));
                         return Ok(Action::None);
                     }
                 }
 
                 // merge transfer data and check size
-                if let Some(transfer_body) = transfer.body.take() {
+                if let Some(transfer_body) = transfer.0.body.take() {
                     if body.len() + transfer_body.len() > self.partial_body_max {
-                        let err = Error {
+                        let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::MessageSizeExceeded.into(),
                             description: None,
                             info: None,
-                        };
+                        }));
                         let _ = self.close(Some(err));
                         return Ok(Action::None);
                     }
@@ -300,13 +301,13 @@ impl ReceiverLinkInner {
                 }
 
                 // received last partial transfer
-                if transfer.more {
+                if transfer.0.more {
                     Ok(Action::None)
                 } else {
                     self.delivery_count += 1;
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
-                        self.queue.back_mut().unwrap().body =
+                        self.queue.back_mut().unwrap().0.body =
                             Some(TransferBody::Data(partial_body.unwrap().freeze()));
                         if self.queue.len() == 1 {
                             self.wake();
@@ -316,26 +317,26 @@ impl ReceiverLinkInner {
                         }))
                     } else {
                         log::error!("Inconsistent state, bug");
-                        let err = Error {
+                        let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::DetachForced.into(),
                             description: Some(ByteString::from_static("Internal error")),
                             info: None,
-                        };
+                        }));
                         let _ = self.close(Some(err));
                         Ok(Action::None)
                     }
                 }
-            } else if transfer.more {
-                if transfer.delivery_id.is_none() {
-                    let err = Error {
+            } else if transfer.more() {
+                if transfer.delivery_id().is_none() {
+                    let err = Error(Box::new(codec::ErrorInner {
                         condition: LinkError::DetachForced.into(),
                         description: Some(ByteString::from_static("delivery_id is required")),
                         info: None,
-                    };
+                    }));
                     let _ = self.close(Some(err));
                     Ok(Action::None)
                 } else {
-                    let body = if let Some(body) = transfer.body.take() {
+                    let body = if let Some(body) = transfer.0.body.take() {
                         match body {
                             TransferBody::Data(data) => BytesMut::from(data.as_ref()),
                             TransferBody::Message(msg) => {
@@ -385,7 +386,7 @@ impl ReceiverLinkBuilder {
             outcomes: None,
             capabilities: None,
         };
-        let frame = Attach {
+        let frame = Attach(Box::new(codec::AttachInner {
             name,
             handle: 0_u32,
             role: Role::Receiver,
@@ -400,13 +401,13 @@ impl ReceiverLinkBuilder {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-        };
+        }));
 
         ReceiverLinkBuilder { frame, session }
     }
 
     pub fn max_message_size(mut self, size: u64) -> Self {
-        self.frame.max_message_size = Some(size);
+        self.frame.0.max_message_size = Some(size);
         self
     }
 

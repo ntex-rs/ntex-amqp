@@ -80,7 +80,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> HandshakeAmqp<Io> {
                     remote_config,
                 })
             }
-            frame => Err(HandshakeError::Unexpected(Box::new(frame))),
+            frame => Err(HandshakeError::Unexpected(frame)),
         }
     }
 }

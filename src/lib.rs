@@ -7,7 +7,7 @@ extern crate derive_more;
 extern crate log;
 
 use ntex::util::ByteString;
-use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open};
+use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner};
 use uuid::Uuid;
 
 mod cell;
@@ -104,7 +104,7 @@ impl Configuration {
 
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
-        Open {
+        Open(Box::new(OpenInner {
             container_id: ByteString::from(Uuid::new_v4().to_simple().to_string()),
             hostname: self.hostname.clone(),
             max_frame_size: self.max_frame_size,
@@ -119,7 +119,7 @@ impl Configuration {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-        }
+        }))
     }
 
     pub(crate) fn timeout_secs(&self) -> usize {
@@ -142,10 +142,10 @@ impl Configuration {
 impl<'a> From<&'a Open> for Configuration {
     fn from(open: &'a Open) -> Self {
         Configuration {
-            max_frame_size: open.max_frame_size,
-            channel_max: open.channel_max as usize,
-            idle_time_out: open.idle_time_out.unwrap_or(0),
-            hostname: open.hostname.clone(),
+            max_frame_size: open.max_frame_size(),
+            channel_max: open.channel_max() as usize,
+            idle_time_out: open.idle_time_out().unwrap_or(0),
+            hostname: open.hostname().cloned(),
         }
     }
 }

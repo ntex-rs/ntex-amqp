@@ -11,7 +11,10 @@ use super::body::MessageBody;
 use super::SECTION_PREFIX_LENGTH;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Message {
+pub struct Message(pub Box<MessageInner>);
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MessageInner {
     pub message_format: Option<MessageFormat>,
     pub header: Option<Header>,
     pub delivery_annotations: Option<VecSymbolMap>,
@@ -24,73 +27,89 @@ pub struct Message {
 }
 
 impl Message {
+    #[inline]
     /// Create new message and set body
     pub fn with_body(body: Bytes) -> Message {
         let mut msg = Message::default();
-        msg.body.data.push(body);
-        msg.message_format = Some(0);
+        msg.0.body.data.push(body);
+        msg.0.message_format = Some(0);
         msg
     }
 
+    #[inline]
     /// Create new message and set messages as body
     pub fn with_messages(messages: Vec<TransferBody>) -> Message {
         let mut msg = Message::default();
-        msg.body.messages = messages;
-        msg.message_format = Some(0);
+        msg.0.body.messages = messages;
+        msg.0.message_format = Some(0);
         msg
     }
 
+    #[inline]
     /// Header
     pub fn header(&self) -> Option<&Header> {
-        self.header.as_ref()
+        self.0.header.as_ref()
     }
 
+    #[inline]
     /// Set message header
     pub fn set_header(&mut self, header: Header) -> &mut Self {
-        self.header = Some(header);
-        self.size.set(0);
+        self.0.header = Some(header);
+        self.0.size.set(0);
         self
     }
 
+    #[inline]
+    /// Set message format
+    pub fn set_format(&mut self, format: MessageFormat) -> &mut Self {
+        self.0.message_format = Some(format);
+        self
+    }
+
+    #[inline]
     /// Message properties
     pub fn properties(&self) -> Option<&Properties> {
-        self.properties.as_ref()
+        self.0.properties.as_ref()
     }
 
+    #[inline]
     /// Mutable reference to properties
     pub fn properties_mut(&mut self) -> &mut Properties {
-        if self.properties.is_none() {
-            self.properties = Some(Properties::default());
+        if self.0.properties.is_none() {
+            self.0.properties = Some(Properties::default());
         }
 
-        self.size.set(0);
-        self.properties.as_mut().unwrap()
+        self.0.size.set(0);
+        self.0.properties.as_mut().unwrap()
     }
 
+    #[inline]
     /// Add property
     pub fn set_properties<F>(&mut self, f: F) -> &mut Self
     where
         F: Fn(&mut Properties),
     {
-        if let Some(ref mut props) = self.properties {
+        if let Some(ref mut props) = self.0.properties {
             f(props);
         } else {
             let mut props = Properties::default();
             f(&mut props);
-            self.properties = Some(props);
+            self.0.properties = Some(props);
         }
-        self.size.set(0);
+        self.0.size.set(0);
         self
     }
 
+    #[inline]
     /// Get application property
     pub fn app_properties(&self) -> Option<&VecStringMap> {
-        self.application_properties.as_ref()
+        self.0.application_properties.as_ref()
     }
 
+    #[inline]
     /// Get application property
     pub fn app_property(&self, key: &str) -> Option<&Variant> {
-        if let Some(ref props) = self.application_properties {
+        if let Some(ref props) = self.0.application_properties {
             props
                 .iter()
                 .find_map(|item| if &item.0 == key { Some(&item.1) } else { None })
@@ -99,26 +118,28 @@ impl Message {
         }
     }
 
+    #[inline]
     /// Add application property
     pub fn set_app_property<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
         K: Into<Str>,
         V: Into<Variant>,
     {
-        if let Some(ref mut props) = self.application_properties {
+        if let Some(ref mut props) = self.0.application_properties {
             props.push((key.into(), value.into()));
         } else {
             let mut props = VecStringMap::default();
             props.push((key.into(), value.into()));
-            self.application_properties = Some(props);
+            self.0.application_properties = Some(props);
         }
-        self.size.set(0);
+        self.0.size.set(0);
         self
     }
 
+    #[inline]
     /// Get message annotation
     pub fn message_annotation(&self, key: &str) -> Option<&Variant> {
-        if let Some(ref props) = self.message_annotations {
+        if let Some(ref props) = self.0.message_annotations {
             props
                 .iter()
                 .find_map(|item| if &item.0 == key { Some(&item.1) } else { None })
@@ -127,84 +148,100 @@ impl Message {
         }
     }
 
+    #[inline]
     /// Add message annotation
     pub fn add_message_annotation<K, V>(&mut self, key: K, value: V) -> &mut Self
     where
         K: Into<Symbol>,
         V: Into<Variant>,
     {
-        if let Some(ref mut props) = self.message_annotations {
+        if let Some(ref mut props) = self.0.message_annotations {
             props.push((key.into(), value.into()));
         } else {
             let mut props = VecSymbolMap::default();
             props.push((key.into(), value.into()));
-            self.message_annotations = Some(props);
+            self.0.message_annotations = Some(props);
         }
-        self.size.set(0);
+        self.0.size.set(0);
         self
     }
 
+    #[inline]
+    /// Get message annotations
+    pub fn message_annotations(&self) -> Option<&VecSymbolMap> {
+        self.0.message_annotations.as_ref()
+    }
+
+    #[inline]
     /// Delivery annotations
     pub fn delivery_annotations(&self) -> Option<&VecSymbolMap> {
-        self.delivery_annotations.as_ref()
+        self.0.delivery_annotations.as_ref()
     }
 
+    #[inline]
     /// Mut reference to delivery annotations
     pub fn delivery_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
-        self.delivery_annotations.as_mut()
+        self.0.delivery_annotations.as_mut()
     }
 
+    #[inline]
     /// Call closure with message reference
     pub fn update<F>(self, f: F) -> Self
     where
         F: Fn(Self) -> Self,
     {
-        self.size.set(0);
+        self.0.size.set(0);
         f(self)
     }
 
+    #[inline]
     /// Call closure if value is Some value
     pub fn if_some<T, F>(self, value: &Option<T>, f: F) -> Self
     where
         F: Fn(Self, &T) -> Self,
     {
         if let Some(ref val) = value {
-            self.size.set(0);
+            self.0.size.set(0);
             f(self, val)
         } else {
             self
         }
     }
 
+    #[inline]
     /// Message body
     pub fn body(&self) -> &MessageBody {
-        &self.body
+        &self.0.body
     }
 
+    #[inline]
     /// Message value
     pub fn value(&self) -> Option<&Variant> {
-        self.body.value.as_ref()
+        self.0.body.value.as_ref()
     }
 
+    #[inline]
     /// Set message body value
     pub fn set_value<V: Into<Variant>>(&mut self, v: V) -> &mut Self {
-        self.body.value = Some(v.into());
+        self.0.body.value = Some(v.into());
         self
     }
 
+    #[inline]
     /// Set message body
     pub fn set_body<F>(&mut self, f: F) -> &mut Self
     where
         F: FnOnce(&mut MessageBody),
     {
-        f(&mut self.body);
-        self.size.set(0);
+        f(&mut self.0.body);
+        self.0.size.set(0);
         self
     }
 
+    #[inline]
     /// Create new message and set `correlation_id` property
     pub fn reply_message(&self) -> Message {
-        Message::default().if_some(&self.properties, |mut msg, data| {
+        Message::default().if_some(&self.0.properties, |mut msg, data| {
             msg.set_properties(|props| props.correlation_id = data.message_id.clone());
             msg
         })
@@ -223,33 +260,33 @@ impl Decode for Message {
             let (buf, sec) = Section::decode(input)?;
             match sec {
                 Section::Header(val) => {
-                    message.header = Some(val);
+                    message.0.header = Some(val);
                 }
                 Section::DeliveryAnnotations(val) => {
-                    message.delivery_annotations = Some(val);
+                    message.0.delivery_annotations = Some(val);
                 }
                 Section::MessageAnnotations(val) => {
-                    message.message_annotations = Some(val);
+                    message.0.message_annotations = Some(val);
                 }
                 Section::ApplicationProperties(val) => {
-                    message.application_properties = Some(val);
+                    message.0.application_properties = Some(val);
                 }
                 Section::Footer(val) => {
-                    message.footer = Some(val);
+                    message.0.footer = Some(val);
                 }
                 Section::Properties(val) => {
-                    message.properties = Some(val);
+                    message.0.properties = Some(val);
                 }
 
                 // body
                 Section::AmqpSequence(val) => {
-                    message.body.sequence.push(val);
+                    message.0.body.sequence.push(val);
                 }
                 Section::AmqpValue(val) => {
-                    message.body.value = Some(val);
+                    message.0.body.value = Some(val);
                 }
                 Section::Data(val) => {
-                    message.body.data.push(val);
+                    message.0.body.data.push(val);
                 }
             }
             input = buf;
@@ -260,60 +297,60 @@ impl Decode for Message {
 
 impl Encode for Message {
     fn encoded_size(&self) -> usize {
-        let size = self.size.get();
+        let size = self.0.size.get();
         if size != 0 {
             return size;
         }
 
-        let mut size = self.body.encoded_size();
+        let mut size = self.0.body.encoded_size();
 
-        if let Some(ref h) = self.header {
+        if let Some(ref h) = self.0.header {
             size += h.encoded_size();
         }
-        if let Some(ref da) = self.delivery_annotations {
+        if let Some(ref da) = self.0.delivery_annotations {
             size += da.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-        if let Some(ref ma) = self.message_annotations {
+        if let Some(ref ma) = self.0.message_annotations {
             size += ma.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-        if let Some(ref p) = self.properties {
+        if let Some(ref p) = self.0.properties {
             size += p.encoded_size();
         }
-        if let Some(ref ap) = self.application_properties {
+        if let Some(ref ap) = self.0.application_properties {
             size += ap.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-        if let Some(ref f) = self.footer {
+        if let Some(ref f) = self.0.footer {
             size += f.encoded_size() + SECTION_PREFIX_LENGTH;
         }
-        self.size.set(size);
+        self.0.size.set(size);
         size
     }
 
     fn encode(&self, dst: &mut BytesMut) {
-        if let Some(ref h) = self.header {
+        if let Some(ref h) = self.0.header {
             h.encode(dst);
         }
-        if let Some(ref da) = self.delivery_annotations {
+        if let Some(ref da) = self.0.delivery_annotations {
             Descriptor::Ulong(113).encode(dst);
             da.encode(dst);
         }
-        if let Some(ref ma) = self.message_annotations {
+        if let Some(ref ma) = self.0.message_annotations {
             Descriptor::Ulong(114).encode(dst);
             ma.encode(dst);
         }
-        if let Some(ref p) = self.properties {
+        if let Some(ref p) = self.0.properties {
             p.encode(dst);
         }
-        if let Some(ref ap) = self.application_properties {
+        if let Some(ref ap) = self.0.application_properties {
             Descriptor::Ulong(116).encode(dst);
             ap.encode(dst);
         }
 
         // message body
-        self.body.encode(dst);
+        self.0.body.encode(dst);
 
         // message footer, always last item
-        if let Some(ref f) = self.footer {
+        if let Some(ref f) = self.0.footer {
             Descriptor::Ulong(120).encode(dst);
             f.encode(dst);
         }

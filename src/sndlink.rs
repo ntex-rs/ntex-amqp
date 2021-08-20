@@ -4,7 +4,7 @@ use std::{future::Future, mem, pin::Pin, task::Context, task::Poll};
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, Ready};
 use ntex_amqp_codec::protocol::{
-    Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
+    self as codec, Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
     ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
     TerminusExpiryPolicy, TransferBody,
 };
@@ -175,12 +175,12 @@ impl SenderLinkInner {
 
     pub(crate) fn with(frame: &Attach, session: Cell<SessionInner>) -> SenderLinkInner {
         let mut name = None;
-        if let Some(ref source) = frame.source {
+        if let Some(source) = frame.source() {
             if let Some(ref addr) = source.address {
                 name = Some(addr.clone());
             }
         }
-        let delivery_count = frame.initial_delivery_count.unwrap_or(0);
+        let delivery_count = frame.initial_delivery_count().unwrap_or(0);
 
         SenderLinkInner {
             delivery_count,
@@ -258,12 +258,12 @@ impl SenderLinkInner {
                 "Apply sender link {:?} flow, credit: {:?} flow count: {:?}, delivery count: {:?}",
                 self.name,
                 credit,
-                flow.delivery_count.unwrap_or(0),
+                flow.delivery_count().unwrap_or(0),
                 self.delivery_count
             );
 
             let delta = flow
-                .delivery_count
+                .delivery_count()
                 .unwrap_or(0)
                 .saturating_add(credit)
                 .saturating_sub(self.delivery_count);
@@ -443,14 +443,14 @@ impl SenderLinkInner {
     }
 
     pub(crate) fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
-        let disp = Disposition {
+        let disp = Disposition(Box::new(codec::DispositionInner {
             role: Role::Sender,
             first: id,
             last: None,
             settled: true,
             state: Some(state),
             batchable: false,
-        };
+        }));
         self.session.inner.get_mut().post_frame(disp.into());
     }
 
@@ -482,7 +482,7 @@ impl SenderLinkBuilder {
             dynamic_node_properties: None,
             capabilities: None,
         };
-        let frame = Attach {
+        let frame = Attach(Box::new(codec::AttachInner {
             name,
             handle: 0_u32,
             role: Role::Sender,
@@ -497,13 +497,13 @@ impl SenderLinkBuilder {
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
-        };
+        }));
 
         SenderLinkBuilder { frame, session }
     }
 
     pub fn max_message_size(mut self, size: u64) -> Self {
-        self.frame.max_message_size = Some(size);
+        self.frame.0.max_message_size = Some(size);
         self
     }
 

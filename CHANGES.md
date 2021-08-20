@@ -1,5 +1,13 @@
 # Changes
 
+## [0.5.0-b.9] - 2021-08-21
+
+* Upgrade to codec 0.7
+
+## [codec-0.7.0] - 2021-08-22
+
+* Optimize memory layout
+
 ## [0.5.0-b.8] - 2021-08-13
 
 * Fix handling for error during opennig link

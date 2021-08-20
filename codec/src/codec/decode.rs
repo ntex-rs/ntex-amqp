@@ -178,7 +178,7 @@ impl DecodeFormatted for Uuid {
     fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_UUID);
         decode_check_len!(input, 16);
-        let uuid = Uuid::from_slice(&input[..16])?;
+        let uuid = Uuid::from_slice(&input[..16]).map_err(|_| AmqpParseError::UuidParseError)?;
         Ok((&input[16..], uuid))
     }
 }

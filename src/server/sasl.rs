@@ -92,7 +92,7 @@ where
                 codec,
                 local_config,
             }),
-            body => Err(HandshakeError::UnexpectedSaslBodyFrame(body)),
+            body => Err(HandshakeError::UnexpectedSaslBodyFrame(Box::new(body))),
         }
     }
 }
@@ -177,7 +177,7 @@ where
                 codec,
                 local_config,
             }),
-            body => Err(HandshakeError::UnexpectedSaslBodyFrame(body)),
+            body => Err(HandshakeError::UnexpectedSaslBodyFrame(Box::new(body))),
         }
     }
 
@@ -326,7 +326,7 @@ where
                             remote_config,
                         ))
                     }
-                    frame => Err(HandshakeError::Unexpected(Box::new(frame))),
+                    frame => Err(HandshakeError::Unexpected(frame)),
                 }
             }
             proto => Err(ProtocolIdError::Unexpected {

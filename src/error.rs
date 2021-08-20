@@ -2,7 +2,7 @@ use std::{convert::TryFrom, io};
 
 use ntex::util::{ByteString, Either};
 
-pub use crate::codec::protocol::Error;
+pub use crate::codec::protocol::{Error, ErrorInner};
 pub use crate::codec::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 use crate::{codec::protocol, types::Outcome};
 
@@ -39,14 +39,10 @@ pub enum AmqpProtocolError {
     TooManyChannels,
     KeepAliveTimeout,
     Disconnected,
-    #[display(fmt = "Unknown session: {} {:?}", _0, _1)]
-    UnknownSession(usize, Box<protocol::Frame>),
-    #[display(fmt = "Session {}, Unknown link: {} {:?}", session, link_handle, frame)]
-    UnknownLink {
-        session: usize,
-        link_handle: u32,
-        frame: Box<protocol::Frame>,
-    },
+    #[display(fmt = "Unknown session: {:?}", _0)]
+    UnknownSession(protocol::Frame),
+    #[display(fmt = "Unknown link in session: {:?}", _0)]
+    UnknownLink(protocol::Frame),
     #[display(fmt = "Connection closed, error: {:?}", _0)]
     Closed(Option<protocol::Error>),
     #[display(fmt = "Session ended, error: {:?}", _0)]
@@ -54,9 +50,9 @@ pub enum AmqpProtocolError {
     #[display(fmt = "Link detached, error: {:?}", _0)]
     LinkDetached(Option<protocol::Error>),
     #[display(fmt = "Unexpected frame for opening state, got: {:?}", _0)]
-    UnexpectedOpeningState(Box<protocol::Frame>),
-    #[display(fmt = "{}, Unexpected frame: {:?}", _0, _1)]
-    Unexpected(&'static str, Box<protocol::Frame>),
+    UnexpectedOpeningState(protocol::Frame),
+    #[display(fmt = "Unexpected frame: {:?}", _0)]
+    Unexpected(protocol::Frame),
 }
 
 impl From<AmqpCodecError> for AmqpProtocolError {
@@ -70,7 +66,7 @@ impl From<AmqpCodecError> for AmqpProtocolError {
 pub struct AmqpError {
     err: Either<protocol::AmqpError, protocol::ErrorCondition>,
     description: Option<ByteString>,
-    info: Option<protocol::Fields>,
+    info: Option<protocol::FieldsVec>,
 }
 
 impl AmqpError {
@@ -135,11 +131,11 @@ impl From<AmqpError> for protocol::Error {
             Either::Left(err) => err.into(),
             Either::Right(err) => err,
         };
-        protocol::Error {
+        protocol::Error(Box::new(ErrorInner {
             condition,
             description: e.description,
             info: e.info,
-        }
+        }))
     }
 }
 
@@ -156,7 +152,7 @@ impl TryFrom<AmqpError> for Outcome {
 pub struct LinkError {
     err: Either<protocol::LinkError, protocol::ErrorCondition>,
     description: Option<ByteString>,
-    info: Option<protocol::Fields>,
+    info: Option<protocol::FieldsVec>,
 }
 
 impl LinkError {
@@ -200,7 +196,7 @@ impl LinkError {
     }
 
     #[allow(clippy::mutable_key_type)]
-    pub fn fields(mut self, fields: protocol::Fields) -> Self {
+    pub fn fields(mut self, fields: protocol::FieldsVec) -> Self {
         self.info = Some(fields);
         self
     }
@@ -213,11 +209,11 @@ impl From<LinkError> for protocol::Error {
             Either::Right(err) => err,
         };
 
-        protocol::Error {
+        protocol::Error(Box::new(ErrorInner {
             condition,
             description: e.description,
             info: e.info,
-        }
+        }))
     }
 }
 

@@ -17,11 +17,11 @@ pub enum Message {
 
 pub(crate) enum Action {
     None,
-    AttachSender(SenderLink, Box<Attach>),
+    AttachSender(SenderLink, Attach),
     AttachReceiver(ReceiverLink),
     DetachSender(SenderLink, Detach),
     DetachReceiver(ReceiverLink, Detach),
-    Flow(SenderLink, Box<Flow>),
+    Flow(SenderLink, Flow),
     Transfer(ReceiverLink),
 }
 
