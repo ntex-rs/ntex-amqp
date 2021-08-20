@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp-codec"
-version = "0.7.0"
+version = "0.7.1"
 description = "AMQP 1.0 Protocol Codec"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>", "Max Gortman <mgortman@microsoft.com>", "Mike Yagley <myagley@gmail.com>"]
 license = "MIT/Apache-2.0"

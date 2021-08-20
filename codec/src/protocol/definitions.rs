@@ -128,6 +128,64 @@ impl Encode for Frame {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Ulong(37) => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Ulong(38) => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Ulong(39) => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
 pub enum DeliveryState {
     Received(Received),
     Accepted(Accepted),
@@ -191,6 +249,73 @@ impl Encode for DeliveryState {
             DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
             DeliveryState::Released(ref v) => encode_released_inner(v, buf),
             DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum SaslFrameBody {
+    SaslMechanisms(SaslMechanisms),
+    SaslInit(SaslInit),
+    SaslChallenge(SaslChallenge),
+    SaslResponse(SaslResponse),
+    SaslOutcome(SaslOutcome),
+}
+impl DecodeFormatted for SaslFrameBody {
+    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let (input, descriptor) = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
+            Descriptor::Ulong(65) => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
+            }
+            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
+                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
+            Descriptor::Ulong(67) => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
+            }
+            Descriptor::Ulong(68) => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
+                decode_sasl_mechanisms_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
+                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
+                decode_sasl_challenge_inner(input)
+                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
+                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
+                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for SaslFrameBody {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            SaslFrameBody::SaslMechanisms(ref v) => encoded_size_sasl_mechanisms_inner(v),
+            SaslFrameBody::SaslInit(ref v) => encoded_size_sasl_init_inner(v),
+            SaslFrameBody::SaslChallenge(ref v) => encoded_size_sasl_challenge_inner(v),
+            SaslFrameBody::SaslResponse(ref v) => encoded_size_sasl_response_inner(v),
+            SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
+            SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
+            SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
+            SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
+            SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
         }
     }
 }
@@ -292,131 +417,6 @@ impl Encode for Section {
             Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
             Section::Footer(ref v) => encode_footer_inner(v, buf),
             Section::Properties(ref v) => encode_properties_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for Outcome {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(36) => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Ulong(37) => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Ulong(38) => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Ulong(39) => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(|(i, r)| (i, Outcome::Accepted(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(|(i, r)| (i, Outcome::Rejected(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(|(i, r)| (i, Outcome::Released(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(|(i, r)| (i, Outcome::Modified(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
-        }
-    }
-}
-impl Encode for Outcome {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq)]
-pub enum SaslFrameBody {
-    SaslMechanisms(SaslMechanisms),
-    SaslInit(SaslInit),
-    SaslChallenge(SaslChallenge),
-    SaslResponse(SaslResponse),
-    SaslOutcome(SaslOutcome),
-}
-impl DecodeFormatted for SaslFrameBody {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(64) => decode_sasl_mechanisms_inner(input)
-                .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r))),
-            Descriptor::Ulong(65) => {
-                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
-            }
-            Descriptor::Ulong(66) => decode_sasl_challenge_inner(input)
-                .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r))),
-            Descriptor::Ulong(67) => {
-                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
-            }
-            Descriptor::Ulong(68) => {
-                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-mechanisms:list" => {
-                decode_sasl_mechanisms_inner(input)
-                    .map(|(i, r)| (i, SaslFrameBody::SaslMechanisms(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-init:list" => {
-                decode_sasl_init_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslInit(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-challenge:list" => {
-                decode_sasl_challenge_inner(input)
-                    .map(|(i, r)| (i, SaslFrameBody::SaslChallenge(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-response:list" => {
-                decode_sasl_response_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslResponse(r)))
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:sasl-outcome:list" => {
-                decode_sasl_outcome_inner(input).map(|(i, r)| (i, SaslFrameBody::SaslOutcome(r)))
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
-        }
-    }
-}
-impl Encode for SaslFrameBody {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            SaslFrameBody::SaslMechanisms(ref v) => encoded_size_sasl_mechanisms_inner(v),
-            SaslFrameBody::SaslInit(ref v) => encoded_size_sasl_init_inner(v),
-            SaslFrameBody::SaslChallenge(ref v) => encoded_size_sasl_challenge_inner(v),
-            SaslFrameBody::SaslResponse(ref v) => encoded_size_sasl_response_inner(v),
-            SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
-            SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
-            SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
-            SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
-            SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
         }
     }
 }
@@ -1082,12 +1082,24 @@ impl Error {
         &self.0.condition
     }
     #[inline]
+    pub fn condition_mut(&mut self) -> &mut ErrorCondition {
+        &mut self.0.condition
+    }
+    #[inline]
     pub fn description(&self) -> Option<&ByteString> {
         self.0.description.as_ref()
     }
     #[inline]
+    pub fn description_mut(&mut self) -> &mut Option<ByteString> {
+        &mut self.0.description
+    }
+    #[inline]
     pub fn info(&self) -> Option<&FieldsVec> {
         self.0.info.as_ref()
+    }
+    #[inline]
+    pub fn info_mut(&mut self) -> &mut Option<FieldsVec> {
+        &mut self.0.info
     }
     pub fn into_inner(self) -> Box<ErrorInner> {
         self.0
@@ -1241,40 +1253,80 @@ impl Open {
         &self.0.container_id
     }
     #[inline]
+    pub fn container_id_mut(&mut self) -> &mut ByteString {
+        &mut self.0.container_id
+    }
+    #[inline]
     pub fn hostname(&self) -> Option<&ByteString> {
         self.0.hostname.as_ref()
+    }
+    #[inline]
+    pub fn hostname_mut(&mut self) -> &mut Option<ByteString> {
+        &mut self.0.hostname
     }
     #[inline]
     pub fn max_frame_size(&self) -> u32 {
         self.0.max_frame_size
     }
     #[inline]
+    pub fn max_frame_size_mut(&mut self) -> &mut u32 {
+        &mut self.0.max_frame_size
+    }
+    #[inline]
     pub fn channel_max(&self) -> u16 {
         self.0.channel_max
+    }
+    #[inline]
+    pub fn channel_max_mut(&mut self) -> &mut u16 {
+        &mut self.0.channel_max
     }
     #[inline]
     pub fn idle_time_out(&self) -> Option<Milliseconds> {
         self.0.idle_time_out
     }
     #[inline]
+    pub fn idle_time_out_mut(&mut self) -> &mut Option<Milliseconds> {
+        &mut self.0.idle_time_out
+    }
+    #[inline]
     pub fn outgoing_locales(&self) -> Option<&IetfLanguageTags> {
         self.0.outgoing_locales.as_ref()
+    }
+    #[inline]
+    pub fn outgoing_locales_mut(&mut self) -> &mut Option<IetfLanguageTags> {
+        &mut self.0.outgoing_locales
     }
     #[inline]
     pub fn incoming_locales(&self) -> Option<&IetfLanguageTags> {
         self.0.incoming_locales.as_ref()
     }
     #[inline]
+    pub fn incoming_locales_mut(&mut self) -> &mut Option<IetfLanguageTags> {
+        &mut self.0.incoming_locales
+    }
+    #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
         self.0.offered_capabilities.as_ref()
+    }
+    #[inline]
+    pub fn offered_capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.0.offered_capabilities
     }
     #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
         self.0.desired_capabilities.as_ref()
     }
     #[inline]
+    pub fn desired_capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.0.desired_capabilities
+    }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.0.properties.as_ref()
+    }
+    #[inline]
+    pub fn properties_mut(&mut self) -> &mut Option<Fields> {
+        &mut self.0.properties
     }
     pub fn into_inner(self) -> Box<OpenInner> {
         self.0
@@ -1552,32 +1604,64 @@ impl Begin {
         self.0.remote_channel
     }
     #[inline]
+    pub fn remote_channel_mut(&mut self) -> &mut Option<u16> {
+        &mut self.0.remote_channel
+    }
+    #[inline]
     pub fn next_outgoing_id(&self) -> TransferNumber {
         self.0.next_outgoing_id
+    }
+    #[inline]
+    pub fn next_outgoing_id_mut(&mut self) -> &mut TransferNumber {
+        &mut self.0.next_outgoing_id
     }
     #[inline]
     pub fn incoming_window(&self) -> u32 {
         self.0.incoming_window
     }
     #[inline]
+    pub fn incoming_window_mut(&mut self) -> &mut u32 {
+        &mut self.0.incoming_window
+    }
+    #[inline]
     pub fn outgoing_window(&self) -> u32 {
         self.0.outgoing_window
+    }
+    #[inline]
+    pub fn outgoing_window_mut(&mut self) -> &mut u32 {
+        &mut self.0.outgoing_window
     }
     #[inline]
     pub fn handle_max(&self) -> Handle {
         self.0.handle_max
     }
     #[inline]
+    pub fn handle_max_mut(&mut self) -> &mut Handle {
+        &mut self.0.handle_max
+    }
+    #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
         self.0.offered_capabilities.as_ref()
+    }
+    #[inline]
+    pub fn offered_capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.0.offered_capabilities
     }
     #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
         self.0.desired_capabilities.as_ref()
     }
     #[inline]
+    pub fn desired_capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.0.desired_capabilities
+    }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.0.properties.as_ref()
+    }
+    #[inline]
+    pub fn properties_mut(&mut self) -> &mut Option<Fields> {
+        &mut self.0.properties
     }
     pub fn into_inner(self) -> Box<BeginInner> {
         self.0
@@ -1825,56 +1909,112 @@ impl Attach {
         &self.0.name
     }
     #[inline]
+    pub fn name_mut(&mut self) -> &mut ByteString {
+        &mut self.0.name
+    }
+    #[inline]
     pub fn handle(&self) -> Handle {
         self.0.handle
+    }
+    #[inline]
+    pub fn handle_mut(&mut self) -> &mut Handle {
+        &mut self.0.handle
     }
     #[inline]
     pub fn role(&self) -> Role {
         self.0.role
     }
     #[inline]
+    pub fn role_mut(&mut self) -> &mut Role {
+        &mut self.0.role
+    }
+    #[inline]
     pub fn snd_settle_mode(&self) -> SenderSettleMode {
         self.0.snd_settle_mode
+    }
+    #[inline]
+    pub fn snd_settle_mode_mut(&mut self) -> &mut SenderSettleMode {
+        &mut self.0.snd_settle_mode
     }
     #[inline]
     pub fn rcv_settle_mode(&self) -> ReceiverSettleMode {
         self.0.rcv_settle_mode
     }
     #[inline]
+    pub fn rcv_settle_mode_mut(&mut self) -> &mut ReceiverSettleMode {
+        &mut self.0.rcv_settle_mode
+    }
+    #[inline]
     pub fn source(&self) -> Option<&Source> {
         self.0.source.as_ref()
+    }
+    #[inline]
+    pub fn source_mut(&mut self) -> &mut Option<Source> {
+        &mut self.0.source
     }
     #[inline]
     pub fn target(&self) -> Option<&Target> {
         self.0.target.as_ref()
     }
     #[inline]
+    pub fn target_mut(&mut self) -> &mut Option<Target> {
+        &mut self.0.target
+    }
+    #[inline]
     pub fn unsettled(&self) -> Option<&Map> {
         self.0.unsettled.as_ref()
+    }
+    #[inline]
+    pub fn unsettled_mut(&mut self) -> &mut Option<Map> {
+        &mut self.0.unsettled
     }
     #[inline]
     pub fn incomplete_unsettled(&self) -> bool {
         self.0.incomplete_unsettled
     }
     #[inline]
+    pub fn incomplete_unsettled_mut(&mut self) -> &mut bool {
+        &mut self.0.incomplete_unsettled
+    }
+    #[inline]
     pub fn initial_delivery_count(&self) -> Option<SequenceNo> {
         self.0.initial_delivery_count
+    }
+    #[inline]
+    pub fn initial_delivery_count_mut(&mut self) -> &mut Option<SequenceNo> {
+        &mut self.0.initial_delivery_count
     }
     #[inline]
     pub fn max_message_size(&self) -> Option<u64> {
         self.0.max_message_size
     }
     #[inline]
+    pub fn max_message_size_mut(&mut self) -> &mut Option<u64> {
+        &mut self.0.max_message_size
+    }
+    #[inline]
     pub fn offered_capabilities(&self) -> Option<&Symbols> {
         self.0.offered_capabilities.as_ref()
+    }
+    #[inline]
+    pub fn offered_capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.0.offered_capabilities
     }
     #[inline]
     pub fn desired_capabilities(&self) -> Option<&Symbols> {
         self.0.desired_capabilities.as_ref()
     }
     #[inline]
+    pub fn desired_capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.0.desired_capabilities
+    }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.0.properties.as_ref()
+    }
+    #[inline]
+    pub fn properties_mut(&mut self) -> &mut Option<Fields> {
+        &mut self.0.properties
     }
     pub fn into_inner(self) -> Box<AttachInner> {
         self.0
@@ -2227,44 +2367,88 @@ impl Flow {
         self.0.next_incoming_id
     }
     #[inline]
+    pub fn next_incoming_id_mut(&mut self) -> &mut Option<TransferNumber> {
+        &mut self.0.next_incoming_id
+    }
+    #[inline]
     pub fn incoming_window(&self) -> u32 {
         self.0.incoming_window
+    }
+    #[inline]
+    pub fn incoming_window_mut(&mut self) -> &mut u32 {
+        &mut self.0.incoming_window
     }
     #[inline]
     pub fn next_outgoing_id(&self) -> TransferNumber {
         self.0.next_outgoing_id
     }
     #[inline]
+    pub fn next_outgoing_id_mut(&mut self) -> &mut TransferNumber {
+        &mut self.0.next_outgoing_id
+    }
+    #[inline]
     pub fn outgoing_window(&self) -> u32 {
         self.0.outgoing_window
+    }
+    #[inline]
+    pub fn outgoing_window_mut(&mut self) -> &mut u32 {
+        &mut self.0.outgoing_window
     }
     #[inline]
     pub fn handle(&self) -> Option<Handle> {
         self.0.handle
     }
     #[inline]
+    pub fn handle_mut(&mut self) -> &mut Option<Handle> {
+        &mut self.0.handle
+    }
+    #[inline]
     pub fn delivery_count(&self) -> Option<SequenceNo> {
         self.0.delivery_count
+    }
+    #[inline]
+    pub fn delivery_count_mut(&mut self) -> &mut Option<SequenceNo> {
+        &mut self.0.delivery_count
     }
     #[inline]
     pub fn link_credit(&self) -> Option<u32> {
         self.0.link_credit
     }
     #[inline]
+    pub fn link_credit_mut(&mut self) -> &mut Option<u32> {
+        &mut self.0.link_credit
+    }
+    #[inline]
     pub fn available(&self) -> Option<u32> {
         self.0.available
+    }
+    #[inline]
+    pub fn available_mut(&mut self) -> &mut Option<u32> {
+        &mut self.0.available
     }
     #[inline]
     pub fn drain(&self) -> bool {
         self.0.drain
     }
     #[inline]
+    pub fn drain_mut(&mut self) -> &mut bool {
+        &mut self.0.drain
+    }
+    #[inline]
     pub fn echo(&self) -> bool {
         self.0.echo
     }
     #[inline]
+    pub fn echo_mut(&mut self) -> &mut bool {
+        &mut self.0.echo
+    }
+    #[inline]
     pub fn properties(&self) -> Option<&Fields> {
         self.0.properties.as_ref()
+    }
+    #[inline]
+    pub fn properties_mut(&mut self) -> &mut Option<Fields> {
+        &mut self.0.properties
     }
     pub fn into_inner(self) -> Box<FlowInner> {
         self.0
@@ -2564,44 +2748,88 @@ impl Transfer {
         self.0.handle
     }
     #[inline]
+    pub fn handle_mut(&mut self) -> &mut Handle {
+        &mut self.0.handle
+    }
+    #[inline]
     pub fn delivery_id(&self) -> Option<DeliveryNumber> {
         self.0.delivery_id
+    }
+    #[inline]
+    pub fn delivery_id_mut(&mut self) -> &mut Option<DeliveryNumber> {
+        &mut self.0.delivery_id
     }
     #[inline]
     pub fn delivery_tag(&self) -> Option<&DeliveryTag> {
         self.0.delivery_tag.as_ref()
     }
     #[inline]
+    pub fn delivery_tag_mut(&mut self) -> &mut Option<DeliveryTag> {
+        &mut self.0.delivery_tag
+    }
+    #[inline]
     pub fn message_format(&self) -> Option<MessageFormat> {
         self.0.message_format
+    }
+    #[inline]
+    pub fn message_format_mut(&mut self) -> &mut Option<MessageFormat> {
+        &mut self.0.message_format
     }
     #[inline]
     pub fn settled(&self) -> Option<bool> {
         self.0.settled
     }
     #[inline]
+    pub fn settled_mut(&mut self) -> &mut Option<bool> {
+        &mut self.0.settled
+    }
+    #[inline]
     pub fn more(&self) -> bool {
         self.0.more
+    }
+    #[inline]
+    pub fn more_mut(&mut self) -> &mut bool {
+        &mut self.0.more
     }
     #[inline]
     pub fn rcv_settle_mode(&self) -> Option<ReceiverSettleMode> {
         self.0.rcv_settle_mode
     }
     #[inline]
+    pub fn rcv_settle_mode_mut(&mut self) -> &mut Option<ReceiverSettleMode> {
+        &mut self.0.rcv_settle_mode
+    }
+    #[inline]
     pub fn state(&self) -> Option<&DeliveryState> {
         self.0.state.as_ref()
+    }
+    #[inline]
+    pub fn state_mut(&mut self) -> &mut Option<DeliveryState> {
+        &mut self.0.state
     }
     #[inline]
     pub fn resume(&self) -> bool {
         self.0.resume
     }
     #[inline]
+    pub fn resume_mut(&mut self) -> &mut bool {
+        &mut self.0.resume
+    }
+    #[inline]
     pub fn aborted(&self) -> bool {
         self.0.aborted
     }
     #[inline]
+    pub fn aborted_mut(&mut self) -> &mut bool {
+        &mut self.0.aborted
+    }
+    #[inline]
     pub fn batchable(&self) -> bool {
         self.0.batchable
+    }
+    #[inline]
+    pub fn batchable_mut(&mut self) -> &mut bool {
+        &mut self.0.batchable
     }
     #[inline]
     pub fn body(&self) -> Option<&TransferBody> {
@@ -2916,24 +3144,48 @@ impl Disposition {
         self.0.role
     }
     #[inline]
+    pub fn role_mut(&mut self) -> &mut Role {
+        &mut self.0.role
+    }
+    #[inline]
     pub fn first(&self) -> DeliveryNumber {
         self.0.first
+    }
+    #[inline]
+    pub fn first_mut(&mut self) -> &mut DeliveryNumber {
+        &mut self.0.first
     }
     #[inline]
     pub fn last(&self) -> Option<DeliveryNumber> {
         self.0.last
     }
     #[inline]
+    pub fn last_mut(&mut self) -> &mut Option<DeliveryNumber> {
+        &mut self.0.last
+    }
+    #[inline]
     pub fn settled(&self) -> bool {
         self.0.settled
+    }
+    #[inline]
+    pub fn settled_mut(&mut self) -> &mut bool {
+        &mut self.0.settled
     }
     #[inline]
     pub fn state(&self) -> Option<&DeliveryState> {
         self.0.state.as_ref()
     }
     #[inline]
+    pub fn state_mut(&mut self) -> &mut Option<DeliveryState> {
+        &mut self.0.state
+    }
+    #[inline]
     pub fn batchable(&self) -> bool {
         self.0.batchable
+    }
+    #[inline]
+    pub fn batchable_mut(&mut self) -> &mut bool {
+        &mut self.0.batchable
     }
     pub fn into_inner(self) -> Box<DispositionInner> {
         self.0
@@ -3134,12 +3386,24 @@ impl Detach {
         self.0.handle
     }
     #[inline]
+    pub fn handle_mut(&mut self) -> &mut Handle {
+        &mut self.0.handle
+    }
+    #[inline]
     pub fn closed(&self) -> bool {
         self.0.closed
     }
     #[inline]
+    pub fn closed_mut(&mut self) -> &mut bool {
+        &mut self.0.closed
+    }
+    #[inline]
     pub fn error(&self) -> Option<&Error> {
         self.0.error.as_ref()
+    }
+    #[inline]
+    pub fn error_mut(&mut self) -> &mut Option<Error> {
+        &mut self.0.error
     }
     pub fn into_inner(self) -> Box<DetachInner> {
         self.0
@@ -3276,6 +3540,10 @@ impl End {
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    #[inline]
+    pub fn error_mut(&mut self) -> &mut Option<Error> {
+        &mut self.error
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
@@ -3355,6 +3623,10 @@ impl Close {
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    #[inline]
+    pub fn error_mut(&mut self) -> &mut Option<Error> {
+        &mut self.error
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
@@ -3433,6 +3705,10 @@ impl SaslMechanisms {
     #[inline]
     pub fn sasl_server_mechanisms(&self) -> &Symbols {
         &self.sasl_server_mechanisms
+    }
+    #[inline]
+    pub fn sasl_server_mechanisms_mut(&mut self) -> &mut Symbols {
+        &mut self.sasl_server_mechanisms
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
@@ -3523,12 +3799,24 @@ impl SaslInit {
         &self.mechanism
     }
     #[inline]
+    pub fn mechanism_mut(&mut self) -> &mut Symbol {
+        &mut self.mechanism
+    }
+    #[inline]
     pub fn initial_response(&self) -> Option<&Bytes> {
         self.initial_response.as_ref()
     }
     #[inline]
+    pub fn initial_response_mut(&mut self) -> &mut Option<Bytes> {
+        &mut self.initial_response
+    }
+    #[inline]
     pub fn hostname(&self) -> Option<&ByteString> {
         self.hostname.as_ref()
+    }
+    #[inline]
+    pub fn hostname_mut(&mut self) -> &mut Option<ByteString> {
+        &mut self.hostname
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;
@@ -3642,6 +3930,10 @@ impl SaslChallenge {
     pub fn challenge(&self) -> &Bytes {
         &self.challenge
     }
+    #[inline]
+    pub fn challenge_mut(&mut self) -> &mut Bytes {
+        &mut self.challenge
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
@@ -3720,6 +4012,10 @@ impl SaslResponse {
     #[inline]
     pub fn response(&self) -> &Bytes {
         &self.response
+    }
+    #[inline]
+    pub fn response_mut(&mut self) -> &mut Bytes {
+        &mut self.response
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
@@ -3802,8 +4098,16 @@ impl SaslOutcome {
         self.code
     }
     #[inline]
+    pub fn code_mut(&mut self) -> &mut SaslCode {
+        &mut self.code
+    }
+    #[inline]
     pub fn additional_data(&self) -> Option<&Bytes> {
         self.additional_data.as_ref()
+    }
+    #[inline]
+    pub fn additional_data_mut(&mut self) -> &mut Option<Bytes> {
+        &mut self.additional_data
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1;
@@ -3911,44 +4215,88 @@ impl Source {
         self.address.as_ref()
     }
     #[inline]
+    pub fn address_mut(&mut self) -> &mut Option<Address> {
+        &mut self.address
+    }
+    #[inline]
     pub fn durable(&self) -> TerminusDurability {
         self.durable
+    }
+    #[inline]
+    pub fn durable_mut(&mut self) -> &mut TerminusDurability {
+        &mut self.durable
     }
     #[inline]
     pub fn expiry_policy(&self) -> TerminusExpiryPolicy {
         self.expiry_policy
     }
     #[inline]
+    pub fn expiry_policy_mut(&mut self) -> &mut TerminusExpiryPolicy {
+        &mut self.expiry_policy
+    }
+    #[inline]
     pub fn timeout(&self) -> Seconds {
         self.timeout
+    }
+    #[inline]
+    pub fn timeout_mut(&mut self) -> &mut Seconds {
+        &mut self.timeout
     }
     #[inline]
     pub fn dynamic(&self) -> bool {
         self.dynamic
     }
     #[inline]
+    pub fn dynamic_mut(&mut self) -> &mut bool {
+        &mut self.dynamic
+    }
+    #[inline]
     pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> {
         self.dynamic_node_properties.as_ref()
+    }
+    #[inline]
+    pub fn dynamic_node_properties_mut(&mut self) -> &mut Option<NodeProperties> {
+        &mut self.dynamic_node_properties
     }
     #[inline]
     pub fn distribution_mode(&self) -> Option<&DistributionMode> {
         self.distribution_mode.as_ref()
     }
     #[inline]
+    pub fn distribution_mode_mut(&mut self) -> &mut Option<DistributionMode> {
+        &mut self.distribution_mode
+    }
+    #[inline]
     pub fn filter(&self) -> Option<&FilterSet> {
         self.filter.as_ref()
+    }
+    #[inline]
+    pub fn filter_mut(&mut self) -> &mut Option<FilterSet> {
+        &mut self.filter
     }
     #[inline]
     pub fn default_outcome(&self) -> Option<&Outcome> {
         self.default_outcome.as_ref()
     }
     #[inline]
+    pub fn default_outcome_mut(&mut self) -> &mut Option<Outcome> {
+        &mut self.default_outcome
+    }
+    #[inline]
     pub fn outcomes(&self) -> Option<&Symbols> {
         self.outcomes.as_ref()
     }
     #[inline]
+    pub fn outcomes_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.outcomes
+    }
+    #[inline]
     pub fn capabilities(&self) -> Option<&Symbols> {
         self.capabilities.as_ref()
+    }
+    #[inline]
+    pub fn capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.capabilities
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
@@ -4173,28 +4521,56 @@ impl Target {
         self.address.as_ref()
     }
     #[inline]
+    pub fn address_mut(&mut self) -> &mut Option<Address> {
+        &mut self.address
+    }
+    #[inline]
     pub fn durable(&self) -> TerminusDurability {
         self.durable
+    }
+    #[inline]
+    pub fn durable_mut(&mut self) -> &mut TerminusDurability {
+        &mut self.durable
     }
     #[inline]
     pub fn expiry_policy(&self) -> TerminusExpiryPolicy {
         self.expiry_policy
     }
     #[inline]
+    pub fn expiry_policy_mut(&mut self) -> &mut TerminusExpiryPolicy {
+        &mut self.expiry_policy
+    }
+    #[inline]
     pub fn timeout(&self) -> Seconds {
         self.timeout
+    }
+    #[inline]
+    pub fn timeout_mut(&mut self) -> &mut Seconds {
+        &mut self.timeout
     }
     #[inline]
     pub fn dynamic(&self) -> bool {
         self.dynamic
     }
     #[inline]
+    pub fn dynamic_mut(&mut self) -> &mut bool {
+        &mut self.dynamic
+    }
+    #[inline]
     pub fn dynamic_node_properties(&self) -> Option<&NodeProperties> {
         self.dynamic_node_properties.as_ref()
     }
     #[inline]
+    pub fn dynamic_node_properties_mut(&mut self) -> &mut Option<NodeProperties> {
+        &mut self.dynamic_node_properties
+    }
+    #[inline]
     pub fn capabilities(&self) -> Option<&Symbols> {
         self.capabilities.as_ref()
+    }
+    #[inline]
+    pub fn capabilities_mut(&mut self) -> &mut Option<Symbols> {
+        &mut self.capabilities
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
@@ -4365,20 +4741,40 @@ impl Header {
         self.durable
     }
     #[inline]
+    pub fn durable_mut(&mut self) -> &mut bool {
+        &mut self.durable
+    }
+    #[inline]
     pub fn priority(&self) -> u8 {
         self.priority
+    }
+    #[inline]
+    pub fn priority_mut(&mut self) -> &mut u8 {
+        &mut self.priority
     }
     #[inline]
     pub fn ttl(&self) -> Option<Milliseconds> {
         self.ttl
     }
     #[inline]
+    pub fn ttl_mut(&mut self) -> &mut Option<Milliseconds> {
+        &mut self.ttl
+    }
+    #[inline]
     pub fn first_acquirer(&self) -> bool {
         self.first_acquirer
     }
     #[inline]
+    pub fn first_acquirer_mut(&mut self) -> &mut bool {
+        &mut self.first_acquirer
+    }
+    #[inline]
     pub fn delivery_count(&self) -> u32 {
         self.delivery_count
+    }
+    #[inline]
+    pub fn delivery_count_mut(&mut self) -> &mut u32 {
+        &mut self.delivery_count
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1;
@@ -4531,52 +4927,104 @@ impl Properties {
         self.message_id.as_ref()
     }
     #[inline]
+    pub fn message_id_mut(&mut self) -> &mut Option<MessageId> {
+        &mut self.message_id
+    }
+    #[inline]
     pub fn user_id(&self) -> Option<&Bytes> {
         self.user_id.as_ref()
+    }
+    #[inline]
+    pub fn user_id_mut(&mut self) -> &mut Option<Bytes> {
+        &mut self.user_id
     }
     #[inline]
     pub fn to(&self) -> Option<&Address> {
         self.to.as_ref()
     }
     #[inline]
+    pub fn to_mut(&mut self) -> &mut Option<Address> {
+        &mut self.to
+    }
+    #[inline]
     pub fn subject(&self) -> Option<&ByteString> {
         self.subject.as_ref()
+    }
+    #[inline]
+    pub fn subject_mut(&mut self) -> &mut Option<ByteString> {
+        &mut self.subject
     }
     #[inline]
     pub fn reply_to(&self) -> Option<&Address> {
         self.reply_to.as_ref()
     }
     #[inline]
+    pub fn reply_to_mut(&mut self) -> &mut Option<Address> {
+        &mut self.reply_to
+    }
+    #[inline]
     pub fn correlation_id(&self) -> Option<&MessageId> {
         self.correlation_id.as_ref()
+    }
+    #[inline]
+    pub fn correlation_id_mut(&mut self) -> &mut Option<MessageId> {
+        &mut self.correlation_id
     }
     #[inline]
     pub fn content_type(&self) -> Option<&Symbol> {
         self.content_type.as_ref()
     }
     #[inline]
+    pub fn content_type_mut(&mut self) -> &mut Option<Symbol> {
+        &mut self.content_type
+    }
+    #[inline]
     pub fn content_encoding(&self) -> Option<&Symbol> {
         self.content_encoding.as_ref()
+    }
+    #[inline]
+    pub fn content_encoding_mut(&mut self) -> &mut Option<Symbol> {
+        &mut self.content_encoding
     }
     #[inline]
     pub fn absolute_expiry_time(&self) -> Option<Timestamp> {
         self.absolute_expiry_time
     }
     #[inline]
+    pub fn absolute_expiry_time_mut(&mut self) -> &mut Option<Timestamp> {
+        &mut self.absolute_expiry_time
+    }
+    #[inline]
     pub fn creation_time(&self) -> Option<Timestamp> {
         self.creation_time
+    }
+    #[inline]
+    pub fn creation_time_mut(&mut self) -> &mut Option<Timestamp> {
+        &mut self.creation_time
     }
     #[inline]
     pub fn group_id(&self) -> Option<&ByteString> {
         self.group_id.as_ref()
     }
     #[inline]
+    pub fn group_id_mut(&mut self) -> &mut Option<ByteString> {
+        &mut self.group_id
+    }
+    #[inline]
     pub fn group_sequence(&self) -> Option<SequenceNo> {
         self.group_sequence
     }
     #[inline]
+    pub fn group_sequence_mut(&mut self) -> &mut Option<SequenceNo> {
+        &mut self.group_sequence
+    }
+    #[inline]
     pub fn reply_to_group_id(&self) -> Option<&ByteString> {
         self.reply_to_group_id.as_ref()
+    }
+    #[inline]
+    pub fn reply_to_group_id_mut(&mut self) -> &mut Option<ByteString> {
+        &mut self.reply_to_group_id
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
@@ -4822,8 +5270,16 @@ impl Received {
         self.section_number
     }
     #[inline]
+    pub fn section_number_mut(&mut self) -> &mut u32 {
+        &mut self.section_number
+    }
+    #[inline]
     pub fn section_offset(&self) -> u64 {
         self.section_offset
+    }
+    #[inline]
+    pub fn section_offset_mut(&mut self) -> &mut u64 {
+        &mut self.section_offset
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1;
@@ -4982,6 +5438,10 @@ impl Rejected {
     pub fn error(&self) -> Option<&Error> {
         self.error.as_ref()
     }
+    #[inline]
+    pub fn error_mut(&mut self) -> &mut Option<Error> {
+        &mut self.error
+    }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1;
 }
@@ -5126,12 +5586,24 @@ impl Modified {
         self.delivery_failed
     }
     #[inline]
+    pub fn delivery_failed_mut(&mut self) -> &mut Option<bool> {
+        &mut self.delivery_failed
+    }
+    #[inline]
     pub fn undeliverable_here(&self) -> Option<bool> {
         self.undeliverable_here
     }
     #[inline]
+    pub fn undeliverable_here_mut(&mut self) -> &mut Option<bool> {
+        &mut self.undeliverable_here
+    }
+    #[inline]
     pub fn message_annotations(&self) -> Option<&FieldsVec> {
         self.message_annotations.as_ref()
+    }
+    #[inline]
+    pub fn message_annotations_mut(&mut self) -> &mut Option<FieldsVec> {
+        &mut self.message_annotations
     }
     #[allow(clippy::identity_op)]
     const FIELD_COUNT: usize = 0 + 1 + 1 + 1;

@@ -107,6 +107,12 @@ impl Message {
     }
 
     #[inline]
+    /// Mut ref tp application property
+    pub fn app_properties_mut(&mut self) -> Option<&mut VecStringMap> {
+        self.0.application_properties.as_mut()
+    }
+
+    #[inline]
     /// Get application property
     pub fn app_property(&self, key: &str) -> Option<&Variant> {
         if let Some(ref props) = self.0.application_properties {
@@ -170,6 +176,12 @@ impl Message {
     /// Get message annotations
     pub fn message_annotations(&self) -> Option<&VecSymbolMap> {
         self.0.message_annotations.as_ref()
+    }
+
+    #[inline]
+    /// Mut reference to message annotations
+    pub fn message_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
+        self.0.message_annotations.as_mut()
     }
 
     #[inline]
@@ -377,7 +389,7 @@ mod tests {
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&buf)?.1;
-        let props = msg2.properties.as_ref().unwrap();
+        let props = msg2.properties().unwrap();
         assert_eq!(props.message_id, Some(1.into()));
         Ok(())
     }
@@ -391,7 +403,7 @@ mod tests {
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&buf)?.1;
-        let props = msg2.application_properties.as_ref().unwrap();
+        let props = msg2.app_properties().unwrap();
         assert_eq!(props[0].0.as_str(), "test");
         assert_eq!(props[0].1, Variant::from(1));
         Ok(())
@@ -427,7 +439,7 @@ mod tests {
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&buf)?.1;
-        assert_eq!(msg2.body.data().unwrap(), &data);
+        assert_eq!(msg2.body().data().unwrap(), &data);
         Ok(())
     }
 
@@ -439,7 +451,7 @@ mod tests {
         assert_eq!(buf, Bytes::from_static(b""));
 
         let msg2 = Message::decode(&buf)?.1;
-        assert!(msg2.body.data().is_none());
+        assert!(msg2.body().data().is_none());
         Ok(())
     }
 
@@ -459,11 +471,11 @@ mod tests {
         msg.encode(&mut buf);
 
         let msg3 = Message::decode(&buf)?.1;
-        let msg4 = Message::decode(&msg3.body.data().unwrap())?.1;
-        assert_eq!(msg1.properties, msg4.properties);
+        let msg4 = Message::decode(&msg3.body().data().unwrap())?.1;
+        assert_eq!(msg1.properties(), msg4.properties());
 
-        let msg5 = Message::decode(&msg3.body.data[1])?.1;
-        assert_eq!(msg2.properties, msg5.properties);
+        let msg5 = Message::decode(&msg3.body().data[1])?.1;
+        assert_eq!(msg2.properties(), msg5.properties());
         Ok(())
     }
 }

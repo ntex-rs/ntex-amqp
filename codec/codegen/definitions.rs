@@ -356,6 +356,18 @@ impl {{list.name}} {
                 {{/if}}
             {{/if}}
         {{/if}}
+
+    {{#if field.optional}}
+    #[inline]
+    pub fn {{field.name}}_mut(&mut self) -> Option<&mut {{field.ty}}> {
+        self.{{list.inner}}{{field.name}}.as_mut()
+    }
+    {{else}}
+    #[inline]
+    pub fn {{field.name}}_mut(&mut self) -> &mut {{field.ty}} {
+        &mut self.{{list.inner}}{{field.name}}
+    }
+    {{/if}}
     {{/each}}
 
     {{#if list.transfer}}

@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.7.1] - 2021-08-22
+
+* Auto-generate mut methods for type fields
+
 ## [0.5.0-b.9] - 2021-08-21
 
 * Upgrade to codec 0.7
