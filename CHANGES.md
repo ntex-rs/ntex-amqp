@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.7.2] - 2021-08-23
+
+* Add `.get_properties_mut()` helper method to some frames
+
 ## [codec-0.7.1] - 2021-08-22
 
 * Auto-generate mut methods for type fields

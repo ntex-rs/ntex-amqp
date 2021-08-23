@@ -370,6 +370,16 @@ impl {{list.name}} {
     {{/if}}
     {{/each}}
 
+    {{#if list.props}}
+    #[inline]
+    pub fn get_properties_mut(&mut self) -> &mut Fields {
+        if self.{{list.inner}}properties.is_none() {
+            self.{{list.inner}}properties = Some(Fields::default());
+        }
+        self.{{list.inner}}properties.as_mut().unwrap()
+    }
+    {{/if}}
+
     {{#if list.transfer}}
     #[inline]
     pub fn body(&self) -> Option<&TransferBody> {

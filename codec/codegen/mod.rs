@@ -177,6 +177,7 @@ pub struct Described {
     fields: Vec<Field>,
     transfer: bool,
     boxed: bool,
+    props: bool,
     inner: String,
 }
 
@@ -335,6 +336,10 @@ impl Described {
                 .map(|item| item == "frame")
                 .unwrap_or(false),
         };
+        let props = match d.name.as_str() {
+            "open" | "begin" | "attach" | "flow" => true,
+            _ => false,
+        };
         Described {
             name: camel_case(&d.name),
             ty: String::new(),
@@ -351,6 +356,7 @@ impl Described {
             .to_string(),
             transfer,
             boxed,
+            props,
         }
     }
     fn alias(d: _Described) -> Described {
@@ -362,6 +368,7 @@ impl Described {
             fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
             transfer: false,
             boxed: false,
+            props: false,
             inner: "".to_string(),
         }
     }
