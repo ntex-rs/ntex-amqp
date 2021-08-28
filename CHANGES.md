@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.0-b.10] - 2021-08-28
+
+* use new ntex's timer api
+
 ## [codec-0.7.2] - 2021-08-23
 
 * Add `.get_properties_mut()` helper method to some frames

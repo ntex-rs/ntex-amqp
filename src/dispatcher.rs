@@ -1,8 +1,8 @@
-use std::{cell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll, time};
+use std::{cell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll};
 
 use ntex::framed::DispatchItem;
-use ntex::rt::time::{sleep, Sleep};
 use ntex::service::Service;
+use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{Either, Ready};
 
 use crate::codec::protocol::Frame;
@@ -17,11 +17,9 @@ pub(crate) struct Dispatcher<Sr, Ctl: Service> {
     ctl_service: Ctl,
     ctl_fut: cell::RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
     shutdown: cell::Cell<bool>,
-    expire: cell::RefCell<Pin<Box<Sleep>>>,
-    idle_timeout: time::Duration,
+    expire: Sleep,
+    idle_timeout: Millis,
 }
-
-const ZERO: time::Duration = time::Duration::from_nanos(0);
 
 impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
@@ -36,10 +34,8 @@ where
         sink: Connection,
         service: Sr,
         ctl_service: Ctl,
-        idle_timeout: usize,
+        idle_timeout: Millis,
     ) -> Self {
-        let idle_timeout = time::Duration::from_secs(idle_timeout as u64);
-
         Dispatcher {
             sink,
             service,
@@ -47,22 +43,19 @@ where
             idle_timeout,
             ctl_fut: cell::RefCell::new(None),
             shutdown: cell::Cell::new(false),
-            expire: cell::RefCell::new(Box::pin(sleep(idle_timeout))),
+            expire: sleep(idle_timeout),
         }
     }
 
     fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
-        let idle_timeout = self.idle_timeout;
-        if idle_timeout > ZERO {
-            let mut expire = self.expire.borrow_mut();
-            if Pin::new(&mut *expire).poll(cx).is_ready() {
-                log::trace!("Send keep-alive ping, timeout: {:?} secs", idle_timeout);
-                self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
-                expire
-                    .as_mut()
-                    .reset((time::Instant::now() + idle_timeout).into());
-                let _ = Pin::new(&mut *expire).poll(cx);
-            }
+        if self.idle_timeout.non_zero() && self.expire.poll_elapsed(cx).is_ready() {
+            log::trace!(
+                "Send keep-alive ping, timeout: {:?} secs",
+                self.idle_timeout
+            );
+            self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
+            self.expire.reset(self.idle_timeout);
+            self.handle_idle_timeout(cx);
         }
     }
 

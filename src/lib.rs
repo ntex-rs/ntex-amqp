@@ -6,7 +6,7 @@ extern crate derive_more;
 #[macro_use]
 extern crate log;
 
-use ntex::util::ByteString;
+use ntex::{time::Seconds, util::ByteString};
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner};
 use uuid::Uuid;
 
@@ -122,19 +122,19 @@ impl Configuration {
         }))
     }
 
-    pub(crate) fn timeout_secs(&self) -> usize {
+    pub(crate) fn timeout_secs(&self) -> Seconds {
         if self.idle_time_out > 0 {
-            (self.idle_time_out / 1000) as usize
+            Seconds::checked_new((self.idle_time_out / 1000) as usize)
         } else {
-            0
+            Seconds::ZERO
         }
     }
 
-    pub(crate) fn timeout_remote_secs(&self) -> usize {
+    pub(crate) fn timeout_remote_secs(&self) -> Seconds {
         if self.idle_time_out > 0 {
-            ((self.idle_time_out as f32) * 0.75 / 1000.0) as usize
+            Seconds::checked_new(((self.idle_time_out as f32) * 0.75 / 1000.0) as usize)
         } else {
-            0
+            Seconds::ZERO
         }
     }
 }

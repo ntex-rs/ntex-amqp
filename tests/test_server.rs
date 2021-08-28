@@ -1,9 +1,9 @@
-use std::{cell::Cell, convert::TryFrom, rc::Rc, time::Duration};
+use std::{cell::Cell, convert::TryFrom, rc::Rc};
 
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, fn_service, Service};
-use ntex::{http::Uri, rt::time::sleep, util::Bytes, util::Ready};
+use ntex::{http::Uri, time::sleep, util::Bytes, util::Ready};
 use ntex_amqp::{client, error::LinkError, server, types};
 
 async fn server(
@@ -75,7 +75,7 @@ async fn test_simple() -> std::io::Result<()> {
         }
     });
     link.send_no_block(Bytes::from(b"test".as_ref())).unwrap();
-    sleep(Duration::from_millis(500)).await;
+    sleep(500).await;
     assert!(res.get());
 
     Ok(())

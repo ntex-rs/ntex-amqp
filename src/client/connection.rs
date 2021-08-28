@@ -1,6 +1,7 @@
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as IoDispatcher, State as IoState, Timer};
 use ntex::service::{fn_service, Service};
+use ntex::time::Seconds;
 use ntex::util::Ready;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -13,7 +14,7 @@ pub struct Client<Io, St = ()> {
     state: IoState,
     codec: AmqpCodec<AmqpFrame>,
     connection: Connection,
-    keepalive: u16,
+    keepalive: Seconds,
     remote_config: Configuration,
     timer: Timer,
     _st: State<St>,
@@ -29,7 +30,7 @@ where
         state: IoState,
         codec: AmqpCodec<AmqpFrame>,
         connection: Connection,
-        keepalive: u16,
+        keepalive: Seconds,
         remote_config: Configuration,
         timer: Timer,
     ) -> Self {
@@ -80,16 +81,18 @@ where
             self.connection,
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
-            self.remote_config.timeout_remote_secs(),
+            self.remote_config.timeout_remote_secs().into(),
         )
         .map(|_| Option::<AmqpFrame>::None);
 
+        let keepalive = if self.keepalive.non_zero() {
+            self.keepalive + Seconds(5)
+        } else {
+            Seconds::ZERO
+        };
+
         IoDispatcher::new(self.io, self.codec, self.state, dispatcher, self.timer)
-            .keepalive_timeout(if self.keepalive == 0 {
-                0
-            } else {
-                self.keepalive + 5
-            })
+            .keepalive_timeout(keepalive)
             .await
     }
 }

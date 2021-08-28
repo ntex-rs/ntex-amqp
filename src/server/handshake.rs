@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::framed::State;
+use ntex::{framed::State, time::Seconds};
 
 use crate::codec::protocol::{Frame, Open};
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -162,11 +162,11 @@ pub struct HandshakeAck<Io, St> {
     io: Io,
     sink: Connection,
     state: State,
-    idle_timeout: usize,
+    idle_timeout: Seconds,
 }
 
 impl<Io, St> HandshakeAck<Io, St> {
-    pub(crate) fn into_inner(self) -> (St, Io, Connection, State, usize) {
+    pub(crate) fn into_inner(self) -> (St, Io, Connection, State, Seconds) {
         (self.st, self.io, self.sink, self.state, self.idle_timeout)
     }
 }

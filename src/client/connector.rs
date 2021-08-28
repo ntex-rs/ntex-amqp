@@ -1,11 +1,11 @@
-use std::{future::Future, marker::PhantomData, time::Duration};
+use std::{future::Future, marker::PhantomData};
 
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::connect::{self, Address, Connect};
 use ntex::framed::{State, Timer};
-use ntex::rt::time::delay_for;
 use ntex::service::Service;
-use ntex::util::{select, ByteString, Either};
+use ntex::time::{timeout, Millis, Seconds};
+use ntex::util::{ByteString, Either};
 
 #[cfg(feature = "openssl")]
 use ntex::connect::openssl::{OpensslConnector, SslConnector};
@@ -13,7 +13,7 @@ use ntex::connect::openssl::{OpensslConnector, SslConnector};
 #[cfg(feature = "rustls")]
 use ntex::connect::rustls::{ClientConfig, RustlsConnector};
 
-use crate::codec::protocol::{Frame, Milliseconds, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
+use crate::codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 use crate::{error::ProtocolIdError, Configuration, Connection};
 
@@ -23,8 +23,8 @@ use super::{connection::Client, error::ConnectError, SaslAuth};
 pub struct Connector<A, T> {
     connector: T,
     config: Configuration,
-    handshake_timeout: u16,
-    disconnect_timeout: u16,
+    handshake_timeout: Seconds,
+    disconnect_timeout: Seconds,
     lw: u16,
     read_hw: u16,
     write_hw: u16,
@@ -38,13 +38,13 @@ impl<A> Connector<A, ()> {
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
             connector: connect::Connector::default(),
-            handshake_timeout: 0,
-            disconnect_timeout: 3,
+            handshake_timeout: Seconds::ZERO,
+            disconnect_timeout: Seconds(3),
             lw: 1024,
             read_hw: 8 * 1024,
             write_hw: 8 * 1024,
             config: Configuration::default(),
-            timer: Timer::with(Duration::from_secs(1)),
+            timer: Timer::new(Millis::ONE_SEC),
             _t: PhantomData,
         }
     }
@@ -79,11 +79,11 @@ where
         self.config.max_frame_size as usize
     }
 
-    /// Set idle time-out for the connection in seconds.
+    /// Set idle time-out for the connection.
     ///
     /// By default idle time-out is set to 120 seconds
-    pub fn idle_timeout(&mut self, timeout: u16) -> &mut Self {
-        self.config.idle_time_out = (timeout * 1000) as Milliseconds;
+    pub fn idle_timeout(&mut self, timeout: Seconds) -> &mut Self {
+        self.config.idle_time_out = (timeout.seconds() * 1000) as u32;
         self
     }
 
@@ -95,16 +95,16 @@ where
         self
     }
 
-    /// Set handshake timeout in milliseconds.
+    /// Set handshake timeout.
     ///
     /// Handshake includes `connect` packet and response `connect-ack`.
     /// By default handshake timeuot is disabled.
-    pub fn handshake_timeout(mut self, timeout: u16) -> Self {
-        self.handshake_timeout = timeout as u16;
+    pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
+        self.handshake_timeout = timeout;
         self
     }
 
-    /// Set client connection disconnect timeout in milliseconds.
+    /// Set client connection disconnect timeout.
     ///
     /// Defines a timeout for disconnect connection. If a disconnect procedure does not complete
     /// within this time, the connection get dropped.
@@ -112,8 +112,8 @@ where
     /// To disable timeout set value to 0.
     ///
     /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(mut self, timeout: u16) -> Self {
-        self.disconnect_timeout = timeout as u16;
+    pub fn disconnect_timeout(mut self, timeout: Seconds) -> Self {
+        self.disconnect_timeout = timeout;
         self
     }
 
@@ -191,15 +191,12 @@ where
         &self,
         address: A,
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
-        if self.handshake_timeout > 0 {
-            let fut = select(
-                delay_for(Duration::from_millis(self.handshake_timeout as u64)),
-                self._connect(address),
-            );
+        if self.handshake_timeout.non_zero() {
+            let fut = timeout(self.handshake_timeout, self._connect(address));
             Either::Left(async move {
                 match fut.await {
-                    Either::Left(_) => Err(ConnectError::HandshakeTimeout),
-                    Either::Right(res) => res.map_err(From::from),
+                    Ok(res) => res.map_err(From::from),
+                    Err(_) => Err(ConnectError::HandshakeTimeout),
                 }
             })
         } else {
@@ -252,15 +249,12 @@ where
         addr: A,
         auth: SaslAuth,
     ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
-        if self.handshake_timeout > 0 {
-            let fut = select(
-                delay_for(Duration::from_millis(self.handshake_timeout as u64)),
-                self._connect_sasl(addr, auth),
-            );
+        if self.handshake_timeout.non_zero() {
+            let fut = timeout(self.handshake_timeout, self._connect_sasl(addr, auth));
             Either::Left(async move {
                 match fut.await {
-                    Either::Left(_) => Err(ConnectError::HandshakeTimeout),
-                    Either::Right(res) => res.map_err(From::from),
+                    Ok(res) => res.map_err(From::from),
+                    Err(_) => Err(ConnectError::HandshakeTimeout),
                 }
             })
         } else {
@@ -445,7 +439,7 @@ where
             state,
             codec,
             connection,
-            config.timeout_secs() as u16,
+            config.timeout_secs(),
             remote_config,
             timer,
         );

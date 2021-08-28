@@ -1,8 +1,9 @@
-use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll, time};
+use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
+use ntex::time::{timeout, Millis, Seconds};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -20,8 +21,8 @@ pub struct Server<Io, St, H, Ctl> {
     lw: u16,
     read_hw: u16,
     write_hw: u16,
-    handshake_timeout: u64,
-    disconnect_timeout: u16,
+    handshake_timeout: Seconds,
+    disconnect_timeout: Seconds,
     _t: marker::PhantomData<(Io, St)>,
 }
 
@@ -30,8 +31,8 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     publish: Pb,
     config: Rc<Configuration>,
     max_size: usize,
-    handshake_timeout: u64,
-    disconnect_timeout: u16,
+    handshake_timeout: Seconds,
+    disconnect_timeout: Seconds,
     lw: u16,
     read_hw: u16,
     write_hw: u16,
@@ -54,8 +55,8 @@ where
     {
         Self {
             handshake: handshake.into_factory(),
-            handshake_timeout: 5000,
-            disconnect_timeout: 3,
+            handshake_timeout: Seconds(5),
+            disconnect_timeout: Seconds(3),
             lw: 1024,
             read_hw: 8 * 1024,
             write_hw: 8 * 1024,
@@ -83,15 +84,15 @@ impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
         self
     }
 
-    /// Set handshake timeout in millis.
+    /// Set handshake timeout.
     ///
     /// By default handshake timeuot is 5 seconds.
-    pub fn handshake_timeout(mut self, timeout: u64) -> Self {
+    pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
         self.handshake_timeout = timeout;
         self
     }
 
-    /// Set server connection disconnect timeout in milliseconds.
+    /// Set server connection disconnect timeout.
     ///
     /// Defines a timeout for disconnect connection. If a disconnect procedure does not complete
     /// within this time, the connection get dropped.
@@ -99,7 +100,7 @@ impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
     /// To disable timeout set value to 0.
     ///
     /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(mut self, val: u16) -> Self {
+    pub fn disconnect_timeout(mut self, val: Seconds) -> Self {
         self.disconnect_timeout = val;
         self
     }
@@ -186,7 +187,7 @@ where
                 lw: self.lw,
                 read_hw: self.read_hw,
                 write_hw: self.write_hw,
-                time: Timer::with(time::Duration::from_secs(1)),
+                time: Timer::new(Millis::ONE_SEC),
                 _t: marker::PhantomData,
             }),
             _t: marker::PhantomData,
@@ -276,8 +277,8 @@ where
     }
 
     fn call(&self, req: Self::Request) -> Self::Future {
-        let timeout = self.inner.handshake_timeout;
         let keepalive = self.inner.config.idle_time_out / 1000;
+        let handshake_timeout = self.inner.handshake_timeout;
         let disconnect_timeout = self.inner.disconnect_timeout;
         let inner = self.inner.clone();
         let fut = handshake(
@@ -288,10 +289,10 @@ where
         );
 
         Box::pin(async move {
-            let (io, state, codec, sink, st, idle_timeout) = if timeout == 0 {
+            let (io, state, codec, sink, st, idle_timeout) = if handshake_timeout.is_zero() {
                 fut.await?
             } else {
-                ntex::rt::time::timeout(time::Duration::from_millis(timeout), fut)
+                timeout(handshake_timeout, fut)
                     .await
                     .map_err(|_| HandshakeError::Timeout)??
             };
@@ -308,11 +309,11 @@ where
                 ServerError::ControlServiceError
             })?;
 
-            let dispatcher = Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout)
+            let dispatcher = Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout.into())
                 .map(|_| Option::<AmqpFrame>::None);
 
             FramedDispatcher::new(io, codec, state, dispatcher, inner.time.clone())
-                .keepalive_timeout(keepalive as u16)
+                .keepalive_timeout(Seconds::checked_new(keepalive as usize))
                 .disconnect_timeout(disconnect_timeout)
                 .await
                 .map_err(|_| ServerError::Disconnected)
@@ -332,7 +333,7 @@ async fn handshake<Io, St, H, Ctl, Pb>(
         AmqpCodec<AmqpFrame>,
         Connection,
         State<St>,
-        usize,
+        Seconds,
     ),
     ServerError<H::Error>,
 >
