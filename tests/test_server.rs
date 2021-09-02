@@ -3,7 +3,8 @@ use std::{cell::Cell, convert::TryFrom, rc::Rc};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, fn_service, Service};
-use ntex::{http::Uri, time::sleep, util::Bytes, util::Ready};
+use ntex::time::{sleep, Millis};
+use ntex::{http::Uri, util::Bytes, util::Ready};
 use ntex_amqp::{client, error::LinkError, server, types};
 
 async fn server(
@@ -54,7 +55,7 @@ async fn test_simple() -> std::io::Result<()> {
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
-        client.start_default().await;
+        let _ = client.start_default().await;
     });
 
     let session = sink.open_session().await.unwrap();
@@ -75,7 +76,7 @@ async fn test_simple() -> std::io::Result<()> {
         }
     });
     link.send_no_block(Bytes::from(b"test".as_ref())).unwrap();
-    sleep(500).await;
+    sleep(Millis(500)).await;
     assert!(res.get());
 
     Ok(())
