@@ -3,8 +3,7 @@ use std::{cell::Cell, convert::TryFrom, rc::Rc};
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, fn_service, Service};
-use ntex::time::{sleep, Millis};
-use ntex::{http::Uri, util::Bytes, util::Ready};
+use ntex::{http::Uri, time::sleep, time::Millis, util::Bytes, util::Ready};
 use ntex_amqp::{client, error::LinkError, server, types};
 
 async fn server(

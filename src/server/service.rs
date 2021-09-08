@@ -198,7 +198,7 @@ where
 struct ServerImpl<Io, St, H, Ctl, Pb> {
     handshake: H,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-    _t: marker::PhantomData<(Io,)>,
+    _t: marker::PhantomData<Io>,
 }
 
 impl<Io, St, H, Ctl, Pb> ServiceFactory for ServerImpl<Io, St, H, Ctl, Pb>
@@ -241,7 +241,7 @@ where
 struct ServerImplService<Io, St, H, Ctl, Pb> {
     handshake: Rc<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-    _t: marker::PhantomData<(Io,)>,
+    _t: marker::PhantomData<Io>,
 }
 
 impl<Io, St, H, Ctl, Pb> Service for ServerImplService<Io, St, H, Ctl, Pb>

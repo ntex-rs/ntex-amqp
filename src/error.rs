@@ -39,6 +39,7 @@ pub enum AmqpProtocolError {
     TooManyChannels,
     KeepAliveTimeout,
     Disconnected,
+    Io,
     #[display(fmt = "Unknown session: {:?}", _0)]
     UnknownSession(protocol::Frame),
     #[display(fmt = "Unknown link in session: {:?}", _0)]

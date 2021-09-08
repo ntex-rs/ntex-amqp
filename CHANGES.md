@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.0-b.11] - 2021-09-08
+
+* Handle keep-alive and io errors
+
 ## [0.5.0-b.10] - 2021-08-28
 
 * use new ntex's timer api

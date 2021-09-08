@@ -11,7 +11,7 @@ use crate::error::{AmqpProtocolError, DispatcherError, Error};
 use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
 
 /// Amqp server dispatcher service.
-pub(crate) struct Dispatcher<Sr, Ctl: Service> {
+pub(crate) struct Dispatcher<Sr: Service, Ctl: Service> {
     sink: Connection,
     service: Sr,
     ctl_service: Ctl,
@@ -104,8 +104,13 @@ where
                 ControlFrameKind::DetachReceiver(_, ref link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::ProtocolError(ref err) => return Err(err.clone().into()),
-                ControlFrameKind::Closed(_) => (),
+                ControlFrameKind::ProtocolError(ref err) => {
+                    self.sink.set_error(err.clone());
+                    return Err(err.clone().into());
+                }
+                ControlFrameKind::Closed(_) => {
+                    self.sink.set_error(AmqpProtocolError::Disconnected);
+                }
             }
         } else {
             match frame.0.get_mut().kind {
@@ -136,8 +141,13 @@ where
                 ControlFrameKind::DetachReceiver(_, _) => {
                     // frame.session_cell().get_mut().handle_detach(frm);
                 }
-                ControlFrameKind::ProtocolError(ref err) => return Err(err.clone().into()),
-                ControlFrameKind::Closed(_) => (),
+                ControlFrameKind::ProtocolError(ref err) => {
+                    self.sink.set_error(err.clone());
+                    return Err(err.clone().into());
+                }
+                ControlFrameKind::Closed(_) => {
+                    self.sink.set_error(AmqpProtocolError::Disconnected);
+                }
             }
         }
         Ok(())
@@ -284,11 +294,18 @@ where
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::KeepAliveTimeout => {
-                self.sink.set_error(AmqpProtocolError::KeepAliveTimeout);
+                let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                    AmqpProtocolError::KeepAliveTimeout,
+                ));
+                *self.ctl_fut.borrow_mut() =
+                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::IoError(_) => {
-                self.sink.set_error(AmqpProtocolError::Disconnected);
+                let frame =
+                    ControlFrame::new_kind(ControlFrameKind::ProtocolError(AmqpProtocolError::Io));
+                *self.ctl_fut.borrow_mut() =
+                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
