@@ -311,3 +311,45 @@ impl Default for ReceiverSettleMode {
         ReceiverSettleMode::First
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ntex_bytes::BytesMut;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::codec::{Decode, Encode};
+    use crate::error::AmqpCodecError;
+
+    #[test]
+    fn test_message_id() -> Result<(), AmqpCodecError> {
+        let id = MessageId::Uuid(Uuid::new_v4());
+
+        let mut buf = BytesMut::new();
+        buf.reserve(id.encoded_size());
+        id.encode(&mut buf);
+
+        let buf = buf.freeze();
+        let new_id = MessageId::decode(&buf[..])?.1;
+
+        assert_eq!(id, new_id);
+        Ok(())
+    }
+
+    #[test]
+    fn test_properties() -> Result<(), AmqpCodecError> {
+        let id = Uuid::new_v4();
+        let mut props = Properties::default();
+        props.correlation_id = Some(id.into());
+
+        let mut buf = BytesMut::new();
+        buf.reserve(id.encoded_size());
+        props.encode(&mut buf);
+
+        let buf = buf.freeze();
+        let props2 = Properties::decode(&buf[..])?.1;
+
+        assert_eq!(props, props2);
+        Ok(())
+    }
+}

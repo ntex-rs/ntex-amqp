@@ -372,6 +372,7 @@ impl Encode for Message {
 #[cfg(test)]
 mod tests {
     use ntex_bytes::{ByteString, Bytes, BytesMut};
+    use uuid::Uuid;
 
     use crate::codec::{Decode, Encode};
     use crate::error::AmqpCodecError;
@@ -476,6 +477,19 @@ mod tests {
 
         let msg5 = Message::decode(&msg3.body().data[1])?.1;
         assert_eq!(msg2.properties(), msg5.properties());
+        Ok(())
+    }
+
+    #[test]
+    fn test_messages_codec() -> Result<(), AmqpCodecError> {
+        let mut msg = Message::default();
+        msg.set_properties(|props| props.message_id = Some(Uuid::new_v4().into()));
+
+        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        msg.encode(&mut buf);
+
+        let msg2 = Message::decode(&buf)?.1;
+        assert_eq!(msg.properties(), msg2.properties());
         Ok(())
     }
 }
