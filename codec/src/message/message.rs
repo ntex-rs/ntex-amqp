@@ -227,6 +227,12 @@ impl Message {
     }
 
     #[inline]
+    /// Mutable message body
+    pub fn body_mut(&mut self) -> &mut MessageBody {
+        &mut self.0.body
+    }
+
+    #[inline]
     /// Message value
     pub fn value(&self) -> Option<&Variant> {
         self.0.body.value.as_ref()
