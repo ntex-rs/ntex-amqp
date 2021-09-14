@@ -261,7 +261,7 @@ impl Message {
 }
 
 impl Decode for Message {
-    fn decode(mut input: &[u8]) -> Result<(&[u8], Message), AmqpParseError> {
+    fn decode(input: &mut Bytes) -> Result<Message, AmqpParseError> {
         let mut message = Message::default();
 
         loop {
@@ -269,7 +269,7 @@ impl Decode for Message {
                 break;
             }
 
-            let (buf, sec) = Section::decode(input)?;
+            let sec = Section::decode(input)?;
             match sec {
                 Section::Header(val) => {
                     message.0.header = Some(val);
@@ -301,9 +301,8 @@ impl Decode for Message {
                     message.0.body.data.push(val);
                 }
             }
-            input = buf;
         }
-        Ok((input, message))
+        Ok(message)
     }
 }
 
@@ -389,7 +388,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = Message::decode(&buf)?.1;
+        let msg2 = Message::decode(&mut buf.freeze())?;
         let props = msg2.properties().unwrap();
         assert_eq!(props.message_id, Some(1.into()));
         Ok(())
@@ -403,7 +402,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = Message::decode(&buf)?.1;
+        let msg2 = Message::decode(&mut buf.freeze())?;
         let props = msg2.app_properties().unwrap();
         assert_eq!(props[0].0.as_str(), "test");
         assert_eq!(props[0].1, Variant::from(1));
@@ -425,7 +424,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = Message::decode(&buf)?.1;
+        let msg2 = Message::decode(&mut buf.freeze())?;
         assert_eq!(msg2.header().unwrap(), &hdr);
         Ok(())
     }
@@ -439,7 +438,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = Message::decode(&buf)?.1;
+        let msg2 = Message::decode(&mut buf.freeze())?;
         assert_eq!(msg2.body().data().unwrap(), &data);
         Ok(())
     }
@@ -451,7 +450,7 @@ mod tests {
         msg.encode(&mut buf);
         assert_eq!(buf, Bytes::from_static(b""));
 
-        let msg2 = Message::decode(&buf)?.1;
+        let msg2 = Message::decode(&mut buf.freeze())?;
         assert!(msg2.body().data().is_none());
         Ok(())
     }
@@ -471,11 +470,11 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg3 = Message::decode(&buf)?.1;
-        let msg4 = Message::decode(&msg3.body().data().unwrap())?.1;
+        let msg3 = Message::decode(&mut buf.freeze())?;
+        let msg4 = Message::decode(&mut msg3.body().data().unwrap().clone())?;
         assert_eq!(msg1.properties(), msg4.properties());
 
-        let msg5 = Message::decode(&msg3.body().data[1])?.1;
+        let msg5 = Message::decode(&mut msg3.body().data[1].clone())?;
         assert_eq!(msg2.properties(), msg5.properties());
         Ok(())
     }
@@ -488,7 +487,7 @@ mod tests {
         let mut buf = BytesMut::with_capacity(msg.encoded_size());
         msg.encode(&mut buf);
 
-        let msg2 = Message::decode(&buf)?.1;
+        let msg2 = Message::decode(&mut buf.freeze())?;
         assert_eq!(msg.properties(), msg2.properties());
         Ok(())
     }

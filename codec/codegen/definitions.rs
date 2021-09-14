@@ -41,61 +41,61 @@ impl Frame {
 }
 
 impl Decode for Frame {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
+    fn decode(input: &mut Bytes) -> Result<Self, AmqpParseError> {
         if input.is_empty() {
-            Ok((input, Frame::Empty))
+            Ok(Frame::Empty)
         } else {
-            let (input, fmt) = decode_format_code(input)?;
+            let fmt = decode_format_code(input)?;
             validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-            let (input, descriptor) = Descriptor::decode(input)?;
+            let descriptor = Descriptor::decode(input)?;
             match descriptor {
-                Descriptor::Ulong(16) => decode_open_inner(input).map(|(i, r)| (i, Frame::Open(r))),
+                Descriptor::Ulong(16) => decode_open_inner(input).map(Frame::Open),
                 Descriptor::Ulong(17) => {
-                    decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r)))
+                    decode_begin_inner(input).map(Frame::Begin)
                 }
                 Descriptor::Ulong(18) => {
-                    decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r)))
+                    decode_attach_inner(input).map(Frame::Attach)
                 }
-                Descriptor::Ulong(19) => decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r))),
+                Descriptor::Ulong(19) => decode_flow_inner(input).map(Frame::Flow),
                 Descriptor::Ulong(20) => {
-                    decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r)))
+                    decode_transfer_inner(input).map(Frame::Transfer)
                 }
                 Descriptor::Ulong(21) => {
-                    decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r)))
+                    decode_disposition_inner(input).map(Frame::Disposition)
                 }
                 Descriptor::Ulong(22) => {
-                    decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r)))
+                    decode_detach_inner(input).map(Frame::Detach)
                 }
-                Descriptor::Ulong(23) => decode_end_inner(input).map(|(i, r)| (i, Frame::End(r))),
+                Descriptor::Ulong(23) => decode_end_inner(input).map(Frame::End),
                 Descriptor::Ulong(24) => {
-                    decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
+                    decode_close_inner(input).map(Frame::Close)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:open:list" => {
-                    decode_open_inner(input).map(|(i, r)| (i, Frame::Open(r)))
+                    decode_open_inner(input).map(Frame::Open)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:begin:list" => {
-                    decode_begin_inner(input).map(|(i, r)| (i, Frame::Begin(r)))
+                    decode_begin_inner(input).map(Frame::Begin)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:attach:list" => {
-                    decode_attach_inner(input).map(|(i, r)| (i, Frame::Attach(r)))
+                    decode_attach_inner(input).map(Frame::Attach)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:flow:list" => {
-                    decode_flow_inner(input).map(|(i, r)| (i, Frame::Flow(r)))
+                    decode_flow_inner(input).map(Frame::Flow)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:transfer:list" => {
-                    decode_transfer_inner(input).map(|(i, r)| (i, Frame::Transfer(r)))
+                    decode_transfer_inner(input).map(Frame::Transfer)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:disposition:list" => {
-                    decode_disposition_inner(input).map(|(i, r)| (i, Frame::Disposition(r)))
+                    decode_disposition_inner(input).map(Frame::Disposition)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:detach:list" => {
-                    decode_detach_inner(input).map(|(i, r)| (i, Frame::Detach(r)))
+                    decode_detach_inner(input).map(Frame::Detach)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:end:list" => {
-                    decode_end_inner(input).map(|(i, r)| (i, Frame::End(r)))
+                    decode_end_inner(input).map(Frame::End)
                 }
                 Descriptor::Symbol(ref a) if a.as_str() == "amqp:close:list" => {
-                    decode_close_inner(input).map(|(i, r)| (i, Frame::Close(r)))
+                    decode_close_inner(input).map(Frame::Close)
                 }
                 _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
             }
@@ -144,15 +144,15 @@ pub enum {{provide.name}} {
 }
 
 impl DecodeFormatted for {{provide.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
+        let descriptor = Descriptor::decode(input)?;
         match descriptor {
             {{#each provide.options as |option|}}
-            Descriptor::Ulong({{option.descriptor.code}}) => decode_{{snake option.ty}}_inner(input).map(|(i, r)| (i, {{provide.name}}::{{option.ty}}(r))),
+            Descriptor::Ulong({{option.descriptor.code}}) => decode_{{snake option.ty}}_inner(input).map({{provide.name}}::{{option.ty}}),
             {{/each}}
             {{#each provide.options as |option|}}
-            Descriptor::Symbol(ref a) if a.as_str() == "{{option.descriptor.name}}" => decode_{{snake option.ty}}_inner(input).map(|(i, r)| (i, {{provide.name}}::{{option.ty}}(r))),
+            Descriptor::Symbol(ref a) if a.as_str() == "{{option.descriptor.name}}" => decode_{{snake option.ty}}_inner(input).map({{provide.name}}::{{option.ty}}),
             {{/each}}
             _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
         }
@@ -201,9 +201,9 @@ impl {{enum.name}} {
     }
 }
 impl DecodeFormatted for {{enum.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        let (input, base) = Symbol::decode_with_format(input, fmt)?;
-        Ok((input, Self::try_from(&base)?))
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        let base = Symbol::decode_with_format(input, fmt)?;
+        Ok(Self::try_from(&base)?)
     }
 }
 impl Encode for {{enum.name}} {
@@ -234,9 +234,9 @@ impl {{enum.name}} {
     }
 }
 impl DecodeFormatted for {{enum.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        let (input, base) = {{enum.ty}}::decode_with_format(input, fmt)?;
-        Ok((input, Self::try_from(base)?))
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        let base = {{enum.ty}}::decode_with_format(input, fmt)?;
+        Ok(Self::try_from(base)?)
     }
 }
 impl Encode for {{enum.name}} {
@@ -266,7 +266,7 @@ impl Encode for {{enum.name}} {
 
 {{#each defs.described_restricted as |dr|}}
 type {{dr.name}} = {{dr.ty}};
-fn decode_{{snake dr.name}}_inner(input: &[u8]) -> Result<(&[u8], {{dr.name}}), AmqpParseError> {
+fn decode_{{snake dr.name}}_inner(input: &mut Bytes) -> Result<{{dr.name}}, AmqpParseError> {
     {{dr.name}}::decode(input)
 }
 fn encoded_size_{{snake dr.name}}_inner(dr: &{{dr.name}}) -> usize {
@@ -426,21 +426,19 @@ impl {{list.name}}Builder {
 {{/if}}
 
 #[allow(unused_mut)]
-fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}}), AmqpParseError> {
-    let (input, format) = decode_format_code(input)?;
-    let (input, header) = decode_list_header(input, format)?;
+fn decode_{{snake list.name}}_inner(input: &mut Bytes) -> Result<{{list.name}}, AmqpParseError> {
+    let format = decode_format_code(input)?;
+    let header = decode_list_header(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     {{#if list.fields}}
-    let (mut input, mut remainder) = input.split_at(size);
+    let mut data = input.split_to(size);
     let mut count = header.count;
     {{#each list.fields as |field|}}
     {{#if field.optional}}
     let {{field.name}}: Option<{{{field.ty}}}>;
     if count > 0 {
-        let decoded = Option::<{{{field.ty}}}>::decode(input)?;
-        input = decoded.0;
-        {{field.name}} = decoded.1;
+        {{field.name}} = Option::<{{{field.ty}}}>::decode(&mut data)?;
         count -= 1;
     }
     else {
@@ -450,13 +448,12 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
     let {{field.name}}: {{{field.ty}}};
     if count > 0 {
         {{#if field.default}}
-        let (in1, decoded) = Option::<{{{field.ty}}}>::decode(input)?;
+        let decoded = Option::<{{{field.ty}}}>::decode(&mut data)?;
         {{field.name}} = decoded.unwrap_or({{field.default}});
         {{else}}
-        let (in1, decoded) = {{{field.ty}}}::decode(input)?;
+        let decoded = {{{field.ty}}}::decode(&mut data)?;
         {{field.name}} = decoded;
         {{/if}}
-        input = in1;
         count -= 1;
     }
     else {
@@ -469,37 +466,35 @@ fn decode_{{snake list.name}}_inner(input: &[u8]) -> Result<(&[u8], {{list.name}
     {{/if}}
     {{/each}}
     {{else}}
-    let mut remainder = &input[size..];
+    input.split_to(size);
     {{/if}}
 
     {{#if list.transfer}}
-    let body = if remainder.is_empty() {
+    let body = if input.is_empty() {
             None
         } else {
-            let b = Bytes::copy_from_slice(remainder);
-            remainder = &[];
-            Some(b.into())
+            Some(input.split_to(input.len()).into())
         };
     {{/if}}
 
     {{#if list.boxed}}
-    Ok((remainder, {{list.name}}(Box::new({{list.name}}Inner {
+    Ok({{list.name}}(Box::new({{list.name}}Inner {
     {{#each list.fields as |field|}}
     {{field.name}},
     {{/each}}
         {{#if list.transfer}}
         body
         {{/if}}
-    }))))
+    })))
     {{else}}
-    Ok((remainder, {{list.name}} {
+    Ok({{list.name}} {
     {{#each list.fields as |field|}}
     {{field.name}},
     {{/each}}
         {{#if list.transfer}}
         body
         {{/if}}
-    }))
+    })
     {{/if}}
 }
 
@@ -539,9 +534,9 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
 }
 
 impl DecodeFormatted for {{list.name}} {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let (input, descriptor) = Descriptor::decode(input)?;
+        let descriptor = Descriptor::decode(input)?;
         let is_match = match descriptor {
             Descriptor::Ulong(val) => val == {{list.descriptor.code}},
             Descriptor::Symbol(ref sym) => sym.as_bytes() == b"{{list.descriptor.name}}",

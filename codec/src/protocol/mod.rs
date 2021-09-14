@@ -78,19 +78,17 @@ impl From<i32> for MessageId {
 }
 
 impl DecodeFormatted for MessageId {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError> {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_SMALLULONG | codec::FORMATCODE_ULONG | codec::FORMATCODE_ULONG_0 => {
-                u64::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Ulong(o)))
+                u64::decode_with_format(input, fmt).map(MessageId::Ulong)
             }
-            codec::FORMATCODE_UUID => {
-                Uuid::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Uuid(o)))
-            }
+            codec::FORMATCODE_UUID => Uuid::decode_with_format(input, fmt).map(MessageId::Uuid),
             codec::FORMATCODE_BINARY8 | codec::FORMATCODE_BINARY32 => {
-                Bytes::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::Binary(o)))
+                Bytes::decode_with_format(input, fmt).map(MessageId::Binary)
             }
             codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
-                ByteString::decode_with_format(input, fmt).map(|(i, o)| (i, MessageId::String(o)))
+                ByteString::decode_with_format(input, fmt).map(MessageId::String)
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -134,21 +132,21 @@ impl Default for ErrorCondition {
 
 impl DecodeFormatted for ErrorCondition {
     #[inline]
-    fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        let (input, result) = Symbol::decode_with_format(input, format)?;
+    fn decode_with_format(input: &mut Bytes, format: u8) -> Result<Self, AmqpParseError> {
+        let result = Symbol::decode_with_format(input, format)?;
         if let Ok(r) = AmqpError::try_from(&result) {
-            return Ok((input, ErrorCondition::AmqpError(r)));
+            return Ok(ErrorCondition::AmqpError(r));
         }
         if let Ok(r) = ConnectionError::try_from(&result) {
-            return Ok((input, ErrorCondition::ConnectionError(r)));
+            return Ok(ErrorCondition::ConnectionError(r));
         }
         if let Ok(r) = SessionError::try_from(&result) {
-            return Ok((input, ErrorCondition::SessionError(r)));
+            return Ok(ErrorCondition::SessionError(r));
         }
         if let Ok(r) = LinkError::try_from(&result) {
-            return Ok((input, ErrorCondition::LinkError(r)));
+            return Ok(ErrorCondition::LinkError(r));
         }
-        Ok((input, ErrorCondition::Custom(result)))
+        Ok(ErrorCondition::Custom(result))
     }
 }
 
@@ -182,14 +180,14 @@ pub enum DistributionMode {
 }
 
 impl DecodeFormatted for DistributionMode {
-    fn decode_with_format(input: &[u8], format: u8) -> Result<(&[u8], Self), AmqpParseError> {
-        let (input, result) = Symbol::decode_with_format(input, format)?;
+    fn decode_with_format(input: &mut Bytes, format: u8) -> Result<Self, AmqpParseError> {
+        let result = Symbol::decode_with_format(input, format)?;
         let result = match result.as_str() {
             "move" => DistributionMode::Move,
             "copy" => DistributionMode::Copy,
             _ => DistributionMode::Custom(result),
         };
-        Ok((input, result))
+        Ok(result)
     }
 }
 
@@ -287,7 +285,7 @@ impl Transfer {
     #[inline]
     pub fn load_message<T: Decode>(&self) -> Result<T, AmqpParseError> {
         if let Some(TransferBody::Data(ref b)) = self.body() {
-            Ok(T::decode(b)?.1)
+            Ok(T::decode(&mut b.clone())?)
         } else {
             Err(AmqpParseError::UnexpectedType("body"))
         }
@@ -329,9 +327,7 @@ mod tests {
         buf.reserve(id.encoded_size());
         id.encode(&mut buf);
 
-        let buf = buf.freeze();
-        let new_id = MessageId::decode(&buf[..])?.1;
-
+        let new_id = MessageId::decode(&mut buf.freeze())?;
         assert_eq!(id, new_id);
         Ok(())
     }
@@ -346,9 +342,7 @@ mod tests {
         buf.reserve(id.encoded_size());
         props.encode(&mut buf);
 
-        let buf = buf.freeze();
-        let props2 = Properties::decode(&buf[..])?.1;
-
+        let props2 = Properties::decode(&mut buf.freeze())?;
         assert_eq!(props, props2);
         Ok(())
     }

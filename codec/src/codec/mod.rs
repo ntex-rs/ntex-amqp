@@ -1,4 +1,4 @@
-use ntex_bytes::BytesMut;
+use ntex_bytes::{Bytes, BytesMut};
 use std::marker::Sized;
 
 use crate::error::AmqpParseError;
@@ -35,30 +35,32 @@ pub trait Decode
 where
     Self: Sized,
 {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError>;
+    fn decode(input: &mut Bytes) -> Result<Self, AmqpParseError>;
 }
 
 pub trait DecodeFormatted
 where
     Self: Sized,
 {
-    fn decode_with_format(input: &[u8], fmt: u8) -> Result<(&[u8], Self), AmqpParseError>;
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError>;
 }
 
 pub trait ArrayDecode: Sized {
-    fn array_decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError>;
+    fn array_decode(input: &mut Bytes) -> Result<Self, AmqpParseError>;
 }
 
 impl<T: DecodeFormatted> Decode for T {
-    fn decode(input: &[u8]) -> Result<(&[u8], Self), AmqpParseError> {
-        let (input, fmt) = decode_format_code(input)?;
+    fn decode(input: &mut Bytes) -> Result<Self, AmqpParseError> {
+        let fmt = decode_format_code(input)?;
         T::decode_with_format(input, fmt)
     }
 }
 
-pub fn decode_format_code(input: &[u8]) -> Result<(&[u8], u8), AmqpParseError> {
+pub fn decode_format_code(input: &mut Bytes) -> Result<u8, AmqpParseError> {
     decode_check_len!(input, 1);
-    Ok((&input[1..], input[0]))
+    let code = input[0];
+    input.split_to(1);
+    Ok(code)
 }
 
 pub const FORMATCODE_DESCRIBED: u8 = 0x00;
@@ -113,10 +115,12 @@ mod tests {
 
     #[test]
     fn test_sasl_mechanisms() -> Result<(), AmqpCodecError> {
-        let data = b"\x02\x01\0\0\0S@\xc02\x01\xe0/\x04\xb3\0\0\0\x07MSSBCBS\0\0\0\x05PLAIN\0\0\0\tANONYMOUS\0\0\0\x08EXTERNAL";
+        let mut data = Bytes::from_static(
+            b"\x02\x01\0\0\0S@\xc02\x01\xe0/\x04\xb3\0\0\0\x07MSSBCBS\0\0\0\x05PLAIN\0\0\0\tANONYMOUS\0\0\0\x08EXTERNAL");
 
-        let (remainder, frame) = SaslFrame::decode(data.as_ref())?;
-        assert!(remainder.is_empty());
+        let data2 = data.clone();
+        let frame = SaslFrame::decode(&mut data).unwrap();
+        assert!(data.is_empty());
         match frame.body {
             SaslFrameBody::SaslMechanisms(_) => (),
             _ => panic!("error"),
@@ -126,24 +130,23 @@ mod tests {
         buf.reserve(frame.encoded_size());
         frame.encode(&mut buf);
         let _ = buf.split_to(4);
-        assert_eq!(Bytes::from_static(data), buf.freeze());
+        assert_eq!(data2, buf.freeze());
 
         Ok(())
     }
 
     #[test]
     fn test_disposition() -> Result<(), AmqpCodecError> {
-        let data = b"\x02\0\0\0\0S\x15\xc0\x0c\x06AC@A\0S$\xc0\x01\0B";
+        let data = Bytes::from_static(b"\x02\0\0\0\0S\x15\xc0\x0c\x06AC@A\0S$\xc0\x01\0B");
 
-        let (remainder, frame) = AmqpFrame::decode(data.as_ref())?;
-        assert!(remainder.is_empty());
+        let frame = AmqpFrame::decode(&mut data.clone())?;
         assert_eq!(frame.performative().name(), "Disposition");
 
         let mut buf = BytesMut::new();
         buf.reserve(frame.encoded_size());
         frame.encode(&mut buf);
         let _ = buf.split_to(4);
-        assert_eq!(Bytes::from_static(data), buf.freeze());
+        assert_eq!(data, buf.freeze());
 
         Ok(())
     }

@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.7.3] - 2021-09-14
+
+* Refactor codec's Decode trait
+
 ## [0.5.0-b.11] - 2021-09-08
 
 * Handle keep-alive and io errors

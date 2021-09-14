@@ -9,9 +9,6 @@ use super::framing::HEADER_LEN;
 use crate::codec::{Decode, Encode};
 use crate::protocol::ProtocolId;
 
-const SIZE_LOW_WM: usize = 4096;
-const SIZE_HIGH_WM: usize = 32768;
-
 #[derive(Debug)]
 pub struct AmqpCodec<T: Decode + Encode> {
     state: Cell<DecodeState>,
@@ -80,10 +77,6 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     src.advance(4);
 
                     if len < size {
-                        // extend receiving buffer to fit the whole frame
-                        if src.remaining_mut() < std::cmp::max(SIZE_LOW_WM, size + HEADER_LEN) {
-                            src.reserve(SIZE_HIGH_WM);
-                        }
                         return Ok(None);
                     }
                 }
@@ -92,9 +85,9 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                         return Ok(None);
                     }
 
-                    let frame_buf = src.split_to(size);
-                    let (remainder, frame) = T::decode(frame_buf.as_ref())?;
-                    if !remainder.is_empty() {
+                    let mut frame_buf = src.split_to(size).freeze();
+                    let frame = T::decode(&mut frame_buf)?;
+                    if !frame_buf.is_empty() {
                         // todo: could it really happen?
                         return Err(AmqpCodecError::UnparsedBytesLeft);
                     }
@@ -112,9 +105,8 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
 
     fn encode(&self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let size = item.encoded_size();
-        let need = std::cmp::max(SIZE_LOW_WM, size);
-        if dst.remaining_mut() < need {
-            dst.reserve(std::cmp::max(need, SIZE_HIGH_WM));
+        if dst.remaining_mut() < size {
+            dst.reserve(size);
         }
 
         let len = dst.len();
