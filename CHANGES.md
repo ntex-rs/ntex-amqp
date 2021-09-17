@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.0] - 2021-09-17
+
+* No changes
+
 ## [codec-0.7.3] - 2021-09-14
 
 * Refactor codec's Decode trait
