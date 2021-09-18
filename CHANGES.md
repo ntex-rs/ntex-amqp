@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.1] - 2021-09-18
+
+* Add std Error impl for errors
+
 ## [0.5.0] - 2021-09-17
 
 * No changes

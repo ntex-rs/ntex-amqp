@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, io};
+use std::{convert::TryFrom, error, io};
 
 use ntex::util::{ByteString, Either};
 
@@ -23,6 +23,8 @@ pub enum DispatcherError {
     /// Unexpected io error
     Io(io::Error),
 }
+
+impl error::Error for DispatcherError {}
 
 impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
     fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
@@ -55,6 +57,8 @@ pub enum AmqpProtocolError {
     #[display(fmt = "Unexpected frame: {:?}", _0)]
     Unexpected(protocol::Frame),
 }
+
+impl error::Error for AmqpProtocolError {}
 
 impl From<AmqpCodecError> for AmqpProtocolError {
     fn from(err: AmqpCodecError) -> Self {
