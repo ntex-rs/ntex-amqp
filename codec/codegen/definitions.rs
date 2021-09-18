@@ -203,7 +203,7 @@ impl {{enum.name}} {
 impl DecodeFormatted for {{enum.name}} {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let base = Symbol::decode_with_format(input, fmt)?;
-        Ok(Self::try_from(&base)?)
+        Self::try_from(&base)
     }
 }
 impl Encode for {{enum.name}} {
@@ -236,7 +236,7 @@ impl {{enum.name}} {
 impl DecodeFormatted for {{enum.name}} {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let base = {{enum.ty}}::decode_with_format(input, fmt)?;
-        Ok(Self::try_from(base)?)
+        Self::try_from(base)
     }
 }
 impl Encode for {{enum.name}} {

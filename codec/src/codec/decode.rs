@@ -89,7 +89,7 @@ impl DecodeFormatted for u32 {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_UINT => be_read!(input, read_u32, 4),
-            codec::FORMATCODE_SMALLUINT => read_u8(input).map(|o| u32::from(o)),
+            codec::FORMATCODE_SMALLUINT => read_u8(input).map(u32::from),
             codec::FORMATCODE_UINT_0 => Ok(0),
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -100,7 +100,7 @@ impl DecodeFormatted for u64 {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_ULONG => be_read!(input, read_u64, 8),
-            codec::FORMATCODE_SMALLULONG => read_u8(input).map(|o| u64::from(o)),
+            codec::FORMATCODE_SMALLULONG => read_u8(input).map(u64::from),
             codec::FORMATCODE_ULONG_0 => Ok(0),
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -125,7 +125,7 @@ impl DecodeFormatted for i32 {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_INT => be_read!(input, read_i32, 4),
-            codec::FORMATCODE_SMALLINT => read_i8(input).map(|o| i32::from(o)),
+            codec::FORMATCODE_SMALLINT => read_i8(input).map(i32::from),
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
@@ -135,7 +135,7 @@ impl DecodeFormatted for i64 {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_LONG => be_read!(input, read_i64, 8),
-            codec::FORMATCODE_SMALLLONG => read_i8(input).map(|o| i64::from(o)),
+            codec::FORMATCODE_SMALLLONG => read_i8(input).map(i64::from),
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
     }
@@ -171,7 +171,7 @@ impl DecodeFormatted for char {
 impl DecodeFormatted for DateTime<Utc> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_TIMESTAMP);
-        be_read!(input, read_i64, 8).map(|o| datetime_from_millis(o))
+        be_read!(input, read_i64, 8).map(datetime_from_millis)
     }
 }
 
@@ -336,41 +336,23 @@ impl DecodeFormatted for Variant {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_NULL => Ok(Variant::Null),
-            codec::FORMATCODE_BOOLEAN => {
-                bool::decode_with_format(input, fmt).map(|o| Variant::Boolean(o))
-            }
+            codec::FORMATCODE_BOOLEAN => bool::decode_with_format(input, fmt).map(Variant::Boolean),
             codec::FORMATCODE_BOOLEAN_FALSE => Ok(Variant::Boolean(false)),
             codec::FORMATCODE_BOOLEAN_TRUE => Ok(Variant::Boolean(true)),
             codec::FORMATCODE_UINT_0 => Ok(Variant::Uint(0)),
             codec::FORMATCODE_ULONG_0 => Ok(Variant::Ulong(0)),
-            codec::FORMATCODE_UBYTE => {
-                u8::decode_with_format(input, fmt).map(|o| Variant::Ubyte(o))
-            }
-            codec::FORMATCODE_USHORT => {
-                u16::decode_with_format(input, fmt).map(|o| Variant::Ushort(o))
-            }
-            codec::FORMATCODE_UINT => u32::decode_with_format(input, fmt).map(|o| Variant::Uint(o)),
-            codec::FORMATCODE_ULONG => {
-                u64::decode_with_format(input, fmt).map(|o| Variant::Ulong(o))
-            }
-            codec::FORMATCODE_BYTE => i8::decode_with_format(input, fmt).map(|o| Variant::Byte(o)),
-            codec::FORMATCODE_SHORT => {
-                i16::decode_with_format(input, fmt).map(|o| Variant::Short(o))
-            }
-            codec::FORMATCODE_INT => i32::decode_with_format(input, fmt).map(|o| Variant::Int(o)),
-            codec::FORMATCODE_LONG => i64::decode_with_format(input, fmt).map(|o| Variant::Long(o)),
-            codec::FORMATCODE_SMALLUINT => {
-                u32::decode_with_format(input, fmt).map(|o| Variant::Uint(o))
-            }
-            codec::FORMATCODE_SMALLULONG => {
-                u64::decode_with_format(input, fmt).map(|o| Variant::Ulong(o))
-            }
-            codec::FORMATCODE_SMALLINT => {
-                i32::decode_with_format(input, fmt).map(|o| Variant::Int(o))
-            }
-            codec::FORMATCODE_SMALLLONG => {
-                i64::decode_with_format(input, fmt).map(|o| Variant::Long(o))
-            }
+            codec::FORMATCODE_UBYTE => u8::decode_with_format(input, fmt).map(Variant::Ubyte),
+            codec::FORMATCODE_USHORT => u16::decode_with_format(input, fmt).map(Variant::Ushort),
+            codec::FORMATCODE_UINT => u32::decode_with_format(input, fmt).map(Variant::Uint),
+            codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(Variant::Ulong),
+            codec::FORMATCODE_BYTE => i8::decode_with_format(input, fmt).map(Variant::Byte),
+            codec::FORMATCODE_SHORT => i16::decode_with_format(input, fmt).map(Variant::Short),
+            codec::FORMATCODE_INT => i32::decode_with_format(input, fmt).map(Variant::Int),
+            codec::FORMATCODE_LONG => i64::decode_with_format(input, fmt).map(Variant::Long),
+            codec::FORMATCODE_SMALLUINT => u32::decode_with_format(input, fmt).map(Variant::Uint),
+            codec::FORMATCODE_SMALLULONG => u64::decode_with_format(input, fmt).map(Variant::Ulong),
+            codec::FORMATCODE_SMALLINT => i32::decode_with_format(input, fmt).map(Variant::Int),
+            codec::FORMATCODE_SMALLLONG => i64::decode_with_format(input, fmt).map(Variant::Long),
             codec::FORMATCODE_FLOAT => {
                 f32::decode_with_format(input, fmt).map(|o| Variant::Float(OrderedFloat(o)))
             }
