@@ -15,7 +15,7 @@ pub(crate) struct Dispatcher<Sr: Service, Ctl: Service> {
     sink: Connection,
     service: Sr,
     ctl_service: Ctl,
-    ctl_fut: cell::RefCell<Option<(ControlFrame, Pin<Box<Ctl::Future>>)>>,
+    ctl_fut: cell::RefCell<Option<(Option<ControlFrame>, Pin<Box<Ctl::Future>>)>>,
     shutdown: cell::Cell<bool>,
     expire: Sleep,
     idle_timeout: Millis,
@@ -67,12 +67,16 @@ where
             match Pin::new(&mut item.1).poll(cx) {
                 Poll::Ready(Ok(_)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(&frame, None)?;
+                    if let Some(frame) = frame {
+                        self.handle_control_frame(&frame, None)?;
+                    }
                 }
                 Poll::Pending => return Ok(false),
                 Poll::Ready(Err(e)) => {
                     let (frame, _) = inner.take().unwrap();
-                    self.handle_control_frame(&frame, Some(e.into()))?;
+                    if let Some(frame) = frame {
+                        self.handle_control_frame(&frame, Some(e.into()))?;
+                    }
                 }
             }
         }
@@ -111,6 +115,7 @@ where
                 ControlFrameKind::Closed(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
+                ControlFrameKind::SessionEnded(_) => (),
             }
         } else {
             match frame.0.get_mut().kind {
@@ -148,6 +153,7 @@ where
                 ControlFrameKind::Closed(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
+                ControlFrameKind::SessionEnded(_) => (),
             }
         }
         Ok(())
@@ -248,7 +254,7 @@ where
                             ControlFrameKind::Flow(frm, link.clone()),
                         );
                         *self.ctl_fut.borrow_mut() =
-                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                     }
                     types::Action::AttachSender(link, frame) => {
                         let frame = ControlFrame::new(
@@ -256,7 +262,7 @@ where
                             ControlFrameKind::AttachSender(frame, link),
                         );
                         *self.ctl_fut.borrow_mut() =
-                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                     }
                     types::Action::AttachReceiver(link) => {
                         let frame = ControlFrame::new(
@@ -264,7 +270,7 @@ where
                             ControlFrameKind::AttachReceiver(link),
                         );
                         *self.ctl_fut.borrow_mut() =
-                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                     }
                     types::Action::DetachSender(link, frm) => {
                         let frame = ControlFrame::new(
@@ -272,7 +278,7 @@ where
                             ControlFrameKind::DetachSender(frm, link.clone()),
                         );
                         *self.ctl_fut.borrow_mut() =
-                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                     }
                     types::Action::DetachReceiver(link, frm) => {
                         let frame = ControlFrame::new(
@@ -280,7 +286,12 @@ where
                             ControlFrameKind::DetachReceiver(frm, link.clone()),
                         );
                         *self.ctl_fut.borrow_mut() =
-                            Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                    }
+                    types::Action::SessionEnded(links) => {
+                        let frame = ControlFrame::new_kind(ControlFrameKind::SessionEnded(links));
+                        *self.ctl_fut.borrow_mut() =
+                            Some((None, Box::pin(self.ctl_service.call(frame))));
                     }
                     types::Action::None => (),
                 };
@@ -290,7 +301,7 @@ where
             DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
                 *self.ctl_fut.borrow_mut() =
-                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                    Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::KeepAliveTimeout => {
@@ -298,14 +309,14 @@ where
                     AmqpProtocolError::KeepAliveTimeout,
                 ));
                 *self.ctl_fut.borrow_mut() =
-                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                    Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::IoError(_) => {
                 let frame =
                     ControlFrame::new_kind(ControlFrameKind::ProtocolError(AmqpProtocolError::Io));
                 *self.ctl_fut.borrow_mut() =
-                    Some((frame.clone(), Box::pin(self.ctl_service.call(frame))));
+                    Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {

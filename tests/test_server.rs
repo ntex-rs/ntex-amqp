@@ -1,10 +1,10 @@
-use std::{cell::Cell, convert::TryFrom, rc::Rc};
+use std::{cell::Cell, convert::TryFrom, rc::Rc, sync::Arc, sync::Mutex};
 
 use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, fn_service, Service};
-use ntex::{http::Uri, time::sleep, time::Millis, util::Bytes, util::Ready};
-use ntex_amqp::{client, error::LinkError, server, types};
+use ntex::{http::Uri, time::sleep, time::Millis, util::Bytes, util::Either, util::Ready};
+use ntex_amqp::{client, error::LinkError, server, types, ControlFrame, ControlFrameKind};
 
 async fn server(
     link: types::Link<()>,
@@ -27,9 +27,6 @@ async fn server(
 
 #[ntex::test]
 async fn test_simple() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "ntex=trace,ntex_amqp=trace");
-    env_logger::init();
-
     let srv = test_server(|| {
         let srv = server::Server::new(|con: server::Handshake<_>| async move {
             match con {
@@ -141,6 +138,71 @@ async fn test_sasl() -> std::io::Result<()> {
         )
         .await;
     println!("E: {:?}", client.err());
+
+    Ok(())
+}
+
+#[ntex::test]
+async fn test_session_end() -> std::io::Result<()> {
+    std::env::set_var("RUST_LOG", "ntex=trace,ntex_amqp=trace");
+    env_logger::init();
+
+    let link_names = Arc::new(Mutex::new(Vec::new()));
+    let link_names2 = link_names.clone();
+
+    let srv = test_server(move || {
+        let srv = server::Server::new(|con: server::Handshake<_>| async move {
+            match con {
+                server::Handshake::Amqp(con) => {
+                    let con = con.open().await.unwrap();
+                    Ok(con.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            }
+        });
+
+        let link_names = link_names2.clone();
+        srv.control(move |frm: ControlFrame| {
+            if let ControlFrameKind::SessionEnded(links) = frm.kind() {
+                let mut names = link_names.lock().unwrap();
+                for lnk in links {
+                    match lnk {
+                        Either::Left(lnk) => {
+                            names.push(lnk.name().clone());
+                        }
+                        Either::Right(lnk) => {
+                            names.push(lnk.frame().name().clone());
+                        }
+                    }
+                }
+            }
+            Ready::<_, ()>::Ok(())
+        })
+        .finish(
+            server::Router::<()>::new()
+                .service("test", fn_factory_with_config(server))
+                .finish(),
+        )
+    });
+
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = client::Connector::new().connect(uri).await.unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    link.send(Bytes::from(b"test".as_ref())).await.unwrap();
+
+    session.end().await;
+    assert_eq!(link_names.lock().unwrap()[0], "test");
 
     Ok(())
 }

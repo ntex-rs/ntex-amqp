@@ -1,5 +1,6 @@
 use std::fmt;
 
+use ntex::util::Either;
 use ntex_amqp_codec::protocol;
 
 use crate::cell::Cell;
@@ -30,6 +31,7 @@ pub enum ControlFrameKind {
     Flow(protocol::Flow, SenderLink),
     DetachSender(protocol::Detach, SenderLink),
     DetachReceiver(protocol::Detach, ReceiverLink),
+    SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     ProtocolError(AmqpProtocolError),
     Closed(bool),
 }
@@ -58,7 +60,13 @@ impl ControlFrame {
     }
 
     #[inline]
+    #[doc(hidden)]
     pub fn frame(&self) -> &ControlFrameKind {
+        &self.0.kind
+    }
+
+    #[inline]
+    pub fn kind(&self) -> &ControlFrameKind {
         &self.0.kind
     }
 

@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.2] - 2021-10-06
+
+* Add ControlFrame::SessionEnded control frame
+
 ## [0.5.1] - 2021-09-18
 
 * Add std Error impl for errors

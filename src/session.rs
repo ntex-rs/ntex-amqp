@@ -1,13 +1,13 @@
-use std::{collections::VecDeque, fmt, future::Future};
+use std::{collections::VecDeque, fmt, future::ready, future::Future};
 
-use ntex::channel::{oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap, Ready};
+use ntex::channel::{condition, oneshot, pool};
+use ntex::util::{ByteString, Bytes, Either, HashMap};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
-    self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, Error,
-    Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Transfer,
-    TransferBody, TransferNumber,
+    self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, End,
+    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode,
+    Transfer, TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::AmqpFrame;
 
@@ -39,8 +39,18 @@ impl Session {
         &self.inner.get_ref().sink
     }
 
-    pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        Ready::Ok(())
+    pub fn end(&self) -> impl Future<Output = ()> {
+        let inner = self.inner.get_mut();
+
+        if inner.flags.contains(Flags::ENDED) {
+            Either::Left(ready(()))
+        } else if inner.flags.contains(Flags::ENDING) {
+            Either::Right(inner.closed.wait())
+        } else {
+            inner.post_frame(Frame::End(End { error: None }));
+            inner.flags.insert(Flags::ENDING);
+            Either::Right(inner.closed.wait())
+        }
     }
 
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
@@ -152,11 +162,19 @@ impl ReceiverLinkState {
     }
 }
 
+bitflags::bitflags! {
+    struct Flags: u8 {
+        const LOCAL =  0b0000_0001;
+        const ENDED =  0b0000_0010;
+        const ENDING = 0b0000_0100;
+    }
+}
+
 pub(crate) struct SessionInner {
     id: usize,
     sink: Connection,
     next_outgoing_id: TransferNumber,
-    local: bool,
+    flags: Flags,
 
     remote_channel_id: u16,
     next_incoming_id: TransferNumber,
@@ -174,6 +192,7 @@ pub(crate) struct SessionInner {
 
     pub(crate) pool: pool::Pool<Result<Disposition, AmqpProtocolError>>,
     pool_disp: pool::Pool<Disposition>,
+    closed: condition::Condition,
 }
 
 struct PendingTransfer {
@@ -210,12 +229,12 @@ impl SessionInner {
     ) -> SessionInner {
         SessionInner {
             id,
-            local,
             sink,
             next_incoming_id,
             remote_channel_id,
             remote_incoming_window,
             remote_outgoing_window,
+            flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_OUTGOING_ID,
             unsettled_deliveries: HashMap::default(),
             links: Slab::new(),
@@ -226,6 +245,7 @@ impl SessionInner {
             error: None,
             pool: pool::new(),
             pool_disp: pool::new(),
+            closed: condition::Condition::new(),
         }
     }
 
@@ -274,6 +294,29 @@ impl SessionInner {
         self.links.clear();
 
         self.error = Some(err);
+        self.flags.insert(Flags::ENDED);
+        self.closed.notify();
+    }
+
+    /// End session.
+    pub(crate) fn end(&mut self, err: AmqpProtocolError) -> Action {
+        log::trace!("Session is ended: {:?}", err);
+
+        let mut links = Vec::new();
+        for (_, st) in self.links.iter_mut() {
+            match st {
+                Either::Left(SenderLinkState::Established(ref link)) => {
+                    links.push(Either::Left(link.clone()));
+                }
+                Either::Right(ReceiverLinkState::Established(ref mut link)) => {
+                    links.push(Either::Right(link.clone()));
+                }
+                _ => (),
+            }
+        }
+        self.set_error(err);
+
+        Action::SessionEnded(links)
     }
 
     fn wait_disposition(
@@ -885,7 +928,7 @@ impl SessionInner {
 
         if flow.echo() {
             let flow = Flow(Box::new(codec::FlowInner {
-                next_incoming_id: if self.local {
+                next_incoming_id: if self.flags.contains(Flags::LOCAL) {
                     Some(self.next_incoming_id)
                 } else {
                     None
@@ -912,7 +955,7 @@ impl SessionInner {
 
     pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
         let flow = Flow(Box::new(codec::FlowInner {
-            next_incoming_id: if self.local {
+            next_incoming_id: if self.flags.contains(Flags::LOCAL) {
                 Some(self.next_incoming_id)
             } else {
                 None

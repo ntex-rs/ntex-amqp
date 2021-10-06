@@ -1,7 +1,7 @@
 use std::fmt;
 
 use ntex::router::Path;
-use ntex::util::ByteString;
+use ntex::util::{ByteString, Either};
 
 use crate::codec::protocol::{Accepted, Attach, DeliveryState, Detach, Error, Flow, Rejected};
 use crate::{rcvlink::ReceiverLink, session::Session, sndlink::SenderLink, Handle, State};
@@ -21,6 +21,7 @@ pub(crate) enum Action {
     AttachReceiver(ReceiverLink),
     DetachSender(SenderLink, Detach),
     DetachReceiver(ReceiverLink, Detach),
+    SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     Flow(SenderLink, Flow),
     Transfer(ReceiverLink),
 }

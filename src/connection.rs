@@ -286,23 +286,34 @@ impl ConnectionInner {
     ) -> Result<Action, AmqpProtocolError> {
         let (channel_id, frame) = frame.into_parts();
 
-        if let Frame::Empty = frame {
-            return Ok(Action::None);
-        }
-
-        if let Frame::Close(ref close) = frame {
-            self.set_error(AmqpProtocolError::Closed(close.error.clone()));
-
-            if self.state == ConnectionState::Closing {
-                log::trace!("Connection closed: {:?}", close);
-                self.set_error(AmqpProtocolError::Disconnected);
-            } else {
-                log::trace!("Connection closed remotely: {:?}", close);
-                let close = Close { error: None };
-                self.post_frame(AmqpFrame::new(0, close.into()));
-                self.state = ConnectionState::RemoteClose;
+        match frame {
+            Frame::Empty => {
+                return Ok(Action::None);
             }
-            return Ok(Action::None);
+            Frame::Close(close) => {
+                self.set_error(AmqpProtocolError::Closed(close.error.clone()));
+
+                if self.state == ConnectionState::Closing {
+                    log::trace!("Connection closed: {:?}", close);
+                    self.set_error(AmqpProtocolError::Disconnected);
+                } else {
+                    log::trace!("Connection closed remotely: {:?}", close);
+                    let close = Close { error: None };
+                    self.post_frame(AmqpFrame::new(0, close.into()));
+                    self.state = ConnectionState::RemoteClose;
+                }
+                return Ok(Action::None);
+            }
+            Frame::Begin(begin) => {
+                // response Begin for open session
+                if let Some(id) = begin.remote_channel() {
+                    self.complete_session_creation(channel_id, id, &begin);
+                } else {
+                    self.register_remote_session(channel_id, &begin, inner)?;
+                }
+                return Ok(Action::None);
+            }
+            _ => (),
         }
 
         if self.error.is_some() {
@@ -319,18 +330,7 @@ impl ConnectionInner {
                 return Err(AmqpProtocolError::UnknownSession(frame));
             }
         } else {
-            // we dont have channel info, only Begin frame is allowed on new channel
-            return if let Frame::Begin(begin) = frame {
-                // response Begin for open session
-                if let Some(id) = begin.remote_channel() {
-                    self.complete_session_creation(channel_id, id, &begin);
-                } else {
-                    self.register_remote_session(channel_id, &begin, inner)?;
-                }
-                Ok(Action::None)
-            } else {
-                Err(AmqpProtocolError::UnknownSession(frame))
-            };
+            return Err(AmqpProtocolError::UnknownSession(frame));
         };
 
         // handle session frames
@@ -364,19 +364,17 @@ impl ConnectionInner {
                         }
                     }
                 }
-                // Frame::Detach(frm) => Ok(Action::Detach(frm)),
                 Frame::End(remote_end) => {
                     trace!("Remote session end: {}", channel_id);
-                    let end = End { error: None };
-                    session
-                        .get_mut()
-                        .set_error(AmqpProtocolError::SessionEnded(remote_end.error));
                     let id = session.get_mut().id();
-                    self.post_frame(AmqpFrame::new(id, end.into()));
+                    let action = session
+                        .get_mut()
+                        .end(AmqpProtocolError::SessionEnded(remote_end.error));
                     if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
-                    Ok(Action::None)
+                    self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
+                    Ok(action)
                 }
                 _ => session.get_mut().handle_frame(frame),
             },
