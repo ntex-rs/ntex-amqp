@@ -41,6 +41,10 @@ impl ReceiverLink {
         self.inner.get_ref().handle as Handle
     }
 
+    pub fn remote_handle(&self) -> Handle {
+        self.inner.get_ref().remote_handle as Handle
+    }
+
     pub fn credit(&self) -> u32 {
         self.inner.get_ref().credit
     }
@@ -171,6 +175,7 @@ impl Stream for ReceiverLink {
 #[derive(Debug)]
 pub(crate) struct ReceiverLinkInner {
     handle: Handle,
+    remote_handle: Handle,
     attach: Attach,
     session: Session,
     closed: bool,
@@ -187,10 +192,12 @@ impl ReceiverLinkInner {
     pub(crate) fn new(
         session: Cell<SessionInner>,
         handle: Handle,
+        remote_handle: Handle,
         attach: Attach,
     ) -> ReceiverLinkInner {
         ReceiverLinkInner {
             handle,
+            remote_handle,
             session: Session::new(session),
             closed: false,
             queue: VecDeque::with_capacity(4),

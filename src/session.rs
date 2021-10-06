@@ -474,7 +474,7 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, attach));
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, handle, attach));
         entry.insert(Either::Right(ReceiverLinkState::Opening(Some(
             inner.clone(),
         ))));
@@ -492,7 +492,12 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, frame.clone()));
+        let inner = Cell::new(ReceiverLinkInner::new(
+            cell,
+            token as u32,
+            token as u32,
+            frame.clone(),
+        ));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
             inner, tx,
         )))));
