@@ -7,6 +7,7 @@ use ntex_amqp_codec::protocol::{
     ReceiverSettleMode, Role, SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy,
     Transfer, TransferBody,
 };
+use ntex_amqp_codec::types::{Symbol, Variant};
 use ntex_amqp_codec::Encode;
 
 use crate::session::{Session, SessionInner};
@@ -406,11 +407,29 @@ impl ReceiverLinkBuilder {
         ReceiverLinkBuilder { frame, session }
     }
 
+    /// Set attach frame max message size
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
     }
 
+    /// Set or reset a receive link property
+    pub fn property<K, V>(mut self, key: K, value: Option<V>) -> Self
+    where
+        Symbol: From<K>,
+        Variant: From<V>,
+    {
+        let key = key.into();
+        let props = self.frame.get_properties_mut();
+
+        match value {
+            Some(value) => props.insert(key, value.into()),
+            None => props.remove(&key),
+        };
+        self
+    }
+
+    /// Attach receiver link
     pub async fn attach(self) -> Result<ReceiverLink, AmqpProtocolError> {
         let cell = self.session.clone();
         let res = self

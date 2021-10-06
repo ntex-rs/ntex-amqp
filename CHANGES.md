@@ -4,6 +4,8 @@
 
 * Add ControlFrame::SessionEnded control frame
 
+* Allow to set attach properties for receiver link builder
+
 ## [0.5.1] - 2021-09-18
 
 * Add std Error impl for errors
