@@ -384,7 +384,7 @@ impl SessionInner {
             unsettled: None,
             incomplete_unsettled: false,
             initial_delivery_count: Some(attach.initial_delivery_count().unwrap_or(0)),
-            max_message_size: Some(65536),
+            max_message_size: link.max_message_size().map(|v| v as u64),
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
@@ -699,6 +699,7 @@ impl SessionInner {
                             attach.handle(),
                             delivery_count,
                             cell,
+                            attach.max_message_size().map(|v| v as usize),
                         ));
                         let local_sender = std::mem::replace(
                             item,
