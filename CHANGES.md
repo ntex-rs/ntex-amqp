@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.3] - 2021-11-02
+
+* Add set_max_message_size on SenderLink
+
 ## [0.5.2] - 2021-10-06
 
 * Add ControlFrame::SessionEnded control frame
