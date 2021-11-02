@@ -39,6 +39,7 @@ impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
 pub enum AmqpProtocolError {
     Codec(AmqpCodecError),
     TooManyChannels,
+    BodyTooLarge,
     KeepAliveTimeout,
     Disconnected,
     Io,

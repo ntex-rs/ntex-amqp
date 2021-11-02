@@ -33,6 +33,7 @@ pub(crate) struct SenderLinkInner {
     closed: bool,
     on_close: condition::Condition,
     on_disposition: Box<dyn Fn(Bytes, Result<Disposition, AmqpProtocolError>)>,
+    max_message_size: Option<usize>,
 }
 
 struct PendingTransfer {
@@ -147,6 +148,10 @@ impl SenderLink {
     {
         self.inner.get_mut().on_disposition = Box::new(f);
     }
+
+    pub fn set_max_message_size(&self, value: usize) {
+        self.inner.get_mut().max_message_size = Some(value)
+    }
 }
 
 impl SenderLinkInner {
@@ -156,6 +161,7 @@ impl SenderLinkInner {
         handle: Handle,
         delivery_count: SequenceNo,
         session: Cell<SessionInner>,
+        max_message_size: Option<usize>,
     ) -> SenderLinkInner {
         SenderLinkInner {
             id,
@@ -170,6 +176,7 @@ impl SenderLinkInner {
             delivery_tag: 0,
             on_close: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
+            max_message_size,
         }
     }
 
@@ -195,6 +202,7 @@ impl SenderLinkInner {
             closed: false,
             on_close: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
+            max_message_size: Some(65536),
         }
     }
 
@@ -208,6 +216,10 @@ impl SenderLinkInner {
 
     pub(crate) fn name(&self) -> &ByteString {
         &self.name
+    }
+
+    pub(crate) fn max_message_size(&self) -> Option<usize> {
+        self.max_message_size
     }
 
     pub(crate) fn detached(&mut self, err: AmqpProtocolError) {
@@ -296,6 +308,13 @@ impl SenderLinkInner {
         } else {
             let body = body.into();
             let message_format = body.message_format();
+
+            if let Some(limit) = self.max_message_size {
+                if body.len() > limit {
+                    return Delivery::Resolved(Err(AmqpProtocolError::BodyTooLarge));
+                }
+            }
+
             let (delivery_tx, delivery_rx) = self.session.inner.get_ref().pool.channel();
 
             let max_frame_size = self.session.inner.get_ref().max_frame_size();
@@ -358,6 +377,12 @@ impl SenderLinkInner {
         } else {
             let body = body.into();
             let message_format = body.message_format();
+
+            if let Some(limit) = self.max_message_size {
+                if body.len() > limit {
+                    return Err(AmqpProtocolError::BodyTooLarge);
+                }
+            }
 
             let max_frame_size = self.session.inner.get_ref().max_frame_size();
             let max_frame_size = if max_frame_size > 2048 {
