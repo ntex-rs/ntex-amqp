@@ -251,7 +251,7 @@ impl SenderLinkInner {
             self.session
                 .inner
                 .get_mut()
-                .detach_sender_link(self.id, true, error, tx);
+                .detach_sender_link(self.id as Handle, true, error, tx);
 
             Either::Right(async move {
                 match rx.await {

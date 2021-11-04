@@ -122,6 +122,33 @@ impl Session {
         }
     }
 
+    /// Detach sender link
+    pub fn detach_sender_link(
+        &mut self,
+        handle: Handle,
+        error: Option<Error>,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
+        let (tx, rx) = oneshot::channel();
+
+        self.inner
+            .get_mut()
+            .detach_sender_link(handle, false, error, tx);
+
+        async move {
+            match rx.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => {
+                    log::trace!("Cannot complete detach sender link {:?}", e);
+                    Err(e)
+                }
+                Err(_) => {
+                    log::trace!("Cannot complete detach sender link, connection is gone");
+                    Err(AmqpProtocolError::Disconnected)
+                }
+            }
+        }
+    }
+
     pub fn wait_disposition(
         &mut self,
         id: DeliveryNumber,
@@ -394,14 +421,15 @@ impl SessionInner {
         SenderLink::new(link)
     }
 
+    /// Detach sender link
     pub(crate) fn detach_sender_link(
         &mut self,
-        id: usize,
+        id: Handle,
         closed: bool,
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
-        if let Some(Either::Left(link)) = self.links.get_mut(id) {
+        if let Some(Either::Left(link)) = self.links.get_mut(id as usize) {
             match link {
                 SenderLinkState::Opening(_) | SenderLinkState::Established(_) => {
                     let detach = Detach(Box::new(codec::DetachInner {
@@ -414,12 +442,12 @@ impl SessionInner {
                 }
                 SenderLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
-                    error!("Unexpected receiver link state: closing - {}", id);
+                    error!("Unexpected sender link state: closing - {}", id);
                 }
             }
         } else {
             let _ = tx.send(Ok(()));
-            error!("Receiver link does not exist while detaching: {}", id);
+            error!("Sender link does not exist while detaching: {}", id);
         }
     }
 
@@ -539,7 +567,7 @@ impl SessionInner {
         error!("Unexpected receiver link state");
     }
 
-    /// Close receiver link
+    /// Detach receiver link
     pub(crate) fn detach_receiver_link(
         &mut self,
         id: Handle,
