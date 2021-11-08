@@ -32,6 +32,25 @@ pub enum ConnectError {
 
 impl std::error::Error for ConnectError {}
 
+impl Clone for ConnectError {
+    fn clone(&self) -> Self {
+        match self {
+            ConnectError::Codec(err) => ConnectError::Codec(err.clone()),
+            ConnectError::HandshakeTimeout => ConnectError::HandshakeTimeout,
+            ConnectError::ProtocolNegotiation(err) => {
+                ConnectError::ProtocolNegotiation(err.clone())
+            }
+            ConnectError::ExpectOpenFrame(frame) => ConnectError::ExpectOpenFrame(frame.clone()),
+            ConnectError::Sasl(err) => ConnectError::Sasl(*err),
+            ConnectError::Disconnected => ConnectError::Disconnected,
+            ConnectError::Connect(err) => ConnectError::Connect(err.clone()),
+            ConnectError::Io(err) => {
+                ConnectError::Io(std::io::Error::new(err.kind(), format!("{}", err)))
+            }
+        }
+    }
+}
+
 impl From<Either<AmqpCodecError, std::io::Error>> for ConnectError {
     fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {
         match err {

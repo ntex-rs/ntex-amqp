@@ -192,7 +192,7 @@ impl SenderLinkInner {
         SenderLinkInner {
             delivery_count,
             id: 0,
-            name: name.unwrap_or_else(ByteString::default),
+            name: name.unwrap_or_default(),
             session: Session::new(session),
             remote_handle: frame.handle(),
             link_credit: 0,

@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.5] - 2021-11-08
+
+* Add Clone impls for error types
+
 ## [0.5.4] - 2021-11-04
 
 * Add helper method `Session::detach_sender_link()`

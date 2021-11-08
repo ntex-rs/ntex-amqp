@@ -26,6 +26,20 @@ pub enum DispatcherError {
 
 impl error::Error for DispatcherError {}
 
+impl Clone for DispatcherError {
+    fn clone(&self) -> Self {
+        match self {
+            DispatcherError::Service => DispatcherError::Service,
+            DispatcherError::Codec(err) => DispatcherError::Codec(err.clone()),
+            DispatcherError::Protocol(err) => DispatcherError::Protocol(err.clone()),
+            DispatcherError::Disconnected => DispatcherError::Disconnected,
+            DispatcherError::Io(err) => {
+                DispatcherError::Io(io::Error::new(err.kind(), format!("{}", err)))
+            }
+        }
+    }
+}
+
 impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
     fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
         match err {
@@ -67,7 +81,7 @@ impl From<AmqpCodecError> for AmqpProtocolError {
     }
 }
 
-#[derive(Debug, Display)]
+#[derive(Clone, Debug, Display)]
 #[display(fmt = "Amqp error: {:?} {:?} ({:?})", err, description, info)]
 pub struct AmqpError {
     err: Either<protocol::AmqpError, protocol::ErrorCondition>,
@@ -153,7 +167,7 @@ impl TryFrom<AmqpError> for Outcome {
     }
 }
 
-#[derive(Debug, Display)]
+#[derive(Clone, Debug, Display)]
 #[display(fmt = "Link error: {:?} {:?} ({:?})", err, description, info)]
 pub struct LinkError {
     err: Either<protocol::LinkError, protocol::ErrorCondition>,
