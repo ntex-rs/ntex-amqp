@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::{future::Future, mem, pin::Pin, task::Context, task::Poll};
+use std::{convert::TryFrom, future::Future, mem, pin::Pin, task::Context, task::Poll};
 
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, Ready};
@@ -167,6 +167,7 @@ impl SenderLinkInner {
             id,
             name,
             delivery_count,
+            max_message_size,
             session: Session::new(session),
             remote_handle: handle,
             link_credit: 0,
@@ -176,7 +177,6 @@ impl SenderLinkInner {
             delivery_tag: 0,
             on_close: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
-            max_message_size,
         }
     }
 
@@ -202,7 +202,9 @@ impl SenderLinkInner {
             closed: false,
             on_close: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
-            max_message_size: Some(65536),
+            max_message_size: frame
+                .max_message_size()
+                .map(|size| usize::try_from(size).unwrap_or(usize::MAX)),
         }
     }
 

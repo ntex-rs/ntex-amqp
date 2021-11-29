@@ -1,5 +1,11 @@
 # Changes
 
+## [0.5.6] - 2021-11-29
+
+* Set SenderLink's max_message_size from Attach frame
+
+* Set ReceiverLink's max_message_size from Attach frame
+
 ## [0.5.5] - 2021-11-08
 
 * Add Clone impls for error types

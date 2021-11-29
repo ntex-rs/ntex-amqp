@@ -552,7 +552,7 @@ impl SessionInner {
                         unsettled: None,
                         incomplete_unsettled: false,
                         initial_delivery_count: Some(0),
-                        max_message_size: Some(65536),
+                        max_message_size: attach.0.max_message_size,
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,
