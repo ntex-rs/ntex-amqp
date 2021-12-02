@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, fmt, future::ready, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap};
+use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -279,6 +279,10 @@ impl SessionInner {
     /// Local channel id
     pub(crate) fn id(&self) -> u16 {
         self.id as u16
+    }
+
+    pub(crate) fn memory_pool(&self) -> PoolRef {
+        self.sink.0.memory_pool()
     }
 
     /// Set error. New operations will return error.

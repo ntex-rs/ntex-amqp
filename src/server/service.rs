@@ -4,6 +4,7 @@ use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout, Millis, Seconds};
+use ntex::util::{Pool, PoolId, PoolRef};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -18,11 +19,9 @@ pub struct Server<Io, St, H, Ctl> {
     control: Ctl,
     config: Rc<Configuration>,
     max_size: usize,
-    lw: u16,
-    read_hw: u16,
-    write_hw: u16,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
+    pool: PoolRef,
     _t: marker::PhantomData<(Io, St)>,
 }
 
@@ -33,9 +32,6 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     max_size: usize,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
-    lw: u16,
-    read_hw: u16,
-    write_hw: u16,
     time: Timer,
     _t: marker::PhantomData<St>,
 }
@@ -57,12 +53,10 @@ where
             handshake: handshake.into_factory(),
             handshake_timeout: Seconds(5),
             disconnect_timeout: Seconds(3),
-            lw: 1024,
-            read_hw: 8 * 1024,
-            write_hw: 8 * 1024,
             control: DefaultControlService::default(),
             max_size: 0,
             config: Rc::new(Configuration::default()),
+            pool: PoolId::P6.pool_ref(),
             _t: marker::PhantomData,
         }
     }
@@ -105,19 +99,27 @@ impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
         self
     }
 
+    /// Set memory pool.
+    ///
+    /// Use specified memory pool for memory allocations. By default P6
+    /// memory pool is used.
+    pub fn memory_pool(mut self, id: PoolId) -> Self {
+        self.pool = id.pool_ref();
+        self
+    }
+
+    #[doc(hidden)]
+    #[deprecated(since = "0.5.6", note = "Use memory pool config")]
     #[inline]
     /// Set read/write buffer params
     ///
     /// By default read buffer is 8kb, write buffer is 8kb
     pub fn buffer_params(
-        mut self,
-        max_read_buf_size: u16,
-        max_write_buf_size: u16,
-        min_buf_size: u16,
+        self,
+        _max_read_buf_size: u16,
+        _max_write_buf_size: u16,
+        _min_buf_size: u16,
     ) -> Self {
-        self.read_hw = max_read_buf_size;
-        self.write_hw = max_write_buf_size;
-        self.lw = min_buf_size;
         self
     }
 }
@@ -149,10 +151,8 @@ where
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             control: service.into_factory(),
+            pool: self.pool,
             max_size: self.max_size,
-            lw: self.lw,
-            read_hw: self.read_hw,
-            write_hw: self.write_hw,
             _t: marker::PhantomData,
         }
     }
@@ -176,6 +176,7 @@ where
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
         ServerImpl {
+            pool: self.pool,
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
                 handshake_timeout: self.handshake_timeout,
@@ -184,9 +185,6 @@ where
                 control: self.control,
                 disconnect_timeout: self.disconnect_timeout,
                 max_size: self.max_size,
-                lw: self.lw,
-                read_hw: self.read_hw,
-                write_hw: self.write_hw,
                 time: Timer::new(Millis::ONE_SEC),
                 _t: marker::PhantomData,
             }),
@@ -197,6 +195,7 @@ where
 
 struct ServerImpl<Io, St, H, Ctl, Pb> {
     handshake: H,
+    pool: PoolRef,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
     _t: marker::PhantomData<Io>,
 }
@@ -225,12 +224,14 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
 
     fn new_service(&self, _: ()) -> Self::Future {
+        let pool = self.pool.pool();
         let inner = self.inner.clone();
         let fut = self.handshake.new_service(());
 
         Box::pin(async move {
             fut.await.map(move |handshake| ServerImplService {
                 inner,
+                pool,
                 handshake: Rc::new(handshake),
                 _t: marker::PhantomData,
             })
@@ -240,6 +241,7 @@ where
 
 struct ServerImplService<Io, St, H, Ctl, Pb> {
     handshake: Rc<H>,
+    pool: Pool,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
     _t: marker::PhantomData<Io>,
 }
@@ -265,10 +267,19 @@ where
 
     #[inline]
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake
+        let ready1 = self.pool.poll_ready(cx).is_ready();
+        let ready2 = self
+            .handshake
             .as_ref()
             .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))
+            .map(|res| res.map_err(ServerError::Service))?
+            .is_ready();
+
+        if ready1 && ready2 {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 
     #[inline]
@@ -285,6 +296,7 @@ where
             req,
             self.inner.max_size,
             self.handshake.clone(),
+            self.pool.pool_ref(),
             self.inner.clone(),
         );
 
@@ -325,6 +337,7 @@ async fn handshake<Io, St, H, Ctl, Pb>(
     mut io: Io,
     max_size: usize,
     handshake: Rc<H>,
+    pool: PoolRef,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 ) -> Result<
     (
@@ -344,12 +357,8 @@ where
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
 {
-    let state = IoState::with_params(
-        inner.read_hw,
-        inner.write_hw,
-        inner.lw,
-        inner.disconnect_timeout,
-    );
+    let state = IoState::with_memory_pool(pool);
+    state.set_disconnect_timeout(inner.disconnect_timeout);
 
     let protocol = state
         .next(&mut io, &ProtocolIdCodec)

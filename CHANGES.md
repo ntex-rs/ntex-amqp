@@ -1,5 +1,9 @@
 # Changes
 
+## [0.5.7] - 2021-12-02
+
+* Add memory pools support
+
 ## [0.5.6] - 2021-11-29
 
 * Set SenderLink's max_message_size from Attach frame

@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, future::Future, hash, pin::Pin, task::Context, task::Poll};
 
-use ntex::util::{ByteString, BytesMut};
+use ntex::util::{ByteString, BytesMut, PoolRef};
 use ntex::{channel::oneshot, task::LocalWaker, Stream};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Disposition, Error, Handle, LinkError,
@@ -186,6 +186,7 @@ pub(crate) struct ReceiverLinkInner {
     error: Option<Error>,
     partial_body: Option<BytesMut>,
     partial_body_max: usize,
+    pool: PoolRef,
 }
 
 impl ReceiverLinkInner {
@@ -195,6 +196,7 @@ impl ReceiverLinkInner {
         remote_handle: Handle,
         attach: Attach,
     ) -> ReceiverLinkInner {
+        let pool = session.get_ref().memory_pool();
         ReceiverLinkInner {
             handle,
             remote_handle,
@@ -208,6 +210,7 @@ impl ReceiverLinkInner {
             delivery_count: attach.initial_delivery_count().unwrap_or(0),
             reader_task: LocalWaker::new(),
             attach,
+            pool,
         }
     }
 
@@ -346,15 +349,15 @@ impl ReceiverLinkInner {
                 } else {
                     let body = if let Some(body) = transfer.0.body.take() {
                         match body {
-                            TransferBody::Data(data) => BytesMut::from(data.as_ref()),
+                            TransferBody::Data(data) => BytesMut::from(data),
                             TransferBody::Message(msg) => {
-                                let mut buf = BytesMut::with_capacity(msg.encoded_size());
+                                let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
                                 msg.encode(&mut buf);
                                 buf
                             }
                         }
                     } else {
-                        BytesMut::new()
+                        self.pool.buf_with_capacity(16)
                     };
                     self.partial_body = Some(body);
                     self.queue.push_back(transfer);
