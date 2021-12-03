@@ -1,5 +1,10 @@
 # Changes
 
+
+## [codec-0.7.4] - 2021-12-03
+
+* Fix overflow in frame decoder
+
 ## [0.5.7] - 2021-12-02
 
 * Add memory pools support
