@@ -28,8 +28,7 @@ pub(crate) struct ConnectionInner {
 pub(crate) enum SessionState {
     Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
     Established(Cell<SessionInner>),
-    #[allow(dead_code)]
-    Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
+    Closing,
 }
 
 impl SessionState {
@@ -181,7 +180,7 @@ impl ConnectionInner {
         log::trace!("Set connection error: {:?}", err);
         for (_, channel) in self.sessions.iter_mut() {
             match channel {
-                SessionState::Opening(_, _) | SessionState::Closing(_) => (),
+                SessionState::Opening(_, _) | SessionState::Closing => (),
                 SessionState::Established(ref mut ses) => {
                     ses.get_mut().set_error(err.clone());
                 }
@@ -374,20 +373,15 @@ impl ConnectionInner {
                     let action = session
                         .get_mut()
                         .end(AmqpProtocolError::SessionEnded(remote_end.error));
-                    if let Some(token) = self.sessions_map.remove(&channel_id) {
-                        self.sessions.remove(token);
-                    }
+                    *state = SessionState::Closing;
                     self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
                     Ok(action)
                 }
                 _ => session.get_mut().handle_frame(frame),
             },
-            SessionState::Closing(ref mut tx) => match frame {
+            SessionState::Closing => match frame {
                 Frame::End(frm) => {
                     trace!("Session end is confirmed: {:?}", frm);
-                    if let Some(tx) = tx.take() {
-                        let _ = tx.send(Ok(()));
-                    }
                     if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
