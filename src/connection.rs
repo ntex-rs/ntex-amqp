@@ -28,7 +28,7 @@ pub(crate) struct ConnectionInner {
 pub(crate) enum SessionState {
     Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
     Established(Cell<SessionInner>),
-    Closing,
+    Closing(Cell<SessionInner>),
 }
 
 impl SessionState {
@@ -152,6 +152,14 @@ impl Connection {
         }
     }
 
+    pub(crate) fn close_session(&self, id: usize) {
+        if let Some(state) = self.0.get_mut().sessions.get_mut(id) {
+            if let SessionState::Established(inner) = state {
+                *state = SessionState::Closing(inner.clone());
+            }
+        }
+    }
+
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
         #[cfg(feature = "frame-trace")]
         log::trace!("outgoing: {:#?}", frame);
@@ -180,7 +188,7 @@ impl ConnectionInner {
         log::trace!("Set connection error: {:?}", err);
         for (_, channel) in self.sessions.iter_mut() {
             match channel {
-                SessionState::Opening(_, _) | SessionState::Closing => (),
+                SessionState::Opening(_, _) | SessionState::Closing(_) => (),
                 SessionState::Established(ref mut ses) => {
                     ses.get_mut().set_error(err.clone());
                 }
@@ -373,19 +381,24 @@ impl ConnectionInner {
                     let action = session
                         .get_mut()
                         .end(AmqpProtocolError::SessionEnded(remote_end.error));
-                    *state = SessionState::Closing;
+                    if let Some(token) = self.sessions_map.remove(&channel_id) {
+                        self.sessions.remove(token);
+                    }
                     self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
                     Ok(action)
                 }
                 _ => session.get_mut().handle_frame(frame),
             },
-            SessionState::Closing => match frame {
+            SessionState::Closing(ref mut session) => match frame {
                 Frame::End(frm) => {
                     trace!("Session end is confirmed: {:?}", frm);
+                    let action = session
+                        .get_mut()
+                        .end(AmqpProtocolError::SessionEnded(frm.error));
                     if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
-                    Ok(Action::None)
+                    Ok(action)
                 }
                 frm => {
                     trace!("Got frame after initiated session end: {:?}", frm);

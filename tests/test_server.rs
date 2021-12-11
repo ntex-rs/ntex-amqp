@@ -188,7 +188,7 @@ async fn test_session_end() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new().connect(uri).await.unwrap();
 
-    let sink = client.sink();
+    let mut sink = client.sink();
     ntex::rt::spawn(async move {
         let _ = client.start_default().await;
     });
@@ -201,8 +201,9 @@ async fn test_session_end() -> std::io::Result<()> {
         .unwrap();
     link.send(Bytes::from(b"test".as_ref())).await.unwrap();
 
-    session.end().await;
+    session.end().await.unwrap();
     assert_eq!(link_names.lock().unwrap()[0], "test");
+    assert!(sink.is_opened());
 
     Ok(())
 }
