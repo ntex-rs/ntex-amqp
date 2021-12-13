@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, error, io};
+use std::{convert::TryFrom, error, io, rc::Rc};
 
 use ntex::util::{ByteString, Either};
 
@@ -56,7 +56,7 @@ pub enum AmqpProtocolError {
     BodyTooLarge,
     KeepAliveTimeout,
     Disconnected,
-    Io,
+    Io(Rc<io::Error>),
     #[display(fmt = "Unknown session: {:?}", _0)]
     UnknownSession(protocol::Frame),
     #[display(fmt = "Unknown link in session: {:?}", _0)]

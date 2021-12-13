@@ -4,7 +4,10 @@ use ntex::router::Path;
 use ntex::util::{ByteString, Either};
 
 use crate::codec::protocol::{Accepted, Attach, DeliveryState, Detach, Error, Flow, Rejected};
-use crate::{rcvlink::ReceiverLink, session::Session, sndlink::SenderLink, Handle, State};
+use crate::{
+    error::AmqpProtocolError, rcvlink::ReceiverLink, session::Session, sndlink::SenderLink, Handle,
+    State,
+};
 
 pub use crate::codec::protocol::Transfer;
 
@@ -24,6 +27,7 @@ pub(crate) enum Action {
     SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     Flow(SenderLink, Flow),
     Transfer(ReceiverLink),
+    RemoteClose(AmqpProtocolError),
 }
 
 pub struct Link<S> {

@@ -3,8 +3,10 @@ use ntex::framed::{Dispatcher as IoDispatcher, State as IoState, Timer};
 use ntex::service::{fn_service, Service};
 use ntex::time::Seconds;
 use ntex::util::Ready;
+use ntex::IntoService;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
+use crate::control::ControlFrame;
 use crate::error::{DispatcherError, LinkError};
 use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
 
@@ -81,6 +83,32 @@ where
             self.connection,
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
+            self.remote_config.timeout_remote_secs().into(),
+        )
+        .map(|_| Option::<AmqpFrame>::None);
+
+        let keepalive = if self.keepalive.non_zero() {
+            self.keepalive + Seconds(5)
+        } else {
+            Seconds::ZERO
+        };
+
+        IoDispatcher::new(self.io, self.codec, self.state, dispatcher, self.timer)
+            .keepalive_timeout(keepalive)
+            .await
+    }
+
+    pub async fn start<F, S>(self, service: F) -> Result<(), DispatcherError>
+    where
+        F: IntoService<S>,
+        S: Service<Request = ControlFrame, Response = ()>,
+        S::Error: Into<crate::error::Error> + std::fmt::Debug + 'static,
+        S: 'static,
+    {
+        let dispatcher = Dispatcher::new(
+            self.connection,
+            fn_service(|_| Ready::<_, LinkError>::Ok(())),
+            service.into_service(),
             self.remote_config.timeout_remote_secs().into(),
         )
         .map(|_| Option::<AmqpFrame>::None);
