@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, fmt, future::ready, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap};
+use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -281,6 +281,10 @@ impl SessionInner {
         self.id as u16
     }
 
+    pub(crate) fn memory_pool(&self) -> PoolRef {
+        self.sink.0.memory_pool()
+    }
+
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("Connection is failed, dropping state: {:?}", err);
@@ -552,7 +556,7 @@ impl SessionInner {
                         unsettled: None,
                         incomplete_unsettled: false,
                         initial_delivery_count: Some(0),
-                        max_message_size: Some(65536),
+                        max_message_size: attach.0.max_message_size,
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,

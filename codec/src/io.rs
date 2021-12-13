@@ -73,6 +73,9 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                     if self.max_size != 0 && size > self.max_size {
                         return Err(AmqpCodecError::MaxSizeExceeded);
                     }
+                    if size <= 4 {
+                        return Err(AmqpCodecError::InvalidFrameSize);
+                    }
                     self.state.set(DecodeState::Frame(size - 4));
                     src.advance(4);
 
@@ -159,6 +162,24 @@ impl Encoder for ProtocolIdCodec {
         dst.put_slice(PROTOCOL_HEADER_PREFIX);
         dst.put_u8(item as u8);
         dst.put_slice(PROTOCOL_VERSION);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::AmqpFrame;
+
+    #[test]
+    fn test_decode() -> Result<(), AmqpCodecError> {
+        let mut data = BytesMut::from(b"\0\0\0\0\0\0\0\0\0\x06AC@A\0S$\xc0\x01\0B".as_ref());
+
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let res = codec.decode(&mut data);
+        assert!(matches!(res, Err(AmqpCodecError::InvalidFrameSize)));
+
         Ok(())
     }
 }

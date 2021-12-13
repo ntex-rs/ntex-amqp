@@ -1,5 +1,20 @@
 # Changes
 
+
+## [codec-0.7.4] - 2021-12-03
+
+* Fix overflow in frame decoder
+
+## [0.5.7] - 2021-12-02
+
+* Add memory pools support
+
+## [0.5.6] - 2021-11-29
+
+* Set SenderLink's max_message_size from Attach frame
+
+* Set ReceiverLink's max_message_size from Attach frame
+
 ## [0.5.5] - 2021-11-08
 
 * Add Clone impls for error types

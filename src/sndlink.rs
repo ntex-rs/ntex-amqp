@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
-use std::{future::Future, mem, pin::Pin, task::Context, task::Poll};
+use std::{convert::TryFrom, future::Future, mem, pin::Pin, task::Context, task::Poll};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{BufMut, ByteString, Bytes, BytesMut, Either, Ready};
+use ntex::util::{BufMut, ByteString, Bytes, Either, PoolRef, Ready};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
     ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
@@ -34,6 +34,7 @@ pub(crate) struct SenderLinkInner {
     on_close: condition::Condition,
     on_disposition: Box<dyn Fn(Bytes, Result<Disposition, AmqpProtocolError>)>,
     max_message_size: Option<usize>,
+    pool: PoolRef,
 }
 
 struct PendingTransfer {
@@ -163,10 +164,13 @@ impl SenderLinkInner {
         session: Cell<SessionInner>,
         max_message_size: Option<usize>,
     ) -> SenderLinkInner {
+        let pool = session.get_ref().memory_pool();
         SenderLinkInner {
             id,
             name,
+            pool,
             delivery_count,
+            max_message_size,
             session: Session::new(session),
             remote_handle: handle,
             link_credit: 0,
@@ -176,7 +180,6 @@ impl SenderLinkInner {
             delivery_tag: 0,
             on_close: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
-            max_message_size,
         }
     }
 
@@ -187,9 +190,11 @@ impl SenderLinkInner {
                 name = Some(addr.clone());
             }
         }
+        let pool = session.get_ref().memory_pool();
         let delivery_count = frame.initial_delivery_count().unwrap_or(0);
 
         SenderLinkInner {
+            pool,
             delivery_count,
             id: 0,
             name: name.unwrap_or_default(),
@@ -202,7 +207,9 @@ impl SenderLinkInner {
             closed: false,
             on_close: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
-            max_message_size: Some(65536),
+            max_message_size: frame
+                .max_message_size()
+                .map(|size| usize::try_from(size).unwrap_or(usize::MAX)),
         }
     }
 
@@ -331,7 +338,7 @@ impl SenderLinkInner {
                 let mut body = match body {
                     TransferBody::Data(data) => data,
                     TransferBody::Message(msg) => {
-                        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+                        let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
                         msg.encode(&mut buf);
                         buf.freeze()
                     }
@@ -398,7 +405,7 @@ impl SenderLinkInner {
                 let mut body = match body {
                     TransferBody::Data(data) => data,
                     TransferBody::Message(msg) => {
-                        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+                        let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
                         msg.encode(&mut buf);
                         buf.freeze()
                     }
@@ -484,7 +491,7 @@ impl SenderLinkInner {
             let delivery_tag = self.delivery_tag;
             self.delivery_tag = delivery_tag.saturating_add(1);
 
-            let mut buf = BytesMut::new();
+            let mut buf = self.pool.buf_with_capacity(16);
             buf.put_u32(delivery_tag);
             buf.freeze()
         })

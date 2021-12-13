@@ -34,10 +34,12 @@ pub enum AmqpParseError {
 #[derive(Debug, Display, From, Clone)]
 pub enum AmqpCodecError {
     ParseError(AmqpParseError),
-    #[display(fmt = "bytes left unparsed at the frame trail")]
+    #[display(fmt = "Bytes left unparsed at the frame trail")]
     UnparsedBytesLeft,
-    #[display(fmt = "max inbound frame size exceeded")]
+    #[display(fmt = "Max inbound frame size exceeded")]
     MaxSizeExceeded,
+    #[display(fmt = "Invalid inbound frame size")]
+    InvalidFrameSize,
 }
 
 #[derive(Debug, Display, From, Clone)]

@@ -5,7 +5,7 @@ use ntex::connect::{self, Address, Connect};
 use ntex::framed::{State, Timer};
 use ntex::service::Service;
 use ntex::time::{timeout, Millis, Seconds};
-use ntex::util::{ByteString, Either};
+use ntex::util::{ByteString, Either, PoolId, PoolRef};
 
 #[cfg(feature = "openssl")]
 use ntex::connect::openssl::{OpensslConnector, SslConnector};
@@ -25,9 +25,7 @@ pub struct Connector<A, T> {
     config: Configuration,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
-    lw: u16,
-    read_hw: u16,
-    write_hw: u16,
+    pool: PoolRef,
     timer: Timer,
     _t: PhantomData<A>,
 }
@@ -40,10 +38,8 @@ impl<A> Connector<A, ()> {
             connector: connect::Connector::default(),
             handshake_timeout: Seconds::ZERO,
             disconnect_timeout: Seconds(3),
-            lw: 1024,
-            read_hw: 8 * 1024,
-            write_hw: 8 * 1024,
             config: Configuration::default(),
+            pool: PoolId::P6.pool_ref(),
             timer: Timer::new(Millis::ONE_SEC),
             _t: PhantomData,
         }
@@ -117,19 +113,27 @@ where
         self
     }
 
+    /// Set memory pool.
+    ///
+    /// Use specified memory pool for memory allocations. By default P6
+    /// memory pool is used.
+    pub fn memory_pool(mut self, id: PoolId) -> Self {
+        self.pool = id.pool_ref();
+        self
+    }
+
+    #[doc(hidden)]
+    #[deprecated(since = "0.5.6", note = "Use memory pool config")]
     #[inline]
     /// Set read/write buffer params
     ///
     /// By default read buffer is 8kb, write buffer is 8kb
     pub fn buffer_params(
-        mut self,
-        max_read_buf_size: u16,
-        max_write_buf_size: u16,
-        min_buf_size: u16,
+        self,
+        _max_read_buf_size: u16,
+        _max_write_buf_size: u16,
+        _min_buf_size: u16,
     ) -> Self {
-        self.read_hw = max_read_buf_size;
-        self.write_hw = max_write_buf_size;
-        self.lw = min_buf_size;
         self
     }
 
@@ -144,9 +148,7 @@ where
             config: self.config,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
-            lw: self.lw,
-            read_hw: self.read_hw,
-            write_hw: self.write_hw,
+            pool: self.pool,
             timer: self.timer,
             _t: PhantomData,
         }
@@ -160,9 +162,7 @@ where
             connector: OpensslConnector::new(connector),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
-            lw: self.lw,
-            read_hw: self.read_hw,
-            write_hw: self.write_hw,
+            pool: self.pool,
             timer: self.timer,
             _t: PhantomData,
         }
@@ -178,9 +178,7 @@ where
             connector: RustlsConnector::new(Arc::new(config)),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
-            lw: self.lw,
-            read_hw: self.read_hw,
-            write_hw: self.write_hw,
+            pool: self.pool,
             timer: self.timer,
             _t: PhantomData,
         }
@@ -211,12 +209,8 @@ where
     {
         trace!("Negotiation client protocol id: Amqp");
 
-        let state = State::with_params(
-            self.read_hw,
-            self.write_hw,
-            self.lw,
-            self.disconnect_timeout,
-        );
+        let state = State::with_memory_pool(self.pool);
+        state.set_disconnect_timeout(self.disconnect_timeout);
 
         _connect_plain(io, state, self.config.clone(), self.timer.clone())
     }
@@ -228,12 +222,8 @@ where
         let fut = self.connector.call(Connect::new(address));
         let config = self.config.clone();
         let timer = self.timer.clone();
-        let state = State::with_params(
-            self.read_hw,
-            self.write_hw,
-            self.lw,
-            self.disconnect_timeout,
-        );
+        let state = State::with_memory_pool(self.pool);
+        state.set_disconnect_timeout(self.disconnect_timeout);
 
         async move {
             trace!("Negotiation client protocol id: Amqp");
@@ -275,12 +265,8 @@ where
 
         let config = self.config.clone();
         let timer = self.timer.clone();
-        let state = State::with_params(
-            self.read_hw,
-            self.write_hw,
-            self.lw,
-            self.disconnect_timeout,
-        );
+        let state = State::with_memory_pool(self.pool);
+        state.set_disconnect_timeout(self.disconnect_timeout);
 
         _connect_sasl(io, state, auth, config, timer)
     }
@@ -293,12 +279,8 @@ where
         let fut = self.connector.call(Connect::new(addr));
         let config = self.config.clone();
         let timer = self.timer.clone();
-        let state = State::with_params(
-            self.read_hw,
-            self.write_hw,
-            self.lw,
-            self.disconnect_timeout,
-        );
+        let state = State::with_memory_pool(self.pool);
+        state.set_disconnect_timeout(self.disconnect_timeout);
 
         async move { _connect_sasl(fut.await?, state, auth, config, timer).await }
     }

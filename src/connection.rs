@@ -2,7 +2,7 @@ use std::future::Future;
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::framed::State as IoState;
-use ntex::util::{HashMap, Ready};
+use ntex::util::{HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -178,6 +178,10 @@ impl Connection {
 }
 
 impl ConnectionInner {
+    pub(crate) fn memory_pool(&self) -> PoolRef {
+        self.io.memory_pool()
+    }
+
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("Set connection error: {:?}", err);
         for (_, channel) in self.sessions.iter_mut() {
