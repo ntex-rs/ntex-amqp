@@ -28,8 +28,7 @@ pub(crate) struct ConnectionInner {
 pub(crate) enum SessionState {
     Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
     Established(Cell<SessionInner>),
-    #[allow(dead_code)]
-    Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
+    Closing(Cell<SessionInner>),
 }
 
 impl SessionState {
@@ -149,6 +148,14 @@ impl Connection {
 
                     rx.await.map_err(|_| AmqpProtocolError::Disconnected)
                 }
+            }
+        }
+    }
+
+    pub(crate) fn close_session(&self, id: usize) {
+        if let Some(state) = self.0.get_mut().sessions.get_mut(id) {
+            if let SessionState::Established(inner) = state {
+                *state = SessionState::Closing(inner.clone());
             }
         }
     }
@@ -382,16 +389,16 @@ impl ConnectionInner {
                 }
                 _ => session.get_mut().handle_frame(frame),
             },
-            SessionState::Closing(ref mut tx) => match frame {
+            SessionState::Closing(ref mut session) => match frame {
                 Frame::End(frm) => {
                     trace!("Session end is confirmed: {:?}", frm);
-                    if let Some(tx) = tx.take() {
-                        let _ = tx.send(Ok(()));
-                    }
+                    let action = session
+                        .get_mut()
+                        .end(AmqpProtocolError::SessionEnded(frm.error));
                     if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
-                    Ok(Action::None)
+                    Ok(action)
                 }
                 frm => {
                     trace!("Got frame after initiated session end: {:?}", frm);
