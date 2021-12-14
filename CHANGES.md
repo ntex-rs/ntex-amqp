@@ -1,5 +1,8 @@
 # Changes
 
+## [0.5.8] - 2021-12-14
+
+* Cleanup session end flow #17
 
 ## [codec-0.7.4] - 2021-12-03
 

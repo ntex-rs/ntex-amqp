@@ -1,7 +1,7 @@
-use std::{collections::VecDeque, fmt, future::ready, future::Future};
+use std::{collections::VecDeque, fmt, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef};
+use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef, Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -39,17 +39,26 @@ impl Session {
         &self.inner.get_ref().sink
     }
 
-    pub fn end(&self) -> impl Future<Output = ()> {
+    pub fn end(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let inner = self.inner.get_mut();
 
         if inner.flags.contains(Flags::ENDED) {
-            Either::Left(ready(()))
-        } else if inner.flags.contains(Flags::ENDING) {
-            Either::Right(inner.closed.wait())
+            Either::Left(Ready::Ok(()))
         } else {
-            inner.post_frame(Frame::End(End { error: None }));
-            inner.flags.insert(Flags::ENDING);
-            Either::Right(inner.closed.wait())
+            if !inner.flags.contains(Flags::ENDING) {
+                inner.sink.close_session(inner.remote_channel_id as usize);
+                inner.post_frame(Frame::End(End { error: None }));
+                inner.flags.insert(Flags::ENDING);
+            }
+            let inner = self.inner.clone();
+            Either::Right(async move {
+                inner.closed.wait().await;
+                if let Some(err @ AmqpProtocolError::SessionEnded(Some(_))) = inner.error.clone() {
+                    Err(err)
+                } else {
+                    Ok(())
+                }
+            })
         }
     }
 
