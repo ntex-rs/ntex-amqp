@@ -174,7 +174,6 @@ where
     type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // log::error!("AD poll ready {:?}", std::thread::current().id());
         // idle ttimeout
         self.handle_idle_timeout(cx);
 
