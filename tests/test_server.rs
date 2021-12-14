@@ -1,6 +1,5 @@
 use std::{cell::Cell, convert::TryFrom, rc::Rc, sync::Arc, sync::Mutex};
 
-use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, fn_service, Service};
 use ntex::{http::Uri, time::sleep, time::Millis, util::Bytes, util::Either, util::Ready};
@@ -28,7 +27,7 @@ async fn server(
 #[ntex::test]
 async fn test_simple() -> std::io::Result<()> {
     let srv = test_server(|| {
-        let srv = server::Server::new(|con: server::Handshake<_>| async move {
+        let srv = server::Server::new(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -78,9 +77,7 @@ async fn test_simple() -> std::io::Result<()> {
     Ok(())
 }
 
-async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
-    auth: server::Sasl<Io>,
-) -> Result<server::HandshakeAck<Io, ()>, server::HandshakeError> {
+async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, server::HandshakeError> {
     let init = auth
         .mechanism("PLAIN")
         .mechanism("ANONYMOUS")
@@ -109,7 +106,7 @@ async fn sasl_auth<Io: AsyncRead + AsyncWrite + Unpin>(
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
     let srv = test_server(|| {
-        server::Server::new(|conn: server::Handshake<_>| async move {
+        server::Server::new(|conn: server::Handshake| async move {
             match conn {
                 server::Handshake::Amqp(conn) => {
                     let conn = conn.open().await.unwrap();
@@ -127,7 +124,7 @@ async fn test_sasl() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::Connector::new()
+    let _client = client::Connector::new()
         .connect_sasl(
             uri,
             client::SaslAuth {
@@ -137,21 +134,17 @@ async fn test_sasl() -> std::io::Result<()> {
             },
         )
         .await;
-    println!("E: {:?}", client.err());
 
     Ok(())
 }
 
 #[ntex::test]
 async fn test_session_end() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "ntex=trace,ntex_amqp=trace");
-    env_logger::init();
-
     let link_names = Arc::new(Mutex::new(Vec::new()));
     let link_names2 = link_names.clone();
 
     let srv = test_server(move || {
-        let srv = server::Server::new(|con: server::Handshake<_>| async move {
+        let srv = server::Server::new(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();

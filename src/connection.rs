@@ -1,8 +1,8 @@
 use std::future::Future;
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
-use ntex::framed::State as IoState;
-use ntex::util::{HashMap, PoolRef, Ready};
+use ntex::io::IoRef;
+use ntex::util::{Either, HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -14,7 +14,7 @@ use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
 pub struct Connection(pub(crate) Cell<ConnectionInner>);
 
 pub(crate) struct ConnectionInner {
-    io: IoState,
+    io: IoRef,
     state: ConnectionState,
     codec: AmqpCodec<AmqpFrame>,
     pub(crate) sessions: slab::Slab<SessionState>,
@@ -47,7 +47,7 @@ pub(crate) enum ConnectionState {
 
 impl Connection {
     pub(crate) fn new(
-        io: IoState,
+        io: IoRef,
         local_config: &Configuration,
         remote_config: &Configuration,
     ) -> Connection {
@@ -171,7 +171,10 @@ impl Connection {
 
         let inner = self.0.get_mut();
         if let Err(e) = inner.io.write().encode(frame, &inner.codec) {
-            inner.set_error(e.into());
+            match e {
+                Either::Left(e) => inner.set_error(e.into()),
+                Either::Right(_) => inner.set_error(AmqpProtocolError::Io),
+            }
         }
     }
 
@@ -212,7 +215,10 @@ impl ConnectionInner {
         log::trace!("outgoing: {:#?}", frame);
 
         if let Err(e) = self.io.write().encode(frame, &self.codec) {
-            self.set_error(e.into());
+            match e {
+                Either::Left(e) => self.set_error(e.into()),
+                Either::Right(_) => self.set_error(AmqpProtocolError::Io),
+            }
         }
     }
 
@@ -254,7 +260,10 @@ impl ConnectionInner {
             .write()
             .encode(AmqpFrame::new(token as u16, begin.into()), &self.codec)
             .map(|_| ())
-            .map_err(AmqpProtocolError::Codec)
+            .map_err(|e| match e {
+                Either::Left(e) => AmqpProtocolError::Codec(e),
+                Either::Right(_) => AmqpProtocolError::Io,
+            })
     }
 
     pub(crate) fn complete_session_creation(

@@ -1,5 +1,4 @@
-use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::framed::{Dispatcher as IoDispatcher, State as IoState, Timer};
+use ntex::io::{Dispatcher as IoDispatcher, IoBoxed, Timer};
 use ntex::service::{fn_service, Service};
 use ntex::time::Seconds;
 use ntex::util::Ready;
@@ -11,9 +10,8 @@ use crate::error::{DispatcherError, LinkError};
 use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
 
 /// Mqtt client
-pub struct Client<Io, St = ()> {
-    io: Io,
-    state: IoState,
+pub struct Client<St = ()> {
+    io: IoBoxed,
     codec: AmqpCodec<AmqpFrame>,
     connection: Connection,
     keepalive: Seconds,
@@ -22,14 +20,10 @@ pub struct Client<Io, St = ()> {
     _st: State<St>,
 }
 
-impl<T> Client<T, ()>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
+impl Client {
     /// Construct new `Dispatcher` instance with outgoing messages stream.
     pub(super) fn new(
-        io: T,
-        state: IoState,
+        io: IoBoxed,
         codec: AmqpCodec<AmqpFrame>,
         connection: Connection,
         keepalive: Seconds,
@@ -38,7 +32,6 @@ where
     ) -> Self {
         Client {
             io,
-            state,
             codec,
             connection,
             keepalive,
@@ -49,10 +42,9 @@ where
     }
 }
 
-impl<Io, St> Client<Io, St>
+impl<St> Client<St>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     #[inline]
     /// Get client sink
@@ -62,10 +54,9 @@ where
 
     #[inline]
     /// Set connection state
-    pub fn state<T: 'static>(self, st: T) -> Client<Io, T> {
+    pub fn state<T: 'static>(self, st: T) -> Client<T> {
         Client {
             io: self.io,
-            state: self.state,
             codec: self.codec,
             connection: self.connection,
             keepalive: self.keepalive,
@@ -93,7 +84,7 @@ where
             Seconds::ZERO
         };
 
-        IoDispatcher::new(self.io, self.codec, self.state, dispatcher, self.timer)
+        IoDispatcher::new(self.io, self.codec, dispatcher, self.timer)
             .keepalive_timeout(keepalive)
             .await
     }

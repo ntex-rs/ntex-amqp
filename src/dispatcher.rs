@@ -1,6 +1,6 @@
 use std::{cell, fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::framed::DispatchItem;
+use ntex::io::DispatchItem;
 use ntex::service::Service;
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{Either, Ready};
@@ -111,7 +111,7 @@ where
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }
-                ControlFrameKind::Closed(_) => {
+                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
                 ControlFrameKind::SessionEnded(_) => (),
@@ -149,7 +149,7 @@ where
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }
-                ControlFrameKind::Closed(_) => {
+                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
                 ControlFrameKind::SessionEnded(_) => (),
@@ -314,10 +314,13 @@ where
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
-            DispatchItem::IoError(err) => {
-                let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(
-                    AmqpProtocolError::Io(Rc::new(err)),
-                ));
+            DispatchItem::Disconnect(e) => {
+                let frame = if e.is_some() {
+                    ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                        AmqpProtocolError::Io(Rc::new(err))))
+                } else {
+                    ControlFrame::new_kind(ControlFrameKind::Disconnected)
+                };
                 *self.ctl_fut.borrow_mut() =
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))

@@ -1,7 +1,6 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::codec::{AsyncRead, AsyncWrite};
-use ntex::framed::{Dispatcher as FramedDispatcher, State as IoState, Timer};
+use ntex::io::{from_iostream, Dispatcher as FramedDispatcher, IoBoxed, IoStream, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout, Millis, Seconds};
 use ntex::util::{Pool, PoolId, PoolRef};
@@ -14,7 +13,7 @@ use super::handshake::{Handshake, HandshakeAck};
 use super::{Error, HandshakeError, ServerError};
 
 /// Server dispatcher factory
-pub struct Server<Io, St, H, Ctl> {
+pub struct Server<St, H, Ctl> {
     handshake: H,
     control: Ctl,
     config: Rc<Configuration>,
@@ -22,7 +21,7 @@ pub struct Server<Io, St, H, Ctl> {
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
     pool: PoolRef,
-    _t: marker::PhantomData<(Io, St)>,
+    _t: marker::PhantomData<St>,
 }
 
 pub(super) struct ServerInner<St, Ctl, Pb> {
@@ -36,12 +35,10 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     _t: marker::PhantomData<St>,
 }
 
-impl<Io, St, H> Server<Io, St, H, DefaultControlService<St, H::Error>>
+impl<St, H> Server<St, H, DefaultControlService<St, H::Error>>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
-        + 'static,
+    H: ServiceFactory<Config = (), Request = Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
 {
     /// Create server factory and provide handshake service
@@ -62,7 +59,7 @@ where
     }
 }
 
-impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
+impl<St, H, Ctl> Server<St, H, Ctl> {
     /// Provide connection configuration
     pub fn config(mut self, config: Configuration) -> Self {
         self.config = Rc::new(config);
@@ -107,29 +104,12 @@ impl<Io, St, H, Ctl> Server<Io, St, H, Ctl> {
         self.pool = id.pool_ref();
         self
     }
-
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.6", note = "Use memory pool config")]
-    #[inline]
-    /// Set read/write buffer params
-    ///
-    /// By default read buffer is 8kb, write buffer is 8kb
-    pub fn buffer_params(
-        self,
-        _max_read_buf_size: u16,
-        _max_write_buf_size: u16,
-        _min_buf_size: u16,
-    ) -> Self {
-        self
-    }
 }
 
-impl<Io, St, H, Ctl> Server<Io, St, H, Ctl>
+impl<St, H, Ctl> Server<St, H, Ctl>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
-        + 'static,
+    H: ServiceFactory<Config = (), Request = Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
@@ -137,7 +117,7 @@ where
     Error: From<Ctl::Error>,
 {
     /// Service to call with control frames
-    pub fn control<F, S>(self, service: F) -> Server<Io, St, H, S>
+    pub fn control<F, S>(self, service: F) -> Server<St, H, S>
     where
         F: IntoServiceFactory<S>,
         S: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
@@ -158,24 +138,25 @@ where
     }
 
     /// Set service to execute for incoming links and create service factory
-    pub fn finish<F, Pb>(
+    pub fn finish<I, S, Pb>(
         self,
-        service: F,
+        service: S,
     ) -> impl ServiceFactory<
         Config = (),
-        Request = Io,
+        Request = I,
         Response = (),
         Error = ServerError<H::Error>,
         InitError = H::InitError,
     >
     where
-        F: IntoServiceFactory<Pb>,
+        I: IoStream,
+        S: IntoServiceFactory<Pb>,
         Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
         Pb::Error: fmt::Debug,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
-        ServerImpl {
+        from_iostream(ServerImpl {
             pool: self.pool,
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
@@ -188,24 +169,20 @@ where
                 time: Timer::new(Millis::ONE_SEC),
                 _t: marker::PhantomData,
             }),
-            _t: marker::PhantomData,
-        }
+        })
     }
 }
 
-struct ServerImpl<Io, St, H, Ctl, Pb> {
+struct ServerImpl<St, H, Ctl, Pb> {
     handshake: H,
     pool: PoolRef,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-    _t: marker::PhantomData<Io>,
 }
 
-impl<Io, St, H, Ctl, Pb> ServiceFactory for ServerImpl<Io, St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> ServiceFactory for ServerImpl<St, H, Ctl, Pb>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: ServiceFactory<Config = (), Request = Handshake<Io>, Response = HandshakeAck<Io, St>>
-        + 'static,
+    H: ServiceFactory<Config = (), Request = Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
@@ -216,10 +193,10 @@ where
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Config = ();
-    type Request = Io;
+    type Request = IoBoxed;
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Service = ServerImplService<Io, St, H::Service, Ctl, Pb>;
+    type Service = ServerImplService<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
 
@@ -233,24 +210,21 @@ where
                 inner,
                 pool,
                 handshake: Rc::new(handshake),
-                _t: marker::PhantomData,
             })
         })
     }
 }
 
-struct ServerImplService<Io, St, H, Ctl, Pb> {
+struct ServerImplService<St, H, Ctl, Pb> {
     handshake: Rc<H>,
     pool: Pool,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-    _t: marker::PhantomData<Io>,
 }
 
-impl<Io, St, H, Ctl, Pb> Service for ServerImplService<Io, St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> Service for ServerImplService<St, H, Ctl, Pb>
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: Service<Request = Handshake<Io>, Response = HandshakeAck<Io, St>> + 'static,
+    H: Service<Request = Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
@@ -260,7 +234,7 @@ where
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
-    type Request = Io;
+    type Request = IoBoxed;
     type Response = ();
     type Error = ServerError<H::Error>;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
@@ -288,20 +262,22 @@ where
     }
 
     fn call(&self, req: Self::Request) -> Self::Future {
+        req.set_memory_pool(self.pool.pool_ref());
+        req.set_disconnect_timeout(self.inner.disconnect_timeout);
+
         let keepalive = self.inner.config.idle_time_out / 1000;
         let handshake_timeout = self.inner.handshake_timeout;
         let disconnect_timeout = self.inner.disconnect_timeout;
-        let inner = self.inner.clone();
         let fut = handshake(
             req,
             self.inner.max_size,
             self.handshake.clone(),
-            self.pool.pool_ref(),
             self.inner.clone(),
         );
+        let inner = self.inner.clone();
 
         Box::pin(async move {
-            let (io, state, codec, sink, st, idle_timeout) = if handshake_timeout.is_zero() {
+            let (state, codec, sink, st, idle_timeout) = if handshake_timeout.is_zero() {
                 fut.await?
             } else {
                 timeout(handshake_timeout, fut)
@@ -324,7 +300,7 @@ where
             let dispatcher = Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout.into())
                 .map(|_| Option::<AmqpFrame>::None);
 
-            FramedDispatcher::new(io, codec, state, dispatcher, inner.time.clone())
+            FramedDispatcher::new(state, codec, dispatcher, inner.time.clone())
                 .keepalive_timeout(Seconds::checked_new(keepalive as usize))
                 .disconnect_timeout(disconnect_timeout)
                 .await
@@ -333,16 +309,14 @@ where
     }
 }
 
-async fn handshake<Io, St, H, Ctl, Pb>(
-    mut io: Io,
+async fn handshake<St, H, Ctl, Pb>(
+    state: IoBoxed,
     max_size: usize,
     handshake: Rc<H>,
-    pool: PoolRef,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 ) -> Result<
     (
-        Io,
-        IoState,
+        IoBoxed,
         AmqpCodec<AmqpFrame>,
         Connection,
         State<St>,
@@ -352,16 +326,12 @@ async fn handshake<Io, St, H, Ctl, Pb>(
 >
 where
     St: 'static,
-    Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    H: Service<Request = Handshake<Io>, Response = HandshakeAck<Io, St>>,
+    H: Service<Request = Handshake, Response = HandshakeAck<St>>,
     Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
     Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
 {
-    let state = IoState::with_memory_pool(pool);
-    state.set_disconnect_timeout(inner.disconnect_timeout);
-
     let protocol = state
-        .next(&mut io, &ProtocolIdCodec)
+        .next(&ProtocolIdCodec)
         .await
         .map_err(HandshakeError::from)?
         .ok_or_else(|| {
@@ -369,37 +339,37 @@ where
             HandshakeError::Disconnected
         })?;
 
-    let (io, sink, state, codec, st, idle_timeout) = match protocol {
+    let (sink, state, codec, st, idle_timeout) = match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             state
-                .send(&mut io, &ProtocolIdCodec, protocol)
+                .send(protocol, &ProtocolIdCodec)
                 .await
                 .map_err(HandshakeError::from)?;
 
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
-                    Handshake::new_plain(io, state, inner.config.clone())
+                    Handshake::new_plain(state, inner.config.clone())
                 } else {
-                    Handshake::new_sasl(io, state, inner.config.clone())
+                    Handshake::new_sasl(state, inner.config.clone())
                 })
                 .await
                 .map_err(ServerError::Service)?;
 
-            let (st, mut io, sink, state, idle_timeout) = ack.into_inner();
+            let (st, sink, idle_timeout, state) = ack.into_inner();
 
             let codec = AmqpCodec::new().max_size(max_size);
 
             // confirm Open
             let local = inner.config.to_open();
             state
-                .send(&mut io, &codec, AmqpFrame::new(0, local.into()))
+                .send(AmqpFrame::new(0, local.into()), &codec)
                 .await
                 .map_err(HandshakeError::from)?;
 
             let st = State::new(st);
 
-            (io, sink, state, codec, st, idle_timeout)
+            (sink, state, codec, st, idle_timeout)
         }
         ProtocolId::AmqpTls => {
             return Err(HandshakeError::from(ProtocolIdError::Unexpected {
@@ -410,5 +380,5 @@ where
         }
     };
 
-    Ok((io, state, codec, sink, st, idle_timeout))
+    Ok((state, codec, sink, st, idle_timeout))
 }
