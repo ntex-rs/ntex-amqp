@@ -315,9 +315,10 @@ where
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::Disconnect(e) => {
-                let frame = if e.is_some() {
-                    ControlFrame::new_kind(ControlFrameKind::ProtocolError(
-                        AmqpProtocolError::Io(Rc::new(err))))
+                let frame = if let Some(e) = e {
+                    ControlFrame::new_kind(ControlFrameKind::ProtocolError(AmqpProtocolError::Io(
+                        Rc::new(e),
+                    )))
                 } else {
                     ControlFrame::new_kind(ControlFrameKind::Disconnected)
                 };

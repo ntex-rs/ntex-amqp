@@ -110,7 +110,7 @@ where
             Seconds::ZERO
         };
 
-        IoDispatcher::new(self.io, self.codec, self.state, dispatcher, self.timer)
+        IoDispatcher::new(self.io, self.codec, dispatcher, self.timer)
             .keepalive_timeout(keepalive)
             .await
     }

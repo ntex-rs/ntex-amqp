@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, rc::Rc};
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::io::IoRef;
@@ -173,7 +173,7 @@ impl Connection {
         if let Err(e) = inner.io.write().encode(frame, &inner.codec) {
             match e {
                 Either::Left(e) => inner.set_error(e.into()),
-                Either::Right(_) => inner.set_error(AmqpProtocolError::Io),
+                Either::Right(e) => inner.set_error(AmqpProtocolError::Io(Rc::new(e))),
             }
         }
     }
@@ -217,7 +217,7 @@ impl ConnectionInner {
         if let Err(e) = self.io.write().encode(frame, &self.codec) {
             match e {
                 Either::Left(e) => self.set_error(e.into()),
-                Either::Right(_) => self.set_error(AmqpProtocolError::Io),
+                Either::Right(e) => self.set_error(AmqpProtocolError::Io(Rc::new(e))),
             }
         }
     }
@@ -262,7 +262,7 @@ impl ConnectionInner {
             .map(|_| ())
             .map_err(|e| match e {
                 Either::Left(e) => AmqpProtocolError::Codec(e),
-                Either::Right(_) => AmqpProtocolError::Io,
+                Either::Right(e) => AmqpProtocolError::Io(Rc::new(e)),
             })
     }
 
@@ -325,7 +325,7 @@ impl ConnectionInner {
                     return Ok(Action::None);
                 } else {
                     log::trace!("Connection closed remotely: {:?}", close);
-                    let err = AmqpProtocolError::Closed(close.error.clone());
+                    let err = AmqpProtocolError::Closed(close.error);
                     self.set_error(err.clone());
                     let close = Close { error: None };
                     self.post_frame(AmqpFrame::new(0, close.into()));
