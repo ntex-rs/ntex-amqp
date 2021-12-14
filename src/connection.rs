@@ -94,20 +94,25 @@ impl Connection {
 
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.0.get_ref().io.close();
+        let inner = self.0.get_mut();
+        inner.post_frame(AmqpFrame::new(0, Frame::Close(Close { error: None })));
+        inner.io.close();
         Ready::Ok(())
     }
 
-    // TODO: implement
     /// Close connection with error
-    pub fn close_with_error<E>(
-        &self,
-        _err: &E,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>>
+    pub fn close_with_error<E>(&self, err: E) -> impl Future<Output = Result<(), AmqpProtocolError>>
     where
         Error: From<E>,
     {
-        self.0.get_ref().io.close();
+        let inner = self.0.get_mut();
+        inner.post_frame(AmqpFrame::new(
+            0,
+            Frame::Close(Close {
+                error: Some(err.into()),
+            }),
+        ));
+        inner.io.close();
         Ready::Ok(())
     }
 
@@ -203,6 +208,9 @@ impl ConnectionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
+        #[cfg(feature = "frame-trace")]
+        log::trace!("outgoing: {:#?}", frame);
+
         if let Err(e) = self.io.write().encode(frame, &self.codec) {
             self.set_error(e.into());
         }
@@ -302,18 +310,19 @@ impl ConnectionInner {
                 return Ok(Action::None);
             }
             Frame::Close(close) => {
-                self.set_error(AmqpProtocolError::Closed(close.error.clone()));
-
                 if self.state == ConnectionState::Closing {
                     log::trace!("Connection closed: {:?}", close);
                     self.set_error(AmqpProtocolError::Disconnected);
+                    return Ok(Action::None);
                 } else {
                     log::trace!("Connection closed remotely: {:?}", close);
+                    let err = AmqpProtocolError::Closed(close.error.clone());
+                    self.set_error(err.clone());
                     let close = Close { error: None };
                     self.post_frame(AmqpFrame::new(0, close.into()));
                     self.state = ConnectionState::RemoteClose;
+                    return Ok(Action::RemoteClose(err));
                 }
-                return Ok(Action::None);
             }
             Frame::Begin(begin) => {
                 // response Begin for open session

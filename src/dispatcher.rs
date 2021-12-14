@@ -1,4 +1,4 @@
-use std::{cell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll};
+use std::{cell, fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::framed::DispatchItem;
 use ntex::service::Service;
@@ -16,7 +16,7 @@ pub(crate) struct Dispatcher<Sr: Service, Ctl: Service> {
     service: Sr,
     ctl_service: Ctl,
     ctl_fut: cell::RefCell<Option<(Option<ControlFrame>, Pin<Box<Ctl::Future>>)>>,
-    shutdown: cell::Cell<bool>,
+    shutdown: cell::RefCell<Option<Pin<Box<Ctl::Future>>>>,
     expire: Sleep,
     idle_timeout: Millis,
 }
@@ -24,11 +24,10 @@ pub(crate) struct Dispatcher<Sr: Service, Ctl: Service> {
 impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
     Sr: Service<Request = types::Message, Response = ()>,
-    Sr::Error: 'static,
+    Sr::Error: Into<Error> + 'static,
     Sr::Future: 'static,
     Ctl: Service<Request = ControlFrame, Response = ()>,
-    Ctl::Error: 'static,
-    Error: From<Sr::Error> + From<Ctl::Error>,
+    Ctl::Error: Into<Error> + 'static,
 {
     pub(crate) fn new(
         sink: Connection,
@@ -42,7 +41,7 @@ where
             ctl_service,
             idle_timeout,
             ctl_fut: cell::RefCell::new(None),
-            shutdown: cell::Cell::new(false),
+            shutdown: cell::RefCell::new(None),
             expire: sleep(idle_timeout),
         }
     }
@@ -124,7 +123,7 @@ where
                     let fut = self.service.call(types::Message::Attached(link.clone()));
                     ntex::rt::spawn(async move {
                         if let Err(err) = fut.await {
-                            let _ = link.close_with_error(Error::from(err)).await;
+                            let _ = link.close_with_error(err.into()).await;
                         } else {
                             link.confirm_receiver_link();
                             link.set_link_credit(50);
@@ -163,12 +162,11 @@ where
 impl<Sr, Ctl> Service for Dispatcher<Sr, Ctl>
 where
     Sr: Service<Request = types::Message, Response = ()>,
-    Sr::Error: fmt::Debug + 'static,
+    Sr::Error: Into<Error> + fmt::Debug + 'static,
     Sr::Future: 'static,
     Ctl: Service<Request = ControlFrame, Response = ()>,
-    Ctl::Error: fmt::Debug + 'static,
+    Ctl::Error: Into<Error> + fmt::Debug + 'static,
     Ctl::Future: 'static,
-    Error: From<Sr::Error> + From<Ctl::Error>,
 {
     type Request = DispatchItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
@@ -185,12 +183,12 @@ where
         // check readiness
         let res1 = self.service.poll_ready(cx).map_err(|err| {
             error!("Publish service readiness check failed: {:?}", err);
-            let _ = self.sink.close_with_error(&err);
+            let _ = self.sink.close_with_error(err.into());
             DispatcherError::Service
         })?;
         let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
             error!("Control service readiness check failed: {:?}", err);
-            let _ = self.sink.close_with_error(&err);
+            let _ = self.sink.close_with_error(err.into());
             DispatcherError::Service
         })?;
 
@@ -202,22 +200,21 @@ where
     }
 
     fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        if !self.shutdown.get() {
-            self.shutdown.set(true);
+        let mut shutdown = self.shutdown.borrow_mut();
+        if !shutdown.is_some() {
             let sink = self.sink.0.get_mut();
             sink.on_close.notify();
             sink.set_error(AmqpProtocolError::Disconnected);
-            let fut = self
-                .ctl_service
-                .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)));
-            ntex::rt::spawn(async move {
-                let _ = fut.await;
-            });
+            *shutdown = Some(Box::pin(
+                self.ctl_service
+                    .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error))),
+            ));
         }
 
+        let res0 = shutdown.as_mut().expect("guard above").as_mut().poll(cx);
         let res1 = self.service.poll_shutdown(cx, is_error);
         let res2 = self.ctl_service.poll_shutdown(cx, is_error);
-        if res1.is_pending() || res2.is_pending() {
+        if res0.is_pending() || res1.is_pending() || res2.is_pending() {
             Poll::Pending
         } else {
             Poll::Ready(())
@@ -293,6 +290,11 @@ where
                         *self.ctl_fut.borrow_mut() =
                             Some((None, Box::pin(self.ctl_service.call(frame))));
                     }
+                    types::Action::RemoteClose(err) => {
+                        let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err));
+                        *self.ctl_fut.borrow_mut() =
+                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                    }
                     types::Action::None => (),
                 };
 
@@ -312,9 +314,10 @@ where
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
             }
-            DispatchItem::IoError(_) => {
-                let frame =
-                    ControlFrame::new_kind(ControlFrameKind::ProtocolError(AmqpProtocolError::Io));
+            DispatchItem::IoError(err) => {
+                let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                    AmqpProtocolError::Io(Rc::new(err)),
+                ));
                 *self.ctl_fut.borrow_mut() =
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
@@ -338,8 +341,7 @@ pin_project_lite::pin_project! {
 impl<F, E> Future for ServiceResult<F, E>
 where
     F: Future<Output = Result<(), E>>,
-    E: fmt::Debug,
-    Error: From<E>,
+    E: Into<Error> + fmt::Debug,
 {
     type Output = Result<(), DispatcherError>;
 
@@ -351,7 +353,7 @@ where
             Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => {
                 log::trace!("Service error {:?}", e);
-                let _ = this.link.close_with_error(e);
+                let _ = this.link.close_with_error(e.into());
                 Poll::Ready(Ok::<_, DispatcherError>(()))
             }
         }

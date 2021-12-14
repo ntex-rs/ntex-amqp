@@ -1,5 +1,14 @@
 # Changes
 
+## [0.5.9] - 2021-12-14
+
+* Send the close frame in close and close_with_error
+* Allow the control service to handle remote_close
+* Propagate IO errors
+* Change dispatcher trait bounds to allow different error types from Sr and Ctl
+* Hold shutdown of dispatcher until control service has handled the close control message
+* Add client start with custom control service
+
 ## [0.5.8] - 2021-12-14
 
 * Cleanup session end flow #17
