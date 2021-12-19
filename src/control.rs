@@ -33,6 +33,7 @@ pub enum ControlFrameKind {
     DetachReceiver(protocol::Detach, ReceiverLink),
     SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     ProtocolError(AmqpProtocolError),
+    Disconnected,
     Closed(bool),
 }
 

@@ -26,7 +26,7 @@ async fn main() -> std::io::Result<()> {
 
     ntex::server::Server::build()
         .bind("amqp", "127.0.0.1:5671", || {
-            let srv = server::Server::new(|con: server::Handshake<_>| async move {
+            let srv = server::Server::new(|con: server::Handshake| async move {
                 match con {
                     server::Handshake::Amqp(con) => {
                         let con = con.open().await.unwrap();

@@ -1,5 +1,13 @@
 # Changes
 
+## [0.6.0-b.0] - 2021-12-19
+
+* Upgrade to ntex 0.5
+
+## [codec-0.8.0] - 2021-12-19
+
+* Upgrade to ntex-codec 0.6
+
 ## [0.5.9] - 2021-12-14
 
 * Send the close frame in close and close_with_error

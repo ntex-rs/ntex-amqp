@@ -1,14 +1,13 @@
 use std::{future::Future, marker::PhantomData};
 
-use ntex::codec::{AsyncRead, AsyncWrite};
 use ntex::connect::{self, Address, Connect};
-use ntex::framed::{State, Timer};
+use ntex::io::{DefaultFilter, Filter, Io, IoBoxed, Timer};
 use ntex::service::Service;
 use ntex::time::{timeout, Millis, Seconds};
 use ntex::util::{ByteString, Either, PoolId, PoolRef};
 
 #[cfg(feature = "openssl")]
-use ntex::connect::openssl::{OpensslConnector, SslConnector};
+use ntex::connect::openssl::{self, OpensslConnector, SslConnector};
 
 #[cfg(feature = "rustls")]
 use ntex::connect::rustls::{ClientConfig, RustlsConnector};
@@ -20,20 +19,20 @@ use crate::{error::ProtocolIdError, Configuration, Connection};
 use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
-pub struct Connector<A, T> {
+pub struct Connector<A, T, F> {
     connector: T,
     config: Configuration,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
     pool: PoolRef,
     timer: Timer,
-    _t: PhantomData<A>,
+    _t: PhantomData<(A, F)>,
 }
 
-impl<A> Connector<A, ()> {
+impl<A> Connector<A, (), ()> {
     #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
-    pub fn new() -> Connector<A, connect::Connector<A>> {
+    pub fn new() -> Connector<A, connect::Connector<A>, DefaultFilter> {
         Connector {
             connector: connect::Connector::default(),
             handshake_timeout: Seconds::ZERO,
@@ -46,11 +45,11 @@ impl<A> Connector<A, ()> {
     }
 }
 
-impl<A, T> Connector<A, T>
+impl<A, T, F> Connector<A, T, F>
 where
     A: Address,
-    T: Service<Request = Connect<A>, Error = connect::ConnectError>,
-    T::Response: AsyncRead + AsyncWrite + Unpin + 'static,
+    F: Filter + 'static,
+    T: Service<Request = Connect<A>, Response = Io<F>, Error = connect::ConnectError>,
 {
     /// The channel-max value is the highest channel number that
     /// may be used on the Connection. This value plus one is the maximum
@@ -122,26 +121,11 @@ where
         self
     }
 
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.6", note = "Use memory pool config")]
-    #[inline]
-    /// Set read/write buffer params
-    ///
-    /// By default read buffer is 8kb, write buffer is 8kb
-    pub fn buffer_params(
-        self,
-        _max_read_buf_size: u16,
-        _max_write_buf_size: u16,
-        _min_buf_size: u16,
-    ) -> Self {
-        self
-    }
-
     /// Use custom connector
-    pub fn connector<U>(self, connector: U) -> Connector<A, U>
+    pub fn connector<U, F1>(self, connector: U) -> Connector<A, U, F1>
     where
-        U: Service<Request = Connect<A>, Error = connect::ConnectError>,
-        U::Response: AsyncRead + AsyncWrite + Unpin + 'static,
+        F1: Filter,
+        U: Service<Request = Connect<A>, Response = Io<F1>, Error = connect::ConnectError>,
     {
         Connector {
             connector,
@@ -156,10 +140,10 @@ where
 
     #[cfg(feature = "openssl")]
     /// Use openssl connector
-    pub fn openssl(self, connector: SslConnector) -> Connector<A, OpensslConnector<A>> {
+    pub fn openssl(self, connector: SslConnector) -> Connector<A, openssl::Connector<A>> {
         Connector {
             config: self.config,
-            connector: OpensslConnector::new(connector),
+            connector: openssl::IoConnector(connector),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
@@ -168,27 +152,24 @@ where
         }
     }
 
-    #[cfg(feature = "rustls")]
-    /// Use rustls connector
-    pub fn rustls(self, config: ClientConfig) -> Connector<A, RustlsConnector<A>> {
-        use std::sync::Arc;
+    // #[cfg(feature = "rustls")]
+    // /// Use rustls connector
+    // pub fn rustls(self, config: ClientConfig) -> Connector<A, RustlsConnector<A>> {
+    //     use std::sync::Arc;
 
-        Connector {
-            config: self.config,
-            connector: RustlsConnector::new(Arc::new(config)),
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
-            pool: self.pool,
-            timer: self.timer,
-            _t: PhantomData,
-        }
-    }
+    //     Connector {
+    //         config: self.config,
+    //         connector: RustlsConnector::new(Arc::new(config)),
+    //         handshake_timeout: self.handshake_timeout,
+    //         disconnect_timeout: self.disconnect_timeout,
+    //         pool: self.pool,
+    //         timer: self.timer,
+    //         _t: PhantomData,
+    //     }
+    // }
 
     /// Connect to amqp server
-    pub fn connect(
-        &self,
-        address: A,
-    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
+    pub fn connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
         if self.handshake_timeout.non_zero() {
             let fut = timeout(self.handshake_timeout, self._connect(address));
             Either::Left(async move {
@@ -203,33 +184,30 @@ where
     }
 
     /// Negotiate amqp protocol over opened socket
-    pub fn negotiate<Io>(&self, io: Io) -> impl Future<Output = Result<Client<Io>, ConnectError>>
-    where
-        Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    {
+    pub fn negotiate(&self, io: IoBoxed) -> impl Future<Output = Result<Client, ConnectError>> {
         trace!("Negotiation client protocol id: Amqp");
 
-        let state = State::with_memory_pool(self.pool);
-        state.set_disconnect_timeout(self.disconnect_timeout);
+        io.set_memory_pool(self.pool);
+        io.set_disconnect_timeout(self.disconnect_timeout.into());
 
-        _connect_plain(io, state, self.config.clone(), self.timer.clone())
+        _connect_plain(io, self.config.clone(), self.timer.clone())
     }
 
-    fn _connect(
-        &self,
-        address: A,
-    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
+    fn _connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
         let fut = self.connector.call(Connect::new(address));
         let config = self.config.clone();
         let timer = self.timer.clone();
-        let state = State::with_memory_pool(self.pool);
-        state.set_disconnect_timeout(self.disconnect_timeout);
+        let pool = self.pool;
+        let disconnect = self.disconnect_timeout;
 
         async move {
             trace!("Negotiation client protocol id: Amqp");
 
-            let io = fut.await?;
-            _connect_plain(io, state, config, timer).await
+            let state = fut.await?;
+            state.set_memory_pool(pool);
+            state.set_disconnect_timeout(disconnect.into());
+
+            _connect_plain(state.into_boxed(), config, timer).await
         }
     }
 
@@ -238,7 +216,7 @@ where
         &self,
         addr: A,
         auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
+    ) -> impl Future<Output = Result<Client, ConnectError>> {
         if self.handshake_timeout.non_zero() {
             let fut = timeout(self.handshake_timeout, self._connect_sasl(addr, auth));
             Either::Left(async move {
@@ -253,57 +231,54 @@ where
     }
 
     /// Negotiate amqp sasl protocol over opened socket
-    pub fn negotiate_sasl<Io>(
+    pub fn negotiate_sasl(
         &self,
-        io: Io,
+        io: IoBoxed,
         auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client<Io>, ConnectError>>
-    where
-        Io: AsyncRead + AsyncWrite + Unpin + 'static,
-    {
+    ) -> impl Future<Output = Result<Client, ConnectError>> {
         trace!("Negotiation client protocol id: Amqp");
 
         let config = self.config.clone();
         let timer = self.timer.clone();
-        let state = State::with_memory_pool(self.pool);
-        state.set_disconnect_timeout(self.disconnect_timeout);
+        io.set_memory_pool(self.pool);
+        io.set_disconnect_timeout(self.disconnect_timeout.into());
 
-        _connect_sasl(io, state, auth, config, timer)
+        _connect_sasl(io, auth, config, timer)
     }
 
     fn _connect_sasl(
         &self,
         addr: A,
         auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client<T::Response>, ConnectError>> {
+    ) -> impl Future<Output = Result<Client, ConnectError>> {
         let fut = self.connector.call(Connect::new(addr));
         let config = self.config.clone();
         let timer = self.timer.clone();
-        let state = State::with_memory_pool(self.pool);
-        state.set_disconnect_timeout(self.disconnect_timeout);
+        let pool = self.pool;
+        let disconnect = self.disconnect_timeout;
 
-        async move { _connect_sasl(fut.await?, state, auth, config, timer).await }
+        async move {
+            let state = fut.await?;
+            state.set_memory_pool(pool);
+            state.set_disconnect_timeout(disconnect.into());
+
+            _connect_sasl(state.into_boxed(), auth, config, timer).await
+        }
     }
 }
 
-async fn _connect_sasl<T>(
-    mut io: T,
-    state: State,
+async fn _connect_sasl(
+    io: IoBoxed,
     auth: SaslAuth,
     config: Configuration,
     timer: Timer,
-) -> Result<Client<T>, ConnectError>
-where
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
-{
+) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: AmqpSasl");
 
-    state
-        .send(&mut io, &ProtocolIdCodec, ProtocolId::AmqpSasl)
-        .await?;
+    io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec).await?;
 
-    let proto = state
-        .next(&mut io, &ProtocolIdCodec)
+    let proto = io
+        .next(&ProtocolIdCodec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| {
@@ -322,8 +297,8 @@ where
     let codec = AmqpCodec::<SaslFrame>::new();
 
     // processing sasl-mechanisms
-    let _ = state
-        .next(&mut io, &codec)
+    let _ = io
+        .next(&codec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
@@ -337,11 +312,11 @@ where
         initial_response: Some(initial_response),
     };
 
-    state.send(&mut io, &codec, sasl_init.into()).await?;
+    io.send(sasl_init.into(), &codec).await?;
 
     // processing sasl-outcome
-    let sasl_frame = state
-        .next(&mut io, &codec)
+    let sasl_frame = io
+        .next(&codec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
@@ -357,26 +332,20 @@ where
         return Err(ConnectError::Disconnected);
     }
 
-    _connect_plain(io, state, config, timer).await
+    _connect_plain(io, config, timer).await
 }
 
-async fn _connect_plain<T>(
-    mut io: T,
-    state: State,
+async fn _connect_plain(
+    io: IoBoxed,
     config: Configuration,
     timer: Timer,
-) -> Result<Client<T>, ConnectError>
-where
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
-{
+) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: Amqp");
 
-    state
-        .send(&mut io, &ProtocolIdCodec, ProtocolId::Amqp)
-        .await?;
+    io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
 
-    let proto = state
-        .next(&mut io, &ProtocolIdCodec)
+    let proto = io
+        .next(&ProtocolIdCodec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| {
@@ -397,12 +366,11 @@ where
     let codec = AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize);
 
     trace!("Open client amqp connection: {:?}", open);
-    state
-        .send(&mut io, &codec, AmqpFrame::new(0, Frame::Open(open)))
+    io.send(AmqpFrame::new(0, Frame::Open(open)), &codec)
         .await?;
 
-    let frame = state
-        .next(&mut io, &codec)
+    let frame = io
+        .next(&codec)
         .await
         .map_err(ConnectError::from)
         .and_then(|res| {
@@ -415,10 +383,9 @@ where
     if let Frame::Open(open) = frame.performative() {
         trace!("Open confirmed: {:?}", open);
         let remote_config = open.into();
-        let connection = Connection::new(state.clone(), &config, &remote_config);
+        let connection = Connection::new(io.get_ref(), &config, &remote_config);
         let client = Client::new(
             io,
-            state,
             codec,
             connection,
             config.timeout_secs(),

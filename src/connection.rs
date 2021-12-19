@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
-use ntex::framed::State as IoState;
+use ntex::io::IoRef;
 use ntex::util::{HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
@@ -14,7 +14,7 @@ use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
 pub struct Connection(pub(crate) Cell<ConnectionInner>);
 
 pub(crate) struct ConnectionInner {
-    io: IoState,
+    io: IoRef,
     state: ConnectionState,
     codec: AmqpCodec<AmqpFrame>,
     pub(crate) sessions: slab::Slab<SessionState>,
@@ -47,7 +47,7 @@ pub(crate) enum ConnectionState {
 
 impl Connection {
     pub(crate) fn new(
-        io: IoState,
+        io: IoRef,
         local_config: &Configuration,
         remote_config: &Configuration,
     ) -> Connection {
@@ -171,7 +171,7 @@ impl Connection {
 
         let inner = self.0.get_mut();
         if let Err(e) = inner.io.write().encode(frame, &inner.codec) {
-            inner.set_error(e.into());
+            inner.set_error(e.into())
         }
     }
 
@@ -212,7 +212,7 @@ impl ConnectionInner {
         log::trace!("outgoing: {:#?}", frame);
 
         if let Err(e) = self.io.write().encode(frame, &self.codec) {
-            self.set_error(e.into());
+            self.set_error(e.into())
         }
     }
 
@@ -316,7 +316,7 @@ impl ConnectionInner {
                     return Ok(Action::None);
                 } else {
                     log::trace!("Connection closed remotely: {:?}", close);
-                    let err = AmqpProtocolError::Closed(close.error.clone());
+                    let err = AmqpProtocolError::Closed(close.error);
                     self.set_error(err.clone());
                     let close = Close { error: None };
                     self.post_frame(AmqpFrame::new(0, close.into()));

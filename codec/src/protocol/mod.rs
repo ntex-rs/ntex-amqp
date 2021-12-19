@@ -215,6 +215,7 @@ impl SaslInit {
     }
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for Properties {
     fn default() -> Properties {
         Properties {
