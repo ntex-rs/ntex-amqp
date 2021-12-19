@@ -1,8 +1,8 @@
-use std::{future::Future, rc::Rc};
+use std::future::Future;
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::io::IoRef;
-use ntex::util::{Either, HashMap, PoolRef, Ready};
+use ntex::util::{HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -171,10 +171,7 @@ impl Connection {
 
         let inner = self.0.get_mut();
         if let Err(e) = inner.io.write().encode(frame, &inner.codec) {
-            match e {
-                Either::Left(e) => inner.set_error(e.into()),
-                Either::Right(e) => inner.set_error(AmqpProtocolError::Io(Rc::new(e))),
-            }
+            inner.set_error(e.into())
         }
     }
 
@@ -215,10 +212,7 @@ impl ConnectionInner {
         log::trace!("outgoing: {:#?}", frame);
 
         if let Err(e) = self.io.write().encode(frame, &self.codec) {
-            match e {
-                Either::Left(e) => self.set_error(e.into()),
-                Either::Right(e) => self.set_error(AmqpProtocolError::Io(Rc::new(e))),
-            }
+            self.set_error(e.into())
         }
     }
 
@@ -260,10 +254,7 @@ impl ConnectionInner {
             .write()
             .encode(AmqpFrame::new(token as u16, begin.into()), &self.codec)
             .map(|_| ())
-            .map_err(|e| match e {
-                Either::Left(e) => AmqpProtocolError::Codec(e),
-                Either::Right(e) => AmqpProtocolError::Io(Rc::new(e)),
-            })
+            .map_err(AmqpProtocolError::Codec)
     }
 
     pub(crate) fn complete_session_creation(

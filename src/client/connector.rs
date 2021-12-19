@@ -32,9 +32,9 @@ pub struct Connector<A, T, F> {
 impl<A> Connector<A, (), ()> {
     #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
-    pub fn new() -> Connector<A, connect::IoConnector<A>, DefaultFilter> {
+    pub fn new() -> Connector<A, connect::Connector<A>, DefaultFilter> {
         Connector {
-            connector: connect::IoConnector::default(),
+            connector: connect::Connector::default(),
             handshake_timeout: Seconds::ZERO,
             disconnect_timeout: Seconds(3),
             config: Configuration::default(),
@@ -140,7 +140,7 @@ where
 
     #[cfg(feature = "openssl")]
     /// Use openssl connector
-    pub fn openssl(self, connector: SslConnector) -> Connector<A, openssl::IoConnector<A>> {
+    pub fn openssl(self, connector: SslConnector) -> Connector<A, openssl::Connector<A>> {
         Connector {
             config: self.config,
             connector: openssl::IoConnector(connector),
@@ -188,7 +188,7 @@ where
         trace!("Negotiation client protocol id: Amqp");
 
         io.set_memory_pool(self.pool);
-        io.set_disconnect_timeout(self.disconnect_timeout);
+        io.set_disconnect_timeout(self.disconnect_timeout.into());
 
         _connect_plain(io, self.config.clone(), self.timer.clone())
     }
@@ -205,7 +205,7 @@ where
 
             let state = fut.await?;
             state.set_memory_pool(pool);
-            state.set_disconnect_timeout(disconnect);
+            state.set_disconnect_timeout(disconnect.into());
 
             _connect_plain(state.into_boxed(), config, timer).await
         }
@@ -241,7 +241,7 @@ where
         let config = self.config.clone();
         let timer = self.timer.clone();
         io.set_memory_pool(self.pool);
-        io.set_disconnect_timeout(self.disconnect_timeout);
+        io.set_disconnect_timeout(self.disconnect_timeout.into());
 
         _connect_sasl(io, auth, config, timer)
     }
@@ -260,7 +260,7 @@ where
         async move {
             let state = fut.await?;
             state.set_memory_pool(pool);
-            state.set_disconnect_timeout(disconnect);
+            state.set_disconnect_timeout(disconnect.into());
 
             _connect_sasl(state.into_boxed(), auth, config, timer).await
         }

@@ -1,9 +1,8 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::io::{from_iostream, Dispatcher as FramedDispatcher, IoBoxed, IoStream, Timer};
+use ntex::io::{into_boxed, Dispatcher as FramedDispatcher, Filter, Io, IoBoxed, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout, Millis, Seconds};
-use ntex::util::{Pool, PoolId, PoolRef};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -20,7 +19,6 @@ pub struct Server<St, H, Ctl> {
     max_size: usize,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
-    pool: PoolRef,
     _t: marker::PhantomData<St>,
 }
 
@@ -53,7 +51,6 @@ where
             control: DefaultControlService::default(),
             max_size: 0,
             config: Rc::new(Configuration::default()),
-            pool: PoolId::P6.pool_ref(),
             _t: marker::PhantomData,
         }
     }
@@ -95,15 +92,6 @@ impl<St, H, Ctl> Server<St, H, Ctl> {
         self.disconnect_timeout = val;
         self
     }
-
-    /// Set memory pool.
-    ///
-    /// Use specified memory pool for memory allocations. By default P6
-    /// memory pool is used.
-    pub fn memory_pool(mut self, id: PoolId) -> Self {
-        self.pool = id.pool_ref();
-        self
-    }
 }
 
 impl<St, H, Ctl> Server<St, H, Ctl>
@@ -131,33 +119,31 @@ where
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             control: service.into_factory(),
-            pool: self.pool,
             max_size: self.max_size,
             _t: marker::PhantomData,
         }
     }
 
     /// Set service to execute for incoming links and create service factory
-    pub fn finish<I, S, Pb>(
+    pub fn finish<F, S, Pb>(
         self,
         service: S,
     ) -> impl ServiceFactory<
         Config = (),
-        Request = I,
+        Request = Io<F>,
         Response = (),
         Error = ServerError<H::Error>,
         InitError = H::InitError,
     >
     where
-        I: IoStream,
+        F: Filter,
         S: IntoServiceFactory<Pb>,
         Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
         Pb::Error: fmt::Debug,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
-        from_iostream(ServerImpl {
-            pool: self.pool,
+        into_boxed(ServerImpl {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
                 handshake_timeout: self.handshake_timeout,
@@ -175,7 +161,6 @@ where
 
 struct ServerImpl<St, H, Ctl, Pb> {
     handshake: H,
-    pool: PoolRef,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
@@ -201,14 +186,12 @@ where
     type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
 
     fn new_service(&self, _: ()) -> Self::Future {
-        let pool = self.pool.pool();
         let inner = self.inner.clone();
         let fut = self.handshake.new_service(());
 
         Box::pin(async move {
             fut.await.map(move |handshake| ServerImplService {
                 inner,
-                pool,
                 handshake: Rc::new(handshake),
             })
         })
@@ -217,7 +200,6 @@ where
 
 struct ServerImplService<St, H, Ctl, Pb> {
     handshake: Rc<H>,
-    pool: Pool,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
@@ -241,19 +223,10 @@ where
 
     #[inline]
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let ready1 = self.pool.poll_ready(cx).is_ready();
-        let ready2 = self
-            .handshake
+        self.handshake
             .as_ref()
             .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))?
-            .is_ready();
-
-        if ready1 && ready2 {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
+            .map(|res| res.map_err(ServerError::Service))
     }
 
     #[inline]
@@ -262,8 +235,7 @@ where
     }
 
     fn call(&self, req: Self::Request) -> Self::Future {
-        req.set_memory_pool(self.pool.pool_ref());
-        req.set_disconnect_timeout(self.inner.disconnect_timeout);
+        req.set_disconnect_timeout(self.inner.disconnect_timeout.into());
 
         let keepalive = self.inner.config.idle_time_out / 1000;
         let handshake_timeout = self.inner.handshake_timeout;
