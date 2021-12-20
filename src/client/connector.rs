@@ -1,7 +1,7 @@
 use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
-use ntex::io::{DefaultFilter, Filter, Io, IoBoxed, Timer};
+use ntex::io::{Base, Filter, Io, IoBoxed, Timer};
 use ntex::service::Service;
 use ntex::time::{timeout, Millis, Seconds};
 use ntex::util::{ByteString, Either, PoolId, PoolRef};
@@ -32,7 +32,7 @@ pub struct Connector<A, T, F> {
 impl<A> Connector<A, (), ()> {
     #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
-    pub fn new() -> Connector<A, connect::Connector<A>, DefaultFilter> {
+    pub fn new() -> Connector<A, connect::Connector<A>, Base> {
         Connector {
             connector: connect::Connector::default(),
             handshake_timeout: Seconds::ZERO,
@@ -280,13 +280,12 @@ async fn _connect_sasl(
     let proto = io
         .next(&ProtocolIdCodec)
         .await
-        .map_err(ConnectError::from)
-        .and_then(|res| {
-            res.ok_or_else(|| {
-                log::trace!("Amqp server is disconnected during handshake");
-                ConnectError::Disconnected
-            })
-        })?;
+        .ok_or_else(|| {
+            log::trace!("Amqp server is disconnected during handshake");
+            ConnectError::Disconnected
+        })
+        .and_then(|res| res.map_err(ConnectError::from))?;
+
     if proto != ProtocolId::AmqpSasl {
         return Err(ConnectError::from(ProtocolIdError::Unexpected {
             exp: ProtocolId::AmqpSasl,
@@ -300,8 +299,8 @@ async fn _connect_sasl(
     let _ = io
         .next(&codec)
         .await
-        .map_err(ConnectError::from)
-        .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
+        .ok_or(ConnectError::Disconnected)
+        .and_then(|res| res.map_err(ConnectError::from))?;
 
     let initial_response =
         SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
@@ -318,8 +317,8 @@ async fn _connect_sasl(
     let sasl_frame = io
         .next(&codec)
         .await
-        .map_err(ConnectError::from)
-        .and_then(|res| res.ok_or(ConnectError::Disconnected))?;
+        .ok_or(ConnectError::Disconnected)
+        .and_then(|res| res.map_err(ConnectError::from))?;
 
     if let SaslFrame {
         body: SaslFrameBody::SaslOutcome(outcome),
@@ -347,13 +346,11 @@ async fn _connect_plain(
     let proto = io
         .next(&ProtocolIdCodec)
         .await
-        .map_err(ConnectError::from)
-        .and_then(|res| {
-            res.ok_or_else(|| {
-                log::trace!("Amqp server is disconnected during handshake");
-                ConnectError::Disconnected
-            })
-        })?;
+        .ok_or_else(|| {
+            log::trace!("Amqp server is disconnected during handshake");
+            ConnectError::Disconnected
+        })
+        .and_then(|res| res.map_err(ConnectError::from))?;
 
     if proto != ProtocolId::Amqp {
         return Err(ConnectError::from(ProtocolIdError::Unexpected {
@@ -372,13 +369,11 @@ async fn _connect_plain(
     let frame = io
         .next(&codec)
         .await
-        .map_err(ConnectError::from)
-        .and_then(|res| {
-            res.ok_or_else(|| {
-                log::trace!("Amqp server is disconnected during handshake");
-                ConnectError::Disconnected
-            })
-        })?;
+        .ok_or_else(|| {
+            log::trace!("Amqp server is disconnected during handshake");
+            ConnectError::Disconnected
+        })
+        .and_then(|res| res.map_err(ConnectError::from))?;
 
     if let Frame::Open(open) = frame.performative() {
         trace!("Open confirmed: {:?}", open);

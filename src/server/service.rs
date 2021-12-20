@@ -305,11 +305,11 @@ where
     let protocol = state
         .next(&ProtocolIdCodec)
         .await
-        .map_err(HandshakeError::from)?
         .ok_or_else(|| {
             log::trace!("Server amqp is disconnected during handshake");
             HandshakeError::Disconnected
-        })?;
+        })
+        .and_then(|res| res.map_err(HandshakeError::from))?;
 
     let (sink, state, codec, st, idle_timeout) = match protocol {
         // start amqp processing
