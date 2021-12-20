@@ -43,11 +43,11 @@ impl HandshakeAmqp {
         let frame = state
             .next(&codec)
             .await
-            .map_err(HandshakeError::from)?
             .ok_or_else(|| {
                 log::trace!("Server amqp is disconnected during open frame");
                 HandshakeError::Disconnected
-            })?;
+            })
+            .and_then(|res| res.map_err(HandshakeError::from))?;
 
         let frame = frame.into_parts().1;
         match frame {

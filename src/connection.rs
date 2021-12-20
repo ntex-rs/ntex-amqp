@@ -170,7 +170,7 @@ impl Connection {
         log::trace!("outgoing: {:#?}", frame);
 
         let inner = self.0.get_mut();
-        if let Err(e) = inner.io.write().encode(frame, &inner.codec) {
+        if let Err(e) = inner.io.encode(frame, &inner.codec) {
             inner.set_error(e.into())
         }
     }
@@ -211,7 +211,7 @@ impl ConnectionInner {
         #[cfg(feature = "frame-trace")]
         log::trace!("outgoing: {:#?}", frame);
 
-        if let Err(e) = self.io.write().encode(frame, &self.codec) {
+        if let Err(e) = self.io.encode(frame, &self.codec) {
             self.set_error(e.into())
         }
     }
@@ -251,7 +251,6 @@ impl ConnectionInner {
         }));
 
         self.io
-            .write()
             .encode(AmqpFrame::new(token as u16, begin.into()), &self.codec)
             .map(|_| ())
             .map_err(AmqpProtocolError::Codec)

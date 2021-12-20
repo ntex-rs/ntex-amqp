@@ -64,8 +64,8 @@ impl Sasl {
         let frame = state
             .next(&codec)
             .await
-            .map_err(HandshakeError::from)?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected)
+            .and_then(|res| res.map_err(HandshakeError::from))?;
 
         match frame.body {
             SaslFrameBody::SaslInit(frame) => Ok(SaslInit {
@@ -130,8 +130,8 @@ impl SaslInit {
         let frame = state
             .next(&codec)
             .await
-            .map_err(HandshakeError::from)?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected)
+            .and_then(|res| res.map_err(HandshakeError::from))?;
 
         match frame.body {
             SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse {
@@ -206,8 +206,8 @@ impl SaslResponse {
         state
             .next(&codec)
             .await
-            .map_err(HandshakeError::from)?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected)
+            .and_then(|res| res.map_err(HandshakeError::from))?;
 
         Ok(SaslSuccess {
             state,
@@ -229,8 +229,8 @@ impl SaslSuccess {
         let protocol = state
             .next(&ProtocolIdCodec)
             .await
-            .map_err(HandshakeError::from)?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected)
+            .and_then(|res| res.map_err(HandshakeError::from))?;
 
         match protocol {
             ProtocolId::Amqp => {
@@ -245,8 +245,8 @@ impl SaslSuccess {
                 let frame = state
                     .next(&codec)
                     .await
-                    .map_err(HandshakeError::from)?
-                    .ok_or(HandshakeError::Disconnected)?;
+                    .ok_or(HandshakeError::Disconnected)
+                    .and_then(|res| res.map_err(HandshakeError::from))?;
 
                 let frame = frame.into_parts().1;
                 match frame {
