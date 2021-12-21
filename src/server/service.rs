@@ -305,17 +305,17 @@ where
     let protocol = state
         .recv(&ProtocolIdCodec)
         .await
+        .map_err(HandshakeError::from)?
         .ok_or_else(|| {
             log::trace!("Server amqp is disconnected during handshake");
             HandshakeError::Disconnected
-        })
-        .and_then(|res| res.map_err(HandshakeError::from))?;
+        })?;
 
     let (sink, state, codec, st, idle_timeout) = match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             state
-                .send(protocol, &ProtocolIdCodec)
+                .send(&ProtocolIdCodec, protocol)
                 .await
                 .map_err(HandshakeError::from)?;
 
@@ -335,7 +335,7 @@ where
             // confirm Open
             let local = inner.config.to_open();
             state
-                .send(AmqpFrame::new(0, local.into()), &codec)
+                .send(&codec, AmqpFrame::new(0, local.into()))
                 .await
                 .map_err(HandshakeError::from)?;
 

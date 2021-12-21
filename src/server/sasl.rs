@@ -63,14 +63,13 @@ impl Sasl {
 
         let codec = AmqpCodec::<SaslFrame>::new();
         state
-            .send(frame, &codec)
+            .send(&codec, frame)
             .await
             .map_err(HandshakeError::from)?;
         let frame = state
             .recv(&codec)
-            .await
-            .ok_or(HandshakeError::Disconnected)
-            .and_then(|res| res.map_err(HandshakeError::from))?;
+            .await?
+            .ok_or(HandshakeError::Disconnected)?;
 
         match frame.body {
             SaslFrameBody::SaslInit(frame) => Ok(SaslInit {
@@ -134,14 +133,13 @@ impl SaslInit {
         let frame = SaslChallenge { challenge }.into();
 
         state
-            .send(frame, &codec)
+            .send(&codec, frame)
             .await
             .map_err(HandshakeError::from)?;
         let frame = state
             .recv(&codec)
-            .await
-            .ok_or(HandshakeError::Disconnected)
-            .and_then(|res| res.map_err(HandshakeError::from))?;
+            .await?
+            .ok_or(HandshakeError::Disconnected)?;
 
         match frame.body {
             SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse {
@@ -166,7 +164,7 @@ impl SaslInit {
         }
         .into();
         state
-            .send(frame, &codec)
+            .send(&codec, frame)
             .await
             .map_err(HandshakeError::from)?;
 
@@ -215,14 +213,13 @@ impl SaslResponse {
         }
         .into();
         state
-            .send(frame, &codec)
+            .send(&codec, frame)
             .await
             .map_err(HandshakeError::from)?;
         state
             .recv(&codec)
-            .await
-            .ok_or(HandshakeError::Disconnected)
-            .and_then(|res| res.map_err(HandshakeError::from))?;
+            .await?
+            .ok_or(HandshakeError::Disconnected)?;
 
         Ok(SaslSuccess {
             state,
@@ -248,15 +245,14 @@ impl SaslSuccess {
 
         let protocol = state
             .recv(&ProtocolIdCodec)
-            .await
-            .ok_or(HandshakeError::Disconnected)
-            .and_then(|res| res.map_err(HandshakeError::from))?;
+            .await?
+            .ok_or(HandshakeError::Disconnected)?;
 
         match protocol {
             ProtocolId::Amqp => {
                 // confirm protocol
                 state
-                    .send(ProtocolId::Amqp, &ProtocolIdCodec)
+                    .send(&ProtocolIdCodec, ProtocolId::Amqp)
                     .await
                     .map_err(HandshakeError::from)?;
 
@@ -264,9 +260,8 @@ impl SaslSuccess {
                 let codec = AmqpCodec::<AmqpFrame>::new();
                 let frame = state
                     .recv(&codec)
-                    .await
-                    .ok_or(HandshakeError::Disconnected)
-                    .and_then(|res| res.map_err(HandshakeError::from))?;
+                    .await?
+                    .ok_or(HandshakeError::Disconnected)?;
 
                 let frame = frame.into_parts().1;
                 match frame {

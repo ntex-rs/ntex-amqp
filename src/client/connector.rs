@@ -275,16 +275,12 @@ async fn _connect_sasl(
 ) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: AmqpSasl");
 
-    io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec).await?;
+    io.send(&ProtocolIdCodec, ProtocolId::AmqpSasl).await?;
 
-    let proto = io
-        .recv(&ProtocolIdCodec)
-        .await
-        .ok_or_else(|| {
-            log::trace!("Amqp server is disconnected during handshake");
-            ConnectError::Disconnected
-        })
-        .and_then(|res| res.map_err(ConnectError::from))?;
+    let proto = io.recv(&ProtocolIdCodec).await?.ok_or_else(|| {
+        log::trace!("Amqp server is disconnected during handshake");
+        ConnectError::Disconnected
+    })?;
 
     if proto != ProtocolId::AmqpSasl {
         return Err(ConnectError::from(ProtocolIdError::Unexpected {
@@ -296,11 +292,7 @@ async fn _connect_sasl(
     let codec = AmqpCodec::<SaslFrame>::new();
 
     // processing sasl-mechanisms
-    let _ = io
-        .recv(&codec)
-        .await
-        .ok_or(ConnectError::Disconnected)
-        .and_then(|res| res.map_err(ConnectError::from))?;
+    let _ = io.recv(&codec).await?.ok_or(ConnectError::Disconnected)?;
 
     let initial_response =
         SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
@@ -311,14 +303,10 @@ async fn _connect_sasl(
         initial_response: Some(initial_response),
     };
 
-    io.send(sasl_init.into(), &codec).await?;
+    io.send(&codec, sasl_init.into()).await?;
 
     // processing sasl-outcome
-    let sasl_frame = io
-        .recv(&codec)
-        .await
-        .ok_or(ConnectError::Disconnected)
-        .and_then(|res| res.map_err(ConnectError::from))?;
+    let sasl_frame = io.recv(&codec).await?.ok_or(ConnectError::Disconnected)?;
 
     if let SaslFrame {
         body: SaslFrameBody::SaslOutcome(outcome),
@@ -341,16 +329,16 @@ async fn _connect_plain(
 ) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: Amqp");
 
-    io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
+    io.send(&ProtocolIdCodec, ProtocolId::Amqp).await?;
 
     let proto = io
         .recv(&ProtocolIdCodec)
         .await
+        .map_err(ConnectError::from)?
         .ok_or_else(|| {
             log::trace!("Amqp server is disconnected during handshake");
             ConnectError::Disconnected
-        })
-        .and_then(|res| res.map_err(ConnectError::from))?;
+        })?;
 
     if proto != ProtocolId::Amqp {
         return Err(ConnectError::from(ProtocolIdError::Unexpected {
@@ -363,17 +351,13 @@ async fn _connect_plain(
     let codec = AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize);
 
     trace!("Open client amqp connection: {:?}", open);
-    io.send(AmqpFrame::new(0, Frame::Open(open)), &codec)
+    io.send(&codec, AmqpFrame::new(0, Frame::Open(open)))
         .await?;
 
-    let frame = io
-        .recv(&codec)
-        .await
-        .ok_or_else(|| {
-            log::trace!("Amqp server is disconnected during handshake");
-            ConnectError::Disconnected
-        })
-        .and_then(|res| res.map_err(ConnectError::from))?;
+    let frame = io.recv(&codec).await?.ok_or_else(|| {
+        log::trace!("Amqp server is disconnected during handshake");
+        ConnectError::Disconnected
+    })?;
 
     if let Frame::Open(open) = frame.performative() {
         trace!("Open confirmed: {:?}", open);

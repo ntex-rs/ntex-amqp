@@ -53,14 +53,10 @@ impl HandshakeAmqp {
         let local_config = self.local_config;
         let codec = AmqpCodec::<AmqpFrame>::new();
 
-        let frame = state
-            .recv(&codec)
-            .await
-            .ok_or_else(|| {
-                log::trace!("Server amqp is disconnected during open frame");
-                HandshakeError::Disconnected
-            })
-            .and_then(|res| res.map_err(HandshakeError::from))?;
+        let frame = state.recv(&codec).await?.ok_or_else(|| {
+            log::trace!("Server amqp is disconnected during open frame");
+            HandshakeError::Disconnected
+        })?;
 
         let frame = frame.into_parts().1;
         match frame {
