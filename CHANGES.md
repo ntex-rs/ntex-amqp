@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.0-b.2] - 2021-12-xx
+
+* Upgrade to ntex 0.5.0 b.2
+
 ## [0.6.0-b.1] - 2021-12-20
 
 * Upgrade to ntex 0.5.0 b.1

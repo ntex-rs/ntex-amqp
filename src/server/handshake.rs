@@ -41,7 +41,7 @@ impl HandshakeAmqp {
         let codec = AmqpCodec::<AmqpFrame>::new();
 
         let frame = state
-            .next(&codec)
+            .recv(&codec)
             .await
             .ok_or_else(|| {
                 log::trace!("Server amqp is disconnected during open frame");

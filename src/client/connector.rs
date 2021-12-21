@@ -278,7 +278,7 @@ async fn _connect_sasl(
     io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec).await?;
 
     let proto = io
-        .next(&ProtocolIdCodec)
+        .recv(&ProtocolIdCodec)
         .await
         .ok_or_else(|| {
             log::trace!("Amqp server is disconnected during handshake");
@@ -297,7 +297,7 @@ async fn _connect_sasl(
 
     // processing sasl-mechanisms
     let _ = io
-        .next(&codec)
+        .recv(&codec)
         .await
         .ok_or(ConnectError::Disconnected)
         .and_then(|res| res.map_err(ConnectError::from))?;
@@ -315,7 +315,7 @@ async fn _connect_sasl(
 
     // processing sasl-outcome
     let sasl_frame = io
-        .next(&codec)
+        .recv(&codec)
         .await
         .ok_or(ConnectError::Disconnected)
         .and_then(|res| res.map_err(ConnectError::from))?;
@@ -344,7 +344,7 @@ async fn _connect_plain(
     io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
 
     let proto = io
-        .next(&ProtocolIdCodec)
+        .recv(&ProtocolIdCodec)
         .await
         .ok_or_else(|| {
             log::trace!("Amqp server is disconnected during handshake");
@@ -367,7 +367,7 @@ async fn _connect_plain(
         .await?;
 
     let frame = io
-        .next(&codec)
+        .recv(&codec)
         .await
         .ok_or_else(|| {
             log::trace!("Amqp server is disconnected during handshake");

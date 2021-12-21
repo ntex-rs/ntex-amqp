@@ -303,7 +303,7 @@ where
     Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
 {
     let protocol = state
-        .next(&ProtocolIdCodec)
+        .recv(&ProtocolIdCodec)
         .await
         .ok_or_else(|| {
             log::trace!("Server amqp is disconnected during handshake");
