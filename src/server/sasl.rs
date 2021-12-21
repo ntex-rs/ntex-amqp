@@ -36,6 +36,11 @@ impl Sasl {
 }
 
 impl Sasl {
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        &self.state
+    }
+
     /// Add supported sasl mechanism
     pub fn mechanism<U: Into<String>>(mut self, symbol: U) -> Self {
         self.mechanisms.push(ByteString::from(symbol.into()).into());
@@ -96,6 +101,11 @@ impl fmt::Debug for SaslInit {
 }
 
 impl SaslInit {
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        &self.state
+    }
+
     /// Sasl mechanism
     pub fn mechanism(&self) -> &str {
         self.frame.mechanism.as_str()
@@ -183,6 +193,11 @@ impl fmt::Debug for SaslResponse {
 }
 
 impl SaslResponse {
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        &self.state
+    }
+
     /// Client response payload
     pub fn response(&self) -> &[u8] {
         &self.frame.response[..]
@@ -222,6 +237,11 @@ pub struct SaslSuccess {
 }
 
 impl SaslSuccess {
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        &self.state
+    }
+
     /// Wait for connection open frame
     pub async fn open(self) -> Result<HandshakeAmqpOpened, HandshakeError> {
         let state = self.state;

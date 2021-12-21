@@ -25,6 +25,14 @@ impl Handshake {
     pub(crate) fn new_sasl(state: IoBoxed, local_config: Rc<Configuration>) -> Self {
         Handshake::Sasl(Sasl::new(state, local_config))
     }
+
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        match self {
+            Handshake::Amqp(ref item) => item.io(),
+            Handshake::Sasl(ref item) => item.io(),
+        }
+    }
 }
 
 /// Open new connection
@@ -34,6 +42,11 @@ pub struct HandshakeAmqp {
 }
 
 impl HandshakeAmqp {
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        &self.state
+    }
+
     /// Wait for connection open frame
     pub async fn open(self) -> Result<HandshakeAmqpOpened, HandshakeError> {
         let state = self.state;
@@ -92,6 +105,11 @@ impl HandshakeAmqpOpened {
             local_config,
             remote_config,
         }
+    }
+
+    /// Returns reference to io object
+    pub fn io(&self) -> &IoBoxed {
+        &self.state
     }
 
     /// Get reference to remote `Open` frame

@@ -4,6 +4,8 @@
 
 * Add ReceiverLink::poll_recv() method, replace for Stream::poll_next()
 
+* allow to access io object during handshake
+
 * Upgrade to ntex 0.5.0 b.2
 
 ## [0.6.0-b.1] - 2021-12-20
