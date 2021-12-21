@@ -2,6 +2,8 @@
 
 ## [0.6.0-b.2] - 2021-12-xx
 
+* Add ReceiverLink::poll_recv() method, replace for Stream::poll_next()
+
 * Upgrade to ntex 0.5.0 b.2
 
 ## [0.6.0-b.1] - 2021-12-20

@@ -138,12 +138,14 @@ impl ReceiverLink {
         inner.error = error;
         inner.wake();
     }
-}
 
-impl Stream for ReceiverLink {
-    type Item = Result<Transfer, AmqpProtocolError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    /// Attempt to pull out the next value of this receiver, registering
+    /// the current task for wakeup if the value is not yet available,
+    /// and returning None if the stream is exhausted.
+    pub fn poll_recv(
+        &self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Transfer, AmqpProtocolError>>> {
         let inner = self.inner.get_mut();
 
         if inner.partial_body.is_some() && inner.queue.len() == 1 {
@@ -169,6 +171,14 @@ impl Stream for ReceiverLink {
             inner.reader_task.register(cx.waker());
             Poll::Pending
         }
+    }
+}
+
+impl Stream for ReceiverLink {
+    type Item = Result<Transfer, AmqpProtocolError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_recv(cx)
     }
 }
 
