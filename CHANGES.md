@@ -1,10 +1,12 @@
 # Changes
 
-## [0.6.0-b.2] - 2021-12-xx
+## [0.6.0-b.2] - 2021-12-22
 
 * Add ReceiverLink::poll_recv() method, replace for Stream::poll_next()
 
-* allow to access io object during handshake
+* Allow to access io object during handshake
+
+* Refactor AmqpDispatcherError, add Disconnected entry
 
 * Upgrade to ntex 0.5.0 b.2
 

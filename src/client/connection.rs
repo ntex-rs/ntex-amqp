@@ -6,7 +6,7 @@ use ntex::IntoService;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
-use crate::error::{DispatcherError, LinkError};
+use crate::error::{AmqpDispatcherError, LinkError};
 use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
 
 /// Mqtt client
@@ -69,7 +69,7 @@ where
     /// Run client with default control messages handler.
     ///
     /// Default handler closes connection on any control message.
-    pub async fn start_default(self) -> Result<(), DispatcherError> {
+    pub async fn start_default(self) -> Result<(), AmqpDispatcherError> {
         let dispatcher = Dispatcher::new(
             self.connection,
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
@@ -89,7 +89,7 @@ where
             .await
     }
 
-    pub async fn start<F, S>(self, service: F) -> Result<(), DispatcherError>
+    pub async fn start<F, S>(self, service: F) -> Result<(), AmqpDispatcherError>
     where
         F: IntoService<S>,
         S: Service<Request = ControlFrame, Response = ()>,

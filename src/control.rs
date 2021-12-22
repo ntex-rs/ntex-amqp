@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, io};
 
 use ntex::util::Either;
 use ntex_amqp_codec::protocol;
@@ -33,7 +33,7 @@ pub enum ControlFrameKind {
     DetachReceiver(protocol::Detach, ReceiverLink),
     SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     ProtocolError(AmqpProtocolError),
-    Disconnected,
+    Disconnected(Option<io::Error>),
     Closed(bool),
 }
 

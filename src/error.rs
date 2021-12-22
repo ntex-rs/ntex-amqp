@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, error, io, rc::Rc};
+use std::{convert::TryFrom, error, io};
 
 use ntex::util::{ByteString, Either};
 
@@ -8,7 +8,7 @@ use crate::{codec::protocol, types::Outcome};
 
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display, From)]
-pub enum DispatcherError {
+pub enum AmqpDispatcherError {
     #[display(fmt = "Service error")]
     /// Service error
     Service,
@@ -19,32 +19,31 @@ pub enum DispatcherError {
     #[display(fmt = "Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
     /// Peer disconnect
-    Disconnected,
-    /// Unexpected io error
-    Io(io::Error),
+    #[display(fmt = "Peer disconnected error: {:?}", _0)]
+    Disconnected(Option<io::Error>),
 }
 
-impl error::Error for DispatcherError {}
+impl error::Error for AmqpDispatcherError {}
 
-impl Clone for DispatcherError {
+impl Clone for AmqpDispatcherError {
     fn clone(&self) -> Self {
         match self {
-            DispatcherError::Service => DispatcherError::Service,
-            DispatcherError::Codec(err) => DispatcherError::Codec(err.clone()),
-            DispatcherError::Protocol(err) => DispatcherError::Protocol(err.clone()),
-            DispatcherError::Disconnected => DispatcherError::Disconnected,
-            DispatcherError::Io(err) => {
-                DispatcherError::Io(io::Error::new(err.kind(), format!("{}", err)))
-            }
+            AmqpDispatcherError::Service => AmqpDispatcherError::Service,
+            AmqpDispatcherError::Codec(err) => AmqpDispatcherError::Codec(err.clone()),
+            AmqpDispatcherError::Protocol(err) => AmqpDispatcherError::Protocol(err.clone()),
+            AmqpDispatcherError::Disconnected(Some(ref err)) => AmqpDispatcherError::Disconnected(
+                Some(io::Error::new(err.kind(), format!("{}", err))),
+            ),
+            AmqpDispatcherError::Disconnected(None) => AmqpDispatcherError::Disconnected(None),
         }
     }
 }
 
-impl From<Either<AmqpCodecError, io::Error>> for DispatcherError {
+impl From<Either<AmqpCodecError, io::Error>> for AmqpDispatcherError {
     fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
         match err {
-            Either::Left(err) => DispatcherError::Codec(err),
-            Either::Right(err) => DispatcherError::Io(err),
+            Either::Left(err) => AmqpDispatcherError::Codec(err),
+            Either::Right(err) => AmqpDispatcherError::Disconnected(Some(err)),
         }
     }
 }
@@ -56,7 +55,6 @@ pub enum AmqpProtocolError {
     BodyTooLarge,
     KeepAliveTimeout,
     Disconnected,
-    Io(Rc<io::Error>),
     #[display(fmt = "Unknown session: {:?}", _0)]
     UnknownSession(protocol::Frame),
     #[display(fmt = "Unknown link in session: {:?}", _0)]

@@ -1,4 +1,4 @@
-use std::{cell, fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{cell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll};
 
 use ntex::io::DispatchItem;
 use ntex::service::Service;
@@ -7,7 +7,7 @@ use ntex::util::{Either, Ready};
 
 use crate::codec::protocol::Frame;
 use crate::codec::{AmqpCodec, AmqpFrame};
-use crate::error::{AmqpProtocolError, DispatcherError, Error};
+use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
 use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
 
 /// Amqp server dispatcher service.
@@ -58,7 +58,7 @@ where
         }
     }
 
-    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, DispatcherError> {
+    fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, AmqpDispatcherError> {
         let mut inner = self.ctl_fut.borrow_mut();
 
         // process control frame
@@ -86,7 +86,7 @@ where
         &self,
         frame: &ControlFrame,
         err: Option<Error>,
-    ) -> Result<(), DispatcherError> {
+    ) -> Result<(), AmqpDispatcherError> {
         if let Some(err) = err {
             match &frame.0.get_mut().kind {
                 ControlFrameKind::AttachReceiver(ref link) => {
@@ -111,7 +111,7 @@ where
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }
-                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected => {
+                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
                 ControlFrameKind::SessionEnded(_) => (),
@@ -149,7 +149,7 @@ where
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }
-                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected => {
+                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
                 ControlFrameKind::SessionEnded(_) => (),
@@ -170,7 +170,7 @@ where
 {
     type Request = DispatchItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
-    type Error = DispatcherError;
+    type Error = AmqpDispatcherError;
     type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -184,12 +184,12 @@ where
         let res1 = self.service.poll_ready(cx).map_err(|err| {
             error!("Publish service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err.into());
-            DispatcherError::Service
+            AmqpDispatcherError::Service
         })?;
         let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
             error!("Control service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err.into());
-            DispatcherError::Service
+            AmqpDispatcherError::Service
         })?;
 
         if res0 || res1.is_pending() || res2.is_pending() {
@@ -230,7 +230,7 @@ where
                 let action = match self
                     .sink
                     .handle_frame(frame)
-                    .map_err(DispatcherError::Protocol)
+                    .map_err(AmqpDispatcherError::Protocol)
                 {
                     Ok(a) => a,
                     Err(e) => return Either::Right(Ready::Err(e)),
@@ -315,13 +315,7 @@ where
                 Either::Right(Ready::Ok(()))
             }
             DispatchItem::Disconnect(e) => {
-                let frame = if let Some(e) = e {
-                    ControlFrame::new_kind(ControlFrameKind::ProtocolError(AmqpProtocolError::Io(
-                        Rc::new(e),
-                    )))
-                } else {
-                    ControlFrame::new_kind(ControlFrameKind::Disconnected)
-                };
+                let frame = ControlFrame::new_kind(ControlFrameKind::Disconnected(e));
                 *self.ctl_fut.borrow_mut() =
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                 Either::Right(Ready::Ok(()))
@@ -347,7 +341,7 @@ where
     F: Future<Output = Result<(), E>>,
     E: Into<Error> + fmt::Debug,
 {
-    type Output = Result<(), DispatcherError>;
+    type Output = Result<(), AmqpDispatcherError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -358,7 +352,7 @@ where
             Poll::Ready(Err(e)) => {
                 log::trace!("Service error {:?}", e);
                 let _ = this.link.close_with_error(e.into());
-                Poll::Ready(Ok::<_, DispatcherError>(()))
+                Poll::Ready(Ok::<_, AmqpDispatcherError>(()))
             }
         }
     }
