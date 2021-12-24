@@ -198,7 +198,7 @@ where
     > {
         Connector {
             config: self.config,
-            connector: self.connector.map(|io| io.seal()),
+            connector: self.connector.map(|io| IoBoxed::from(io)),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
