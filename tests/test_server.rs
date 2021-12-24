@@ -10,7 +10,7 @@ async fn server(
 ) -> Result<
     Box<
         dyn Service<
-                Request = types::Transfer,
+                types::Transfer,
                 Response = types::Outcome,
                 Error = LinkError,
                 Future = Ready<types::Outcome, LinkError>,
@@ -46,7 +46,7 @@ async fn test_simple() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new().seal().connect(uri).await.unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -125,6 +125,7 @@ async fn test_sasl() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let _client = client::Connector::new()
+        .seal()
         .connect_sasl(
             uri,
             client::SaslAuth {
@@ -179,7 +180,7 @@ async fn test_session_end() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new().seal().connect(uri).await.unwrap();
 
     let mut sink = client.sink();
     ntex::rt::spawn(async move {

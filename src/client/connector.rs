@@ -1,7 +1,7 @@
 use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
-use ntex::io::{Base, Filter, Io, IoBoxed, Timer};
+use ntex::io::{Base, Filter, Io, IoBoxed, Sealed, Timer};
 use ntex::service::Service;
 use ntex::time::{timeout, Millis, Seconds};
 use ntex::util::{ByteString, Either, PoolId, PoolRef};
@@ -48,8 +48,6 @@ impl<A> Connector<A, (), ()> {
 impl<A, T, F> Connector<A, T, F>
 where
     A: Address,
-    F: Filter + 'static,
-    T: Service<Request = Connect<A>, Response = Io<F>, Error = connect::ConnectError>,
 {
     /// The channel-max value is the highest channel number that
     /// may be used on the Connection. This value plus one is the maximum
@@ -125,7 +123,7 @@ where
     pub fn connector<U, F1>(self, connector: U) -> Connector<A, U, F1>
     where
         F1: Filter,
-        U: Service<Request = Connect<A>, Response = Io<F1>, Error = connect::ConnectError>,
+        U: Service<Connect<A>, Response = Io<F1>, Error = connect::ConnectError>,
     {
         Connector {
             connector,
@@ -152,6 +150,22 @@ where
         }
     }
 
+    /// Use custom connector
+    pub fn sealed_connector<U>(self, connector: U) -> Connector<A, U, Sealed>
+    where
+        U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
+    {
+        Connector {
+            connector,
+            config: self.config,
+            handshake_timeout: self.handshake_timeout,
+            disconnect_timeout: self.disconnect_timeout,
+            pool: self.pool,
+            timer: self.timer,
+            _t: PhantomData,
+        }
+    }
+
     // #[cfg(feature = "rustls")]
     // /// Use rustls connector
     // pub fn rustls(self, config: ClientConfig) -> Connector<A, RustlsConnector<A>> {
@@ -167,7 +181,38 @@ where
     //         _t: PhantomData,
     //     }
     // }
+}
 
+impl<A, T, F> Connector<A, T, F>
+where
+    A: Address,
+    F: Filter,
+    T: Service<Connect<A>, Response = Io<F>, Error = connect::ConnectError>,
+{
+    pub fn seal(
+        self,
+    ) -> Connector<
+        A,
+        impl Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
+        Sealed,
+    > {
+        Connector {
+            config: self.config,
+            connector: self.connector.map(|io| io.seal()),
+            handshake_timeout: self.handshake_timeout,
+            disconnect_timeout: self.disconnect_timeout,
+            pool: self.pool,
+            timer: self.timer,
+            _t: PhantomData,
+        }
+    }
+}
+
+impl<A, T> Connector<A, T, Sealed>
+where
+    A: Address,
+    T: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
+{
     /// Connect to amqp server
     pub fn connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
         if self.handshake_timeout.non_zero() {
@@ -207,7 +252,7 @@ where
             state.set_memory_pool(pool);
             state.set_disconnect_timeout(disconnect.into());
 
-            _connect_plain(state.into_boxed(), config, timer).await
+            _connect_plain(state, config, timer).await
         }
     }
 
@@ -262,7 +307,7 @@ where
             state.set_memory_pool(pool);
             state.set_disconnect_timeout(disconnect.into());
 
-            _connect_sasl(state.into_boxed(), auth, config, timer).await
+            _connect_sasl(state, auth, config, timer).await
         }
     }
 }

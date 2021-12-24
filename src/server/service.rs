@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::io::{into_boxed, Dispatcher as FramedDispatcher, Filter, Io, IoBoxed, Timer};
+use ntex::io::{seal, Dispatcher as FramedDispatcher, Filter, Io, IoBoxed, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout, Millis, Seconds};
 
@@ -36,13 +36,13 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
 impl<St, H> Server<St, H, DefaultControlService<St, H::Error>>
 where
     St: 'static,
-    H: ServiceFactory<Config = (), Request = Handshake, Response = HandshakeAck<St>> + 'static,
+    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
 {
     /// Create server factory and provide handshake service
     pub fn new<F>(handshake: F) -> Self
     where
-        F: IntoServiceFactory<H>,
+        F: IntoServiceFactory<H, Handshake>,
     {
         Self {
             handshake: handshake.into_factory(),
@@ -97,9 +97,9 @@ impl<St, H, Ctl> Server<St, H, Ctl> {
 impl<St, H, Ctl> Server<St, H, Ctl>
 where
     St: 'static,
-    H: ServiceFactory<Config = (), Request = Handshake, Response = HandshakeAck<St>> + 'static,
+    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Error: From<Ctl::Error>,
@@ -107,8 +107,8 @@ where
     /// Service to call with control frames
     pub fn control<F, S>(self, service: F) -> Server<St, H, S>
     where
-        F: IntoServiceFactory<S>,
-        S: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+        F: IntoServiceFactory<S, ControlFrame, State<St>>,
+        S: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
         S::Error: fmt::Debug,
         S::InitError: fmt::Debug,
         Error: From<S::Error>,
@@ -128,22 +128,16 @@ where
     pub fn finish<F, S, Pb>(
         self,
         service: S,
-    ) -> impl ServiceFactory<
-        Config = (),
-        Request = Io<F>,
-        Response = (),
-        Error = ServerError<H::Error>,
-        InitError = H::InitError,
-    >
+    ) -> impl ServiceFactory<Io<F>, Response = (), Error = ServerError<H::Error>, InitError = H::InitError>
     where
         F: Filter,
-        S: IntoServiceFactory<Pb>,
-        Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
+        S: IntoServiceFactory<Pb, Message, State<St>>,
+        Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
         Pb::Error: fmt::Debug,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
-        into_boxed(ServerImpl {
+        seal(ServerImpl {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
                 handshake_timeout: self.handshake_timeout,
@@ -164,21 +158,19 @@ struct ServerImpl<St, H, Ctl, Pb> {
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
-impl<St, H, Ctl, Pb> ServiceFactory for ServerImpl<St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed> for ServerImpl<St, H, Ctl, Pb>
 where
     St: 'static,
-    H: ServiceFactory<Config = (), Request = Handshake, Response = HandshakeAck<St>> + 'static,
+    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
     Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
-    type Config = ();
-    type Request = IoBoxed;
     type Response = ();
     type Error = ServerError<H::Error>;
     type Service = ServerImplService<St, H::Service, Ctl, Pb>;
@@ -203,20 +195,19 @@ struct ServerImplService<St, H, Ctl, Pb> {
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
-impl<St, H, Ctl, Pb> Service for ServerImplService<St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> Service<IoBoxed> for ServerImplService<St, H, Ctl, Pb>
 where
     St: 'static,
-    H: Service<Request = Handshake, Response = HandshakeAck<St>> + 'static,
+    H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
     H::Error: fmt::Debug,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
     Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
-    type Request = IoBoxed;
     type Response = ();
     type Error = ServerError<H::Error>;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
@@ -234,7 +225,7 @@ where
         self.handshake.as_ref().poll_shutdown(cx, is_error)
     }
 
-    fn call(&self, req: Self::Request) -> Self::Future {
+    fn call(&self, req: IoBoxed) -> Self::Future {
         req.set_disconnect_timeout(self.inner.disconnect_timeout.into());
 
         let keepalive = self.inner.config.idle_time_out / 1000;
@@ -298,9 +289,9 @@ async fn handshake<St, H, Ctl, Pb>(
 >
 where
     St: 'static,
-    H: Service<Request = Handshake, Response = HandshakeAck<St>>,
-    Ctl: ServiceFactory<Config = State<St>, Request = ControlFrame, Response = ()> + 'static,
-    Pb: ServiceFactory<Config = State<St>, Request = Message, Response = ()> + 'static,
+    H: Service<Handshake, Response = HandshakeAck<St>>,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
 {
     let protocol = state
         .recv(&ProtocolIdCodec)

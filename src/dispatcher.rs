@@ -11,7 +11,7 @@ use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
 use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
 
 /// Amqp server dispatcher service.
-pub(crate) struct Dispatcher<Sr: Service, Ctl: Service> {
+pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
     service: Sr,
     ctl_service: Ctl,
@@ -23,11 +23,10 @@ pub(crate) struct Dispatcher<Sr: Service, Ctl: Service> {
 
 impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
-    Sr: Service<Request = types::Message, Response = ()>,
-    Sr::Error: Into<Error> + 'static,
-    Sr::Future: 'static,
-    Ctl: Service<Request = ControlFrame, Response = ()>,
-    Ctl::Error: Into<Error> + 'static,
+    Sr: Service<types::Message, Response = ()> + 'static,
+    Sr::Error: Into<Error>,
+    Ctl: Service<ControlFrame, Response = ()> + 'static,
+    Ctl::Error: Into<Error>,
 {
     pub(crate) fn new(
         sink: Connection,
@@ -159,16 +158,13 @@ where
     }
 }
 
-impl<Sr, Ctl> Service for Dispatcher<Sr, Ctl>
+impl<Sr, Ctl> Service<DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher<Sr, Ctl>
 where
-    Sr: Service<Request = types::Message, Response = ()>,
-    Sr::Error: Into<Error> + fmt::Debug + 'static,
-    Sr::Future: 'static,
-    Ctl: Service<Request = ControlFrame, Response = ()>,
-    Ctl::Error: Into<Error> + fmt::Debug + 'static,
-    Ctl::Future: 'static,
+    Sr: Service<types::Message, Response = ()> + 'static,
+    Sr::Error: Into<Error> + fmt::Debug,
+    Ctl: Service<ControlFrame, Response = ()> + 'static,
+    Ctl::Error: Into<Error> + fmt::Debug,
 {
-    type Request = DispatchItem<AmqpCodec<AmqpFrame>>;
     type Response = ();
     type Error = AmqpDispatcherError;
     type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
@@ -221,7 +217,7 @@ where
         }
     }
 
-    fn call(&self, request: Self::Request) -> Self::Future {
+    fn call(&self, request: DispatchItem<AmqpCodec<AmqpFrame>>) -> Self::Future {
         match request {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]

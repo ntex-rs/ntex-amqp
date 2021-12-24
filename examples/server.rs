@@ -7,7 +7,7 @@ async fn server(
 ) -> Result<
     Box<
         dyn Service<
-                Request = server::Transfer,
+                server::Transfer,
                 Response = server::Outcome,
                 Error = AmqpError,
                 Future = Ready<server::Outcome, AmqpError>,

@@ -91,8 +91,8 @@ where
 
     pub async fn start<F, S>(self, service: F) -> Result<(), AmqpDispatcherError>
     where
-        F: IntoService<S>,
-        S: Service<Request = ControlFrame, Response = ()>,
+        F: IntoService<S, ControlFrame>,
+        S: Service<ControlFrame, Response = ()>,
         S::Error: Into<crate::error::Error> + std::fmt::Debug + 'static,
         S: 'static,
     {

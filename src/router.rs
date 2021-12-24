@@ -30,8 +30,8 @@ impl<S: 'static> Router<S> {
     pub fn service<T, F, U: 'static>(mut self, address: T, service: F) -> Self
     where
         T: IntoPattern,
-        F: IntoServiceFactory<U>,
-        U: ServiceFactory<Config = Link<S>, Request = Transfer, Response = Outcome>,
+        F: IntoServiceFactory<U, Transfer, Link<S>>,
+        U: ServiceFactory<Transfer, Link<S>, Response = Outcome>,
         Error: From<U::Error> + From<U::InitError>,
         Outcome: TryFrom<U::Error, Error = Error>,
     {
@@ -46,8 +46,8 @@ impl<S: 'static> Router<S> {
     pub fn finish(
         self,
     ) -> impl ServiceFactory<
-        Config = State<S>,
-        Request = Message,
+        Message,
+        State<S>,
         Response = (),
         Error = Error,
         InitError = std::convert::Infallible,
@@ -76,8 +76,7 @@ struct RouterServiceInner<S> {
     handlers: HashMap<ReceiverLink, Option<HandleService>>,
 }
 
-impl<S: 'static> Service for RouterService<S> {
-    type Request = Message;
+impl<S: 'static> Service<Message> for RouterService<S> {
     type Response = ();
     type Error = Error;
     type Future = Either<Ready<(), Error>, RouterServiceResponse<S>>;
@@ -247,39 +246,40 @@ impl<S> Future for RouterServiceResponse<S> {
                         return Poll::Ready(Ok(()));
                     }
                 }
-                RouterServiceResponseState::NewService(ref mut fut) => match Pin::new(fut).poll(cx)
-                {
-                    Poll::Ready(Ok(srv)) => {
-                        log::trace!(
-                            "Handler service is created for {}",
-                            this.link
-                                .frame()
-                                .target()
-                                .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
-                        );
-                        this.inner
-                            .get_mut()
-                            .handlers
-                            .insert(this.link.clone(), Some(srv));
-                        if let Some(tr) = this.link.get_transfer() {
-                            this.state = RouterServiceResponseState::Service(Some(tr));
-                        } else {
-                            return Poll::Ready(Ok(()));
+                RouterServiceResponseState::NewService(ref mut fut) => {
+                    match Pin::new(fut).poll(cx) {
+                        Poll::Ready(Ok(srv)) => {
+                            log::trace!(
+                                "Handler service is created for {}",
+                                this.link
+                                    .frame()
+                                    .target()
+                                    .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
+                            );
+                            this.inner
+                                .get_mut()
+                                .handlers
+                                .insert(this.link.clone(), Some(srv));
+                            if let Some(tr) = this.link.get_transfer() {
+                                this.state = RouterServiceResponseState::Service(Some(tr));
+                            } else {
+                                return Poll::Ready(Ok(()));
+                            }
                         }
+                        Poll::Ready(Err(e)) => {
+                            log::error!(
+                                "Failed to create link service for {} err: {:?}",
+                                this.link
+                                    .frame()
+                                    .target()
+                                    .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref)),
+                                e
+                            );
+                            return Poll::Ready(Err(e));
+                        }
+                        Poll::Pending => return Poll::Pending,
                     }
-                    Poll::Ready(Err(e)) => {
-                        log::error!(
-                            "Failed to create link service for {} err: {:?}",
-                            this.link
-                                .frame()
-                                .target()
-                                .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref)),
-                            e
-                        );
-                        return Poll::Ready(Err(e));
-                    }
-                    Poll::Pending => return Poll::Pending,
-                },
+                }
             }
         }
     }
@@ -305,7 +305,7 @@ struct ResourceServiceFactory<S, T> {
 impl<S, T> ResourceServiceFactory<S, T>
 where
     S: 'static,
-    T: ServiceFactory<Config = Link<S>, Request = Transfer, Response = Outcome> + 'static,
+    T: ServiceFactory<Transfer, Link<S>, Response = Outcome> + 'static,
     Error: From<T::Error> + From<T::InitError>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
@@ -317,14 +317,12 @@ where
     }
 }
 
-impl<S, T> ServiceFactory for ResourceServiceFactory<S, T>
+impl<S, T> ServiceFactory<Transfer, Link<S>> for ResourceServiceFactory<S, T>
 where
-    T: ServiceFactory<Config = Link<S>, Request = Transfer, Response = Outcome>,
+    T: ServiceFactory<Transfer, Link<S>, Response = Outcome>,
     Error: From<T::Error> + From<T::InitError>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
-    type Config = Link<S>;
-    type Request = Transfer;
     type Response = Outcome;
     type Error = Error;
     type InitError = Error;
@@ -340,7 +338,7 @@ where
 }
 
 pin_project_lite::pin_project! {
-    struct ResourceServiceFactoryFut<S, T: ServiceFactory> {
+    struct ResourceServiceFactoryFut<S, T: ServiceFactory<Transfer, Link<S>>> {
         #[pin] fut: T::Future,
         _t: marker::PhantomData<S>,
     }
@@ -348,7 +346,7 @@ pin_project_lite::pin_project! {
 
 impl<S, T> Future for ResourceServiceFactoryFut<S, T>
 where
-    T: ServiceFactory<Config = Link<S>, Request = Transfer, Response = Outcome>,
+    T: ServiceFactory<Transfer, Link<S>, Response = Outcome>,
     Error: From<T::Error> + From<T::InitError>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
@@ -372,13 +370,12 @@ struct ResourceService<S, T> {
     _t: marker::PhantomData<S>,
 }
 
-impl<S, T> Service for ResourceService<S, T>
+impl<S, T> Service<Transfer> for ResourceService<S, T>
 where
-    T: Service<Request = Transfer, Response = Outcome>,
+    T: Service<Transfer, Response = Outcome>,
     Error: From<T::Error>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
-    type Request = Transfer;
     type Response = Outcome;
     type Error = Error;
     type Future = ResourceServiceFut<S, T>;
@@ -403,7 +400,7 @@ where
 }
 
 pin_project_lite::pin_project! {
-    struct ResourceServiceFut<S, T: Service> {
+    struct ResourceServiceFut<S, T: Service<Transfer>> {
         #[pin] fut: T::Future,
         _t: marker::PhantomData<S>,
     }
@@ -411,7 +408,7 @@ pin_project_lite::pin_project! {
 
 impl<S, T> Future for ResourceServiceFut<S, T>
 where
-    T: Service<Request = Transfer, Response = Outcome>,
+    T: Service<Transfer, Response = Outcome>,
     Error: From<T::Error>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {

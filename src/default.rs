@@ -15,9 +15,7 @@ impl<S, E> Default for DefaultPublishService<S, E> {
     }
 }
 
-impl<S, E> ServiceFactory for DefaultPublishService<S, E> {
-    type Config = State<S>;
-    type Request = Link<S>;
+impl<S, E> ServiceFactory<Link<S>, State<S>> for DefaultPublishService<S, E> {
     type Response = ();
     type Error = E;
     type InitError = LinkError;
@@ -29,8 +27,7 @@ impl<S, E> ServiceFactory for DefaultPublishService<S, E> {
     }
 }
 
-impl<S, E> Service for DefaultPublishService<S, E> {
-    type Request = Link<S>;
+impl<S, E> Service<Link<S>> for DefaultPublishService<S, E> {
     type Response = ();
     type Error = E;
     type Future = Ready<Self::Response, Self::Error>;
@@ -41,7 +38,7 @@ impl<S, E> Service for DefaultPublishService<S, E> {
     }
 
     #[inline]
-    fn call(&self, _pkt: Self::Request) -> Self::Future {
+    fn call(&self, _pkt: Link<S>) -> Self::Future {
         log::warn!("AMQP Publish service is not configured");
         Ready::Ok(())
     }
@@ -56,9 +53,7 @@ impl<S, E> Default for DefaultControlService<S, E> {
     }
 }
 
-impl<S, E> ServiceFactory for DefaultControlService<S, E> {
-    type Config = State<S>;
-    type Request = ControlFrame;
+impl<S, E> ServiceFactory<ControlFrame, State<S>> for DefaultControlService<S, E> {
     type Response = ();
     type Error = E;
     type InitError = E;
@@ -70,8 +65,7 @@ impl<S, E> ServiceFactory for DefaultControlService<S, E> {
     }
 }
 
-impl<S, E> Service for DefaultControlService<S, E> {
-    type Request = ControlFrame;
+impl<S, E> Service<ControlFrame> for DefaultControlService<S, E> {
     type Response = ();
     type Error = E;
     type Future = Ready<Self::Response, Self::Error>;
@@ -82,7 +76,7 @@ impl<S, E> Service for DefaultControlService<S, E> {
     }
 
     #[inline]
-    fn call(&self, _pkt: Self::Request) -> Self::Future {
+    fn call(&self, _pkt: ControlFrame) -> Self::Future {
         Ready::Ok(())
     }
 }

@@ -6,6 +6,7 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let driver = client::Connector::new()
+        .seal()
         .connect("127.0.0.1:5671")
         .await
         .unwrap();
