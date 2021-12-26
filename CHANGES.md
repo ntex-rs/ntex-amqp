@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.0-b.4] - 2021-12-27
+
+* Upgrade to ntex 0.5-b4
+
 ## [0.6.0-b.3] - 2021-12-24
 
 * Upgrade to ntex-service 0.3.0

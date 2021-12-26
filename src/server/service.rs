@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::io::{seal, Dispatcher as FramedDispatcher, Filter, Io, IoBoxed, Timer};
+use ntex::io::{Dispatcher as FramedDispatcher, IoBoxed, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout, Millis, Seconds};
 
@@ -125,19 +125,23 @@ where
     }
 
     /// Set service to execute for incoming links and create service factory
-    pub fn finish<F, S, Pb>(
+    pub fn finish<S, Pb>(
         self,
         service: S,
-    ) -> impl ServiceFactory<Io<F>, Response = (), Error = ServerError<H::Error>, InitError = H::InitError>
+    ) -> impl ServiceFactory<
+        IoBoxed,
+        Response = (),
+        Error = ServerError<H::Error>,
+        InitError = H::InitError,
+    >
     where
-        F: Filter,
         S: IntoServiceFactory<Pb, Message, State<St>>,
         Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
         Pb::Error: fmt::Debug,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
-        seal(ServerImpl {
+        ServerImpl {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
                 handshake_timeout: self.handshake_timeout,
@@ -149,7 +153,7 @@ where
                 time: Timer::new(Millis::ONE_SEC),
                 _t: marker::PhantomData,
             }),
-        })
+        }
     }
 }
 

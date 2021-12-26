@@ -1,7 +1,7 @@
 use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
-use ntex::io::{Base, Filter, Io, IoBoxed, Sealed, Timer};
+use ntex::io::{Boxed, Filter, Io, IoBoxed, Timer};
 use ntex::service::Service;
 use ntex::time::{timeout, Millis, Seconds};
 use ntex::util::{ByteString, Either, PoolId, PoolRef};
@@ -19,22 +19,22 @@ use crate::{error::ProtocolIdError, Configuration, Connection};
 use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
-pub struct Connector<A, T, F> {
+pub struct Connector<A, T = ()> {
     connector: T,
     config: Configuration,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
     pool: PoolRef,
     timer: Timer,
-    _t: PhantomData<(A, F)>,
+    _t: PhantomData<A>,
 }
 
-impl<A> Connector<A, (), ()> {
+impl<A> Connector<A, ()> {
     #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
-    pub fn new() -> Connector<A, connect::Connector<A>, Base> {
+    pub fn new() -> Connector<A, Boxed<connect::Connector<A>, Connect<A>>> {
         Connector {
-            connector: connect::Connector::default(),
+            connector: Boxed::new(connect::Connector::default()),
             handshake_timeout: Seconds::ZERO,
             disconnect_timeout: Seconds(3),
             config: Configuration::default(),
@@ -45,7 +45,7 @@ impl<A> Connector<A, (), ()> {
     }
 }
 
-impl<A, T, F> Connector<A, T, F>
+impl<A, T> Connector<A, T>
 where
     A: Address,
 {
@@ -120,13 +120,13 @@ where
     }
 
     /// Use custom connector
-    pub fn connector<U, F1>(self, connector: U) -> Connector<A, U, F1>
+    pub fn connector<U, F>(self, connector: U) -> Connector<A, Boxed<U, Connect<A>>>
     where
-        F1: Filter,
-        U: Service<Connect<A>, Response = Io<F1>, Error = connect::ConnectError>,
+        F: Filter,
+        U: Service<Connect<A>, Response = Io<F>, Error = connect::ConnectError>,
     {
         Connector {
-            connector,
+            connector: Boxed::new(connector),
             config: self.config,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
@@ -138,10 +138,13 @@ where
 
     #[cfg(feature = "openssl")]
     /// Use openssl connector
-    pub fn openssl(self, connector: SslConnector) -> Connector<A, openssl::Connector<A>> {
+    pub fn openssl(
+        self,
+        connector: SslConnector,
+    ) -> Connector<A, Boxed<openssl::Connector<A>, Connect<A>>> {
         Connector {
             config: self.config,
-            connector: openssl::IoConnector(connector),
+            connector: Boxed::new(openssl::IoConnector(connector)),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
@@ -152,12 +155,15 @@ where
 
     #[cfg(feature = "rustls")]
     /// Use rustls connector
-    pub fn rustls(self, config: ClientConfig) -> Connector<A, rustls::Connector<A>> {
+    pub fn rustls(
+        self,
+        config: ClientConfig,
+    ) -> Connector<A, Boxed<rustls::Connector<A>, Connect<A>>> {
         use std::sync::Arc;
 
         Connector {
             config: self.config,
-            connector: rustls::Connector::new(Arc::new(config)),
+            connector: Boxed::new(rustls::Connector::new(Arc::new(config))),
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
@@ -167,7 +173,7 @@ where
     }
 
     /// Use custom connector
-    pub fn sealed_connector<U>(self, connector: U) -> Connector<A, U, Sealed>
+    pub fn boxed_connector<U>(self, connector: U) -> Connector<A, U>
     where
         U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
     {
@@ -183,32 +189,7 @@ where
     }
 }
 
-impl<A, T, F> Connector<A, T, F>
-where
-    A: Address,
-    F: Filter,
-    T: Service<Connect<A>, Response = Io<F>, Error = connect::ConnectError>,
-{
-    pub fn seal(
-        self,
-    ) -> Connector<
-        A,
-        impl Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
-        Sealed,
-    > {
-        Connector {
-            config: self.config,
-            connector: self.connector.map(|io| IoBoxed::from(io)),
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
-            pool: self.pool,
-            timer: self.timer,
-            _t: PhantomData,
-        }
-    }
-}
-
-impl<A, T> Connector<A, T, Sealed>
+impl<A, T> Connector<A, T>
 where
     A: Address,
     T: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
