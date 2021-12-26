@@ -63,7 +63,7 @@ impl Sasl {
 
         let codec = AmqpCodec::<SaslFrame>::new();
         state
-            .send(&codec, frame)
+            .send(frame, &codec)
             .await
             .map_err(HandshakeError::from)?;
         let frame = state
@@ -133,7 +133,7 @@ impl SaslInit {
         let frame = SaslChallenge { challenge }.into();
 
         state
-            .send(&codec, frame)
+            .send(frame, &codec)
             .await
             .map_err(HandshakeError::from)?;
         let frame = state
@@ -164,7 +164,7 @@ impl SaslInit {
         }
         .into();
         state
-            .send(&codec, frame)
+            .send(frame, &codec)
             .await
             .map_err(HandshakeError::from)?;
 
@@ -213,7 +213,7 @@ impl SaslResponse {
         }
         .into();
         state
-            .send(&codec, frame)
+            .send(frame, &codec)
             .await
             .map_err(HandshakeError::from)?;
         state
@@ -252,7 +252,7 @@ impl SaslSuccess {
             ProtocolId::Amqp => {
                 // confirm protocol
                 state
-                    .send(&ProtocolIdCodec, ProtocolId::Amqp)
+                    .send(ProtocolId::Amqp, &ProtocolIdCodec)
                     .await
                     .map_err(HandshakeError::from)?;
 

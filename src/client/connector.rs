@@ -150,6 +150,22 @@ where
         }
     }
 
+    #[cfg(feature = "rustls")]
+    /// Use rustls connector
+    pub fn rustls(self, config: ClientConfig) -> Connector<A, rustls::Connector<A>> {
+        use std::sync::Arc;
+
+        Connector {
+            config: self.config,
+            connector: rustls::Connector::new(Arc::new(config)),
+            handshake_timeout: self.handshake_timeout,
+            disconnect_timeout: self.disconnect_timeout,
+            pool: self.pool,
+            timer: self.timer,
+            _t: PhantomData,
+        }
+    }
+
     /// Use custom connector
     pub fn sealed_connector<U>(self, connector: U) -> Connector<A, U, Sealed>
     where
@@ -165,22 +181,6 @@ where
             _t: PhantomData,
         }
     }
-
-    // #[cfg(feature = "rustls")]
-    // /// Use rustls connector
-    // pub fn rustls(self, config: ClientConfig) -> Connector<A, RustlsConnector<A>> {
-    //     use std::sync::Arc;
-
-    //     Connector {
-    //         config: self.config,
-    //         connector: RustlsConnector::new(Arc::new(config)),
-    //         handshake_timeout: self.handshake_timeout,
-    //         disconnect_timeout: self.disconnect_timeout,
-    //         pool: self.pool,
-    //         timer: self.timer,
-    //         _t: PhantomData,
-    //     }
-    // }
 }
 
 impl<A, T, F> Connector<A, T, F>
@@ -320,7 +320,7 @@ async fn _connect_sasl(
 ) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: AmqpSasl");
 
-    io.send(&ProtocolIdCodec, ProtocolId::AmqpSasl).await?;
+    io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec).await?;
 
     let proto = io.recv(&ProtocolIdCodec).await?.ok_or_else(|| {
         log::trace!("Amqp server is disconnected during handshake");
@@ -348,7 +348,7 @@ async fn _connect_sasl(
         initial_response: Some(initial_response),
     };
 
-    io.send(&codec, sasl_init.into()).await?;
+    io.send(sasl_init.into(), &codec).await?;
 
     // processing sasl-outcome
     let sasl_frame = io.recv(&codec).await?.ok_or(ConnectError::Disconnected)?;
@@ -374,7 +374,7 @@ async fn _connect_plain(
 ) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: Amqp");
 
-    io.send(&ProtocolIdCodec, ProtocolId::Amqp).await?;
+    io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
 
     let proto = io
         .recv(&ProtocolIdCodec)
@@ -396,7 +396,7 @@ async fn _connect_plain(
     let codec = AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize);
 
     trace!("Open client amqp connection: {:?}", open);
-    io.send(&codec, AmqpFrame::new(0, Frame::Open(open)))
+    io.send(AmqpFrame::new(0, Frame::Open(open)), &codec)
         .await?;
 
     let frame = io.recv(&codec).await?.ok_or_else(|| {

@@ -306,7 +306,7 @@ where
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             state
-                .send(&ProtocolIdCodec, protocol)
+                .send(protocol, &ProtocolIdCodec)
                 .await
                 .map_err(HandshakeError::from)?;
 
@@ -326,7 +326,7 @@ where
             // confirm Open
             let local = inner.config.to_open();
             state
-                .send(&codec, AmqpFrame::new(0, local.into()))
+                .send(AmqpFrame::new(0, local.into()), &codec)
                 .await
                 .map_err(HandshakeError::from)?;
 
