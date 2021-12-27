@@ -26,7 +26,7 @@ async fn main() -> std::io::Result<()> {
 
     ntex::server::Server::build()
         .bind("amqp", "127.0.0.1:5671", |_| {
-            let srv = server::Server::new(|con: server::Handshake| async move {
+            server::Server::build(|con: server::Handshake| async move {
                 match con {
                     server::Handshake::Amqp(con) => {
                         let con = con.open().await.unwrap();
@@ -34,8 +34,8 @@ async fn main() -> std::io::Result<()> {
                     }
                     server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
                 }
-            });
-            srv.finish(
+            })
+            .finish(
                 server::Router::new()
                     .service("test", fn_factory_with_config(server))
                     .finish(),

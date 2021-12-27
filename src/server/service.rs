@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::io::{Dispatcher as FramedDispatcher, IoBoxed, Timer};
+use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed, Timer};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout, Millis, Seconds};
 
@@ -11,8 +11,14 @@ use crate::{dispatcher::Dispatcher, types::Message};
 use super::handshake::{Handshake, HandshakeAck};
 use super::{Error, HandshakeError, ServerError};
 
-/// Server dispatcher factory
-pub struct Server<St, H, Ctl> {
+/// Amqp server factory
+pub struct Server<St, H, Ctl, Pb> {
+    handshake: H,
+    inner: Rc<ServerInner<St, Ctl, Pb>>,
+}
+
+/// Amqp server builder
+pub struct ServerBuilder<St, H, Ctl> {
     handshake: H,
     control: Ctl,
     config: Rc<Configuration>,
@@ -33,18 +39,17 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     _t: marker::PhantomData<St>,
 }
 
-impl<St, H> Server<St, H, DefaultControlService<St, H::Error>>
+impl<St> Server<St, (), (), ()>
 where
     St: 'static,
-    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
 {
-    /// Create server factory and provide handshake service
-    pub fn new<F>(handshake: F) -> Self
+    /// Start server buldeing process with provided handshake service
+    pub fn build<F, H>(handshake: F) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
     where
         F: IntoServiceFactory<H, Handshake>,
+        H: ServiceFactory<Handshake, Response = HandshakeAck<St>>,
     {
-        Self {
+        ServerBuilder {
             handshake: handshake.into_factory(),
             handshake_timeout: Seconds(5),
             disconnect_timeout: Seconds(3),
@@ -56,7 +61,7 @@ where
     }
 }
 
-impl<St, H, Ctl> Server<St, H, Ctl> {
+impl<St, H, Ctl> ServerBuilder<St, H, Ctl> {
     /// Provide connection configuration
     pub fn config(mut self, config: Configuration) -> Self {
         self.config = Rc::new(config);
@@ -94,7 +99,7 @@ impl<St, H, Ctl> Server<St, H, Ctl> {
     }
 }
 
-impl<St, H, Ctl> Server<St, H, Ctl>
+impl<St, H, Ctl> ServerBuilder<St, H, Ctl>
 where
     St: 'static,
     H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
@@ -105,7 +110,7 @@ where
     Error: From<Ctl::Error>,
 {
     /// Service to call with control frames
-    pub fn control<F, S>(self, service: F) -> Server<St, H, S>
+    pub fn control<F, S>(self, service: F) -> ServerBuilder<St, H, S>
     where
         F: IntoServiceFactory<S, ControlFrame, State<St>>,
         S: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
@@ -113,7 +118,7 @@ where
         S::InitError: fmt::Debug,
         Error: From<S::Error>,
     {
-        Server {
+        ServerBuilder {
             config: self.config,
             handshake: self.handshake,
             handshake_timeout: self.handshake_timeout,
@@ -125,15 +130,7 @@ where
     }
 
     /// Set service to execute for incoming links and create service factory
-    pub fn finish<S, Pb>(
-        self,
-        service: S,
-    ) -> impl ServiceFactory<
-        IoBoxed,
-        Response = (),
-        Error = ServerError<H::Error>,
-        InitError = H::InitError,
-    >
+    pub fn finish<S, Pb>(self, service: S) -> Server<St, H, Ctl, Pb>
     where
         S: IntoServiceFactory<Pb, Message, State<St>>,
         Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
@@ -141,7 +138,7 @@ where
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
-        ServerImpl {
+        Server {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
                 handshake_timeout: self.handshake_timeout,
@@ -157,12 +154,40 @@ where
     }
 }
 
-struct ServerImpl<St, H, Ctl, Pb> {
-    handshake: H,
-    inner: Rc<ServerInner<St, Ctl, Pb>>,
+impl<F, St, H, Ctl, Pb> ServiceFactory<Io<F>> for Server<St, H, Ctl, Pb>
+where
+    F: Filter,
+    St: 'static,
+    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
+    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb::Error: fmt::Debug,
+    Pb::InitError: fmt::Debug,
+    Error: From<Pb::Error> + From<Ctl::Error>,
+{
+    type Response = ();
+    type Error = ServerError<H::Error>;
+    type Service = ServerHandler<St, H::Service, Ctl, Pb>;
+    type InitError = H::InitError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
+
+    fn new_service(&self, _: ()) -> Self::Future {
+        let inner = self.inner.clone();
+        let fut = self.handshake.new_service(());
+
+        Box::pin(async move {
+            fut.await.map(move |handshake| ServerHandler {
+                inner,
+                handshake: Rc::new(handshake),
+            })
+        })
+    }
 }
 
-impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed> for ServerImpl<St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed> for Server<St, H, Ctl, Pb>
 where
     St: 'static,
     H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
@@ -177,7 +202,7 @@ where
 {
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Service = ServerImplService<St, H::Service, Ctl, Pb>;
+    type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
 
@@ -186,7 +211,7 @@ where
         let fut = self.handshake.new_service(());
 
         Box::pin(async move {
-            fut.await.map(move |handshake| ServerImplService {
+            fut.await.map(move |handshake| ServerHandler {
                 inner,
                 handshake: Rc::new(handshake),
             })
@@ -194,12 +219,13 @@ where
     }
 }
 
-struct ServerImplService<St, H, Ctl, Pb> {
+/// Amqp connections handler
+pub struct ServerHandler<St, H, Ctl, Pb> {
     handshake: Rc<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
-impl<St, H, Ctl, Pb> Service<IoBoxed> for ServerImplService<St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> ServerHandler<St, H, Ctl, Pb>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
@@ -212,24 +238,10 @@ where
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
-    type Response = ();
-    type Error = ServerError<H::Error>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
-
-    #[inline]
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake
-            .as_ref()
-            .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))
-    }
-
-    #[inline]
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.as_ref().poll_shutdown(cx, is_error)
-    }
-
-    fn call(&self, req: IoBoxed) -> Self::Future {
+    fn create(
+        &self,
+        req: IoBoxed,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ServerError<H::Error>>>>> {
         req.set_disconnect_timeout(self.inner.disconnect_timeout.into());
 
         let keepalive = self.inner.config.idle_time_out / 1000;
@@ -273,6 +285,77 @@ where
                 .await
                 .map_err(|_| ServerError::Disconnected)
         })
+    }
+}
+
+impl<F, St, H, Ctl, Pb> Service<Io<F>> for ServerHandler<St, H, Ctl, Pb>
+where
+    F: Filter,
+    St: 'static,
+    H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
+    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb::Error: fmt::Debug,
+    Pb::InitError: fmt::Debug,
+    Error: From<Pb::Error> + From<Ctl::Error>,
+{
+    type Response = ();
+    type Error = ServerError<H::Error>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    #[inline]
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.handshake
+            .as_ref()
+            .poll_ready(cx)
+            .map(|res| res.map_err(ServerError::Service))
+    }
+
+    #[inline]
+    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
+        self.handshake.as_ref().poll_shutdown(cx, is_error)
+    }
+
+    fn call(&self, req: Io<F>) -> Self::Future {
+        self.create(IoBoxed::from(req))
+    }
+}
+
+impl<St, H, Ctl, Pb> Service<IoBoxed> for ServerHandler<St, H, Ctl, Pb>
+where
+    St: 'static,
+    H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
+    H::Error: fmt::Debug,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Ctl::Error: fmt::Debug,
+    Ctl::InitError: fmt::Debug,
+    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb::Error: fmt::Debug,
+    Pb::InitError: fmt::Debug,
+    Error: From<Pb::Error> + From<Ctl::Error>,
+{
+    type Response = ();
+    type Error = ServerError<H::Error>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    #[inline]
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.handshake
+            .as_ref()
+            .poll_ready(cx)
+            .map(|res| res.map_err(ServerError::Service))
+    }
+
+    #[inline]
+    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
+        self.handshake.as_ref().poll_shutdown(cx, is_error)
+    }
+
+    fn call(&self, req: IoBoxed) -> Self::Future {
+        self.create(req)
     }
 }
 

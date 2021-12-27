@@ -27,7 +27,7 @@ async fn server(
 #[ntex::test]
 async fn test_simple() -> std::io::Result<()> {
     let srv = test_server(|| {
-        let srv = server::Server::new(|con: server::Handshake| async move {
+        server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -35,9 +35,8 @@ async fn test_simple() -> std::io::Result<()> {
                 }
                 server::Handshake::Sasl(_) => Err(()),
             }
-        });
-
-        srv.finish(
+        })
+        .finish(
             server::Router::<()>::new()
                 .service("test", fn_factory_with_config(server))
                 .finish(),
@@ -46,7 +45,7 @@ async fn test_simple() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::Connector::new().seal().connect(uri).await.unwrap();
+    let client = client::Connector::new().connect(uri).await.unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -106,7 +105,7 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
     let srv = test_server(|| {
-        server::Server::new(|conn: server::Handshake| async move {
+        server::Server::build(|conn: server::Handshake| async move {
             match conn {
                 server::Handshake::Amqp(conn) => {
                     let conn = conn.open().await.unwrap();
@@ -125,7 +124,6 @@ async fn test_sasl() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let _client = client::Connector::new()
-        .seal()
         .connect_sasl(
             uri,
             client::SaslAuth {
@@ -145,7 +143,7 @@ async fn test_session_end() -> std::io::Result<()> {
     let link_names2 = link_names.clone();
 
     let srv = test_server(move || {
-        let srv = server::Server::new(|con: server::Handshake| async move {
+        let srv = server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -180,7 +178,7 @@ async fn test_session_end() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().seal().connect(uri).await.unwrap();
+    let client = client::Connector::new().connect(uri).await.unwrap();
 
     let mut sink = client.sink();
     ntex::rt::spawn(async move {
