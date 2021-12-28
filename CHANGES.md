@@ -1,9 +1,8 @@
 # Changes
 
-## [0.6.0-b.5] - 2021-12-xx
+## [0.6.0-b.5] - 2021-12-28
 
 * Make Server universal, accept both Io<F> and IoBoxed
-
 
 ## [0.6.0-b.4] - 2021-12-27
 
