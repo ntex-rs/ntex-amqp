@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.0] - 2021-12-30
+
+* Upgrade to ntex 0.5.0
+
 ## [0.6.0-b.5] - 2021-12-28
 
 * Make Server universal, accept both Io<F> and IoBoxed

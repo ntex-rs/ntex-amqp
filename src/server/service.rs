@@ -1,8 +1,8 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed, Timer};
+use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
-use ntex::time::{timeout, Millis, Seconds};
+use ntex::time::{timeout, Seconds};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -35,7 +35,6 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     max_size: usize,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
-    time: Timer,
     _t: marker::PhantomData<St>,
 }
 
@@ -147,7 +146,6 @@ where
                 control: self.control,
                 disconnect_timeout: self.disconnect_timeout,
                 max_size: self.max_size,
-                time: Timer::new(Millis::ONE_SEC),
                 _t: marker::PhantomData,
             }),
         }
@@ -279,7 +277,7 @@ where
             let dispatcher = Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout.into())
                 .map(|_| Option::<AmqpFrame>::None);
 
-            FramedDispatcher::new(state, codec, dispatcher, inner.time.clone())
+            FramedDispatcher::new(state, codec, dispatcher)
                 .keepalive_timeout(Seconds::checked_new(keepalive as usize))
                 .disconnect_timeout(disconnect_timeout)
                 .await

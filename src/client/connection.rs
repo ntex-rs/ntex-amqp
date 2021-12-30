@@ -1,4 +1,4 @@
-use ntex::io::{Dispatcher as IoDispatcher, IoBoxed, Timer};
+use ntex::io::{Dispatcher as IoDispatcher, IoBoxed};
 use ntex::service::{fn_service, Service};
 use ntex::time::Seconds;
 use ntex::util::Ready;
@@ -16,7 +16,6 @@ pub struct Client<St = ()> {
     connection: Connection,
     keepalive: Seconds,
     remote_config: Configuration,
-    timer: Timer,
     _st: State<St>,
 }
 
@@ -28,7 +27,6 @@ impl Client {
         connection: Connection,
         keepalive: Seconds,
         remote_config: Configuration,
-        timer: Timer,
     ) -> Self {
         Client {
             io,
@@ -36,7 +34,6 @@ impl Client {
             connection,
             keepalive,
             remote_config,
-            timer,
             _st: State::new(()),
         }
     }
@@ -61,7 +58,6 @@ where
             connection: self.connection,
             keepalive: self.keepalive,
             remote_config: self.remote_config,
-            timer: self.timer,
             _st: State::new(st),
         }
     }
@@ -84,7 +80,7 @@ where
             Seconds::ZERO
         };
 
-        IoDispatcher::new(self.io, self.codec, dispatcher, self.timer)
+        IoDispatcher::new(self.io, self.codec, dispatcher)
             .keepalive_timeout(keepalive)
             .await
     }
@@ -110,7 +106,7 @@ where
             Seconds::ZERO
         };
 
-        IoDispatcher::new(self.io, self.codec, dispatcher, self.timer)
+        IoDispatcher::new(self.io, self.codec, dispatcher)
             .keepalive_timeout(keepalive)
             .await
     }

@@ -1,9 +1,9 @@
 use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
-use ntex::io::{Boxed, Filter, Io, IoBoxed, Timer};
+use ntex::io::{utils::Boxed, Filter, Io, IoBoxed};
 use ntex::service::Service;
-use ntex::time::{timeout, Millis, Seconds};
+use ntex::time::{timeout, Seconds};
 use ntex::util::{ByteString, Either, PoolId, PoolRef};
 
 #[cfg(feature = "openssl")]
@@ -25,7 +25,6 @@ pub struct Connector<A, T = ()> {
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
     pool: PoolRef,
-    timer: Timer,
     _t: PhantomData<A>,
 }
 
@@ -39,7 +38,6 @@ impl<A> Connector<A, ()> {
             disconnect_timeout: Seconds(3),
             config: Configuration::default(),
             pool: PoolId::P6.pool_ref(),
-            timer: Timer::new(Millis::ONE_SEC),
             _t: PhantomData,
         }
     }
@@ -131,7 +129,6 @@ where
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
-            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -148,7 +145,6 @@ where
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
-            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -167,7 +163,6 @@ where
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
-            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -183,7 +178,6 @@ where
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
-            timer: self.timer,
             _t: PhantomData,
         }
     }
@@ -216,13 +210,12 @@ where
         io.set_memory_pool(self.pool);
         io.set_disconnect_timeout(self.disconnect_timeout.into());
 
-        _connect_plain(io, self.config.clone(), self.timer.clone())
+        _connect_plain(io, self.config.clone())
     }
 
     fn _connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
         let fut = self.connector.call(Connect::new(address));
         let config = self.config.clone();
-        let timer = self.timer.clone();
         let pool = self.pool;
         let disconnect = self.disconnect_timeout;
 
@@ -233,7 +226,7 @@ where
             state.set_memory_pool(pool);
             state.set_disconnect_timeout(disconnect.into());
 
-            _connect_plain(state, config, timer).await
+            _connect_plain(state, config).await
         }
     }
 
@@ -265,11 +258,10 @@ where
         trace!("Negotiation client protocol id: Amqp");
 
         let config = self.config.clone();
-        let timer = self.timer.clone();
         io.set_memory_pool(self.pool);
         io.set_disconnect_timeout(self.disconnect_timeout.into());
 
-        _connect_sasl(io, auth, config, timer)
+        _connect_sasl(io, auth, config)
     }
 
     fn _connect_sasl(
@@ -279,7 +271,6 @@ where
     ) -> impl Future<Output = Result<Client, ConnectError>> {
         let fut = self.connector.call(Connect::new(addr));
         let config = self.config.clone();
-        let timer = self.timer.clone();
         let pool = self.pool;
         let disconnect = self.disconnect_timeout;
 
@@ -288,7 +279,7 @@ where
             state.set_memory_pool(pool);
             state.set_disconnect_timeout(disconnect.into());
 
-            _connect_sasl(state, auth, config, timer).await
+            _connect_sasl(state, auth, config).await
         }
     }
 }
@@ -297,7 +288,6 @@ async fn _connect_sasl(
     io: IoBoxed,
     auth: SaslAuth,
     config: Configuration,
-    timer: Timer,
 ) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: AmqpSasl");
 
@@ -345,14 +335,10 @@ async fn _connect_sasl(
         return Err(ConnectError::Disconnected);
     }
 
-    _connect_plain(io, config, timer).await
+    _connect_plain(io, config).await
 }
 
-async fn _connect_plain(
-    io: IoBoxed,
-    config: Configuration,
-    timer: Timer,
-) -> Result<Client, ConnectError> {
+async fn _connect_plain(io: IoBoxed, config: Configuration) -> Result<Client, ConnectError> {
     trace!("Negotiation client protocol id: Amqp");
 
     io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
@@ -389,14 +375,7 @@ async fn _connect_plain(
         trace!("Open confirmed: {:?}", open);
         let remote_config = open.into();
         let connection = Connection::new(io.get_ref(), &config, &remote_config);
-        let client = Client::new(
-            io,
-            codec,
-            connection,
-            config.timeout_secs(),
-            remote_config,
-            timer,
-        );
+        let client = Client::new(io, codec, connection, config.timeout_secs(), remote_config);
         Ok(client)
     } else {
         Err(ConnectError::ExpectOpenFrame(Box::new(frame)))
