@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.1] - 2022-01-xx
+
+* Cleanup client connector interface
+
 ## [0.6.0] - 2021-12-30
 
 * Upgrade to ntex 0.5.0

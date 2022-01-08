@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -24,7 +24,7 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = { version = "0.5.0", default-features = false }
+ntex = "0.5.7"
 ntex-amqp-codec = "0.8.0"
 
 bitflags = "1.3"
@@ -36,7 +36,15 @@ uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
 env_logger = "0.8"
+ntex = { version = "0.5.7", features = ["tokio"] }
 
 [patch.crates-io]
 ntex-amqp = { path = "." }
 ntex-amqp-codec = { path = "codec" }
+
+ntex = { path = "../../ntex/ntex" }
+ntex-io = { path = "../../ntex/ntex-io" }
+ntex-util = { path = "../../ntex/ntex-util" }
+ntex-tls = { path = "../../ntex/ntex-tls" }
+ntex-service = { path = "../../ntex/ntex-service" }
+ntex-tokio = { path = "../../ntex/ntex-tokio" }

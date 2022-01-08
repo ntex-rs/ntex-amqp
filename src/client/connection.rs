@@ -71,8 +71,7 @@ where
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             self.remote_config.timeout_remote_secs().into(),
-        )
-        .map(|_| Option::<AmqpFrame>::None);
+        );
 
         let keepalive = if self.keepalive.non_zero() {
             self.keepalive + Seconds(5)
@@ -97,8 +96,7 @@ where
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             service.into_service(),
             self.remote_config.timeout_remote_secs().into(),
-        )
-        .map(|_| Option::<AmqpFrame>::None);
+        );
 
         let keepalive = if self.keepalive.non_zero() {
             self.keepalive + Seconds(5)

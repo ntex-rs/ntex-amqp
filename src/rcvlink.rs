@@ -132,8 +132,12 @@ impl ReceiverLink {
     }
 
     pub(crate) fn remote_closed(&self, error: Option<Error>) {
-        trace!("Receiver link has been closed remotely");
         let inner = self.inner.get_mut();
+        trace!(
+            "Receiver link has been closed remotely handle: {:?} name: {:#?}",
+            inner.remote_handle,
+            inner.attach.name()
+        );
         inner.closed = true;
         inner.error = error;
         inner.wake();
