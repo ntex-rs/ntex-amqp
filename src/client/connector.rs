@@ -1,7 +1,7 @@
 use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
-use ntex::io::{Io, IoBoxed};
+use ntex::io::IoBoxed;
 use ntex::service::Service;
 use ntex::time::{timeout_checked, Seconds};
 use ntex::util::{ByteString, PoolId, PoolRef};
@@ -13,19 +13,19 @@ use crate::{error::ProtocolIdError, Configuration, Connection};
 use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
-pub struct Connector<A, T = (), I = IoBoxed> {
+pub struct Connector<A, T = ()> {
     connector: T,
     config: Configuration,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
     pool: PoolRef,
-    _t: PhantomData<(A, I)>,
+    _t: PhantomData<A>,
 }
 
 impl<A> Connector<A> {
     #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
-    pub fn new() -> Connector<A, connect::Connector<A>, Io> {
+    pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
             connector: connect::Connector::default(),
             handshake_timeout: Seconds::ZERO,
@@ -37,7 +37,7 @@ impl<A> Connector<A> {
     }
 }
 
-impl<A, T, I> Connector<A, T, I>
+impl<A, T> Connector<A, T>
 where
     A: Address,
 {
@@ -112,10 +112,10 @@ where
     }
 
     /// Use custom connector
-    pub fn connector<U, F>(self, connector: U) -> Connector<A, U, F>
+    pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
-        U: Service<Connect<A>, Response = F, Error = connect::ConnectError>,
-        IoBoxed: From<F>,
+        U: Service<Connect<A>, Error = connect::ConnectError>,
+        IoBoxed: From<U::Response>,
     {
         Connector {
             connector,
@@ -130,7 +130,7 @@ where
     #[doc(hidden)]
     #[deprecated]
     /// Use custom connector
-    pub fn boxed_connector<U>(self, connector: U) -> Connector<A, U, IoBoxed>
+    pub fn boxed_connector<U>(self, connector: U) -> Connector<A, U>
     where
         U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
     {
@@ -138,11 +138,11 @@ where
     }
 }
 
-impl<A, T, I> Connector<A, T, I>
+impl<A, T> Connector<A, T>
 where
     A: Address,
-    T: Service<Connect<A>, Response = I, Error = connect::ConnectError>,
-    IoBoxed: From<I>,
+    T: Service<Connect<A>, Error = connect::ConnectError>,
+    IoBoxed: From<T::Response>,
 {
     /// Connect to amqp server
     pub fn connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
