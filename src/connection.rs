@@ -74,7 +74,7 @@ impl Connection {
 
     #[inline]
     /// Check connection state
-    pub fn is_opened(&mut self) -> bool {
+    pub fn is_opened(&self) -> bool {
         let inner = self.0.get_mut();
         if inner.state != ConnectionState::Normal {
             return false;

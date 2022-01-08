@@ -265,7 +265,7 @@ where
             .keepalive_timeout(Seconds::checked_new(keepalive as usize))
             .disconnect_timeout(disconnect_timeout)
             .await
-            .map_err(|e| ServerError::Dispatcher(e))
+            .map_err(ServerError::Dispatcher)
         })
     }
 }

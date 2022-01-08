@@ -2,18 +2,15 @@ use std::collections::VecDeque;
 use std::{convert::TryFrom, future::Future, mem, pin::Pin, task::Context, task::Poll};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{BufMut, ByteString, Bytes, Either, PoolRef, Ready};
+use ntex::util::{ready, BufMut, ByteString, Bytes, Either, PoolRef, Ready};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
     ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
     TerminusExpiryPolicy, TransferBody,
 };
-use ntex_amqp_codec::Encode;
 
-use crate::cell::Cell;
-use crate::error::AmqpProtocolError;
 use crate::session::{Session, SessionInner, TransferState};
-use crate::Handle;
+use crate::{cell::Cell, codec::Encode, error::AmqpProtocolError, Handle};
 
 #[derive(Clone)]
 pub struct SenderLink {
@@ -65,26 +62,27 @@ impl SenderLink {
         SenderLink { inner }
     }
 
+    /// Id of the sender link
     pub fn id(&self) -> u32 {
         self.inner.id as u32
     }
 
+    /// Name of the sender link
     pub fn name(&self) -> &ByteString {
         &self.inner.name
     }
 
+    /// Remote handle
     pub fn remote_handle(&self) -> Handle {
         self.inner.remote_handle
     }
 
+    /// Reference to session
     pub fn session(&self) -> &Session {
         &self.inner.get_ref().session
     }
 
-    pub fn session_mut(&mut self) -> &mut Session {
-        &mut self.inner.get_mut().session
-    }
-
+    /// Send body
     pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
     where
         T: Into<TransferBody>,
@@ -92,6 +90,7 @@ impl SenderLink {
         self.inner.get_mut().send(body, None)
     }
 
+    /// Send body with specific delivery tag
     pub fn send_with_tag<T>(
         &self,
         body: T,
@@ -125,10 +124,12 @@ impl SenderLink {
         self.inner.get_mut().settle_message(id, state);
     }
 
+    /// Close sender link
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(None)
     }
 
+    /// Close sender link with error
     pub fn close_with_error<E>(
         &self,
         error: E,
@@ -534,11 +535,13 @@ impl SenderLinkBuilder {
         SenderLinkBuilder { frame, session }
     }
 
+    /// Set max message size
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
     }
 
+    /// Modify attach frame
     pub fn with_frame<F>(mut self, f: F) -> Self
     where
         F: FnOnce(&mut Attach),
@@ -547,6 +550,7 @@ impl SenderLinkBuilder {
         self
     }
 
+    /// Initiate attach sender process
     pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
         let result = self
             .session
@@ -559,11 +563,6 @@ impl SenderLinkBuilder {
             Ok(Err(e)) => Err(e),
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
-    }
-
-    #[doc(hidden)]
-    pub async fn open(self) -> Result<SenderLink, AmqpProtocolError> {
-        self.attach().await
     }
 }
 
@@ -578,10 +577,9 @@ impl Future for Delivery {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Delivery::Pending(ref mut receiver) = *self {
-            return match Pin::new(receiver).poll(cx) {
-                Poll::Ready(Ok(r)) => Poll::Ready(r),
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(e)) => {
+            return match ready!(Pin::new(receiver).poll(cx)) {
+                Ok(r) => Poll::Ready(r),
+                Err(e) => {
                     trace!("delivery oneshot is gone: {:?}", e);
                     Poll::Ready(Err(AmqpProtocolError::Disconnected))
                 }

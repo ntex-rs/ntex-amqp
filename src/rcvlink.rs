@@ -53,10 +53,6 @@ impl ReceiverLink {
         &self.inner.get_ref().session
     }
 
-    pub fn session_mut(&mut self) -> &mut Session {
-        &mut self.inner.get_mut().session
-    }
-
     pub fn frame(&self) -> &Attach {
         &self.inner.get_ref().attach
     }
@@ -467,10 +463,5 @@ impl ReceiverLinkBuilder {
             Ok(Err(err)) => Err(err),
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
-    }
-
-    #[doc(hidden)]
-    pub async fn open(self) -> Result<ReceiverLink, AmqpProtocolError> {
-        self.attach().await
     }
 }
