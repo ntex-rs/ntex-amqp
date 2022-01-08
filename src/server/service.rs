@@ -2,7 +2,7 @@ use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Po
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
-use ntex::time::{timeout_checked, Seconds};
+use ntex::time::{timeout_checked, Millis, Seconds};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -260,12 +260,12 @@ where
             FramedDispatcher::new(
                 state,
                 codec,
-                Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout.into()),
+                Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),
             )
             .keepalive_timeout(Seconds::checked_new(keepalive as usize))
             .disconnect_timeout(disconnect_timeout)
             .await
-            .map_err(|_| ServerError::Disconnected)
+            .map_err(|e| ServerError::Dispatcher(e))
         })
     }
 }
@@ -287,15 +287,12 @@ where
 
     #[inline]
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake
-            .as_ref()
-            .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))
+        self.handshake.poll_ready(cx).map_err(ServerError::Service)
     }
 
     #[inline]
     fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.as_ref().poll_shutdown(cx, is_error)
+        self.handshake.poll_shutdown(cx, is_error)
     }
 
     fn call(&self, req: Io<F>) -> Self::Future {
@@ -319,15 +316,12 @@ where
 
     #[inline]
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake
-            .as_ref()
-            .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))
+        self.handshake.poll_ready(cx).map_err(ServerError::Service)
     }
 
     #[inline]
     fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.as_ref().poll_shutdown(cx, is_error)
+        self.handshake.poll_shutdown(cx, is_error)
     }
 
     fn call(&self, req: IoBoxed) -> Self::Future {
@@ -340,16 +334,7 @@ async fn handshake<St, H, Ctl, Pb>(
     max_size: usize,
     handshake: Rc<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-) -> Result<
-    (
-        IoBoxed,
-        AmqpCodec<AmqpFrame>,
-        Connection,
-        State<St>,
-        Seconds,
-    ),
-    ServerError<H::Error>,
->
+) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>>,
@@ -362,17 +347,19 @@ where
         .map_err(HandshakeError::from)?
         .ok_or_else(|| {
             log::trace!("Server amqp is disconnected during handshake");
-            HandshakeError::Disconnected
+            HandshakeError::Disconnected(None)
         })?;
 
     match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
+            // confirm protocol
             state
                 .send(protocol, &ProtocolIdCodec)
                 .await
                 .map_err(HandshakeError::from)?;
 
+            // handshake protocol
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
                     Handshake::new_plain(state, inner.config.clone())
@@ -393,12 +380,19 @@ where
                 .await
                 .map_err(HandshakeError::from)?;
 
-            Ok((state, codec, sink, State::new(st), idle_timeout))
+            Ok((
+                state,
+                codec,
+                sink,
+                State::new(st),
+                Millis::from(idle_timeout),
+            ))
         }
-        ProtocolId::AmqpTls => Err(HandshakeError::from(ProtocolIdError::Unexpected {
-            exp: ProtocolId::Amqp,
-            got: ProtocolId::AmqpTls,
-        })
-        .into()),
+        ProtocolId::AmqpTls => Err(ServerError::Handshake(HandshakeError::from(
+            ProtocolIdError::Unexpected {
+                exp: ProtocolId::Amqp,
+                got: ProtocolId::AmqpTls,
+            },
+        ))),
     }
 }

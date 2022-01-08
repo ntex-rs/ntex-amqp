@@ -24,9 +24,8 @@ pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
 impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
     Sr: Service<types::Message, Response = ()> + 'static,
-    Sr::Error: Into<Error>,
     Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Ctl::Error: Into<Error>,
+    Error: From<Sr::Error> + From<Ctl::Error>,
 {
     pub(crate) fn new(
         sink: Connection,
@@ -122,7 +121,7 @@ where
                     let fut = self.service.call(types::Message::Attached(link.clone()));
                     ntex::rt::spawn(async move {
                         if let Err(err) = fut.await {
-                            let _ = link.close_with_error(err.into()).await;
+                            let _ = link.close_with_error(Error::from(err)).await;
                         } else {
                             link.confirm_receiver_link();
                             link.set_link_credit(50);
@@ -161,9 +160,8 @@ where
 impl<Sr, Ctl> Service<DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher<Sr, Ctl>
 where
     Sr: Service<types::Message, Response = ()> + 'static,
-    Sr::Error: Into<Error>,
     Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Ctl::Error: Into<Error>,
+    Error: From<Sr::Error> + From<Ctl::Error>,
 {
     type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
@@ -178,13 +176,13 @@ where
 
         // check readiness
         let res1 = self.service.poll_ready(cx).map_err(|err| {
-            let err = err.into();
+            let err = Error::from(err);
             error!("Publish service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
         let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
-            let err = err.into();
+            let err = Error::from(err);
             error!("Control service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service

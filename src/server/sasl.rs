@@ -69,7 +69,7 @@ impl Sasl {
         let frame = state
             .recv(&codec)
             .await?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected(None))?;
 
         match frame.body {
             SaslFrameBody::SaslInit(frame) => Ok(SaslInit {
@@ -139,7 +139,7 @@ impl SaslInit {
         let frame = state
             .recv(&codec)
             .await?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected(None))?;
 
         match frame.body {
             SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse {
@@ -219,7 +219,7 @@ impl SaslResponse {
         state
             .recv(&codec)
             .await?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected(None))?;
 
         Ok(SaslSuccess {
             state,
@@ -246,7 +246,7 @@ impl SaslSuccess {
         let protocol = state
             .recv(&ProtocolIdCodec)
             .await?
-            .ok_or(HandshakeError::Disconnected)?;
+            .ok_or(HandshakeError::Disconnected(None))?;
 
         match protocol {
             ProtocolId::Amqp => {
@@ -261,7 +261,7 @@ impl SaslSuccess {
                 let frame = state
                     .recv(&codec)
                     .await?
-                    .ok_or(HandshakeError::Disconnected)?;
+                    .ok_or(HandshakeError::Disconnected(None))?;
 
                 let frame = frame.into_parts().1;
                 match frame {

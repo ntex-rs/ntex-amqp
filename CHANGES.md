@@ -2,6 +2,8 @@
 
 ## [0.6.1] - 2022-01-xx
 
+* Cleanup server errors
+
 * Cleanup client connector interface
 
 ## [0.6.0] - 2021-12-30
