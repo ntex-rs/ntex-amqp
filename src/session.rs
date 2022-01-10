@@ -95,7 +95,7 @@ impl Session {
 
     /// Open receiver link
     pub fn build_receiver_link<T: Into<ByteString>, U: Into<ByteString>>(
-        &mut self,
+        &self,
         name: U,
         address: T,
     ) -> ReceiverLinkBuilder {
@@ -106,7 +106,7 @@ impl Session {
 
     /// Detach receiver link
     pub fn detach_receiver_link(
-        &mut self,
+        &self,
         handle: Handle,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
@@ -133,7 +133,7 @@ impl Session {
 
     /// Detach sender link
     pub fn detach_sender_link(
-        &mut self,
+        &self,
         handle: Handle,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
@@ -159,7 +159,7 @@ impl Session {
     }
 
     pub fn wait_disposition(
-        &mut self,
+        &self,
         id: DeliveryNumber,
     ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
         self.inner.get_mut().wait_disposition(id)

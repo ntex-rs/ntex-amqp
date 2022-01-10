@@ -1,5 +1,15 @@
 # Changes
 
+## [0.6.1] - 2022-01-10
+
+* Cleanup server errors
+
+* Cleanup client connector interface
+
+## [codec-0.8.1] - 2022-01-10
+
+* Use new ByteString api
+
 ## [0.6.0] - 2021-12-30
 
 * Upgrade to ntex 0.5.0

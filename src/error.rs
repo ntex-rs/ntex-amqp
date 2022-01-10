@@ -12,9 +12,6 @@ pub enum AmqpDispatcherError {
     #[display(fmt = "Service error")]
     /// Service error
     Service,
-    /// Amqp codec error
-    #[display(fmt = "Amqp codec error: {:?}", _0)]
-    Codec(AmqpCodecError),
     /// Amqp protocol error
     #[display(fmt = "Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
@@ -29,21 +26,11 @@ impl Clone for AmqpDispatcherError {
     fn clone(&self) -> Self {
         match self {
             AmqpDispatcherError::Service => AmqpDispatcherError::Service,
-            AmqpDispatcherError::Codec(err) => AmqpDispatcherError::Codec(err.clone()),
             AmqpDispatcherError::Protocol(err) => AmqpDispatcherError::Protocol(err.clone()),
             AmqpDispatcherError::Disconnected(Some(ref err)) => AmqpDispatcherError::Disconnected(
                 Some(io::Error::new(err.kind(), format!("{}", err))),
             ),
             AmqpDispatcherError::Disconnected(None) => AmqpDispatcherError::Disconnected(None),
-        }
-    }
-}
-
-impl From<Either<AmqpCodecError, io::Error>> for AmqpDispatcherError {
-    fn from(err: Either<AmqpCodecError, io::Error>) -> Self {
-        match err {
-            Either::Left(err) => AmqpDispatcherError::Codec(err),
-            Either::Right(err) => AmqpDispatcherError::Disconnected(Some(err)),
         }
     }
 }

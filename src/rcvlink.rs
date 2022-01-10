@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, future::Future, hash, pin::Pin, task::Context, task::Poll};
 
-use ntex::util::{ByteString, BytesMut, PoolRef};
-use ntex::{channel::oneshot, task::LocalWaker, Stream};
+use ntex::util::{poll_fn, ByteString, BytesMut, PoolRef, Stream};
+use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Disposition, Error, Handle, LinkError,
     ReceiverSettleMode, Role, SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy,
@@ -51,10 +51,6 @@ impl ReceiverLink {
 
     pub fn session(&self) -> &Session {
         &self.inner.get_ref().session
-    }
-
-    pub fn session_mut(&mut self) -> &mut Session {
-        &mut self.inner.get_mut().session
     }
 
     pub fn frame(&self) -> &Attach {
@@ -132,11 +128,22 @@ impl ReceiverLink {
     }
 
     pub(crate) fn remote_closed(&self, error: Option<Error>) {
-        trace!("Receiver link has been closed remotely");
         let inner = self.inner.get_mut();
+        trace!(
+            "Receiver link has been closed remotely handle: {:?} name: {:#?}",
+            inner.remote_handle,
+            inner.attach.name()
+        );
         inner.closed = true;
         inner.error = error;
         inner.wake();
+    }
+
+    /// Attempt to pull out the next value of this receiver, registering
+    /// the current task for wakeup if the value is not yet available,
+    /// and returning None if the stream is exhausted.
+    pub async fn recv(&self) -> Option<Result<Transfer, AmqpProtocolError>> {
+        poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     /// Attempt to pull out the next value of this receiver, registering
@@ -463,10 +470,5 @@ impl ReceiverLinkBuilder {
             Ok(Err(err)) => Err(err),
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
-    }
-
-    #[doc(hidden)]
-    pub async fn open(self) -> Result<ReceiverLink, AmqpProtocolError> {
-        self.attach().await
     }
 }

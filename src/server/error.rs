@@ -1,8 +1,8 @@
 use derive_more::Display;
-use ntex::util::{ByteString, Either};
+use ntex::util::Either;
 
 use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame};
-use crate::error::AmqpProtocolError;
+use crate::error::{AmqpDispatcherError, AmqpProtocolError};
 
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display)]
@@ -19,14 +19,14 @@ pub enum ServerError<E> {
     /// Amqp protocol error
     #[display(fmt = "Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
+    /// Dispatcher error
+    Dispatcher(AmqpDispatcherError),
     /// Control service init error
     #[display(fmt = "Control service init error")]
     ControlServiceError,
     /// Publish service init error
     #[display(fmt = "Publish service init error")]
     PublishServiceError,
-    /// Peer disconnect
-    Disconnected,
 }
 
 impl<E> From<AmqpCodecError> for ServerError<E> {
@@ -74,10 +74,9 @@ pub enum HandshakeError {
     /// Sasl error code
     #[display(fmt = "Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
-    #[display(fmt = "Peer disconnected")]
-    Disconnected,
-    /// Unexpected io error
-    Io(std::io::Error),
+    /// Unexpected io error, peer disconnected
+    #[display(fmt = "Peer disconnected, with error {:?}", _0)]
+    Disconnected(Option<std::io::Error>),
 }
 
 impl std::error::Error for HandshakeError {}
@@ -86,7 +85,7 @@ impl From<Either<AmqpCodecError, std::io::Error>> for HandshakeError {
     fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {
         match err {
             Either::Left(err) => HandshakeError::Codec(err),
-            Either::Right(err) => HandshakeError::Io(err),
+            Either::Right(err) => HandshakeError::Disconnected(Some(err)),
         }
     }
 }
@@ -95,17 +94,7 @@ impl From<Either<ProtocolIdError, std::io::Error>> for HandshakeError {
     fn from(err: Either<ProtocolIdError, std::io::Error>) -> Self {
         match err {
             Either::Left(err) => HandshakeError::ProtocolNegotiation(err),
-            Either::Right(err) => HandshakeError::Io(err),
+            Either::Right(err) => HandshakeError::Disconnected(Some(err)),
         }
-    }
-}
-
-impl From<HandshakeError> for protocol::Error {
-    fn from(err: HandshakeError) -> protocol::Error {
-        protocol::Error(Box::new(protocol::ErrorInner {
-            condition: protocol::AmqpError::InternalError.into(),
-            description: Some(ByteString::from(format!("{}", err))),
-            info: None,
-        }))
     }
 }

@@ -180,7 +180,7 @@ async fn test_session_end() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new().connect(uri).await.unwrap();
 
-    let mut sink = client.sink();
+    let sink = client.sink();
     ntex::rt::spawn(async move {
         let _ = client.start_default().await;
     });

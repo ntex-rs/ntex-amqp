@@ -2,7 +2,7 @@ use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Po
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
-use ntex::time::{timeout, Seconds};
+use ntex::time::{timeout_checked, Millis, Seconds};
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -102,9 +102,7 @@ impl<St, H, Ctl> ServerBuilder<St, H, Ctl>
 where
     St: 'static,
     H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Error: From<Ctl::Error>,
 {
@@ -113,7 +111,6 @@ where
     where
         F: IntoServiceFactory<S, ControlFrame, State<St>>,
         S: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-        S::Error: fmt::Debug,
         S::InitError: fmt::Debug,
         Error: From<S::Error>,
     {
@@ -133,7 +130,6 @@ where
     where
         S: IntoServiceFactory<Pb, Message, State<St>>,
         Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
-        Pb::Error: fmt::Debug,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
@@ -157,12 +153,9 @@ where
     F: Filter,
     St: 'static,
     H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -189,12 +182,9 @@ impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed> for Server<St, H, Ctl, Pb>
 where
     St: 'static,
     H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -227,12 +217,9 @@ impl<St, H, Ctl, Pb> ServerHandler<St, H, Ctl, Pb>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -254,13 +241,9 @@ where
         let inner = self.inner.clone();
 
         Box::pin(async move {
-            let (state, codec, sink, st, idle_timeout) = if handshake_timeout.is_zero() {
-                fut.await?
-            } else {
-                timeout(handshake_timeout, fut)
-                    .await
-                    .map_err(|_| HandshakeError::Timeout)??
-            };
+            let (state, codec, sink, st, idle_timeout) = timeout_checked(handshake_timeout, fut)
+                .await
+                .map_err(|_| HandshakeError::Timeout)??;
 
             // create publish service
             let pb_srv = inner.publish.new_service(st.clone()).await.map_err(|e| {
@@ -274,14 +257,15 @@ where
                 ServerError::ControlServiceError
             })?;
 
-            let dispatcher = Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout.into())
-                .map(|_| Option::<AmqpFrame>::None);
-
-            FramedDispatcher::new(state, codec, dispatcher)
-                .keepalive_timeout(Seconds::checked_new(keepalive as usize))
-                .disconnect_timeout(disconnect_timeout)
-                .await
-                .map_err(|_| ServerError::Disconnected)
+            FramedDispatcher::new(
+                state,
+                codec,
+                Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),
+            )
+            .keepalive_timeout(Seconds::checked_new(keepalive as usize))
+            .disconnect_timeout(disconnect_timeout)
+            .await
+            .map_err(ServerError::Dispatcher)
         })
     }
 }
@@ -291,12 +275,9 @@ where
     F: Filter,
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -306,15 +287,12 @@ where
 
     #[inline]
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake
-            .as_ref()
-            .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))
+        self.handshake.poll_ready(cx).map_err(ServerError::Service)
     }
 
     #[inline]
     fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.as_ref().poll_shutdown(cx, is_error)
+        self.handshake.poll_shutdown(cx, is_error)
     }
 
     fn call(&self, req: Io<F>) -> Self::Future {
@@ -326,12 +304,9 @@ impl<St, H, Ctl, Pb> Service<IoBoxed> for ServerHandler<St, H, Ctl, Pb>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
-    H::Error: fmt::Debug,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Ctl::Error: fmt::Debug,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
-    Pb::Error: fmt::Debug,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -341,15 +316,12 @@ where
 
     #[inline]
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake
-            .as_ref()
-            .poll_ready(cx)
-            .map(|res| res.map_err(ServerError::Service))
+        self.handshake.poll_ready(cx).map_err(ServerError::Service)
     }
 
     #[inline]
     fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.as_ref().poll_shutdown(cx, is_error)
+        self.handshake.poll_shutdown(cx, is_error)
     }
 
     fn call(&self, req: IoBoxed) -> Self::Future {
@@ -362,16 +334,7 @@ async fn handshake<St, H, Ctl, Pb>(
     max_size: usize,
     handshake: Rc<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
-) -> Result<
-    (
-        IoBoxed,
-        AmqpCodec<AmqpFrame>,
-        Connection,
-        State<St>,
-        Seconds,
-    ),
-    ServerError<H::Error>,
->
+) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>>,
@@ -384,17 +347,19 @@ where
         .map_err(HandshakeError::from)?
         .ok_or_else(|| {
             log::trace!("Server amqp is disconnected during handshake");
-            HandshakeError::Disconnected
+            HandshakeError::Disconnected(None)
         })?;
 
-    let (sink, state, codec, st, idle_timeout) = match protocol {
+    match protocol {
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
+            // confirm protocol
             state
                 .send(protocol, &ProtocolIdCodec)
                 .await
                 .map_err(HandshakeError::from)?;
 
+            // handshake protocol
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
                     Handshake::new_plain(state, inner.config.clone())
@@ -415,18 +380,19 @@ where
                 .await
                 .map_err(HandshakeError::from)?;
 
-            let st = State::new(st);
-
-            (sink, state, codec, st, idle_timeout)
+            Ok((
+                state,
+                codec,
+                sink,
+                State::new(st),
+                Millis::from(idle_timeout),
+            ))
         }
-        ProtocolId::AmqpTls => {
-            return Err(HandshakeError::from(ProtocolIdError::Unexpected {
+        ProtocolId::AmqpTls => Err(ServerError::Handshake(HandshakeError::from(
+            ProtocolIdError::Unexpected {
                 exp: ProtocolId::Amqp,
                 got: ProtocolId::AmqpTls,
-            })
-            .into())
-        }
-    };
-
-    Ok((state, codec, sink, st, idle_timeout))
+            },
+        ))),
+    }
 }

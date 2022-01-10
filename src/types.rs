@@ -69,10 +69,6 @@ impl<S> Link<S> {
         self.link.session()
     }
 
-    pub fn session_mut(&mut self) -> &mut Session {
-        self.link.session_mut()
-    }
-
     pub fn receiver(&self) -> &ReceiverLink {
         &self.link
     }

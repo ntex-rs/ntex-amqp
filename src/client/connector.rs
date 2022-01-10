@@ -1,16 +1,10 @@
 use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
-use ntex::io::{utils::Boxed, Filter, Io, IoBoxed};
+use ntex::io::IoBoxed;
 use ntex::service::Service;
-use ntex::time::{timeout, Seconds};
-use ntex::util::{ByteString, Either, PoolId, PoolRef};
-
-#[cfg(feature = "openssl")]
-use ntex::connect::openssl::{self, OpensslConnector, SslConnector};
-
-#[cfg(feature = "rustls")]
-use ntex::connect::rustls::{ClientConfig, RustlsConnector};
+use ntex::time::{timeout_checked, Seconds};
+use ntex::util::{ByteString, PoolId, PoolRef};
 
 use crate::codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
@@ -28,12 +22,12 @@ pub struct Connector<A, T = ()> {
     _t: PhantomData<A>,
 }
 
-impl<A> Connector<A, ()> {
+impl<A> Connector<A> {
     #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
-    pub fn new() -> Connector<A, Boxed<connect::Connector<A>, Connect<A>>> {
+    pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
-            connector: Boxed::new(connect::Connector::default()),
+            connector: connect::Connector::default(),
             handshake_timeout: Seconds::ZERO,
             disconnect_timeout: Seconds(3),
             config: Configuration::default(),
@@ -118,59 +112,10 @@ where
     }
 
     /// Use custom connector
-    pub fn connector<U, F>(self, connector: U) -> Connector<A, Boxed<U, Connect<A>>>
+    pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
-        F: Filter,
-        U: Service<Connect<A>, Response = Io<F>, Error = connect::ConnectError>,
-    {
-        Connector {
-            connector: Boxed::new(connector),
-            config: self.config,
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
-            pool: self.pool,
-            _t: PhantomData,
-        }
-    }
-
-    #[cfg(feature = "openssl")]
-    /// Use openssl connector
-    pub fn openssl(
-        self,
-        connector: SslConnector,
-    ) -> Connector<A, Boxed<openssl::Connector<A>, Connect<A>>> {
-        Connector {
-            config: self.config,
-            connector: Boxed::new(openssl::IoConnector(connector)),
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
-            pool: self.pool,
-            _t: PhantomData,
-        }
-    }
-
-    #[cfg(feature = "rustls")]
-    /// Use rustls connector
-    pub fn rustls(
-        self,
-        config: ClientConfig,
-    ) -> Connector<A, Boxed<rustls::Connector<A>, Connect<A>>> {
-        use std::sync::Arc;
-
-        Connector {
-            config: self.config,
-            connector: Boxed::new(rustls::Connector::new(Arc::new(config))),
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
-            pool: self.pool,
-            _t: PhantomData,
-        }
-    }
-
-    /// Use custom connector
-    pub fn boxed_connector<U>(self, connector: U) -> Connector<A, U>
-    where
-        U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
+        U: Service<Connect<A>, Error = connect::ConnectError>,
+        IoBoxed: From<U::Response>,
     {
         Connector {
             connector,
@@ -181,25 +126,32 @@ where
             _t: PhantomData,
         }
     }
+
+    #[doc(hidden)]
+    #[deprecated]
+    /// Use custom connector
+    pub fn boxed_connector<U>(self, connector: U) -> Connector<A, U>
+    where
+        U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
+    {
+        self.connector(connector)
+    }
 }
 
 impl<A, T> Connector<A, T>
 where
     A: Address,
-    T: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
+    T: Service<Connect<A>, Error = connect::ConnectError>,
+    IoBoxed: From<T::Response>,
 {
     /// Connect to amqp server
     pub fn connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
-        if self.handshake_timeout.non_zero() {
-            let fut = timeout(self.handshake_timeout, self._connect(address));
-            Either::Left(async move {
-                match fut.await {
-                    Ok(res) => res.map_err(From::from),
-                    Err(_) => Err(ConnectError::HandshakeTimeout),
-                }
-            })
-        } else {
-            Either::Right(self._connect(address))
+        let fut = timeout_checked(self.handshake_timeout, self._connect(address));
+        async move {
+            match fut.await {
+                Ok(res) => res.map_err(From::from),
+                Err(_) => Err(ConnectError::HandshakeTimeout),
+            }
         }
     }
 
@@ -222,11 +174,11 @@ where
         async move {
             trace!("Negotiation client protocol id: Amqp");
 
-            let state = fut.await?;
-            state.set_memory_pool(pool);
-            state.set_disconnect_timeout(disconnect.into());
+            let io = IoBoxed::from(fut.await?);
+            io.set_memory_pool(pool);
+            io.set_disconnect_timeout(disconnect.into());
 
-            _connect_plain(state, config).await
+            _connect_plain(io, config).await
         }
     }
 
@@ -236,16 +188,12 @@ where
         addr: A,
         auth: SaslAuth,
     ) -> impl Future<Output = Result<Client, ConnectError>> {
-        if self.handshake_timeout.non_zero() {
-            let fut = timeout(self.handshake_timeout, self._connect_sasl(addr, auth));
-            Either::Left(async move {
-                match fut.await {
-                    Ok(res) => res.map_err(From::from),
-                    Err(_) => Err(ConnectError::HandshakeTimeout),
-                }
-            })
-        } else {
-            Either::Right(self._connect_sasl(addr, auth))
+        let fut = timeout_checked(self.handshake_timeout, self._connect_sasl(addr, auth));
+        async move {
+            match fut.await {
+                Ok(res) => res.map_err(From::from),
+                Err(_) => Err(ConnectError::HandshakeTimeout),
+            }
         }
     }
 
@@ -275,11 +223,11 @@ where
         let disconnect = self.disconnect_timeout;
 
         async move {
-            let state = fut.await?;
-            state.set_memory_pool(pool);
-            state.set_disconnect_timeout(disconnect.into());
+            let io = IoBoxed::from(fut.await?);
+            io.set_memory_pool(pool);
+            io.set_disconnect_timeout(disconnect.into());
 
-            _connect_sasl(state, auth, config).await
+            _connect_sasl(io, auth, config).await
         }
     }
 }

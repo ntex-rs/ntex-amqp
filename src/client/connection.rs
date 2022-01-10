@@ -71,8 +71,7 @@ where
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             fn_service(|_| Ready::<_, LinkError>::Ok(())),
             self.remote_config.timeout_remote_secs().into(),
-        )
-        .map(|_| Option::<AmqpFrame>::None);
+        );
 
         let keepalive = if self.keepalive.non_zero() {
             self.keepalive + Seconds(5)
@@ -89,16 +88,16 @@ where
     where
         F: IntoService<S, ControlFrame>,
         S: Service<ControlFrame, Response = ()>,
-        S::Error: Into<crate::error::Error> + std::fmt::Debug + 'static,
+        S::Error: std::fmt::Debug + 'static,
+        crate::error::Error: From<S::Error>,
         S: 'static,
     {
         let dispatcher = Dispatcher::new(
             self.connection,
-            fn_service(|_| Ready::<_, LinkError>::Ok(())),
+            fn_service(|_| Ready::<_, S::Error>::Ok(())),
             service.into_service(),
             self.remote_config.timeout_remote_secs().into(),
-        )
-        .map(|_| Option::<AmqpFrame>::None);
+        );
 
         let keepalive = if self.keepalive.non_zero() {
             self.keepalive + Seconds(5)

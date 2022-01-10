@@ -1,9 +1,9 @@
-use std::{cell, fmt, future::Future, marker, pin::Pin, task::Context, task::Poll};
+use std::{cell, future::Future, marker, pin::Pin, task::Context, task::Poll};
 
 use ntex::io::DispatchItem;
 use ntex::service::Service;
 use ntex::time::{sleep, Millis, Sleep};
-use ntex::util::{Either, Ready};
+use ntex::util::{ready, Either, Ready};
 
 use crate::codec::protocol::Frame;
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -24,9 +24,8 @@ pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
 impl<Sr, Ctl> Dispatcher<Sr, Ctl>
 where
     Sr: Service<types::Message, Response = ()> + 'static,
-    Sr::Error: Into<Error>,
     Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Ctl::Error: Into<Error>,
+    Error: From<Sr::Error> + From<Ctl::Error>,
 {
     pub(crate) fn new(
         sink: Connection,
@@ -122,7 +121,7 @@ where
                     let fut = self.service.call(types::Message::Attached(link.clone()));
                     ntex::rt::spawn(async move {
                         if let Err(err) = fut.await {
-                            let _ = link.close_with_error(err.into()).await;
+                            let _ = link.close_with_error(Error::from(err)).await;
                         } else {
                             link.confirm_receiver_link();
                             link.set_link_credit(50);
@@ -161,11 +160,10 @@ where
 impl<Sr, Ctl> Service<DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher<Sr, Ctl>
 where
     Sr: Service<types::Message, Response = ()> + 'static,
-    Sr::Error: Into<Error> + fmt::Debug,
     Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Ctl::Error: Into<Error> + fmt::Debug,
+    Error: From<Sr::Error> + From<Ctl::Error>,
 {
-    type Response = ();
+    type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
     type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
@@ -178,13 +176,15 @@ where
 
         // check readiness
         let res1 = self.service.poll_ready(cx).map_err(|err| {
+            let err = Error::from(err);
             error!("Publish service readiness check failed: {:?}", err);
-            let _ = self.sink.close_with_error(err.into());
+            let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
         let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
+            let err = Error::from(err);
             error!("Control service readiness check failed: {:?}", err);
-            let _ = self.sink.close_with_error(err.into());
+            let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
 
@@ -294,13 +294,13 @@ where
                     types::Action::None => (),
                 };
 
-                Either::Right(Ready::Ok(()))
+                Either::Right(Ready::Ok(None))
             }
             DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
                 *self.ctl_fut.borrow_mut() =
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
-                Either::Right(Ready::Ok(()))
+                Either::Right(Ready::Ok(None))
             }
             DispatchItem::KeepAliveTimeout => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(
@@ -308,16 +308,16 @@ where
                 ));
                 *self.ctl_fut.borrow_mut() =
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
-                Either::Right(Ready::Ok(()))
+                Either::Right(Ready::Ok(None))
             }
             DispatchItem::Disconnect(e) => {
                 let frame = ControlFrame::new_kind(ControlFrameKind::Disconnected(e));
                 *self.ctl_fut.borrow_mut() =
                     Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
-                Either::Right(Ready::Ok(()))
+                Either::Right(Ready::Ok(None))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
-                Either::Right(Ready::Ok(()))
+                Either::Right(Ready::Ok(None))
             }
         }
     }
@@ -335,21 +335,20 @@ pin_project_lite::pin_project! {
 impl<F, E> Future for ServiceResult<F, E>
 where
     F: Future<Output = Result<(), E>>,
-    E: Into<Error> + fmt::Debug,
+    E: Into<Error>,
 {
-    type Output = Result<(), AmqpDispatcherError>;
+    type Output = Result<Option<AmqpFrame>, AmqpDispatcherError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        match this.fut.poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                log::trace!("Service error {:?}", e);
-                let _ = this.link.close_with_error(e.into());
-                Poll::Ready(Ok::<_, AmqpDispatcherError>(()))
-            }
+        if let Err(e) = ready!(this.fut.poll(cx)) {
+            let e = e.into();
+            log::trace!("Service error {:?}", e);
+            let _ = this.link.close_with_error(e);
+            Poll::Ready(Ok::<_, AmqpDispatcherError>(None))
+        } else {
+            Poll::Ready(Ok(None))
         }
     }
 }

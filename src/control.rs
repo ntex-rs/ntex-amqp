@@ -61,12 +61,6 @@ impl ControlFrame {
     }
 
     #[inline]
-    #[doc(hidden)]
-    pub fn frame(&self) -> &ControlFrameKind {
-        &self.0.kind
-    }
-
-    #[inline]
     pub fn kind(&self) -> &ControlFrameKind {
         &self.0.kind
     }
