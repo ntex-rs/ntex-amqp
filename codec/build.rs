@@ -61,7 +61,7 @@ fn generate_from_spec() {
     );
 
     codegen
-        .register_template_string("definitions", template.to_string())
+        .register_template_string("definitions", template)
         .expect("Failed to register template.");
     let mut data = std::collections::BTreeMap::new();
 

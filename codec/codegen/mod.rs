@@ -275,11 +275,11 @@ impl Definitions {
         map: &mut HashMap<String, Vec<ProvidesItem>>,
         name: &str,
         descriptor: Option<Descriptor>,
-        provides: &Vec<String>,
+        provides: &[String],
     ) {
         for p in provides.iter() {
             map.entry(p.clone())
-                .or_insert_with(|| vec![])
+                .or_insert_with(Vec::new)
                 .push(ProvidesItem {
                     ty: name.to_string(),
                     descriptor: descriptor.clone().unwrap_or_else(|| Descriptor {
@@ -307,10 +307,10 @@ impl Enum {
         let ty = get_type_name(&*e.source, None);
         let is_symbol = ty == "Symbol";
         Enum {
-            name: camel_case(&*e.name),
-            ty: ty.clone(),
-            provides: parse_provides(e.provides),
+            ty,
             is_symbol,
+            name: camel_case(&*e.name),
+            provides: parse_provides(e.provides),
             items: e
                 .choice
                 .into_iter()
@@ -336,16 +336,13 @@ impl Described {
                 .map(|item| item == "frame")
                 .unwrap_or(false),
         };
-        let props = match d.name.as_str() {
-            "open" | "begin" | "attach" | "flow" => true,
-            _ => false,
-        };
+        let props = matches!(d.name.as_str(), "open" | "begin" | "attach" | "flow");
         Described {
             name: camel_case(&d.name),
             ty: String::new(),
             provides: parse_provides(d.provides),
             descriptor: Descriptor::from(d.descriptor),
-            fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
+            fields: d.field.into_iter().map(Field::from).collect(),
             inner: {
                 if boxed {
                     "0."
@@ -365,7 +362,7 @@ impl Described {
             ty: get_type_name(&d.source, None),
             provides: parse_provides(d.provides),
             descriptor: Descriptor::from(d.descriptor),
-            fields: d.field.into_iter().map(|f| Field::from(f)).collect(),
+            fields: d.field.into_iter().map(Field::from).collect(),
             transfer: false,
             boxed: false,
             props: false,
@@ -378,7 +375,7 @@ impl Descriptor {
     fn from(d: _Descriptor) -> Descriptor {
         let code_parts: Vec<u32> = d
             .code
-            .split(":")
+            .split(':')
             .map(|p| {
                 assert!(p.starts_with("0x"));
                 u32::from_str_radix(&p[2..], 16).expect("malformed descriptor code")
@@ -401,11 +398,11 @@ impl Field {
         let is_ref = REF_TYPES.lock().unwrap().contains(&ty);
         let default = Field::format_default(field.default, &ty);
         Field {
-            name: snake_case(&*field.name),
-            ty: ty,
+            ty,
             is_ref,
             is_str,
-            optional: !field.mandatory && default.len() == 0,
+            name: snake_case(&*field.name),
+            optional: !field.mandatory && default.is_empty(),
             multiple: field.multiple,
             collection: field.collection.unwrap_or(false),
             default,
@@ -438,18 +435,18 @@ fn get_type_name(ty: &str, req: Option<String>) -> String {
 
 fn parse_provides(p: Option<String>) -> Vec<String> {
     p.map(|v| {
-        v.split_terminator(",")
+        v.split_terminator(',')
             .filter_map(|s| {
                 let s = s.trim();
-                if s == "" {
+                if s.is_empty() {
                     None
                 } else {
-                    Some(camel_case(&s))
+                    Some(camel_case(s))
                 }
             })
             .collect()
     })
-    .unwrap_or(vec![])
+    .unwrap_or_else(Vec::new)
 }
 
 fn string_as_bool<'de, T, D>(deserializer: D) -> Result<T, D::Error>

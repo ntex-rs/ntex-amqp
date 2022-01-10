@@ -28,7 +28,8 @@ pub enum AmqpParseError {
     #[from(ignore)]
     #[display(fmt = "Unexpected type: '{:?}'", "_0")]
     UnexpectedType(&'static str),
-    Utf8Error(std::str::Utf8Error),
+    #[display(fmt = "Value is not valid utf8 string")]
+    Utf8Error,
 }
 
 #[derive(Debug, Display, From, Clone)]

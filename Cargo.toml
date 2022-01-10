@@ -24,8 +24,8 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = "0.5.7"
-ntex-amqp-codec = "0.8.0"
+ntex = "0.5.8"
+ntex-amqp-codec = "0.8.1"
 
 bitflags = "1.3"
 derive_more = "0.99"
@@ -35,16 +35,9 @@ slab = "0.4"
 uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
-env_logger = "0.8"
-ntex = { version = "0.5.7", features = ["tokio"] }
+env_logger = "0.9"
+ntex = { version = "0.5.8", features = ["tokio"] }
 
 [patch.crates-io]
 ntex-amqp = { path = "." }
 ntex-amqp-codec = { path = "codec" }
-
-ntex = { path = "../../ntex/ntex" }
-ntex-io = { path = "../../ntex/ntex-io" }
-ntex-util = { path = "../../ntex/ntex-util" }
-ntex-tls = { path = "../../ntex/ntex-tls" }
-ntex-service = { path = "../../ntex/ntex-service" }
-ntex-tokio = { path = "../../ntex/ntex-tokio" }

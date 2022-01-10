@@ -200,11 +200,11 @@ impl DecodeFormatted for ByteString {
         match fmt {
             codec::FORMATCODE_STRING8 => {
                 let bytes = read_bytes_u8(input)?;
-                Ok(ByteString::try_from(bytes)?)
+                Ok(ByteString::try_from(bytes).map_err(|_| AmqpParseError::Utf8Error)?)
             }
             codec::FORMATCODE_STRING32 => {
                 let bytes = read_bytes_u32(input)?;
-                Ok(ByteString::try_from(bytes)?)
+                Ok(ByteString::try_from(bytes).map_err(|_| AmqpParseError::Utf8Error)?)
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -222,11 +222,15 @@ impl DecodeFormatted for Symbol {
         match fmt {
             codec::FORMATCODE_SYMBOL8 => {
                 let bytes = read_bytes_u8(input)?;
-                Ok(Symbol(Str::ByteStr(ByteString::try_from(bytes)?)))
+                Ok(Symbol(Str::ByteStr(
+                    ByteString::try_from(bytes).map_err(|_| AmqpParseError::Utf8Error)?,
+                )))
             }
             codec::FORMATCODE_SYMBOL32 => {
                 let bytes = read_bytes_u32(input)?;
-                Ok(Symbol(Str::ByteStr(ByteString::try_from(bytes)?)))
+                Ok(Symbol(Str::ByteStr(
+                    ByteString::try_from(bytes).map_err(|_| AmqpParseError::Utf8Error)?,
+                )))
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -235,7 +239,8 @@ impl DecodeFormatted for Symbol {
 
 impl ArrayDecode for Symbol {
     fn array_decode(input: &mut Bytes) -> Result<Self, AmqpParseError> {
-        let bytes = ByteString::try_from(read_bytes_u32(input)?)?;
+        let bytes =
+            ByteString::try_from(read_bytes_u32(input)?).map_err(|_| AmqpParseError::Utf8Error)?;
         Ok(Symbol(Str::ByteStr(bytes)))
     }
 }
