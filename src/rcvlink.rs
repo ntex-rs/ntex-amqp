@@ -78,6 +78,11 @@ impl ReceiverLink {
         self.inner.get_mut().set_link_credit(credit);
     }
 
+    /// Set max message size.
+    pub fn set_max_message_size(&self, size: u64) {
+        self.inner.get_mut().attach.0.max_message_size = Some(size);
+    }
+
     /// Set max total size for partial transfers.
     ///
     /// Default is 256Kb

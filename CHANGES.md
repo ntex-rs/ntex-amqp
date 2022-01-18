@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.2] - 2022-01-18
+
+* Allow to change max message size for receiver link
+
 ## [0.6.1] - 2022-01-10
 
 * Cleanup server errors
