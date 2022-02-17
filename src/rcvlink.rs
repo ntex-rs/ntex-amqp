@@ -37,6 +37,10 @@ impl ReceiverLink {
         ReceiverLink { inner }
     }
 
+    pub fn name(&self) -> &ByteString {
+        &self.inner.get_ref().name
+    }
+
     pub fn handle(&self) -> Handle {
         self.inner.get_ref().handle as Handle
     }
@@ -53,10 +57,6 @@ impl ReceiverLink {
         &self.inner.get_ref().session
     }
 
-    pub fn frame(&self) -> &Attach {
-        &self.inner.get_ref().attach
-    }
-
     pub fn is_closed(&self) -> bool {
         self.inner.get_ref().closed
     }
@@ -65,13 +65,15 @@ impl ReceiverLink {
         self.inner.get_ref().error.as_ref()
     }
 
-    pub(crate) fn confirm_receiver_link(&self) {
+    pub(crate) fn confirm_receiver_link(&self, frm: &Attach) {
         let inner = self.inner.get_mut();
+        let size = self.inner.get_ref().max_message_size;
+        let size = if size != 0 { Some(size) } else { None };
         inner
             .session
             .inner
             .get_mut()
-            .confirm_receiver_link(inner.handle, &inner.attach);
+            .confirm_receiver_link(inner.handle, frm, size);
     }
 
     pub fn set_link_credit(&self, credit: u32) {
@@ -80,7 +82,7 @@ impl ReceiverLink {
 
     /// Set max message size.
     pub fn set_max_message_size(&self, size: u64) {
-        self.inner.get_mut().attach.0.max_message_size = Some(size);
+        self.inner.get_mut().max_message_size = size;
     }
 
     /// Set max total size for partial transfers.
@@ -135,9 +137,9 @@ impl ReceiverLink {
     pub(crate) fn remote_closed(&self, error: Option<Error>) {
         let inner = self.inner.get_mut();
         trace!(
-            "Receiver link has been closed remotely handle: {:?} name: {:#?}",
+            "Receiver link has been closed remotely handle: {:?} name: {:?}",
             inner.remote_handle,
-            inner.attach.name()
+            inner.name
         );
         inner.closed = true;
         inner.error = error;
@@ -196,9 +198,9 @@ impl Stream for ReceiverLink {
 
 #[derive(Debug)]
 pub(crate) struct ReceiverLinkInner {
+    name: ByteString,
     handle: Handle,
     remote_handle: Handle,
-    attach: Attach,
     session: Session,
     closed: bool,
     reader_task: LocalWaker,
@@ -208,6 +210,7 @@ pub(crate) struct ReceiverLinkInner {
     error: Option<Error>,
     partial_body: Option<BytesMut>,
     partial_body_max: usize,
+    max_message_size: u64,
     pool: PoolRef,
 }
 
@@ -216,12 +219,17 @@ impl ReceiverLinkInner {
         session: Cell<SessionInner>,
         handle: Handle,
         remote_handle: Handle,
-        attach: Attach,
+        frame: &Attach,
     ) -> ReceiverLinkInner {
         let pool = session.get_ref().memory_pool();
+        let mut name = frame.name().clone();
+        name.trimdown();
+
         ReceiverLinkInner {
+            name,
             handle,
             remote_handle,
+            pool,
             session: Session::new(session),
             closed: false,
             queue: VecDeque::with_capacity(4),
@@ -229,10 +237,9 @@ impl ReceiverLinkInner {
             error: None,
             partial_body: None,
             partial_body_max: 262_144,
-            delivery_count: attach.initial_delivery_count().unwrap_or(0),
+            delivery_count: frame.initial_delivery_count().unwrap_or(0),
+            max_message_size: frame.max_message_size().unwrap_or(0),
             reader_task: LocalWaker::new(),
-            attach,
-            pool,
         }
     }
 
@@ -371,7 +378,7 @@ impl ReceiverLinkInner {
                 } else {
                     let body = if let Some(body) = transfer.0.body.take() {
                         match body {
-                            TransferBody::Data(data) => BytesMut::from(data),
+                            TransferBody::Data(data) => BytesMut::copy_from_slice(&data),
                             TransferBody::Message(msg) => {
                                 let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
                                 msg.encode(&mut buf);

@@ -88,22 +88,22 @@ impl<S: 'static> Service<Message> for RouterService<S> {
 
     fn call(&self, msg: Message) -> Self::Future {
         match msg {
-            Message::Attached(link) => {
-                let path = link
-                    .frame()
+            Message::Attached(frm, link) => {
+                let path = frm
                     .target()
                     .and_then(|target| target.address.as_ref().cloned());
 
                 if let Some(path) = path {
                     let inner = self.0.get_mut();
-                    let mut link = Link::new(link, inner.state.clone(), path);
+                    let mut link = Link::new(frm, link, inner.state.clone(), path);
                     if let Some((hnd, _info)) = inner.router.recognize(link.path_mut()) {
                         trace!("Create handler service for {}", link.path().get_ref());
-                        let fut = hnd.new_service(link.clone());
                         inner.handlers.insert(link.receiver().clone(), None);
+                        let rcv_link = link.link.clone();
+                        let fut = hnd.new_service(link);
                         Either::Right(RouterServiceResponse {
+                            link: rcv_link,
                             inner: self.0.clone(),
-                            link: link.link.clone(),
                             state: RouterServiceResponseState::NewService(fut),
                         })
                     } else {
@@ -176,10 +176,7 @@ impl<S> Future for RouterServiceResponse<S> {
                             Poll::Pending => {
                                 log::trace!(
                                     "Handler service is not ready for {}",
-                                    this.link.frame().target().map_or("", |t| t
-                                        .address
-                                        .as_ref()
-                                        .map_or("", AsRef::as_ref))
+                                    this.link.name()
                                 );
                                 return Poll::Pending;
                             }
@@ -220,14 +217,7 @@ impl<S> Future for RouterServiceResponse<S> {
                 RouterServiceResponseState::Transfer(ref mut fut, delivery_id) => {
                     match Pin::new(fut).poll(cx) {
                         Poll::Ready(Ok(outcome)) => {
-                            log::trace!(
-                                "Outcome is ready {:?} for {}",
-                                outcome,
-                                this.link
-                                    .frame()
-                                    .target()
-                                    .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
-                            );
+                            log::trace!("Outcome is ready {:?} for {}", outcome, this.link.name());
                             settle(&mut this.link, delivery_id, outcome.into_delivery_state());
                         }
                         Poll::Pending => return Poll::Pending,
@@ -249,13 +239,7 @@ impl<S> Future for RouterServiceResponse<S> {
                 RouterServiceResponseState::NewService(ref mut fut) => {
                     match Pin::new(fut).poll(cx) {
                         Poll::Ready(Ok(srv)) => {
-                            log::trace!(
-                                "Handler service is created for {}",
-                                this.link
-                                    .frame()
-                                    .target()
-                                    .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref))
-                            );
+                            log::trace!("Handler service is created for {}", this.link.name());
                             this.inner
                                 .get_mut()
                                 .handlers
@@ -269,10 +253,7 @@ impl<S> Future for RouterServiceResponse<S> {
                         Poll::Ready(Err(e)) => {
                             log::error!(
                                 "Failed to create link service for {} err: {:?}",
-                                this.link
-                                    .frame()
-                                    .target()
-                                    .map_or("", |t| t.address.as_ref().map_or("", AsRef::as_ref)),
+                                this.link.name(),
                                 e
                             );
                             return Poll::Ready(Err(e));

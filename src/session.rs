@@ -368,7 +368,7 @@ impl SessionInner {
         async move { rx.await.map_err(|_| AmqpProtocolError::Disconnected) }
     }
 
-    pub(crate) fn max_frame_size(&self) -> usize {
+    pub(crate) fn max_frame_size(&self) -> u32 {
         self.sink.0.max_frame_size
     }
 
@@ -509,7 +509,7 @@ impl SessionInner {
     pub(crate) fn attach_remote_receiver_link(
         &mut self,
         cell: Cell<SessionInner>,
-        attach: Attach,
+        attach: &Attach,
     ) -> ReceiverLink {
         let handle = attach.handle();
         let entry = self.links.vacant_entry();
@@ -537,7 +537,7 @@ impl SessionInner {
             cell,
             token as u32,
             token as u32,
-            frame.clone(),
+            &frame,
         ));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
             inner, tx,
@@ -550,11 +550,17 @@ impl SessionInner {
         rx
     }
 
-    pub(crate) fn confirm_receiver_link(&mut self, token: Handle, attach: &Attach) {
+    pub(crate) fn confirm_receiver_link(
+        &mut self,
+        token: Handle,
+        attach: &Attach,
+        max_message_size: Option<u64>,
+    ) {
         if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
             if let ReceiverLinkState::Opening(l) = link {
                 if let Some(l) = l.take() {
                     let attach = Attach(Box::new(codec::AttachInner {
+                        max_message_size,
                         name: attach.0.name.clone(),
                         handle: token as Handle,
                         role: Role::Receiver,
@@ -565,7 +571,6 @@ impl SessionInner {
                         unsettled: None,
                         incomplete_unsettled: false,
                         initial_delivery_count: Some(0),
-                        max_message_size: attach.0.max_message_size,
                         offered_capabilities: None,
                         desired_capabilities: None,
                         properties: None,

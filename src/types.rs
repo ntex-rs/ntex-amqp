@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 use ntex::router::Path;
 use ntex::util::{ByteString, Either};
@@ -13,7 +13,7 @@ pub use crate::codec::protocol::Transfer;
 
 #[derive(Debug)]
 pub enum Message {
-    Attached(ReceiverLink),
+    Attached(Attach, ReceiverLink),
     // Detached(ReceiverLink),
     Transfer(ReceiverLink),
 }
@@ -21,7 +21,7 @@ pub enum Message {
 pub(crate) enum Action {
     None,
     AttachSender(SenderLink, Attach),
-    AttachReceiver(ReceiverLink),
+    AttachReceiver(ReceiverLink, Attach),
     DetachSender(SenderLink, Detach),
     DetachReceiver(ReceiverLink, Detach),
     SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
@@ -34,13 +34,20 @@ pub struct Link<S> {
     pub(crate) state: State<S>,
     pub(crate) link: ReceiverLink,
     pub(crate) path: Path<ByteString>,
+    pub(crate) attach: Rc<Attach>,
 }
 
 impl<S> Link<S> {
-    pub(crate) fn new(link: ReceiverLink, state: State<S>, path: ByteString) -> Self {
+    pub(crate) fn new(
+        attach: Attach,
+        link: ReceiverLink,
+        state: State<S>,
+        path: ByteString,
+    ) -> Self {
         Link {
             state,
             link,
+            attach: Rc::new(attach),
             path: Path::new(path),
         }
     }
@@ -53,16 +60,16 @@ impl<S> Link<S> {
         &mut self.path
     }
 
-    pub fn frame(&self) -> &Attach {
-        self.link.frame()
-    }
-
     pub fn state(&self) -> &State<S> {
         &self.state
     }
 
     pub fn handle(&self) -> Handle {
         self.link.handle()
+    }
+
+    pub fn frame(&self) -> &Attach {
+        self.attach.as_ref()
     }
 
     pub fn session(&self) -> &Session {
@@ -88,6 +95,7 @@ impl<S> Clone for Link<S> {
             state: self.state.clone(),
             link: self.link.clone(),
             path: self.path.clone(),
+            attach: self.attach.clone(),
         }
     }
 }
@@ -95,7 +103,7 @@ impl<S> Clone for Link<S> {
 impl<S> fmt::Debug for Link<S> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Link<S>")
-            .field("frame", self.link.frame())
+            .field("frame", self.frame())
             .finish()
     }
 }

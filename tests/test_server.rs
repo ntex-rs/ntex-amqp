@@ -2,7 +2,8 @@ use std::{cell::Cell, convert::TryFrom, rc::Rc, sync::Arc, sync::Mutex};
 
 use ntex::server::test_server;
 use ntex::service::{fn_factory_with_config, fn_service, Service};
-use ntex::{http::Uri, time::sleep, time::Millis, util::Bytes, util::Either, util::Ready};
+use ntex::util::{Bytes, Either, Ready};
+use ntex::{http::Uri, time::sleep, time::Millis};
 use ntex_amqp::{client, error::LinkError, server, types, ControlFrame, ControlFrameKind};
 
 async fn server(
@@ -163,7 +164,7 @@ async fn test_session_end() -> std::io::Result<()> {
                             names.push(lnk.name().clone());
                         }
                         Either::Right(lnk) => {
-                            names.push(lnk.frame().name().clone());
+                            names.push(lnk.name().clone());
                         }
                     }
                 }

@@ -1,8 +1,4 @@
-#![allow(
-    clippy::mutable_key_type,
-    clippy::len_without_is_empty,
-    clippy::return_self_not_must_use
-)]
+#![allow(clippy::mutable_key_type, clippy::len_without_is_empty)]
 
 #[macro_use]
 extern crate derive_more;

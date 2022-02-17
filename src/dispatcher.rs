@@ -87,7 +87,7 @@ where
     ) -> Result<(), AmqpDispatcherError> {
         if let Some(err) = err {
             match &frame.0.get_mut().kind {
-                ControlFrameKind::AttachReceiver(ref link) => {
+                ControlFrameKind::AttachReceiver(_, ref link) => {
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::AttachSender(ref frm, _) => {
@@ -116,14 +116,17 @@ where
             }
         } else {
             match frame.0.get_mut().kind {
-                ControlFrameKind::AttachReceiver(ref link) => {
+                ControlFrameKind::AttachReceiver(ref frm, ref link) => {
                     let link = link.clone();
-                    let fut = self.service.call(types::Message::Attached(link.clone()));
+                    let frm = frm.clone();
+                    let fut = self
+                        .service
+                        .call(types::Message::Attached(frm.clone(), link.clone()));
                     ntex::rt::spawn(async move {
                         if let Err(err) = fut.await {
                             let _ = link.close_with_error(Error::from(err)).await;
                         } else {
-                            link.confirm_receiver_link();
+                            link.confirm_receiver_link(&frm);
                             link.set_link_credit(50);
                         }
                     });
@@ -257,10 +260,10 @@ where
                         *self.ctl_fut.borrow_mut() =
                             Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
                     }
-                    types::Action::AttachReceiver(link) => {
+                    types::Action::AttachReceiver(link, frm) => {
                         let frame = ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::AttachReceiver(link),
+                            ControlFrameKind::AttachReceiver(frm, link),
                         );
                         *self.ctl_fut.borrow_mut() =
                             Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));

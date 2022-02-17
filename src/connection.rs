@@ -21,8 +21,8 @@ pub(crate) struct ConnectionInner {
     pub(crate) sessions_map: HashMap<u16, usize>,
     pub(crate) on_close: Condition,
     pub(crate) error: Option<AmqpProtocolError>,
-    channel_max: usize,
-    pub(crate) max_frame_size: usize,
+    channel_max: u16,
+    pub(crate) max_frame_size: u32,
 }
 
 pub(crate) enum SessionState {
@@ -60,7 +60,7 @@ impl Connection {
             error: None,
             on_close: Condition::new(),
             channel_max: local_config.channel_max,
-            max_frame_size: remote_config.max_frame_size as usize,
+            max_frame_size: remote_config.max_frame_size,
         }))
     }
 
@@ -133,7 +133,7 @@ impl Connection {
                 let entry = inner.sessions.vacant_entry();
                 let token = entry.key();
 
-                if token >= inner.channel_max {
+                if token >= inner.channel_max as usize {
                     log::trace!("Too many channels: {:?}", token);
                     Err(AmqpProtocolError::TooManyChannels)
                 } else {
@@ -377,8 +377,8 @@ impl ConnectionInner {
                                 // receiver link
                                 let link = session
                                     .get_mut()
-                                    .attach_remote_receiver_link(session.clone(), attach);
-                                Ok(Action::AttachReceiver(link))
+                                    .attach_remote_receiver_link(session.clone(), &attach);
+                                Ok(Action::AttachReceiver(link, attach))
                             }
                         }
                     }

@@ -47,7 +47,7 @@ where
     ///
     /// By default channel max value is set to 1024
     pub fn channel_max(&mut self, num: u16) -> &mut Self {
-        self.config.channel_max = num as usize;
+        self.config.channel_max = num;
         self
     }
 

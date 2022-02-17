@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.3] - 2022-02-18
+
+* Do not store Attach frame in ReceiverLink
+
 ## [0.6.2] - 2022-01-18
 
 * Allow to change max message size for receiver link

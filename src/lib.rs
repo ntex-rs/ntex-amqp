@@ -1,5 +1,5 @@
 #![deny(rust_2018_idioms)]
-#![allow(clippy::type_complexity, clippy::return_self_not_must_use)]
+#![allow(clippy::type_complexity)]
 
 #[macro_use]
 extern crate derive_more;
@@ -41,7 +41,7 @@ pub mod codec {
 #[derive(Debug, Clone)]
 pub struct Configuration {
     pub max_frame_size: u32,
-    pub channel_max: usize,
+    pub channel_max: u16,
     pub idle_time_out: Milliseconds,
     pub hostname: Option<ByteString>,
 }
@@ -69,7 +69,7 @@ impl Configuration {
     ///
     /// By default channel max value is set to 1024
     pub fn channel_max(&mut self, num: u16) -> &mut Self {
-        self.channel_max = num as usize;
+        self.channel_max = num;
         self
     }
 
@@ -82,8 +82,8 @@ impl Configuration {
     }
 
     /// Get max frame size for the connection.
-    pub fn get_max_frame_size(&self) -> usize {
-        self.max_frame_size as usize
+    pub fn get_max_frame_size(&self) -> u32 {
+        self.max_frame_size
     }
 
     /// Set idle time-out for the connection in seconds.
@@ -108,7 +108,7 @@ impl Configuration {
             container_id: ByteString::from(Uuid::new_v4().to_simple().to_string()),
             hostname: self.hostname.clone(),
             max_frame_size: self.max_frame_size,
-            channel_max: self.channel_max as u16,
+            channel_max: self.channel_max,
             idle_time_out: if self.idle_time_out > 0 {
                 Some(self.idle_time_out)
             } else {
@@ -143,7 +143,7 @@ impl<'a> From<&'a Open> for Configuration {
     fn from(open: &'a Open) -> Self {
         Configuration {
             max_frame_size: open.max_frame_size(),
-            channel_max: open.channel_max() as usize,
+            channel_max: open.channel_max(),
             idle_time_out: open.idle_time_out().unwrap_or(0),
             hostname: open.hostname().cloned(),
         }

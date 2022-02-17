@@ -193,12 +193,14 @@ impl SenderLinkInner {
         }
         let pool = session.get_ref().memory_pool();
         let delivery_count = frame.initial_delivery_count().unwrap_or(0);
+        let mut name = name.unwrap_or_default();
+        name.trimdown();
 
         SenderLinkInner {
             pool,
+            name,
             delivery_count,
             id: 0,
-            name: name.unwrap_or_default(),
             session: Session::new(session),
             remote_handle: frame.handle(),
             link_credit: 0,
@@ -329,10 +331,10 @@ impl SenderLinkInner {
             let max_frame_size = if max_frame_size > 2048 {
                 max_frame_size - 2048
             } else if max_frame_size == 0 {
-                usize::MAX
+                u32::MAX
             } else {
                 max_frame_size
-            };
+            } as usize;
 
             // body is larger than allowed frame size, send body as a set of transfers
             if body.len() > max_frame_size {
@@ -396,10 +398,10 @@ impl SenderLinkInner {
             let max_frame_size = if max_frame_size > 2048 {
                 max_frame_size - 2048
             } else if max_frame_size == 0 {
-                usize::MAX
+                u32::MAX
             } else {
                 max_frame_size
-            };
+            } as usize;
 
             // body is larger than allowed frame size, send body as a set of transfers
             if body.len() > max_frame_size {
