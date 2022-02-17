@@ -82,6 +82,11 @@ impl SenderLink {
         &self.inner.get_ref().session
     }
 
+    /// Returns available send credit
+    pub fn credit(&self) -> u32 {
+        self.inner.get_ref().link_credit
+    }
+
     /// Send body
     pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
     where

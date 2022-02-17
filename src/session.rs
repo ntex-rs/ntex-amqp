@@ -39,6 +39,11 @@ impl Session {
         &self.inner.get_ref().sink
     }
 
+    /// Get remote window size
+    pub fn remote_window_size(&self) -> u32 {
+        self.inner.get_ref().remote_incoming_window
+    }
+
     pub fn end(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let inner = self.inner.get_mut();
 

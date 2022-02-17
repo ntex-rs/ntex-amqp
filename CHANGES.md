@@ -4,6 +4,10 @@
 
 * Do not store Attach frame in ReceiverLink
 
+* Expose available sender link
+
+* Expose available session remove window size
+
 ## [0.6.2] - 2022-01-18
 
 * Allow to change max message size for receiver link
