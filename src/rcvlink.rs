@@ -247,6 +247,10 @@ impl ReceiverLinkInner {
         self.reader_task.wake();
     }
 
+    pub(crate) fn name(&self) -> &ByteString {
+        &self.name
+    }
+
     pub(crate) fn detached(&mut self) {
         // drop pending transfers
         self.queue.clear();
