@@ -6,7 +6,7 @@ use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
     self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, End,
-    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode,
+    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Source,
     Transfer, TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::AmqpFrame;
@@ -180,7 +180,7 @@ enum SenderLinkState {
 
 #[derive(Debug)]
 enum ReceiverLinkState {
-    Opening(Option<Cell<ReceiverLinkInner>>),
+    Opening(Option<(Cell<ReceiverLinkInner>, Option<Source>)>),
     OpeningLocal(
         Option<(
             Cell<ReceiverLinkInner>,
@@ -521,9 +521,10 @@ impl SessionInner {
         let token = entry.key();
 
         let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, handle, attach));
-        entry.insert(Either::Right(ReceiverLinkState::Opening(Some(
+        entry.insert(Either::Right(ReceiverLinkState::Opening(Some((
             inner.clone(),
-        ))));
+            attach.source().cloned(),
+        )))));
         self.remote_handles.insert(handle, token);
         ReceiverLink::new(inner)
     }
@@ -563,7 +564,7 @@ impl SessionInner {
     ) {
         if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
             if let ReceiverLinkState::Opening(l) = link {
-                if let Some(l) = l.take() {
+                if let Some((l, _)) = l.take() {
                     let attach = Attach(Box::new(codec::AttachInner {
                         max_message_size,
                         name: attach.0.name.clone(),
@@ -600,7 +601,26 @@ impl SessionInner {
     ) {
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
-                ReceiverLinkState::Opening(_inner) => {
+                ReceiverLinkState::Opening(inner) => {
+                    if let Some((inner, source)) = inner.take() {
+                        let attach = Attach(Box::new(codec::AttachInner {
+                            max_message_size: None,
+                            name: inner.name().clone(),
+                            handle: id,
+                            role: Role::Receiver,
+                            snd_settle_mode: SenderSettleMode::Mixed,
+                            rcv_settle_mode: ReceiverSettleMode::First,
+                            source: source,
+                            target: None,
+                            unsettled: None,
+                            incomplete_unsettled: false,
+                            initial_delivery_count: Some(0),
+                            offered_capabilities: None,
+                            desired_capabilities: None,
+                            properties: None,
+                        }));
+                        self.post_frame(attach.into());
+                    }
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,
                         closed,
