@@ -9,7 +9,7 @@ use super::*;
 use crate::error::AmqpParseError;
 use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
 
-#[derive(Clone, Debug, PartialEq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum Frame {
     Open(Open),
     Begin(Begin),
@@ -136,7 +136,7 @@ impl Encode for Frame {
 
 {{#each defs.provides as |provide|}}
 {{#if provide.described}}
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum {{provide.name}} {
 {{#each provide.options as |option|}}
     {{option.ty}}({{option.ty}}),
@@ -183,7 +183,7 @@ pub type {{alias.name}} = {{alias.source}};
 {{/each}}
 
 {{#each defs.enums as |enum|}}
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum {{enum.name}} {
 {{#each enum.items as |item|}}
     {{item.name}},
@@ -281,13 +281,13 @@ fn encode_{{snake dr.name}}_inner(dr: &{{dr.name}}, buf: &mut BytesMut) {
 
 {{#each defs.lists as |list|}}
 {{#if list.boxed}}
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct {{list.name}}(pub Box<{{list.name}}Inner>);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct {{list.name}}Builder(pub Box<{{list.name}}Inner>);
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct {{list.name}}Inner {
     {{#each list.fields as |field|}}
     {{#if field.optional}}
@@ -301,7 +301,7 @@ pub struct {{list.name}}Inner {
     {{/if}}
 }
 {{else}}
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct {{list.name}} {
     {{#each list.fields as |field|}}
     {{#if field.optional}}

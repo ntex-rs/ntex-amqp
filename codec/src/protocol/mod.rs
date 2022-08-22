@@ -115,7 +115,7 @@ impl Encode for MessageId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum ErrorCondition {
     AmqpError(AmqpError),
     ConnectionError(ConnectionError),
@@ -172,7 +172,7 @@ impl Encode for ErrorCondition {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DistributionMode {
     Move,
     Copy,
@@ -236,7 +236,7 @@ impl Default for Properties {
     }
 }
 
-#[derive(Debug, Clone, From, PartialEq)]
+#[derive(Debug, Clone, From, PartialEq, Eq)]
 pub enum TransferBody {
     Data(Bytes),
     Message(Message),

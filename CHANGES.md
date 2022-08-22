@@ -1,5 +1,13 @@
 # Changes
 
+## [0.6.4] - 2022-08-22
+
+* Must respond with attach before detach when rejecting links #24
+
+## [codec-0.8.2] - 2022-08-22
+
+* Missing derives
+
 ## [0.6.3] - 2022-02-18
 
 * Do not store Attach frame in ReceiverLink

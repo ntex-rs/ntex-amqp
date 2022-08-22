@@ -6,7 +6,7 @@ use crate::types::{Descriptor, List, Variant};
 
 use super::SECTION_PREFIX_LENGTH;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageBody {
     pub data: Vec<Bytes>,
     pub sequence: Vec<List>,

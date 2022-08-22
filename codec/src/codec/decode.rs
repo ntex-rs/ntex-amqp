@@ -526,11 +526,11 @@ fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
         // In order to handle time before 1970 correctly, we need to subtract a second
         // and use the nanoseconds field to add it back. This is a result of the nanoseconds
         // parameter being u32
-        let nanoseconds = ((1000 + (millis - (seconds * 1000))) * 1_000_000).abs() as u32;
-        Utc.timestamp(seconds - 1, nanoseconds)
+        let nanoseconds = ((1000 + (millis - (seconds * 1000))) * 1_000_000).unsigned_abs();
+        Utc.timestamp(seconds - 1, nanoseconds as u32)
     } else {
-        let nanoseconds = ((millis - (seconds * 1000)) * 1_000_000).abs() as u32;
-        Utc.timestamp(seconds, nanoseconds)
+        let nanoseconds = ((millis - (seconds * 1000)) * 1_000_000).unsigned_abs();
+        Utc.timestamp(seconds, nanoseconds as u32)
     }
 }
 

@@ -87,6 +87,15 @@ impl SenderLink {
         self.inner.get_ref().link_credit
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.inner.get_ref().closed
+    }
+
+    /// Check link error
+    pub fn error(&self) -> Option<&AmqpProtocolError> {
+        self.inner.get_ref().error.as_ref()
+    }
+
     /// Send body
     pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
     where

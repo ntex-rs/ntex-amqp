@@ -8,7 +8,7 @@ pub const FRAME_TYPE_AMQP: u8 = 0x00;
 pub const FRAME_TYPE_SASL: u8 = 0x01;
 
 /// Represents an AMQP Frame
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AmqpFrame {
     channel_id: u16,
     performative: protocol::Frame,
@@ -38,7 +38,7 @@ impl AmqpFrame {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaslFrame {
     pub body: protocol::SaslFrameBody,
 }
