@@ -10,10 +10,10 @@ use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap}
 use super::body::MessageBody;
 use super::SECTION_PREFIX_LENGTH;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Message(pub Box<MessageInner>);
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageInner {
     pub message_format: Option<MessageFormat>,
     pub header: Option<Header>,

@@ -173,7 +173,7 @@ impl Hash for VariantMap {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Display)]
+#[derive(PartialEq, Eq, Clone, Debug, Display)]
 #[display(fmt = "{:?}", _0)]
 pub struct VecSymbolMap(pub Vec<(Symbol, Variant)>);
 
@@ -209,7 +209,7 @@ impl std::ops::DerefMut for VecSymbolMap {
     }
 }
 
-#[derive(PartialEq, Clone, Debug, Display)]
+#[derive(PartialEq, Eq, Clone, Debug, Display)]
 #[display(fmt = "{:?}", _0)]
 pub struct VecStringMap(pub Vec<(Str, Variant)>);
 

@@ -139,8 +139,8 @@ impl From<String> for Str {
 impl hash::Hash for Str {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {
-            Str::String(s) => (&*s).hash(state),
-            Str::ByteStr(s) => (&*s).hash(state),
+            Str::String(s) => (&**s).hash(state),
+            Str::ByteStr(s) => (&**s).hash(state),
             Str::Static(s) => s.hash(state),
         }
     }
@@ -180,7 +180,7 @@ impl PartialEq<str> for Str {
             Str::String(ref s) => s == other,
             Str::ByteStr(ref s) => {
                 // workaround for possible compiler bug
-                let t: &str = &*s;
+                let t: &str = s;
                 t == other
             }
             Str::Static(s) => *s == other,
@@ -192,7 +192,7 @@ impl fmt::Debug for Str {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Str::String(s) => write!(f, "ST:\"{}\"", s),
-            Str::ByteStr(s) => write!(f, "B:\"{}\"", &*s),
+            Str::ByteStr(s) => write!(f, "B:\"{}\"", s),
             Str::Static(s) => write!(f, "S:\"{}\"", s),
         }
     }

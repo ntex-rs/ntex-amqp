@@ -180,7 +180,7 @@ enum SenderLinkState {
 
 #[derive(Debug)]
 enum ReceiverLinkState {
-    Opening(Option<(Cell<ReceiverLinkInner>, Option<Source>)>),
+    Opening(Box<Option<(Cell<ReceiverLinkInner>, Option<Source>)>>),
     OpeningLocal(
         Option<(
             Cell<ReceiverLinkInner>,
@@ -521,10 +521,10 @@ impl SessionInner {
         let token = entry.key();
 
         let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, handle, attach));
-        entry.insert(Either::Right(ReceiverLinkState::Opening(Some((
+        entry.insert(Either::Right(ReceiverLinkState::Opening(Box::new(Some((
             inner.clone(),
             attach.source().cloned(),
-        )))));
+        ))))));
         self.remote_handles.insert(handle, token);
         ReceiverLink::new(inner)
     }
@@ -604,13 +604,13 @@ impl SessionInner {
                 ReceiverLinkState::Opening(inner) => {
                     if let Some((inner, source)) = inner.take() {
                         let attach = Attach(Box::new(codec::AttachInner {
+                            source,
                             max_message_size: None,
                             name: inner.name().clone(),
                             handle: id,
                             role: Role::Receiver,
                             snd_settle_mode: SenderSettleMode::Mixed,
                             rcv_settle_mode: ReceiverSettleMode::First,
-                            source: source,
                             target: None,
                             unsettled: None,
                             incomplete_unsettled: false,
@@ -622,9 +622,9 @@ impl SessionInner {
                         self.post_frame(attach.into());
                     }
                     let detach = Detach(Box::new(codec::DetachInner {
-                        handle: id,
                         closed,
                         error,
+                        handle: id,
                     }));
                     self.post_frame(detach.into());
                     let _ = tx.send(Ok(()));
