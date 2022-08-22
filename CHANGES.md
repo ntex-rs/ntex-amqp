@@ -1,5 +1,9 @@
 # Changes
 
+## [0.6.4] - 2022-08-22
+
+* Must respond with attach before detach when rejecting links #24
+
 ## [0.6.3] - 2022-02-18
 
 * Do not store Attach frame in ReceiverLink
