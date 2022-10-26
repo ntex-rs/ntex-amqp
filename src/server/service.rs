@@ -42,7 +42,7 @@ impl<St> Server<St, (), (), ()>
 where
     St: 'static,
 {
-    /// Start server buldeing process with provided handshake service
+    /// Start server building process with provided handshake service
     pub fn build<F, H>(handshake: F) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
     where
         F: IntoServiceFactory<H, Handshake>,
@@ -78,7 +78,7 @@ impl<St, H, Ctl> ServerBuilder<St, H, Ctl> {
 
     /// Set handshake timeout.
     ///
-    /// By default handshake timeuot is 5 seconds.
+    /// By default handshake timeout is 5 seconds.
     pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
         self.handshake_timeout = timeout;
         self
