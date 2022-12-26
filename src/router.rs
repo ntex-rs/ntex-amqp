@@ -355,15 +355,8 @@ where
     type Error = Error;
     type Future<'f> = ResourceServiceFut<'f, S, T> where Self: 'f;
 
-    #[inline]
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx).map_err(Error::from)
-    }
-
-    #[inline]
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.service.poll_shutdown(cx, is_error)
-    }
+    ntex::forward_poll_ready!(service);
+    ntex::forward_poll_shutdown!(service);
 
     #[inline]
     fn call(&self, req: Transfer) -> Self::Future<'_> {

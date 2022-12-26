@@ -34,7 +34,7 @@ pub enum ControlFrameKind {
     SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     ProtocolError(AmqpProtocolError),
     Disconnected(Option<io::Error>),
-    Closed(bool),
+    Closed,
 }
 
 impl ControlFrame {

@@ -1,4 +1,4 @@
-use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{fmt, future::Future, marker, pin::Pin, rc::Rc};
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
@@ -286,15 +286,8 @@ where
     type Error = ServerError<H::Error>;
     type Future<'f> = BoxFuture<'f, Result<Self::Response, Self::Error>>;
 
-    #[inline]
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake.poll_ready(cx).map_err(ServerError::Service)
-    }
-
-    #[inline]
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.poll_shutdown(cx, is_error)
-    }
+    ntex::forward_poll_ready!(handshake, ServerError::Service);
+    ntex::forward_poll_shutdown!(handshake);
 
     fn call(&self, req: Io<F>) -> Self::Future<'_> {
         self.create(IoBoxed::from(req))
@@ -315,15 +308,8 @@ where
     type Error = ServerError<H::Error>;
     type Future<'f> = BoxFuture<'f, Result<Self::Response, Self::Error>>;
 
-    #[inline]
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake.poll_ready(cx).map_err(ServerError::Service)
-    }
-
-    #[inline]
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.poll_shutdown(cx, is_error)
-    }
+    ntex::forward_poll_ready!(handshake, ServerError::Service);
+    ntex::forward_poll_shutdown!(handshake);
 
     fn call(&self, req: IoBoxed) -> Self::Future<'_> {
         self.create(req)

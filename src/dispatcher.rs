@@ -122,7 +122,7 @@ where
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }
-                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected(_) => {
+                ControlFrameKind::Closed | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
                 ControlFrameKind::SessionEnded(_) => (),
@@ -164,7 +164,7 @@ where
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }
-                ControlFrameKind::Closed(_) | ControlFrameKind::Disconnected(_) => {
+                ControlFrameKind::Closed | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
                 ControlFrameKind::SessionEnded(_) => (),
@@ -213,7 +213,7 @@ where
         }
     }
 
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
+    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
         let mut shutdown = self.shutdown.borrow_mut();
         if !shutdown.is_some() {
             let sink = self.sink.0.get_mut();
@@ -222,14 +222,14 @@ where
             let ctl_service = self.ctl_service.clone();
             *shutdown = Some(Box::pin(async move {
                 let _ = ctl_service
-                    .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)))
+                    .call(ControlFrame::new_kind(ControlFrameKind::Closed))
                     .await;
             }));
         }
 
         let res0 = shutdown.as_mut().expect("guard above").as_mut().poll(cx);
-        let res1 = self.service.poll_shutdown(cx, is_error);
-        let res2 = self.ctl_service.poll_shutdown(cx, is_error);
+        let res1 = self.service.poll_shutdown(cx);
+        let res2 = self.ctl_service.poll_shutdown(cx);
         if res0.is_pending() || res1.is_pending() || res2.is_pending() {
             Poll::Pending
         } else {
