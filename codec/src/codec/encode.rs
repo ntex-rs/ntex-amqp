@@ -45,7 +45,7 @@ impl ArrayEncode for bool {
         1
     }
     fn array_encode(&self, buf: &mut BytesMut) {
-        buf.put_u8(if *self { 1 } else { 0 });
+        buf.put_u8(u8::from(*self));
     }
 }
 

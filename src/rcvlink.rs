@@ -290,7 +290,7 @@ impl ReceiverLinkInner {
         self.session
             .inner
             .get_mut()
-            .rcv_link_flow(self.handle as u32, self.delivery_count, credit);
+            .rcv_link_flow(self.handle, self.delivery_count, credit);
     }
 
     #[allow(clippy::unnecessary_unwrap)]
