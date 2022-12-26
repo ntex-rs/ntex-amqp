@@ -1,9 +1,9 @@
-use std::{cell, future::Future, marker, pin::Pin, task::Context, task::Poll};
+use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::io::DispatchItem;
 use ntex::service::Service;
 use ntex::time::{sleep, Millis, Sleep};
-use ntex::util::{ready, Either, Ready};
+use ntex::util::{ready, BoxFuture, Either, Ready};
 
 use crate::codec::protocol::Frame;
 use crate::codec::{AmqpCodec, AmqpFrame};
@@ -13,10 +13,15 @@ use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, Recei
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
-    service: Sr,
-    ctl_service: Ctl,
-    ctl_fut: cell::RefCell<Option<(Option<ControlFrame>, Pin<Box<Ctl::Future>>)>>,
-    shutdown: cell::RefCell<Option<Pin<Box<Ctl::Future>>>>,
+    service: Rc<Sr>,
+    ctl_service: Rc<Ctl>,
+    ctl_fut: cell::RefCell<
+        Option<(
+            Option<ControlFrame>,
+            BoxFuture<'static, Result<Ctl::Response, Ctl::Error>>,
+        )>,
+    >,
+    shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
     expire: Sleep,
     idle_timeout: Millis,
 }
@@ -35,13 +40,21 @@ where
     ) -> Self {
         Dispatcher {
             sink,
-            service,
-            ctl_service,
             idle_timeout,
+            service: Rc::new(service),
+            ctl_service: Rc::new(ctl_service),
             ctl_fut: cell::RefCell::new(None),
             shutdown: cell::RefCell::new(None),
             expire: sleep(idle_timeout),
         }
+    }
+
+    fn call_control_service(&self, frame: ControlFrame) {
+        let ctl = self.ctl_service.clone();
+        *self.ctl_fut.borrow_mut() = Some((
+            Some(frame.clone()),
+            Box::pin(async move { ctl.call(frame).await }),
+        ));
     }
 
     fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
@@ -119,11 +132,12 @@ where
                 ControlFrameKind::AttachReceiver(ref frm, ref link) => {
                     let link = link.clone();
                     let frm = frm.clone();
-                    let fut = self
-                        .service
-                        .call(types::Message::Attached(frm.clone(), link.clone()));
+                    let service = self.service.clone();
                     ntex::rt::spawn(async move {
-                        if let Err(err) = fut.await {
+                        let result = service
+                            .call(types::Message::Attached(frm.clone(), link.clone()))
+                            .await;
+                        if let Err(err) = result {
                             let _ = link.close_with_error(Error::from(err)).await;
                         } else {
                             link.confirm_receiver_link(&frm);
@@ -168,10 +182,11 @@ where
 {
     type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
-    type Future = Either<ServiceResult<Sr::Future, Sr::Error>, Ready<Self::Response, Self::Error>>;
+    type Future<'f> =
+        Either<ServiceResult<'f, Sr::Future<'f>, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // idle ttimeout
+        // idle timeout
         self.handle_idle_timeout(cx);
 
         // process control frame
@@ -204,10 +219,12 @@ where
             let sink = self.sink.0.get_mut();
             sink.on_close.notify();
             sink.set_error(AmqpProtocolError::Disconnected);
-            *shutdown = Some(Box::pin(
-                self.ctl_service
-                    .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error))),
-            ));
+            let ctl_service = self.ctl_service.clone();
+            *shutdown = Some(Box::pin(async move {
+                let _ = ctl_service
+                    .call(ControlFrame::new_kind(ControlFrameKind::Closed(is_error)))
+                    .await;
+            }));
         }
 
         let res0 = shutdown.as_mut().expect("guard above").as_mut().poll(cx);
@@ -220,7 +237,7 @@ where
         }
     }
 
-    fn call(&self, request: DispatchItem<AmqpCodec<AmqpFrame>>) -> Self::Future {
+    fn call(&self, request: DispatchItem<AmqpCodec<AmqpFrame>>) -> Self::Future<'_> {
         match request {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]
@@ -245,54 +262,44 @@ where
                     }
                     types::Action::Flow(link, frm) => {
                         // apply flow to specific link
-                        let frame = ControlFrame::new(
+                        self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::Flow(frm, link.clone()),
-                        );
-                        *self.ctl_fut.borrow_mut() =
-                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                        ));
                     }
                     types::Action::AttachSender(link, frame) => {
-                        let frame = ControlFrame::new(
+                        self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::AttachSender(frame, link),
-                        );
-                        *self.ctl_fut.borrow_mut() =
-                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                        ));
                     }
                     types::Action::AttachReceiver(link, frm) => {
-                        let frame = ControlFrame::new(
+                        self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::AttachReceiver(frm, link),
-                        );
-                        *self.ctl_fut.borrow_mut() =
-                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                        ));
                     }
                     types::Action::DetachSender(link, frm) => {
-                        let frame = ControlFrame::new(
+                        self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::DetachSender(frm, link.clone()),
-                        );
-                        *self.ctl_fut.borrow_mut() =
-                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                        ));
                     }
                     types::Action::DetachReceiver(link, frm) => {
-                        let frame = ControlFrame::new(
+                        self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::DetachReceiver(frm, link.clone()),
-                        );
-                        *self.ctl_fut.borrow_mut() =
-                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                        ));
                     }
                     types::Action::SessionEnded(links) => {
-                        let frame = ControlFrame::new_kind(ControlFrameKind::SessionEnded(links));
-                        *self.ctl_fut.borrow_mut() =
-                            Some((None, Box::pin(self.ctl_service.call(frame))));
+                        self.call_control_service(ControlFrame::new_kind(
+                            ControlFrameKind::SessionEnded(links),
+                        ));
                     }
                     types::Action::RemoteClose(err) => {
-                        let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err));
-                        *self.ctl_fut.borrow_mut() =
-                            Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                        self.call_control_service(ControlFrame::new_kind(
+                            ControlFrameKind::ProtocolError(err),
+                        ));
                     }
                     types::Action::None => (),
                 };
@@ -300,23 +307,21 @@ where
                 Either::Right(Ready::Ok(None))
             }
             DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
-                let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(err.into()));
-                *self.ctl_fut.borrow_mut() =
-                    Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                    err.into(),
+                )));
                 Either::Right(Ready::Ok(None))
             }
             DispatchItem::KeepAliveTimeout => {
-                let frame = ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     AmqpProtocolError::KeepAliveTimeout,
-                ));
-                *self.ctl_fut.borrow_mut() =
-                    Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                )));
                 Either::Right(Ready::Ok(None))
             }
             DispatchItem::Disconnect(e) => {
-                let frame = ControlFrame::new_kind(ControlFrameKind::Disconnected(e));
-                *self.ctl_fut.borrow_mut() =
-                    Some((Some(frame.clone()), Box::pin(self.ctl_service.call(frame))));
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
+                    e,
+                )));
                 Either::Right(Ready::Ok(None))
             }
             DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
@@ -327,15 +332,17 @@ where
 }
 
 pin_project_lite::pin_project! {
-    pub struct ServiceResult<F, E> {
+    pub struct ServiceResult<'f, F, E>
+    where F: 'f
+    {
         #[pin]
         fut: F,
         link: ReceiverLink,
-        _t: marker::PhantomData<E>,
+        _t: marker::PhantomData<&'f E>,
     }
 }
 
-impl<F, E> Future for ServiceResult<F, E>
+impl<'f, F, E> Future for ServiceResult<'f, F, E>
 where
     F: Future<Output = Result<(), E>>,
     E: Into<Error>,

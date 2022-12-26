@@ -1,5 +1,9 @@
 # Changes
 
+## [0.7.0] - 2022-xx-xx
+
+* Use ntex-service 0.4
+
 ## [0.6.4] - 2022-08-22
 
 * Must respond with attach before detach when rejecting links #24

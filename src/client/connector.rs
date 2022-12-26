@@ -145,13 +145,11 @@ where
     IoBoxed: From<T::Response>,
 {
     /// Connect to amqp server
-    pub fn connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
+    pub async fn connect(&self, address: A) -> Result<Client, ConnectError> {
         let fut = timeout_checked(self.handshake_timeout, self._connect(address));
-        async move {
-            match fut.await {
-                Ok(res) => res.map_err(From::from),
-                Err(_) => Err(ConnectError::HandshakeTimeout),
-            }
+        match fut.await {
+            Ok(res) => res.map_err(From::from),
+            Err(_) => Err(ConnectError::HandshakeTimeout),
         }
     }
 
@@ -165,35 +163,27 @@ where
         _connect_plain(io, self.config.clone())
     }
 
-    fn _connect(&self, address: A) -> impl Future<Output = Result<Client, ConnectError>> {
-        let fut = self.connector.call(Connect::new(address));
+    async fn _connect(&self, address: A) -> Result<Client, ConnectError> {
+        let io = self.connector.call(Connect::new(address)).await?;
         let config = self.config.clone();
         let pool = self.pool;
         let disconnect = self.disconnect_timeout;
 
-        async move {
-            trace!("Negotiation client protocol id: Amqp");
+        trace!("Negotiation client protocol id: Amqp");
 
-            let io = IoBoxed::from(fut.await?);
-            io.set_memory_pool(pool);
-            io.set_disconnect_timeout(disconnect.into());
+        let io = IoBoxed::from(io);
+        io.set_memory_pool(pool);
+        io.set_disconnect_timeout(disconnect.into());
 
-            _connect_plain(io, config).await
-        }
+        _connect_plain(io, config).await
     }
 
     /// Connect to amqp server
-    pub fn connect_sasl(
-        &self,
-        addr: A,
-        auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client, ConnectError>> {
+    pub async fn connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
         let fut = timeout_checked(self.handshake_timeout, self._connect_sasl(addr, auth));
-        async move {
-            match fut.await {
-                Ok(res) => res.map_err(From::from),
-                Err(_) => Err(ConnectError::HandshakeTimeout),
-            }
+        match fut.await {
+            Ok(res) => res.map_err(From::from),
+            Err(_) => Err(ConnectError::HandshakeTimeout),
         }
     }
 
@@ -212,23 +202,17 @@ where
         _connect_sasl(io, auth, config)
     }
 
-    fn _connect_sasl(
-        &self,
-        addr: A,
-        auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client, ConnectError>> {
-        let fut = self.connector.call(Connect::new(addr));
+    async fn _connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
+        let io = self.connector.call(Connect::new(addr)).await?;
         let config = self.config.clone();
         let pool = self.pool;
         let disconnect = self.disconnect_timeout;
 
-        async move {
-            let io = IoBoxed::from(fut.await?);
-            io.set_memory_pool(pool);
-            io.set_disconnect_timeout(disconnect.into());
+        let io = IoBoxed::from(io);
+        io.set_memory_pool(pool);
+        io.set_disconnect_timeout(disconnect.into());
 
-            _connect_sasl(io, auth, config).await
-        }
+        _connect_sasl(io, auth, config).await
     }
 }
 

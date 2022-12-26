@@ -1,20 +1,9 @@
-use ntex::service::{fn_factory_with_config, Service};
-use ntex::util::Ready;
+use ntex::service::{boxed::BoxService, fn_factory_with_config};
 use ntex_amqp::{error::AmqpError, error::LinkError, server};
 
 async fn server(
     link: server::Link<()>,
-) -> Result<
-    Box<
-        dyn Service<
-                server::Transfer,
-                Response = server::Outcome,
-                Error = AmqpError,
-                Future = Ready<server::Outcome, AmqpError>,
-            > + 'static,
-    >,
-    LinkError,
-> {
+) -> Result<BoxService<server::Transfer, server::Outcome, AmqpError>, LinkError> {
     println!("OPEN LINK: {:?}", link);
     Err(LinkError::force_detach().description("unimplemented"))
 }
