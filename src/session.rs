@@ -451,7 +451,7 @@ impl SessionInner {
             match link {
                 SenderLinkState::Opening(_) | SenderLinkState::Established(_) => {
                     let detach = Detach(Box::new(codec::DetachInner {
-                        handle: id as u32,
+                        handle: id,
                         closed,
                         error,
                     }));

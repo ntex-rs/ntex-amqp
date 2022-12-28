@@ -139,8 +139,8 @@ impl From<String> for Str {
 impl hash::Hash for Str {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {
-            Str::String(s) => (&**s).hash(state),
-            Str::ByteStr(s) => (&**s).hash(state),
+            Str::String(s) => (**s).hash(state),
+            Str::ByteStr(s) => (**s).hash(state),
             Str::Static(s) => s.hash(state),
         }
     }

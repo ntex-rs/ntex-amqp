@@ -126,7 +126,7 @@ impl Variant {
 
     pub fn as_int(&self) -> Option<i32> {
         match self {
-            Variant::Int(v) => Some(*v as i32),
+            Variant::Int(v) => Some(*v),
             _ => None,
         }
     }
@@ -140,7 +140,7 @@ impl Variant {
             Variant::Byte(v) => Some(*v as i64),
             Variant::Short(v) => Some(*v as i64),
             Variant::Int(v) => Some(*v as i64),
-            Variant::Long(v) => Some(*v as i64),
+            Variant::Long(v) => Some(*v),
             _ => None,
         }
     }

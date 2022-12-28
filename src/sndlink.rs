@@ -165,6 +165,10 @@ impl SenderLink {
         self.inner.get_mut().on_disposition = Box::new(f);
     }
 
+    pub fn max_message_size(&self) -> Option<usize> {
+        self.inner.get_mut().max_message_size
+    }
+
     pub fn set_max_message_size(&self, value: usize) {
         self.inner.get_mut().max_message_size = Some(value)
     }

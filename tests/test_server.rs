@@ -1,26 +1,16 @@
 use std::{cell::Cell, convert::TryFrom, rc::Rc, sync::Arc, sync::Mutex};
 
 use ntex::server::test_server;
-use ntex::service::{fn_factory_with_config, fn_service, Service};
+use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
 use ntex::util::{Bytes, Either, Ready};
 use ntex::{http::Uri, time::sleep, time::Millis};
 use ntex_amqp::{client, error::LinkError, server, types, ControlFrame, ControlFrameKind};
 
 async fn server(
     link: types::Link<()>,
-) -> Result<
-    Box<
-        dyn Service<
-                types::Transfer,
-                Response = types::Outcome,
-                Error = LinkError,
-                Future = Ready<types::Outcome, LinkError>,
-            > + 'static,
-    >,
-    LinkError,
-> {
+) -> Result<BoxService<types::Transfer, types::Outcome, LinkError>, LinkError> {
     println!("OPEN LINK: {:?}", link);
-    Ok(Box::new(fn_service(|_req| {
+    Ok(boxed::service(fn_service(|_req| {
         Ready::Ok(types::Outcome::Accept)
     })))
 }
@@ -193,6 +183,7 @@ async fn test_session_end() -> std::io::Result<()> {
         .await
         .unwrap();
     link.send(Bytes::from(b"test".as_ref())).await.unwrap();
+    sleep(Millis(150)).await;
 
     session.end().await.unwrap();
     assert_eq!(link_names.lock().unwrap()[0], "test");

@@ -1,8 +1,9 @@
-use std::{fmt, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{fmt, future::Future, marker, pin::Pin, rc::Rc};
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Service, ServiceFactory};
 use ntex::time::{timeout_checked, Millis, Seconds};
+use ntex::util::BoxFuture;
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -163,11 +164,11 @@ where
     type Error = ServerError<H::Error>;
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
+    type Future<'f> = BoxFuture<'f, Result<Self::Service, Self::InitError>>;
 
-    fn new_service(&self, _: ()) -> Self::Future {
+    fn create(&self, _: ()) -> Self::Future<'_> {
         let inner = self.inner.clone();
-        let fut = self.handshake.new_service(());
+        let fut = self.handshake.create(());
 
         Box::pin(async move {
             fut.await.map(move |handshake| ServerHandler {
@@ -192,11 +193,11 @@ where
     type Error = ServerError<H::Error>;
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Service, Self::InitError>>>>;
+    type Future<'f> = BoxFuture<'f, Result<Self::Service, Self::InitError>>;
 
-    fn new_service(&self, _: ()) -> Self::Future {
+    fn create(&self, _: ()) -> Self::Future<'_> {
         let inner = self.inner.clone();
-        let fut = self.handshake.new_service(());
+        let fut = self.handshake.create(());
 
         Box::pin(async move {
             fut.await.map(move |handshake| ServerHandler {
@@ -246,13 +247,13 @@ where
                 .map_err(|_| HandshakeError::Timeout)??;
 
             // create publish service
-            let pb_srv = inner.publish.new_service(st.clone()).await.map_err(|e| {
+            let pb_srv = inner.publish.create(st.clone()).await.map_err(|e| {
                 error!("Publish service init error: {:?}", e);
                 ServerError::PublishServiceError
             })?;
 
             // create control service
-            let ctl_srv = inner.control.new_service(st.clone()).await.map_err(|e| {
+            let ctl_srv = inner.control.create(st.clone()).await.map_err(|e| {
                 error!("Control service init error: {:?}", e);
                 ServerError::ControlServiceError
             })?;
@@ -283,19 +284,12 @@ where
 {
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future<'f> = BoxFuture<'f, Result<Self::Response, Self::Error>>;
 
-    #[inline]
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake.poll_ready(cx).map_err(ServerError::Service)
-    }
+    ntex::forward_poll_ready!(handshake, ServerError::Service);
+    ntex::forward_poll_shutdown!(handshake);
 
-    #[inline]
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.poll_shutdown(cx, is_error)
-    }
-
-    fn call(&self, req: Io<F>) -> Self::Future {
+    fn call(&self, req: Io<F>) -> Self::Future<'_> {
         self.create(IoBoxed::from(req))
     }
 }
@@ -312,19 +306,12 @@ where
 {
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future<'f> = BoxFuture<'f, Result<Self::Response, Self::Error>>;
 
-    #[inline]
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.handshake.poll_ready(cx).map_err(ServerError::Service)
-    }
+    ntex::forward_poll_ready!(handshake, ServerError::Service);
+    ntex::forward_poll_shutdown!(handshake);
 
-    #[inline]
-    fn poll_shutdown(&self, cx: &mut Context<'_>, is_error: bool) -> Poll<()> {
-        self.handshake.poll_shutdown(cx, is_error)
-    }
-
-    fn call(&self, req: IoBoxed) -> Self::Future {
+    fn call(&self, req: IoBoxed) -> Self::Future<'_> {
         self.create(req)
     }
 }
