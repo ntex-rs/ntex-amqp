@@ -1,5 +1,11 @@
 # Changes
 
+## [0.7.0] - 2023-01-04
+
+* 0.7 Release
+
+* Use uuid-1.2
+
 ## [0.7.0-beta.0] - 2022-12-28
 
 * Migrate to ntex-service 1.0

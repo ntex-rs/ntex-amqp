@@ -105,7 +105,7 @@ impl Configuration {
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
         Open(Box::new(OpenInner {
-            container_id: ByteString::from(Uuid::new_v4().to_simple().to_string()),
+            container_id: ByteString::from(Uuid::new_v4().simple().to_string()),
             hostname: self.hostname.clone(),
             max_frame_size: self.max_frame_size,
             channel_max: self.channel_max,
