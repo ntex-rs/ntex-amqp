@@ -1,5 +1,9 @@
 # Changes
 
+## [0.7.1] - 2023-03-01
+
+* Add SendLink::on_credit_update() helper, allow to wait for credit updates
+
 ## [0.7.0] - 2023-01-04
 
 * 0.7 Release

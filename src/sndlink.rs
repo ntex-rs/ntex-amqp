@@ -29,6 +29,7 @@ pub(crate) struct SenderLinkInner {
     error: Option<AmqpProtocolError>,
     closed: bool,
     on_close: condition::Condition,
+    on_credit: condition::Condition,
     on_disposition: Box<dyn Fn(Bytes, Result<Disposition, AmqpProtocolError>)>,
     max_message_size: Option<usize>,
     pool: PoolRef,
@@ -158,6 +159,14 @@ impl SenderLink {
         self.inner.get_ref().on_close.wait()
     }
 
+    /// Notify when credit get updated
+    ///
+    /// After notification credit must be checked again,
+    /// other waiters could consume it.
+    pub fn on_credit_update(&self) -> condition::Waiter {
+        self.inner.get_ref().on_credit.wait()
+    }
+
     pub fn on_disposition<F>(&self, f: F)
     where
         F: Fn(Bytes, Result<Disposition, AmqpProtocolError>) + 'static,
@@ -198,6 +207,7 @@ impl SenderLinkInner {
             closed: false,
             delivery_tag: 0,
             on_close: condition::Condition::new(),
+            on_credit: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
         }
     }
@@ -227,6 +237,7 @@ impl SenderLinkInner {
             error: None,
             closed: false,
             on_close: condition::Condition::new(),
+            on_credit: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
             max_message_size: frame
                 .max_message_size()
@@ -273,6 +284,7 @@ impl SenderLinkInner {
         } else {
             self.closed = true;
             self.on_close.notify();
+            self.on_credit.notify();
 
             let (tx, rx) = oneshot::channel();
 
@@ -326,6 +338,11 @@ impl SenderLinkInner {
                 } else {
                     break;
                 }
+            }
+
+            // notify available credit waiters
+            if self.link_credit > 0 {
+                self.on_credit.notify();
             }
         }
     }
