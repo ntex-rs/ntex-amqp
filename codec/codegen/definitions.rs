@@ -319,7 +319,7 @@ pub struct {{list.name}} {
 impl {{list.name}} {
     {{#if list.boxed}}
     pub fn build() -> {{list.name}}Builder {
-        {{list.name}}Builder(Box::new({{list.name}}Inner::default()))
+        {{list.name}}Builder(Box::default())
     }
     {{/if}}
 

@@ -63,31 +63,57 @@ impl SenderLink {
         SenderLink { inner }
     }
 
+    #[inline]
     /// Id of the sender link
     pub fn id(&self) -> u32 {
         self.inner.id as u32
     }
 
+    #[inline]
     /// Name of the sender link
     pub fn name(&self) -> &ByteString {
         &self.inner.name
     }
 
+    #[inline]
     /// Remote handle
     pub fn remote_handle(&self) -> Handle {
         self.inner.remote_handle
     }
 
+    #[inline]
     /// Reference to session
     pub fn session(&self) -> &Session {
         &self.inner.get_ref().session
     }
 
+    #[inline]
     /// Returns available send credit
     pub fn credit(&self) -> u32 {
         self.inner.get_ref().link_credit
     }
 
+    /// Get notification when packet could be send to the peer.
+    ///
+    /// Result indicates if connection is alive
+    pub async fn ready(&self) -> bool {
+        loop {
+            let waiter = {
+                let inner = self.inner.get_ref();
+                if inner.closed {
+                    return false;
+                }
+                if inner.link_credit > 0 {
+                    return true;
+                }
+                inner.on_credit.wait()
+            };
+            waiter.await
+        }
+    }
+
+    #[inline]
+    /// Check is link is closed
     pub fn is_closed(&self) -> bool {
         self.inner.get_ref().closed
     }
