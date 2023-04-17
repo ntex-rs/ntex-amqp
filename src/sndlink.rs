@@ -332,21 +332,24 @@ impl SenderLinkInner {
     pub(crate) fn apply_flow(&mut self, flow: &Flow) {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
-            trace!(
-                "Apply sender link {:?} flow, credit: {:?} flow count: {:?}, delivery count: {:?}",
-                self.name,
-                credit,
-                flow.delivery_count().unwrap_or(0),
-                self.delivery_count
-            );
-
             let delta = flow
                 .delivery_count()
                 .unwrap_or(0)
                 .saturating_add(credit)
                 .saturating_sub(self.delivery_count);
-            self.link_credit += delta;
 
+            trace!(
+                "Apply sender link {:?} flow, credit: {:?}({:?}) flow count: {:?}, delivery count: {:?} pending: {:?} new credit {:?}",
+                self.name,
+                credit,
+                delta,
+                flow.delivery_count().unwrap_or(0),
+                self.delivery_count,
+                self.pending_transfers.len(),
+                self.link_credit
+            );
+
+            self.link_credit += delta;
             let session = self.session.inner.get_mut();
 
             // credit became available => drain pending_transfers
@@ -477,6 +480,10 @@ impl SenderLinkInner {
 
                 let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
                 let tag = self.get_tag(tag);
+                log::trace!(
+                    "Body size if larger than max size, sending multiple tranfers for {:?}",
+                    tag
+                );
 
                 self.send_inner(
                     chunk.into(),
@@ -489,15 +496,18 @@ impl SenderLinkInner {
 
                     // last chunk
                     if body.is_empty() {
+                        log::trace!("Sending last tranfer for {:?}", tag);
                         self.send_inner(chunk.into(), message_format, TransferState::Last);
                         break;
                     }
 
+                    log::trace!("Sending chunk tranfer for {:?}", tag);
                     self.send_inner(chunk.into(), message_format, TransferState::Continue);
                 }
                 Ok(tag)
             } else {
                 let tag = self.get_tag(tag);
+                log::trace!("Sending non-blocking tranfer for {:?}", tag);
                 let st =
                     TransferState::Only(DeliveryPromise::new_link(link, tag.clone()), tag.clone());
                 self.send_inner(body, message_format, st);
@@ -512,10 +522,13 @@ impl SenderLinkInner {
         message_format: Option<MessageFormat>,
         state: TransferState,
     ) {
-        if self.link_credit == 0 {
+        if self.link_credit == 0 || !self.pending_transfers.is_empty() {
             log::trace!(
-                "Sender link credit is 0, push to pending queue hnd:{} {:?}, queue size: {}",
-                self.id as u32,
+                "Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}) {:?}, queue size: {}",
+                self.link_credit,
+                self.name,
+                self.id,
+                self.remote_handle,
                 state,
                 self.pending_transfers.len()
             );
@@ -526,6 +539,16 @@ impl SenderLinkInner {
                 body: Some(body),
             });
         } else {
+            log::trace!(
+                "Sender link credit is {:?}, hnd:{}({} -> {}) {:?}, queue size: {}",
+                self.link_credit,
+                self.name,
+                self.id,
+                self.remote_handle,
+                state,
+                self.pending_transfers.len()
+            );
+
             self.link_credit -= 1;
             self.delivery_count = self.delivery_count.saturating_add(1);
             self.session.inner.get_mut().send_transfer(

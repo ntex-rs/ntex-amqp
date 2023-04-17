@@ -382,7 +382,7 @@ impl SessionInner {
         &mut self,
         mut frame: Attach,
     ) -> oneshot::Receiver<Result<Cell<SenderLinkInner>, AmqpProtocolError>> {
-        trace!("Local sender link opening: {:?}", frame.name());
+        // trace!("Local sender link opening: {:?}", frame.name());
         let (tx, rx) = oneshot::channel();
 
         let entry = self.links.vacant_entry();
@@ -390,6 +390,7 @@ impl SessionInner {
         entry.insert(Either::Left(SenderLinkState::Opening(Some(tx))));
 
         frame.0.handle = token as Handle;
+        trace!("Local sender link opening: {:#?}", frame.0);
 
         self.links_by_name.insert(frame.0.name.clone(), token);
         self.post_frame(Frame::Attach(frame));
@@ -668,6 +669,7 @@ impl SessionInner {
             match frame {
                 Frame::Flow(flow) => {
                     // apply link flow
+                    log::trace!("FLOW FRAME: {:#?}", flow.0);
                     if let Some(Either::Left(link)) = flow
                         .handle()
                         .and_then(|h| self.remote_handles.get(&h).copied())
@@ -756,10 +758,12 @@ impl SessionInner {
                 Some(Either::Left(item)) => {
                     if item.is_opening() {
                         trace!(
-                            "Local sender link attached: {:?} {} -> {}",
+                            "Local sender link attached: {:?} {} -> {}, {:?} {:?}",
                             name,
                             index,
-                            attach.handle()
+                            attach.handle(),
+                            self.remote_handles,
+                            self.remote_handles.contains_key(&attach.handle())
                         );
 
                         self.remote_handles.insert(attach.handle(), *index);
@@ -942,38 +946,33 @@ impl SessionInner {
         if cfg!(feature = "frame-trace") {
             trace!("Settle delivery: {:#?}", disposition);
         } else {
+            trace!("Settle delivery: {:#?}", disposition);
             trace!(
-                "Settle delivery from {}, state {:?} settled: {:?}",
+                "Settle delivery from {} - {}, state {:?} settled: {:?}",
                 from,
+                to,
                 disposition.state(),
                 disposition.settled()
             );
         }
 
-        if from == to {
-            if let Some(val) = self.unsettled_deliveries.remove(&from) {
-                if !disposition.settled() {
-                    let mut disp = disposition.clone();
-                    disp.0.role = Role::Sender;
-                    disp.0.settled = true;
-                    disp.0.state = Some(DeliveryState::Accepted(Accepted {}));
-                    self.post_frame(Frame::Disposition(disp));
-                }
-                val.ready(Ok(disposition));
-            }
-        } else {
-            if !disposition.settled() {
-                let mut disp = disposition.clone();
-                disp.0.role = Role::Sender;
-                disp.0.settled = true;
-                disp.0.state = Some(DeliveryState::Accepted(Accepted {}));
-                self.post_frame(Frame::Disposition(disp));
-            }
+        if !disposition.settled() {
+            let mut disp = disposition.clone();
+            disp.0.role = Role::Sender;
+            disp.0.settled = true;
+            disp.0.state = Some(DeliveryState::Accepted(Accepted {}));
+            self.post_frame(Frame::Disposition(disp));
+        }
 
-            for k in from..=to {
-                if let Some(val) = self.unsettled_deliveries.remove(&k) {
-                    val.ready(Ok(disposition.clone()));
-                }
+        for k in from..=to {
+            if let Some(val) = self.unsettled_deliveries.remove(&k) {
+                val.ready(Ok(disposition.clone()));
+            } else {
+                log::error!(
+                    "Could not find handler for {:?}, {:?}",
+                    disposition,
+                    self.unsettled_deliveries.len()
+                );
             }
         }
     }

@@ -34,6 +34,8 @@ pin-project-lite = "0.2"
 slab = "0.4"
 uuid = { version = "1.2", features = ["v4"] }
 
+backtrace = "*"
+
 [dev-dependencies]
 env_logger = "0.10"
 ntex = { version = "0.6.3", features = ["tokio"] }
