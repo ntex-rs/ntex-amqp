@@ -1033,7 +1033,7 @@ pub struct ErrorInner {
 }
 impl Error {
     pub fn build() -> ErrorBuilder {
-        ErrorBuilder(Box::new(ErrorInner::default()))
+        ErrorBuilder(Box::default())
     }
     #[inline]
     pub fn condition(&self) -> &ErrorCondition {
@@ -1196,7 +1196,7 @@ pub struct OpenInner {
 }
 impl Open {
     pub fn build() -> OpenBuilder {
-        OpenBuilder(Box::new(OpenInner::default()))
+        OpenBuilder(Box::default())
     }
     #[inline]
     pub fn container_id(&self) -> &ByteString {
@@ -1534,7 +1534,7 @@ pub struct BeginInner {
 }
 impl Begin {
     pub fn build() -> BeginBuilder {
-        BeginBuilder(Box::new(BeginInner::default()))
+        BeginBuilder(Box::default())
     }
     #[inline]
     pub fn remote_channel(&self) -> Option<u16> {
@@ -1831,7 +1831,7 @@ pub struct AttachInner {
 }
 impl Attach {
     pub fn build() -> AttachBuilder {
-        AttachBuilder(Box::new(AttachInner::default()))
+        AttachBuilder(Box::default())
     }
     #[inline]
     pub fn name(&self) -> &ByteString {
@@ -2271,7 +2271,7 @@ pub struct FlowInner {
 }
 impl Flow {
     pub fn build() -> FlowBuilder {
-        FlowBuilder(Box::new(FlowInner::default()))
+        FlowBuilder(Box::default())
     }
     #[inline]
     pub fn next_incoming_id(&self) -> Option<TransferNumber> {
@@ -2639,7 +2639,7 @@ pub struct TransferInner {
 }
 impl Transfer {
     pub fn build() -> TransferBuilder {
-        TransferBuilder(Box::new(TransferInner::default()))
+        TransferBuilder(Box::default())
     }
     #[inline]
     pub fn handle(&self) -> Handle {
@@ -3013,7 +3013,7 @@ pub struct DispositionInner {
 }
 impl Disposition {
     pub fn build() -> DispositionBuilder {
-        DispositionBuilder(Box::new(DispositionInner::default()))
+        DispositionBuilder(Box::default())
     }
     #[inline]
     pub fn role(&self) -> Role {
@@ -3244,7 +3244,7 @@ pub struct DetachInner {
 }
 impl Detach {
     pub fn build() -> DetachBuilder {
-        DetachBuilder(Box::new(DetachInner::default()))
+        DetachBuilder(Box::default())
     }
     #[inline]
     pub fn handle(&self) -> Handle {

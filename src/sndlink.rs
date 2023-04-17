@@ -29,6 +29,7 @@ pub(crate) struct SenderLinkInner {
     error: Option<AmqpProtocolError>,
     closed: bool,
     on_close: condition::Condition,
+    on_credit: condition::Condition,
     on_disposition: Box<dyn Fn(Bytes, Result<Disposition, AmqpProtocolError>)>,
     max_message_size: Option<usize>,
     pool: PoolRef,
@@ -62,31 +63,57 @@ impl SenderLink {
         SenderLink { inner }
     }
 
+    #[inline]
     /// Id of the sender link
     pub fn id(&self) -> u32 {
         self.inner.id as u32
     }
 
+    #[inline]
     /// Name of the sender link
     pub fn name(&self) -> &ByteString {
         &self.inner.name
     }
 
+    #[inline]
     /// Remote handle
     pub fn remote_handle(&self) -> Handle {
         self.inner.remote_handle
     }
 
+    #[inline]
     /// Reference to session
     pub fn session(&self) -> &Session {
         &self.inner.get_ref().session
     }
 
+    #[inline]
     /// Returns available send credit
     pub fn credit(&self) -> u32 {
         self.inner.get_ref().link_credit
     }
 
+    /// Get notification when packet could be send to the peer.
+    ///
+    /// Result indicates if connection is alive
+    pub async fn ready(&self) -> bool {
+        loop {
+            let waiter = {
+                let inner = self.inner.get_ref();
+                if inner.closed {
+                    return false;
+                }
+                if inner.link_credit > 0 {
+                    return true;
+                }
+                inner.on_credit.wait()
+            };
+            waiter.await
+        }
+    }
+
+    #[inline]
+    /// Check is link is closed
     pub fn is_closed(&self) -> bool {
         self.inner.get_ref().closed
     }
@@ -158,6 +185,14 @@ impl SenderLink {
         self.inner.get_ref().on_close.wait()
     }
 
+    /// Notify when credit get updated
+    ///
+    /// After notification credit must be checked again,
+    /// other waiters could consume it.
+    pub fn on_credit_update(&self) -> condition::Waiter {
+        self.inner.get_ref().on_credit.wait()
+    }
+
     pub fn on_disposition<F>(&self, f: F)
     where
         F: Fn(Bytes, Result<Disposition, AmqpProtocolError>) + 'static,
@@ -198,6 +233,7 @@ impl SenderLinkInner {
             closed: false,
             delivery_tag: 0,
             on_close: condition::Condition::new(),
+            on_credit: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
         }
     }
@@ -227,6 +263,7 @@ impl SenderLinkInner {
             error: None,
             closed: false,
             on_close: condition::Condition::new(),
+            on_credit: condition::Condition::new(),
             on_disposition: Box::new(|_, _| ()),
             max_message_size: frame
                 .max_message_size()
@@ -273,6 +310,7 @@ impl SenderLinkInner {
         } else {
             self.closed = true;
             self.on_close.notify();
+            self.on_credit.notify();
 
             let (tx, rx) = oneshot::channel();
 
@@ -326,6 +364,11 @@ impl SenderLinkInner {
                 } else {
                     break;
                 }
+            }
+
+            // notify available credit waiters
+            if self.link_credit > 0 {
+                self.on_credit.notify();
             }
         }
     }
