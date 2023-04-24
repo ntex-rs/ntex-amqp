@@ -1,26 +1,22 @@
 use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::io::DispatchItem;
-use ntex::service::Service;
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{ready, BoxFuture, Either, Ready};
+use ntex::{io::DispatchItem, service::Service, task::LocalWaker};
 
-use crate::codec::protocol::Frame;
-use crate::codec::{AmqpCodec, AmqpFrame};
+use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
 use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
+
+type ControlItem<R, E> = (ControlFrame, BoxFuture<'static, Result<R, E>>);
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
     service: Rc<Sr>,
     ctl_service: Rc<Ctl>,
-    ctl_fut: cell::RefCell<
-        Option<(
-            Option<ControlFrame>,
-            BoxFuture<'static, Result<Ctl::Response, Ctl::Error>>,
-        )>,
-    >,
+    ctl_fut: cell::RefCell<Vec<ControlItem<Ctl::Response, Ctl::Error>>>,
+    ctl_waker: LocalWaker,
     shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
     expire: Sleep,
     idle_timeout: Millis,
@@ -43,7 +39,8 @@ where
             idle_timeout,
             service: Rc::new(service),
             ctl_service: Rc::new(ctl_service),
-            ctl_fut: cell::RefCell::new(None),
+            ctl_fut: cell::RefCell::new(Vec::new()),
+            ctl_waker: LocalWaker::new(),
             shutdown: cell::RefCell::new(None),
             expire: sleep(idle_timeout),
         }
@@ -51,10 +48,11 @@ where
 
     fn call_control_service(&self, frame: ControlFrame) {
         let ctl = self.ctl_service.clone();
-        *self.ctl_fut.borrow_mut() = Some((
-            Some(frame.clone()),
+        self.ctl_fut.borrow_mut().push((
+            frame.clone(),
             Box::pin(async move { ctl.call(frame).await }),
         ));
+        self.ctl_waker.wake();
     }
 
     fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
@@ -70,27 +68,32 @@ where
     }
 
     fn handle_control_fut(&self, cx: &mut Context<'_>) -> Result<bool, AmqpDispatcherError> {
+        let mut ready = true;
         let mut inner = self.ctl_fut.borrow_mut();
 
         // process control frame
-        if let Some(ref mut item) = &mut *inner {
-            match Pin::new(&mut item.1).poll(cx) {
-                Poll::Ready(Ok(_)) => {
-                    let (frame, _) = inner.take().unwrap();
-                    if let Some(frame) = frame {
-                        self.handle_control_frame(&frame, None)?;
-                    }
+        let mut idx = 0;
+        while inner.len() > idx {
+            let item = &mut inner[idx];
+            let res = match Pin::new(&mut item.1).poll(cx) {
+                Poll::Pending => {
+                    idx += 1;
+                    ready = false;
+                    continue;
                 }
-                Poll::Pending => return Ok(false),
-                Poll::Ready(Err(e)) => {
-                    let (frame, _) = inner.take().unwrap();
-                    if let Some(frame) = frame {
-                        self.handle_control_frame(&frame, Some(e.into()))?;
-                    }
+                Poll::Ready(res) => res,
+            };
+            let (frame, _) = inner.swap_remove(idx);
+            match res {
+                Ok(_) => {
+                    self.handle_control_frame(&frame, None)?;
+                }
+                Err(e) => {
+                    self.handle_control_frame(&frame, Some(e.into()))?;
                 }
             }
         }
-        Ok(true)
+        Ok(ready)
     }
 
     fn handle_control_frame(
@@ -186,6 +189,8 @@ where
         Either<ServiceResult<'f, Sr::Future<'f>, Sr::Error>, Ready<Self::Response, Self::Error>>;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.ctl_waker.register(cx.waker());
+
         // idle timeout
         self.handle_idle_timeout(cx);
 
