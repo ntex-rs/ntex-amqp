@@ -539,16 +539,6 @@ impl SenderLinkInner {
                 body: Some(body),
             });
         } else {
-            log::trace!(
-                "Sender link credit is {:?}, hnd:{}({} -> {}) {:?}, queue size: {}",
-                self.link_credit,
-                self.name,
-                self.id,
-                self.remote_handle,
-                state,
-                self.pending_transfers.len()
-            );
-
             self.link_credit -= 1;
             self.delivery_count = self.delivery_count.saturating_add(1);
             self.session.inner.get_mut().send_transfer(

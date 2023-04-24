@@ -675,13 +675,11 @@ impl SessionInner {
                         .and_then(|h| self.remote_handles.get(&h).copied())
                         .and_then(|h| self.links.get_mut(h))
                     {
-                        log::trace!("GOT LINK: {:?}", link);
                         if let SenderLinkState::Established(ref link) = link {
                             return Ok(Action::Flow(link.clone(), flow));
                         }
                         warn!("Received flow frame");
                     }
-                    log::trace!("NO LINK: {:?}", flow.0);
                     self.handle_flow(&flow, None);
                     Ok(Action::None)
                 }
@@ -990,12 +988,10 @@ impl SessionInner {
             .saturating_sub(self.next_outgoing_id);
 
         trace!(
-            "Session received credit {:?}. window: {}, pending: {}, frame: {:?}, link: {:?}",
+            "Session received credit {:?}. window: {}, pending: {}",
             flow.link_credit(),
             self.remote_outgoing_window,
             self.pending_transfers.len(),
-            flow.0,
-            link
         );
 
         while let Some(t) = self.pending_transfers.pop_front() {
