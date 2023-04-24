@@ -1,6 +1,6 @@
 # Changes
 
-## [0.7.1] - 2023-04-xx
+## [0.7.1] - 2023-04-24
 
 * Fix handling sync multiple control frames
 
