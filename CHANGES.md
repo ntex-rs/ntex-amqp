@@ -1,6 +1,8 @@
 # Changes
 
-## [0.7.1] - 2023-03-01
+## [0.7.1] - 2023-04-xx
+
+* Fix handling sync multiple control frames
 
 * Add SendLink::ready() helper, allow to wait for available credit
 
