@@ -669,17 +669,19 @@ impl SessionInner {
             match frame {
                 Frame::Flow(flow) => {
                     // apply link flow
-                    log::trace!("FLOW FRAME: {:#?}", flow.0);
+                    log::trace!("FLOW FRAME: {:#?}\n{:?}", flow.0, self.remote_handles);
                     if let Some(Either::Left(link)) = flow
                         .handle()
                         .and_then(|h| self.remote_handles.get(&h).copied())
                         .and_then(|h| self.links.get_mut(h))
                     {
+                        log::trace!("GOT LINK: {:?}", link);
                         if let SenderLinkState::Established(ref mut link) = link {
                             return Ok(Action::Flow(link.clone(), flow));
                         }
                         warn!("Received flow frame");
                     }
+                    log::trace!("NO LINK: {:?}", flow.0);
                     self.handle_flow(&flow, None);
                     Ok(Action::None)
                 }
@@ -758,11 +760,10 @@ impl SessionInner {
                 Some(Either::Left(item)) => {
                     if item.is_opening() {
                         trace!(
-                            "Local sender link attached: {:?} {} -> {}, {:?} {:?}",
+                            "Local sender link attached: {:?} {} -> {}, {:?}",
                             name,
                             index,
                             attach.handle(),
-                            self.remote_handles,
                             self.remote_handles.contains_key(&attach.handle())
                         );
 
@@ -989,10 +990,12 @@ impl SessionInner {
             .saturating_sub(self.next_outgoing_id);
 
         trace!(
-            "Session received credit {:?}. window: {}, pending: {}",
+            "Session received credit {:?}. window: {}, pending: {}, frame: {:?}, link: {:?}",
             flow.link_credit(),
             self.remote_outgoing_window,
-            self.pending_transfers.len()
+            self.pending_transfers.len(),
+            flow.0,
+            link
         );
 
         while let Some(t) = self.pending_transfers.pop_front() {
