@@ -266,7 +266,6 @@ where
                         });
                     }
                     types::Action::Flow(link, frm) => {
-                        log::trace!("FLOW {:?} {:?}", link, frm);
                         // apply flow to specific link
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),

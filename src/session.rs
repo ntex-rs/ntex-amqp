@@ -382,15 +382,18 @@ impl SessionInner {
         &mut self,
         mut frame: Attach,
     ) -> oneshot::Receiver<Result<Cell<SenderLinkInner>, AmqpProtocolError>> {
-        // trace!("Local sender link opening: {:?}", frame.name());
         let (tx, rx) = oneshot::channel();
 
         let entry = self.links.vacant_entry();
         let token = entry.key();
         entry.insert(Either::Left(SenderLinkState::Opening(Some(tx))));
+        trace!(
+            "Local sender link opening: {:?} hnd:{:?}",
+            frame.name(),
+            token
+        );
 
         frame.0.handle = token as Handle;
-        trace!("Local sender link opening: {:#?}", frame.0);
 
         self.links_by_name.insert(frame.0.name.clone(), token);
         self.post_frame(Frame::Attach(frame));
@@ -669,7 +672,6 @@ impl SessionInner {
             match frame {
                 Frame::Flow(flow) => {
                     // apply link flow
-                    log::trace!("FLOW FRAME: {:#?}\n{:?}", flow.0, self.remote_handles);
                     if let Some(Either::Left(link)) = flow
                         .handle()
                         .and_then(|h| self.remote_handles.get(&h).copied())
