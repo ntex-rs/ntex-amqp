@@ -1,5 +1,9 @@
 # Changes
 
+## [0.7.2] - 2023-05-11
+
+* Fix session flow frame handling, could cause tight loop and 100% cpu consumption
+
 ## [0.7.1] - 2023-04-24
 
 * Fix handling sync multiple control frames

@@ -947,7 +947,6 @@ impl SessionInner {
         if cfg!(feature = "frame-trace") {
             trace!("Settle delivery: {:#?}", disposition);
         } else {
-            trace!("Settle delivery: {:#?}", disposition);
             trace!(
                 "Settle delivery from {} - {}, state {:?} settled: {:?}",
                 from,
@@ -965,14 +964,15 @@ impl SessionInner {
             self.post_frame(Frame::Disposition(disp));
         }
 
-        for k in from..=to {
-            if let Some(val) = self.unsettled_deliveries.remove(&k) {
+        for no in from..=to {
+            if let Some(val) = self.unsettled_deliveries.remove(&no) {
                 val.ready(Ok(disposition.clone()));
             } else {
                 log::error!(
-                    "Could not find handler for {:?}, {:?}",
+                    "Could not find handler for {:?}, no: {:?}, unsettled: {:?}",
                     disposition,
-                    self.unsettled_deliveries.len()
+                    no,
+                    self.unsettled_deliveries.len(),
                 );
             }
         }
@@ -992,15 +992,16 @@ impl SessionInner {
         trace!(
             "Session received credit {:?}. window: {}, pending: {}",
             flow.link_credit(),
-            self.remote_outgoing_window,
+            self.remote_incoming_window,
             self.pending_transfers.len(),
         );
 
-        while let Some(t) = self.pending_transfers.pop_front() {
-            self.send_transfer(t.link_handle, t.body, t.state, t.settled, t.message_format);
-            if self.remote_outgoing_window == 0 {
-                break;
+        while self.remote_incoming_window != 0 {
+            if let Some(t) = self.pending_transfers.pop_front() {
+                self.send_transfer(t.link_handle, t.body, t.state, t.settled, t.message_format);
+                continue;
             }
+            break;
         }
 
         if flow.echo() {
