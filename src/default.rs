@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ntex::service::{Service, ServiceFactory};
+use ntex::service::{Ctx, Service, ServiceFactory};
 use ntex::util::Ready;
 
 use crate::error::LinkError;
@@ -33,7 +33,7 @@ impl<S, E> Service<Link<S>> for DefaultPublishService<S, E> {
     type Future<'f> = Ready<Self::Response, Self::Error> where Self: 'f;
 
     #[inline]
-    fn call(&self, _pkt: Link<S>) -> Self::Future<'_> {
+    fn call<'a>(&'a self, _: Link<S>, _: Ctx<'a, Self>) -> Self::Future<'a> {
         log::warn!("AMQP Publish service is not configured");
         Ready::Ok(())
     }
@@ -66,7 +66,7 @@ impl<S, E> Service<ControlFrame> for DefaultControlService<S, E> {
     type Future<'f> = Ready<Self::Response, Self::Error> where Self: 'f;
 
     #[inline]
-    fn call(&self, _pkt: ControlFrame) -> Self::Future<'_> {
+    fn call<'a>(&'a self, _: ControlFrame, _: Ctx<'a, Self>) -> Self::Future<'a> {
         Ready::Ok(())
     }
 }

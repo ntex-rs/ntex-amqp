@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.0] - 2023-06-xx
+
+* Migrate to ntex-0.7
+
 ## [0.7.2] - 2023-05-11
 
 * Fix session flow frame handling, could cause tight loop and 100% cpu consumption

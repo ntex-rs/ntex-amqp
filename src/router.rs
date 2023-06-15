@@ -1,7 +1,10 @@
 use std::{convert::TryFrom, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
-use ntex::service::{boxed, fn_factory_with_config, IntoServiceFactory, Service, ServiceFactory};
+use ntex::service::{
+    boxed, fn_factory_with_config, Container, Ctx, IntoServiceFactory, Service, ServiceCall,
+    ServiceFactory,
+};
 use ntex::util::{BoxFuture, Either, HashMap, Ready};
 
 use crate::codec::protocol::{
@@ -73,7 +76,7 @@ struct RouterService<S>(Cell<RouterServiceInner<S>>);
 struct RouterServiceInner<S> {
     state: State<S>,
     router: Rc<PatternRouter<Handle<S>>>,
-    handlers: HashMap<ReceiverLink, Option<HandleService>>,
+    handlers: HashMap<ReceiverLink, Option<Container<HandleService>>>,
 }
 
 impl<S: 'static> Service<Message> for RouterService<S> {
@@ -81,7 +84,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
     type Error = Error;
     type Future<'f> = Either<Ready<(), Error>, RouterServiceResponse<'f, S>>;
 
-    fn call(&self, msg: Message) -> Self::Future<'_> {
+    fn call<'a>(&'a self, msg: Message, _: Ctx<'a, Self>) -> Self::Future<'_> {
         match msg {
             Message::Attached(frm, link) => {
                 let path = frm
@@ -147,7 +150,7 @@ struct RouterServiceResponse<'f, S> {
 
 enum RouterServiceResponseState<'f> {
     Service(Option<Transfer>),
-    Transfer(BoxFuture<'f, Result<Outcome, Error>>, u32),
+    Transfer(ServiceCall<'f, HandleService, Transfer>, u32),
     NewService(BoxFuture<'f, Result<boxed::BoxService<Transfer, Outcome, Error>, Error>>),
 }
 
@@ -236,7 +239,7 @@ impl<'f, S> Future for RouterServiceResponse<'f, S> {
                         this.inner
                             .get_mut()
                             .handlers
-                            .insert(this.link.clone(), Some(srv));
+                            .insert(this.link.clone(), Some(Container::new(srv)));
                         if let Some(tr) = this.link.get_transfer() {
                             this.state = RouterServiceResponseState::Service(Some(tr));
                         } else {
@@ -359,9 +362,9 @@ where
     ntex::forward_poll_shutdown!(service);
 
     #[inline]
-    fn call(&self, req: Transfer) -> Self::Future<'_> {
+    fn call<'a>(&'a self, req: Transfer, ctx: Ctx<'a, Self>) -> Self::Future<'a> {
         ResourceServiceFut {
-            fut: self.service.call(req),
+            fut: ctx.call(&self.service, req),
             _t: marker::PhantomData,
         }
     }
@@ -371,7 +374,8 @@ pin_project_lite::pin_project! {
     struct ResourceServiceFut<'f, S, T: Service<Transfer>>
     where T: 'f
     {
-        #[pin] fut: T::Future<'f>,
+        #[pin]
+        fut: ServiceCall<'f, T, Transfer>,
         _t: marker::PhantomData<S>,
     }
 }

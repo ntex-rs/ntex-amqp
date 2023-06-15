@@ -1,8 +1,6 @@
 use ntex::io::{Dispatcher as IoDispatcher, IoBoxed};
-use ntex::service::{fn_service, Service};
-use ntex::time::Seconds;
-use ntex::util::Ready;
-use ntex::IntoService;
+use ntex::service::{fn_service, Container, IntoService, Service};
+use ntex::{time::Seconds, util::Ready};
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
@@ -68,8 +66,8 @@ where
     pub async fn start_default(self) -> Result<(), AmqpDispatcherError> {
         let dispatcher = Dispatcher::new(
             self.connection,
-            fn_service(|_| Ready::<_, LinkError>::Ok(())),
-            fn_service(|_| Ready::<_, LinkError>::Ok(())),
+            Container::new(fn_service(|_| Ready::<_, LinkError>::Ok(()))),
+            Container::new(fn_service(|_| Ready::<_, LinkError>::Ok(()))),
             self.remote_config.timeout_remote_secs().into(),
         );
 
@@ -94,8 +92,8 @@ where
     {
         let dispatcher = Dispatcher::new(
             self.connection,
-            fn_service(|_| Ready::<_, S::Error>::Ok(())),
-            service.into_service(),
+            Container::new(fn_service(|_| Ready::<_, S::Error>::Ok(()))),
+            Container::new(service.into_service()),
             self.remote_config.timeout_remote_secs().into(),
         );
 

@@ -1,8 +1,9 @@
-use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{cell, future::Future, marker, pin::Pin, task::Context, task::Poll};
 
+use ntex::service::{Container, Ctx, Service, ServiceCall};
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{ready, BoxFuture, Either, Ready};
-use ntex::{io::DispatchItem, service::Service, task::LocalWaker};
+use ntex::{io::DispatchItem, task::LocalWaker};
 
 use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
@@ -13,8 +14,8 @@ type ControlItem<R, E> = (ControlFrame, BoxFuture<'static, Result<R, E>>);
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
-    service: Rc<Sr>,
-    ctl_service: Rc<Ctl>,
+    service: Container<Sr>,
+    ctl_service: Container<Ctl>,
     ctl_fut: cell::RefCell<Vec<ControlItem<Ctl::Response, Ctl::Error>>>,
     ctl_waker: LocalWaker,
     shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
@@ -30,15 +31,15 @@ where
 {
     pub(crate) fn new(
         sink: Connection,
-        service: Sr,
-        ctl_service: Ctl,
+        service: Container<Sr>,
+        ctl_service: Container<Ctl>,
         idle_timeout: Millis,
     ) -> Self {
         Dispatcher {
             sink,
             idle_timeout,
-            service: Rc::new(service),
-            ctl_service: Rc::new(ctl_service),
+            service,
+            ctl_service,
             ctl_fut: cell::RefCell::new(Vec::new()),
             ctl_waker: LocalWaker::new(),
             shutdown: cell::RefCell::new(None),
@@ -185,8 +186,10 @@ where
 {
     type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
-    type Future<'f> =
-        Either<ServiceResult<'f, Sr::Future<'f>, Sr::Error>, Ready<Self::Response, Self::Error>>;
+    type Future<'f> = Either<
+        ServiceResult<'f, ServiceCall<'f, Sr, types::Message>, Sr::Error>,
+        Ready<Self::Response, Self::Error>,
+    >;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.ctl_waker.register(cx.waker());
@@ -242,7 +245,11 @@ where
         }
     }
 
-    fn call(&self, request: DispatchItem<AmqpCodec<AmqpFrame>>) -> Self::Future<'_> {
+    fn call<'a>(
+        &'a self,
+        request: DispatchItem<AmqpCodec<AmqpFrame>>,
+        _: Ctx<'a, Self>,
+    ) -> Self::Future<'a> {
         match request {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]

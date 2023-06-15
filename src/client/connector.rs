@@ -2,7 +2,7 @@ use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
 use ntex::io::IoBoxed;
-use ntex::service::Service;
+use ntex::service::{Container, Service};
 use ntex::time::{timeout_checked, Seconds};
 use ntex::util::{ByteString, PoolId, PoolRef};
 
@@ -14,7 +14,7 @@ use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
 pub struct Connector<A, T = ()> {
-    connector: T,
+    connector: Container<T>,
     config: Configuration,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
@@ -27,7 +27,7 @@ impl<A> Connector<A> {
     /// Create new amqp connector
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
-            connector: connect::Connector::default(),
+            connector: Container::new(connect::Connector::default()),
             handshake_timeout: Seconds::ZERO,
             disconnect_timeout: Seconds(3),
             config: Configuration::default(),
@@ -118,7 +118,7 @@ where
         IoBoxed: From<U::Response>,
     {
         Connector {
-            connector,
+            connector: connector.into(),
             config: self.config,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
