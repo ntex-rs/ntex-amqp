@@ -115,7 +115,13 @@ impl SenderLink {
     #[inline]
     /// Check is link is closed
     pub fn is_closed(&self) -> bool {
-        self.inner.get_ref().closed
+        self.inner.closed
+    }
+
+    #[inline]
+    /// Check link state
+    pub fn is_opened(&self) -> bool {
+        !self.inner.closed
     }
 
     /// Check link error
