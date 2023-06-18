@@ -107,11 +107,11 @@ where
                 ControlFrameKind::AttachReceiver(_, ref link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::AttachSender(ref frm, _) => {
+                ControlFrameKind::AttachSender(ref frm, ref link) => {
                     frame
                         .session_cell()
                         .get_mut()
-                        .detach_unconfirmed_sender_link(frm, Some(err));
+                        .detach_unconfirmed_sender_link(frm, link.inner.clone(), Some(err));
                 }
                 ControlFrameKind::Flow(_, ref link) => {
                     let _ = link.close_with_error(err);

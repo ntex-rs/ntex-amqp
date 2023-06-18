@@ -244,7 +244,7 @@ impl SenderLinkInner {
         }
     }
 
-    pub(crate) fn with(frame: &Attach, session: Cell<SessionInner>) -> SenderLinkInner {
+    pub(crate) fn with(id: usize, frame: &Attach, session: Cell<SessionInner>) -> SenderLinkInner {
         let mut name = None;
         if let Some(source) = frame.source() {
             if let Some(ref addr) = source.address {
@@ -257,10 +257,10 @@ impl SenderLinkInner {
         name.trimdown();
 
         SenderLinkInner {
+            id,
             pool,
             name,
             delivery_count,
-            id: 0,
             session: Session::new(session),
             remote_handle: frame.handle(),
             link_credit: 0,

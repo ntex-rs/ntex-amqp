@@ -4,6 +4,8 @@
 
 * Make session id accessible
 
+* Fix session managment for sender links
+
 * Fix router leaks service handlers
 
 * Send message to router that allows it to release service handlers for detached links

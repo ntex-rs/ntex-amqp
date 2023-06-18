@@ -92,6 +92,17 @@ impl Connection {
         self.0.get_ref().error.clone()
     }
 
+    /// Get existing session by local channel id
+    pub fn get_session_by_local_id(&self, channel: u16) -> Option<Session> {
+        if let Some(SessionState::Established(inner)) =
+            self.0.get_ref().sessions.get(channel as usize)
+        {
+            Some(Session::new(inner.clone()))
+        } else {
+            None
+        }
+    }
+
     /// Gracefully close connection
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let inner = self.0.get_mut();
@@ -367,7 +378,9 @@ impl ConnectionInner {
                         match attach.0.role {
                             Role::Receiver => {
                                 // remotly opened sender link
+                                let id = session.get_mut().new_remote_sender();
                                 let link = SenderLink::new(Cell::new(SenderLinkInner::with(
+                                    id,
                                     &attach,
                                     session.clone(),
                                 )));

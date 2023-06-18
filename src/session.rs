@@ -35,14 +35,22 @@ impl Session {
         Session { inner }
     }
 
+    #[inline]
     pub fn connection(&self) -> &Connection {
         &self.inner.get_ref().sink
     }
 
-    pub fn id(&self) -> u16 {
+    #[inline]
+    pub fn local_channel_id(&self) -> u16 {
         self.inner.get_ref().id()
     }
 
+    #[inline]
+    pub fn remote_channel_id(&self) -> u16 {
+        self.inner.get_ref().remote_channel_id
+    }
+
+    #[inline]
     /// Get remote window size
     pub fn remote_window_size(&self) -> u32 {
         self.inner.get_ref().remote_incoming_window
@@ -83,12 +91,24 @@ impl Session {
         None
     }
 
-    pub fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
-        self.inner.get_ref().get_sender_link_by_handle(hnd)
+    #[inline]
+    pub fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+        self.inner.get_ref().get_sender_link_by_local_handle(hnd)
     }
 
-    pub fn get_receiver_link_by_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
-        self.inner.get_ref().get_receiver_link_by_handle(hnd)
+    #[inline]
+    pub fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+        self.inner.get_ref().get_sender_link_by_remote_handle(hnd)
+    }
+
+    #[inline]
+    pub fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+        self.inner.get_ref().get_receiver_link_by_local_handle(hnd)
+    }
+
+    #[inline]
+    pub fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+        self.inner.get_ref().get_receiver_link_by_remote_handle(hnd)
     }
 
     /// Open sender link
@@ -167,6 +187,7 @@ impl Session {
         }
     }
 
+    #[inline]
     pub fn wait_disposition(
         &self,
         id: DeliveryNumber,
@@ -178,6 +199,7 @@ impl Session {
 #[derive(Debug)]
 enum SenderLinkState {
     Established(SenderLink),
+    OpeningRemote,
     Opening(Option<oneshot::Sender<Result<Cell<SenderLinkInner>, AmqpProtocolError>>>),
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
@@ -381,6 +403,12 @@ impl SessionInner {
         self.sink.0.max_frame_size
     }
 
+    /// Initialize creation of remote sender link
+    pub(crate) fn new_remote_sender(&mut self) -> usize {
+        self.links
+            .insert(Either::Left(SenderLinkState::OpeningRemote))
+    }
+
     /// Open sender link
     pub(crate) fn attach_local_sender_link(
         &mut self,
@@ -411,8 +439,7 @@ impl SessionInner {
         link: Cell<SenderLinkInner>,
     ) -> SenderLink {
         trace!("Remote sender link attached: {:?}", attach.name());
-        let entry = self.links.vacant_entry();
-        let token = entry.key();
+        let token = link.id;
 
         if let Some(source) = attach.source() {
             if let Some(ref addr) = source.address {
@@ -420,11 +447,12 @@ impl SessionInner {
             }
         }
 
-        link.get_mut().id = token;
         self.remote_handles.insert(attach.handle(), token);
-        entry.insert(Either::Left(SenderLinkState::Established(SenderLink::new(
-            link.clone(),
-        ))));
+        *self
+            .links
+            .get_mut(token)
+            .expect("new remote sender entry must exist") =
+            Either::Left(SenderLinkState::Established(SenderLink::new(link.clone())));
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -466,6 +494,10 @@ impl SessionInner {
                     *link = SenderLinkState::Closing(Some(tx));
                     self.post_frame(detach.into());
                 }
+                SenderLinkState::OpeningRemote => {
+                    let _ = tx.send(Ok(()));
+                    error!("Unexpected sender link state: opening remote - {}", id);
+                }
                 SenderLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
                     error!("Unexpected sender link state: closing - {}", id);
@@ -478,9 +510,13 @@ impl SessionInner {
     }
 
     /// Detach unconfirmed sender link
-    pub(crate) fn detach_unconfirmed_sender_link(&mut self, attach: &Attach, error: Option<Error>) {
-        let entry = self.links.vacant_entry();
-        let token = entry.key();
+    pub(crate) fn detach_unconfirmed_sender_link(
+        &mut self,
+        attach: &Attach,
+        link: Cell<SenderLinkInner>,
+        error: Option<Error>,
+    ) {
+        let token = link.id;
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -506,9 +542,21 @@ impl SessionInner {
             error,
         }));
         self.post_frame(detach.into());
+
+        self.links.remove(token);
     }
 
-    pub(crate) fn get_sender_link_by_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+    pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+        if let Some(Either::Left(SenderLinkState::Established(ref link))) =
+            self.links.get(hnd as usize)
+        {
+            Some(link)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
         if let Some(id) = self.remote_handles.get(&hnd) {
             if let Some(Either::Left(SenderLinkState::Established(ref link))) = self.links.get(*id)
             {
@@ -660,7 +708,17 @@ impl SessionInner {
         }
     }
 
-    pub(crate) fn get_receiver_link_by_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+    pub(crate) fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+        if let Some(Either::Right(ReceiverLinkState::Established(ref link))) =
+            self.links.get(hnd as usize)
+        {
+            Some(link)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
         if let Some(id) = self.remote_handles.get(&hnd) {
             if let Some(Either::Right(ReceiverLinkState::Established(ref link))) =
                 self.links.get(*id)
@@ -883,6 +941,13 @@ impl SessionInner {
                         self.sink
                             .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
                         action = Action::DetachSender(link.clone(), frame);
+                        true
+                    }
+                    SenderLinkState::OpeningRemote => {
+                        error!(
+                            "Detach frame received for unconfirmed sender link: {:?}",
+                            frame
+                        );
                         true
                     }
                     SenderLinkState::Closing(_) => true,
