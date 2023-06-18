@@ -3,7 +3,7 @@ use std::{cell, future::Future, marker, pin::Pin, task::Context, task::Poll};
 use ntex::service::{Container, Ctx, Service, ServiceCall};
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{ready, BoxFuture, Either, Ready};
-use ntex::{io::DispatchItem, task::LocalWaker};
+use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
 
 use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
@@ -298,12 +298,29 @@ where
                         ));
                     }
                     types::Action::DetachReceiver(link, frm) => {
+                        let lnk = link.clone();
+                        let svc = self.service.clone();
+                        spawn(async move {
+                            let _ = svc.call(types::Message::Detached(lnk)).await;
+                        });
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::DetachReceiver(frm, link.clone()),
+                            ControlFrameKind::DetachReceiver(frm, link),
                         ));
                     }
                     types::Action::SessionEnded(links) => {
+                        let receivers = links
+                            .iter()
+                            .filter_map(|either| match either {
+                                Either::Right(link) => Some(link.clone()),
+                                Either::Left(_) => None,
+                            })
+                            .collect();
+
+                        let svc = self.service.clone();
+                        spawn(async move {
+                            let _ = svc.call(types::Message::DetachedAll(receivers)).await;
+                        });
                         self.call_control_service(ControlFrame::new_kind(
                             ControlFrameKind::SessionEnded(links),
                         ));

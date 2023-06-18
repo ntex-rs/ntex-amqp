@@ -14,7 +14,8 @@ pub use crate::codec::protocol::Transfer;
 #[derive(Debug)]
 pub enum Message {
     Attached(Attach, ReceiverLink),
-    // Detached(ReceiverLink),
+    Detached(ReceiverLink),
+    DetachedAll(Vec<ReceiverLink>),
     Transfer(ReceiverLink),
 }
 

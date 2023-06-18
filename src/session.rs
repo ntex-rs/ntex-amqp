@@ -39,6 +39,10 @@ impl Session {
         &self.inner.get_ref().sink
     }
 
+    pub fn id(&self) -> u16 {
+        self.inner.get_ref().id()
+    }
+
     /// Get remote window size
     pub fn remote_window_size(&self) -> u32 {
         self.inner.get_ref().remote_incoming_window

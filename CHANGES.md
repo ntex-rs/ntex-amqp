@@ -1,5 +1,13 @@
 # Changes
 
+## [0.8.0-beta.1] - 2023-06-xx
+
+* Make session id accessible
+
+* Fix router leaks service handlers
+
+* Send message to router that allows it to release service handlers for detached links
+
 ## [0.8.0-beta.0] - 2023-06-17
 
 * Migrate to ntex-0.7

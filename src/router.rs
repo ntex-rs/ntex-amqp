@@ -5,10 +5,10 @@ use ntex::service::{
     boxed, fn_factory_with_config, Container, Ctx, IntoServiceFactory, Service, ServiceCall,
     ServiceFactory,
 };
-use ntex::util::{BoxFuture, Either, HashMap, Ready};
+use ntex::util::{join_all, BoxFuture, Either, HashMap, Ready};
 
 use crate::codec::protocol::{
-    self as codec, DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
+    self, DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
 };
 use crate::error::LinkError;
 use crate::types::{Link, Message, Outcome};
@@ -125,6 +125,48 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                             .into(),
                     ))
                 }
+            }
+            Message::Detached(link) => {
+                if let Some(Some(srv)) = self.0.get_mut().handlers.remove(&link) {
+                    trace!("Releasing handler service for {}", link.name());
+                    let name = link.name().clone();
+                    ntex::rt::spawn(async move {
+                        ntex::util::poll_fn(move |cx| srv.poll_shutdown(cx)).await;
+                        trace!("Handler service for {} has shutdown", name);
+                    });
+                }
+                Either::Left(Ready::Ok(()))
+            }
+            Message::DetachedAll(links) => {
+                let futs: Vec<_> = links
+                    .into_iter()
+                    .filter_map(|link| {
+                        self.0.get_mut().handlers.remove(&link).and_then(|srv| {
+                            srv.map(|srv| {
+                                trace!(
+                                    "Releasing handler service for {} (session ended)",
+                                    link.name()
+                                );
+                                ntex::util::poll_fn(move |cx| srv.poll_shutdown(cx))
+                            })
+                        })
+                    })
+                    .collect();
+
+                trace!(
+                    "Shutting down {} handler services (session ended)",
+                    futs.len()
+                );
+
+                ntex::rt::spawn(async move {
+                    let len = futs.len();
+                    let _ = join_all(futs).await;
+                    trace!(
+                        "Handler services for {} links have shutdown (session ended)",
+                        len
+                    );
+                });
+                Either::Left(Ready::Ok(()))
             }
             Message::Transfer(link) => {
                 if let Some(Some(_)) = self.0.get_ref().handlers.get(&link) {
@@ -262,7 +304,7 @@ impl<'f, S> Future for RouterServiceResponse<'f, S> {
 }
 
 fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
-    let disposition = Disposition(Box::new(codec::DispositionInner {
+    let disposition = Disposition(Box::new(protocol::DispositionInner {
         state: Some(state),
         role: Role::Receiver,
         first: id,
