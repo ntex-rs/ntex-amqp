@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.0-beta.2] - 2023-06-19
+
+* Use container for client connector
+
 ## [0.8.0-beta.1] - 2023-06-19
 
 * Make session id accessible

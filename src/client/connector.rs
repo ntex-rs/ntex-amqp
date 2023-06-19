@@ -112,13 +112,13 @@ where
     }
 
     /// Use custom connector
-    pub fn connector<U>(self, connector: U) -> Connector<A, U>
+    pub fn connector<U>(self, connector: Container<U>) -> Connector<A, U>
     where
         U: Service<Connect<A>, Error = connect::ConnectError>,
         IoBoxed: From<U::Response>,
     {
         Connector {
-            connector: connector.into(),
+            connector,
             config: self.config,
             handshake_timeout: self.handshake_timeout,
             disconnect_timeout: self.disconnect_timeout,
@@ -130,7 +130,7 @@ where
     #[doc(hidden)]
     #[deprecated]
     /// Use custom connector
-    pub fn boxed_connector<U>(self, connector: U) -> Connector<A, U>
+    pub fn boxed_connector<U>(self, connector: Container<U>) -> Connector<A, U>
     where
         U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
     {
