@@ -26,12 +26,15 @@ impl fmt::Debug for ControlFrame {
 
 #[derive(Debug)]
 pub enum ControlFrameKind {
-    AttachReceiver(protocol::Attach, ReceiverLink),
     AttachSender(protocol::Attach, SenderLink),
+    AttachReceiver(protocol::Attach, ReceiverLink),
     Flow(protocol::Flow, SenderLink),
-    DetachSender(protocol::Detach, SenderLink),
-    DetachReceiver(protocol::Detach, ReceiverLink),
-    SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
+    LocalDetachSender(protocol::Detach, SenderLink),
+    RemoteDetachSender(protocol::Detach, SenderLink),
+    LocalDetachReceiver(protocol::Detach, ReceiverLink),
+    RemoteDetachReceiver(protocol::Detach, ReceiverLink),
+    LocalSessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
+    RemoteSessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
     ProtocolError(AmqpProtocolError),
     Disconnected(Option<io::Error>),
     Closed,

@@ -146,7 +146,7 @@ async fn test_session_end() -> std::io::Result<()> {
 
         let link_names = link_names2.clone();
         srv.control(move |frm: ControlFrame| {
-            if let ControlFrameKind::SessionEnded(links) = frm.kind() {
+            if let ControlFrameKind::RemoteSessionEnded(links) = frm.kind() {
                 let mut names = link_names.lock().unwrap();
                 for lnk in links {
                     match lnk {

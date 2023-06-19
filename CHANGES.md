@@ -8,6 +8,8 @@
 
 * Fix router leaks service handlers
 
+* Local detach/end handling
+
 * Send message to router that allows it to release service handlers for detached links
 
 ## [0.8.0-beta.0] - 2023-06-17

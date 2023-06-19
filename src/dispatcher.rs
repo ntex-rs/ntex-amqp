@@ -1,4 +1,5 @@
-use std::{cell, future::Future, marker, pin::Pin, task::Context, task::Poll};
+use std::collections::VecDeque;
+use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::service::{Container, Ctx, Service, ServiceCall};
 use ntex::time::{sleep, Millis, Sleep};
@@ -11,13 +12,26 @@ use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, Recei
 
 type ControlItem<R, E> = (ControlFrame, BoxFuture<'static, Result<R, E>>);
 
+#[derive(Default)]
+pub(crate) struct ControlQueue {
+    pending: cell::RefCell<VecDeque<ControlFrame>>,
+    waker: LocalWaker,
+}
+
+impl ControlQueue {
+    pub(crate) fn enqueue_frame(&self, frame: ControlFrame) {
+        self.pending.borrow_mut().push_back(frame);
+        self.waker.wake();
+    }
+}
+
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
     service: Container<Sr>,
     ctl_service: Container<Ctl>,
     ctl_fut: cell::RefCell<Vec<ControlItem<Ctl::Response, Ctl::Error>>>,
-    ctl_waker: LocalWaker,
+    ctl_queue: Rc<ControlQueue>,
     shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
     expire: Sleep,
     idle_timeout: Millis,
@@ -35,13 +49,14 @@ where
         ctl_service: Container<Ctl>,
         idle_timeout: Millis,
     ) -> Self {
+        let ctl_queue = sink.get_control_queue().clone();
         Dispatcher {
             sink,
             idle_timeout,
             service,
             ctl_service,
+            ctl_queue,
             ctl_fut: cell::RefCell::new(Vec::new()),
-            ctl_waker: LocalWaker::new(),
             shutdown: cell::RefCell::new(None),
             expire: sleep(idle_timeout),
         }
@@ -53,7 +68,7 @@ where
             frame.clone(),
             Box::pin(async move { ctl.call(frame).await }),
         ));
-        self.ctl_waker.wake();
+        self.ctl_queue.waker.wake();
     }
 
     fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
@@ -116,10 +131,12 @@ where
                 ControlFrameKind::Flow(_, ref link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::DetachSender(_, ref link) => {
+                ControlFrameKind::LocalDetachSender(..) => {}
+                ControlFrameKind::LocalDetachReceiver(..) => {}
+                ControlFrameKind::RemoteDetachSender(_, ref link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::DetachReceiver(_, ref link) => {
+                ControlFrameKind::RemoteDetachReceiver(_, ref link) => {
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::ProtocolError(ref err) => {
@@ -129,7 +146,8 @@ where
                 ControlFrameKind::Closed | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
-                ControlFrameKind::SessionEnded(_) => (),
+                ControlFrameKind::LocalSessionEnded(_)
+                | ControlFrameKind::RemoteSessionEnded(_) => (),
             }
         } else {
             match frame.0.get_mut().kind {
@@ -158,12 +176,6 @@ where
                 ControlFrameKind::Flow(ref frm, ref link) => {
                     frame.session_cell().get_mut().handle_flow(frm, Some(link));
                 }
-                ControlFrameKind::DetachSender(_, _) => {
-                    // frame.session_cell().get_mut().handle_detach(frm);
-                }
-                ControlFrameKind::DetachReceiver(_, _) => {
-                    // frame.session_cell().get_mut().handle_detach(frm);
-                }
                 ControlFrameKind::ProtocolError(ref err) => {
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
@@ -171,7 +183,12 @@ where
                 ControlFrameKind::Closed | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
-                ControlFrameKind::SessionEnded(_) => (),
+                ControlFrameKind::LocalDetachSender(..)
+                | ControlFrameKind::LocalDetachReceiver(..)
+                | ControlFrameKind::LocalSessionEnded(_)
+                | ControlFrameKind::RemoteDetachSender(..)
+                | ControlFrameKind::RemoteDetachReceiver(..)
+                | ControlFrameKind::RemoteSessionEnded(_) => (),
             }
         }
         Ok(())
@@ -192,29 +209,42 @@ where
     >;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.ctl_waker.register(cx.waker());
+        self.ctl_queue.waker.register(cx.waker());
 
         // idle timeout
         self.handle_idle_timeout(cx);
 
         // process control frame
-        let res0 = !self.handle_control_fut(cx)?;
+        let mut control_fut_pending = !self.handle_control_fut(cx)?;
 
         // check readiness
-        let res1 = self.service.poll_ready(cx).map_err(|err| {
+        let service_poll = self.service.poll_ready(cx).map_err(|err| {
             let err = Error::from(err);
             error!("Publish service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
-        let res2 = self.ctl_service.poll_ready(cx).map_err(|err| {
+
+        let ctl_service_poll = self.ctl_service.poll_ready(cx).map_err(|err| {
             let err = Error::from(err);
             error!("Control service readiness check failed: {:?}", err);
             let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
 
-        if res0 || res1.is_pending() || res2.is_pending() {
+        // enqueue pending control frames
+        if ctl_service_poll.is_ready() && !self.ctl_queue.pending.borrow().is_empty() {
+            self.ctl_queue
+                .pending
+                .borrow_mut()
+                .drain(..)
+                .for_each(|frame| {
+                    self.call_control_service(frame);
+                });
+            control_fut_pending = true;
+        }
+
+        if control_fut_pending || service_poll.is_pending() || ctl_service_poll.is_pending() {
             Poll::Pending
         } else {
             Poll::Ready(Ok(()))
@@ -294,7 +324,7 @@ where
                     types::Action::DetachSender(link, frm) => {
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::DetachSender(frm, link.clone()),
+                            ControlFrameKind::RemoteDetachSender(frm, link.clone()),
                         ));
                     }
                     types::Action::DetachReceiver(link, frm) => {
@@ -305,7 +335,7 @@ where
                         });
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::DetachReceiver(frm, link),
+                            ControlFrameKind::RemoteDetachReceiver(frm, link),
                         ));
                     }
                     types::Action::SessionEnded(links) => {
@@ -322,7 +352,7 @@ where
                             let _ = svc.call(types::Message::DetachedAll(receivers)).await;
                         });
                         self.call_control_service(ControlFrame::new_kind(
-                            ControlFrameKind::SessionEnded(links),
+                            ControlFrameKind::RemoteSessionEnded(links),
                         ));
                     }
                     types::Action::RemoteClose(err) => {

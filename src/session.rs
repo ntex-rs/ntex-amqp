@@ -15,7 +15,7 @@ use crate::connection::Connection;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{DeliveryPromise, SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::{cell::Cell, types::Action};
+use crate::{cell::Cell, types::Action, ControlFrame};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
@@ -66,6 +66,12 @@ impl Session {
                 inner.sink.close_session(inner.remote_channel_id as usize);
                 inner.post_frame(Frame::End(End { error: None }));
                 inner.flags.insert(Flags::ENDING);
+                inner
+                    .sink
+                    .get_control_queue()
+                    .enqueue_frame(ControlFrame::new_kind(
+                        crate::ControlFrameKind::LocalSessionEnded(inner.get_all_links()),
+                    ));
             }
             let inner = self.inner.clone();
             Either::Right(async move {
@@ -373,21 +379,25 @@ impl SessionInner {
     pub(crate) fn end(&mut self, err: AmqpProtocolError) -> Action {
         log::trace!("Session is ended: {:?}", err);
 
-        let mut links = Vec::new();
-        for (_, st) in self.links.iter_mut() {
-            match st {
-                Either::Left(SenderLinkState::Established(ref link)) => {
-                    links.push(Either::Left(link.clone()));
-                }
-                Either::Right(ReceiverLinkState::Established(ref mut link)) => {
-                    links.push(Either::Right(link.clone()));
-                }
-                _ => (),
-            }
-        }
+        let links = self.get_all_links();
         self.set_error(err);
 
         Action::SessionEnded(links)
+    }
+
+    fn get_all_links(&self) -> Vec<Either<SenderLink, ReceiverLink>> {
+        self.links
+            .iter()
+            .filter_map(|(_, st)| match st {
+                Either::Left(SenderLinkState::Established(ref link)) => {
+                    Some(Either::Left(link.clone()))
+                }
+                Either::Right(ReceiverLinkState::Established(ref link)) => {
+                    Some(Either::Right(link.clone()))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     fn wait_disposition(
@@ -485,7 +495,7 @@ impl SessionInner {
     ) {
         if let Some(Either::Left(link)) = self.links.get_mut(id as usize) {
             match link {
-                SenderLinkState::Opening(_) | SenderLinkState::Established(_) => {
+                SenderLinkState::Opening(_) => {
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,
                         closed,
@@ -493,6 +503,21 @@ impl SessionInner {
                     }));
                     *link = SenderLinkState::Closing(Some(tx));
                     self.post_frame(detach.into());
+                }
+                SenderLinkState::Established(sender_link) => {
+                    let sender_link = sender_link.clone();
+                    let detach = Detach(Box::new(codec::DetachInner {
+                        handle: id,
+                        closed,
+                        error,
+                    }));
+                    *link = SenderLinkState::Closing(Some(tx));
+                    self.post_frame(detach.clone().into());
+                    self.sink
+                        .get_control_queue()
+                        .enqueue_frame(ControlFrame::new_kind(
+                            crate::ControlFrameKind::LocalDetachSender(detach, sender_link),
+                        ))
                 }
                 SenderLinkState::OpeningRemote => {
                     let _ = tx.send(Ok(()));
@@ -686,14 +711,20 @@ impl SessionInner {
                     let _ = tx.send(Ok(()));
                     let _ = self.links.remove(id as usize);
                 }
-                ReceiverLinkState::Established(_) => {
+                ReceiverLinkState::Established(receiver_link) => {
+                    let receiver_link = receiver_link.clone();
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,
                         closed,
                         error,
                     }));
                     *link = ReceiverLinkState::Closing(Some(tx));
-                    self.post_frame(detach.into());
+                    self.post_frame(detach.clone().into());
+                    self.sink
+                        .get_control_queue()
+                        .enqueue_frame(ControlFrame::new_kind(
+                            crate::ControlFrameKind::LocalDetachReceiver(detach, receiver_link),
+                        ))
                 }
                 ReceiverLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
@@ -950,7 +981,16 @@ impl SessionInner {
                         );
                         true
                     }
-                    SenderLinkState::Closing(_) => true,
+                    SenderLinkState::Closing(tx) => {
+                        if let Some(tx) = tx.take() {
+                            if let Some(err) = frame.0.error {
+                                let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
+                            } else {
+                                let _ = tx.send(Ok(()));
+                            }
+                        }
+                        true
+                    }
                 },
                 Either::Right(link) => match link {
                     ReceiverLinkState::Opening(_) => false,

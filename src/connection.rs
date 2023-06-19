@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, rc::Rc};
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::io::IoRef;
@@ -6,6 +6,7 @@ use ntex::util::{HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
+use crate::dispatcher::ControlQueue;
 use crate::session::{Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
@@ -17,6 +18,7 @@ pub(crate) struct ConnectionInner {
     io: IoRef,
     state: ConnectionState,
     codec: AmqpCodec<AmqpFrame>,
+    control_queue: Rc<ControlQueue>,
     pub(crate) sessions: slab::Slab<SessionState>,
     pub(crate) sessions_map: HashMap<u16, usize>,
     pub(crate) on_close: Condition,
@@ -57,6 +59,7 @@ impl Connection {
             state: ConnectionState::Normal,
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::default(),
+            control_queue: Rc::default(),
             error: None,
             on_close: Condition::new(),
             channel_max: local_config.channel_max,
@@ -188,6 +191,10 @@ impl Connection {
 
     pub(crate) fn set_error(&self, err: AmqpProtocolError) {
         self.0.get_mut().set_error(err)
+    }
+
+    pub(crate) fn get_control_queue(&self) -> &Rc<ControlQueue> {
+        &self.0.get_ref().control_queue
     }
 
     pub(crate) fn handle_frame(&self, frame: AmqpFrame) -> Result<Action, AmqpProtocolError> {
@@ -413,13 +420,13 @@ impl ConnectionInner {
             SessionState::Closing(ref mut session) => match frame {
                 Frame::End(frm) => {
                     trace!("Session end is confirmed: {:?}", frm);
-                    let action = session
+                    let _ = session
                         .get_mut()
                         .end(AmqpProtocolError::SessionEnded(frm.error));
                     if let Some(token) = self.sessions_map.remove(&channel_id) {
                         self.sessions.remove(token);
                     }
-                    Ok(action)
+                    Ok(Action::None)
                 }
                 frm => {
                     trace!("Got frame after initiated session end: {:?}", frm);
