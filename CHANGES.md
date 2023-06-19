@@ -1,8 +1,10 @@
 # Changes
 
-## [0.8.0-beta.1] - 2023-06-xx
+## [0.8.0-beta.1] - 2023-06-19
 
 * Make session id accessible
+
+* Fix broken channel id handling
 
 * Fix session managment for sender links
 

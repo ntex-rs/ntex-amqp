@@ -970,7 +970,7 @@ impl SessionInner {
                         // detach snd link
                         link.inner.get_mut().detached(err);
                         self.sink
-                            .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
+                            .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
                         action = Action::DetachSender(link.clone(), frame);
                         true
                     }
@@ -1020,8 +1020,7 @@ impl SessionInner {
 
                         // detach rcv link
                         self.sink
-                            .post_frame(AmqpFrame::new(self.remote_channel_id, detach.into()));
-
+                            .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
                         action = Action::DetachReceiver(link.clone(), frame);
                         true
                     }
@@ -1239,7 +1238,6 @@ impl SessionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {
-        self.sink
-            .post_frame(AmqpFrame::new(self.remote_channel_id, frame));
+        self.sink.post_frame(AmqpFrame::new(self.id(), frame));
     }
 }
