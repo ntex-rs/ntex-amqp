@@ -1183,12 +1183,6 @@ impl SessionInner {
         } else {
             self.remote_incoming_window -= 1;
 
-            log::trace!(
-                "Sending transfer over {} window: {}",
-                link_handle,
-                self.remote_incoming_window
-            );
-
             let settled2 = settled.unwrap_or(false);
             let tr_settled = if settled2 {
                 Some(DeliveryState::Accepted(Accepted {}))
@@ -1232,6 +1226,17 @@ impl SessionInner {
                     transfer.0.more = false;
                 }
             }
+
+            log::trace!(
+                "Sending transfer over handle {}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}",
+                link_handle,
+                self.remote_incoming_window,
+                transfer.delivery_id(),
+                transfer.delivery_tag(),
+                transfer.more(),
+                transfer.batchable(),
+                transfer.settled(),
+            );
 
             self.post_frame(Frame::Transfer(transfer));
         }
