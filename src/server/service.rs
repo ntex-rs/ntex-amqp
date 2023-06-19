@@ -1,7 +1,7 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc};
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
-use ntex::service::{Container, Ctx, IntoServiceFactory, Service, ServiceFactory};
+use ntex::service::{Container, IntoServiceFactory, Service, ServiceCtx, ServiceFactory};
 use ntex::time::{timeout_checked, Millis, Seconds};
 use ntex::util::BoxFuture;
 
@@ -289,7 +289,7 @@ where
     ntex::forward_poll_ready!(handshake, ServerError::Service);
     ntex::forward_poll_shutdown!(handshake);
 
-    fn call<'a>(&'a self, req: Io<F>, _: Ctx<'a, Self>) -> Self::Future<'a> {
+    fn call<'a>(&'a self, req: Io<F>, _: ServiceCtx<'a, Self>) -> Self::Future<'a> {
         self.create(IoBoxed::from(req))
     }
 }
@@ -311,7 +311,7 @@ where
     ntex::forward_poll_ready!(handshake, ServerError::Service);
     ntex::forward_poll_shutdown!(handshake);
 
-    fn call<'a>(&'a self, req: IoBoxed, _: Ctx<'_, Self>) -> Self::Future<'a> {
+    fn call<'a>(&'a self, req: IoBoxed, _: ServiceCtx<'_, Self>) -> Self::Future<'a> {
         self.create(req)
     }
 }

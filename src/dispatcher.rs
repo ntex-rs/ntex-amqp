@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::service::{Container, Ctx, Service, ServiceCall};
+use ntex::service::{Container, Service, ServiceCall, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{ready, BoxFuture, Either, Ready};
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
@@ -278,7 +278,7 @@ where
     fn call<'a>(
         &'a self,
         request: DispatchItem<AmqpCodec<AmqpFrame>>,
-        _: Ctx<'a, Self>,
+        _: ServiceCtx<'a, Self>,
     ) -> Self::Future<'a> {
         match request {
             DispatchItem::Item(frame) => {

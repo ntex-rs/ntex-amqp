@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.0-beta.3] - 2023-06-19
+
+* Use ServiceCtx instead of Ctx
+
 ## [0.8.0-beta.2] - 2023-06-19
 
 * Use container for client connector

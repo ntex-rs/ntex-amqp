@@ -2,7 +2,7 @@ use std::{convert::TryFrom, future::Future, marker, pin::Pin, rc::Rc, task::Cont
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{
-    boxed, fn_factory_with_config, Container, Ctx, IntoServiceFactory, Service, ServiceCall,
+    boxed, fn_factory_with_config, Container, IntoServiceFactory, Service, ServiceCall, ServiceCtx,
     ServiceFactory,
 };
 use ntex::util::{join_all, BoxFuture, Either, HashMap, Ready};
@@ -84,7 +84,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
     type Error = Error;
     type Future<'f> = Either<Ready<(), Error>, RouterServiceResponse<'f, S>>;
 
-    fn call<'a>(&'a self, msg: Message, _: Ctx<'a, Self>) -> Self::Future<'_> {
+    fn call<'a>(&'a self, msg: Message, _: ServiceCtx<'a, Self>) -> Self::Future<'_> {
         match msg {
             Message::Attached(frm, link) => {
                 let path = frm
@@ -404,7 +404,7 @@ where
     ntex::forward_poll_shutdown!(service);
 
     #[inline]
-    fn call<'a>(&'a self, req: Transfer, ctx: Ctx<'a, Self>) -> Self::Future<'a> {
+    fn call<'a>(&'a self, req: Transfer, ctx: ServiceCtx<'a, Self>) -> Self::Future<'a> {
         ResourceServiceFut {
             fut: ctx.call(&self.service, req),
             _t: marker::PhantomData,
