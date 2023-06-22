@@ -2,7 +2,7 @@ use std::{future::Future, marker::PhantomData};
 
 use ntex::connect::{self, Address, Connect};
 use ntex::io::IoBoxed;
-use ntex::service::{Container, Service};
+use ntex::service::{Pipeline, Service};
 use ntex::time::{timeout_checked, Seconds};
 use ntex::util::{ByteString, PoolId, PoolRef};
 
@@ -14,7 +14,7 @@ use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
 pub struct Connector<A, T = ()> {
-    connector: Container<T>,
+    connector: Pipeline<T>,
     config: Configuration,
     handshake_timeout: Seconds,
     disconnect_timeout: Seconds,
@@ -27,7 +27,7 @@ impl<A> Connector<A> {
     /// Create new amqp connector
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
-            connector: Container::new(connect::Connector::default()),
+            connector: Pipeline::new(connect::Connector::default()),
             handshake_timeout: Seconds::ZERO,
             disconnect_timeout: Seconds(3),
             config: Configuration::default(),
@@ -112,7 +112,7 @@ where
     }
 
     /// Use custom connector
-    pub fn connector<U>(self, connector: Container<U>) -> Connector<A, U>
+    pub fn connector<U>(self, connector: Pipeline<U>) -> Connector<A, U>
     where
         U: Service<Connect<A>, Error = connect::ConnectError>,
         IoBoxed: From<U::Response>,
@@ -130,7 +130,7 @@ where
     #[doc(hidden)]
     #[deprecated]
     /// Use custom connector
-    pub fn boxed_connector<U>(self, connector: Container<U>) -> Connector<A, U>
+    pub fn boxed_connector<U>(self, connector: Pipeline<U>) -> Connector<A, U>
     where
         U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
     {

@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.0] - 2023-06-22
+
+* Release v0.8.0
+
 ## [0.8.0-beta.3] - 2023-06-19
 
 * Use ServiceCtx instead of Ctx

@@ -1,7 +1,7 @@
 use std::{fmt, future::Future, marker, pin::Pin, rc::Rc};
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
-use ntex::service::{Container, IntoServiceFactory, Service, ServiceCtx, ServiceFactory};
+use ntex::service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
 use ntex::time::{timeout_checked, Millis, Seconds};
 use ntex::util::BoxFuture;
 
@@ -169,7 +169,7 @@ where
     fn create(&self, _: ()) -> Self::Future<'_> {
         Box::pin(async move {
             self.handshake
-                .container(())
+                .pipeline(())
                 .await
                 .map(move |handshake| ServerHandler {
                     handshake,
@@ -198,7 +198,7 @@ where
     fn create(&self, _: ()) -> Self::Future<'_> {
         Box::pin(async move {
             self.handshake
-                .container(())
+                .pipeline(())
                 .await
                 .map(move |handshake| ServerHandler {
                     handshake,
@@ -210,7 +210,7 @@ where
 
 /// Amqp connections handler
 pub struct ServerHandler<St, H, Ctl, Pb> {
-    handshake: Container<H>,
+    handshake: Pipeline<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
@@ -247,13 +247,13 @@ where
                 .map_err(|_| HandshakeError::Timeout)??;
 
             // create publish service
-            let pb_srv = inner.publish.container(st.clone()).await.map_err(|e| {
+            let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
                 error!("Publish service init error: {:?}", e);
                 ServerError::PublishServiceError
             })?;
 
             // create control service
-            let ctl_srv = inner.control.container(st.clone()).await.map_err(|e| {
+            let ctl_srv = inner.control.pipeline(st.clone()).await.map_err(|e| {
                 error!("Control service init error: {:?}", e);
                 ServerError::ControlServiceError
             })?;
@@ -319,7 +319,7 @@ where
 async fn handshake<St, H, Ctl, Pb>(
     state: IoBoxed,
     max_size: usize,
-    handshake: Container<H>,
+    handshake: Pipeline<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 ) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
 where
@@ -348,7 +348,7 @@ where
 
             // handshake protocol
             let ack = handshake
-                .call(if protocol == ProtocolId::Amqp {
+                .service_call(if protocol == ProtocolId::Amqp {
                     Handshake::new_plain(state, inner.config.clone())
                 } else {
                     Handshake::new_sasl(state, inner.config.clone())

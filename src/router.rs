@@ -2,7 +2,7 @@ use std::{convert::TryFrom, future::Future, marker, pin::Pin, rc::Rc, task::Cont
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{
-    boxed, fn_factory_with_config, Container, IntoServiceFactory, Service, ServiceCall, ServiceCtx,
+    boxed, fn_factory_with_config, IntoServiceFactory, Pipeline, Service, ServiceCall, ServiceCtx,
     ServiceFactory,
 };
 use ntex::util::{join_all, BoxFuture, Either, HashMap, Ready};
@@ -76,7 +76,7 @@ struct RouterService<S>(Cell<RouterServiceInner<S>>);
 struct RouterServiceInner<S> {
     state: State<S>,
     router: Rc<PatternRouter<Handle<S>>>,
-    handlers: HashMap<ReceiverLink, Option<Container<HandleService>>>,
+    handlers: HashMap<ReceiverLink, Option<Pipeline<HandleService>>>,
 }
 
 impl<S: 'static> Service<Message> for RouterService<S> {
@@ -247,7 +247,7 @@ impl<'f, S> Future for RouterServiceResponse<'f, S> {
                         };
 
                         this.state =
-                            RouterServiceResponseState::Transfer(srv.call(tr), delivery_id);
+                            RouterServiceResponseState::Transfer(srv.service_call(tr), delivery_id);
                     } else {
                         return Poll::Ready(Ok(()));
                     }
@@ -281,7 +281,7 @@ impl<'f, S> Future for RouterServiceResponse<'f, S> {
                         this.inner
                             .get_mut()
                             .handlers
-                            .insert(this.link.clone(), Some(Container::new(srv)));
+                            .insert(this.link.clone(), Some(Pipeline::new(srv)));
                         if let Some(tr) = this.link.get_transfer() {
                             this.state = RouterServiceResponseState::Service(Some(tr));
                         } else {
