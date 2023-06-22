@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::service::{Container, Service, ServiceCall, ServiceCtx};
+use ntex::service::{Pipeline, Service, ServiceCall, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{ready, BoxFuture, Either, Ready};
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
@@ -28,8 +28,8 @@ impl ControlQueue {
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
-    service: Container<Sr>,
-    ctl_service: Container<Ctl>,
+    service: Pipeline<Sr>,
+    ctl_service: Pipeline<Ctl>,
     ctl_fut: cell::RefCell<Vec<ControlItem<Ctl::Response, Ctl::Error>>>,
     ctl_queue: Rc<ControlQueue>,
     shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
@@ -45,8 +45,8 @@ where
 {
     pub(crate) fn new(
         sink: Connection,
-        service: Container<Sr>,
-        ctl_service: Container<Ctl>,
+        service: Pipeline<Sr>,
+        ctl_service: Pipeline<Ctl>,
         idle_timeout: Millis,
     ) -> Self {
         let ctl_queue = sink.get_control_queue().clone();
@@ -298,7 +298,7 @@ where
                     types::Action::Transfer(link) => {
                         return Either::Left(ServiceResult {
                             link: link.clone(),
-                            fut: self.service.call(types::Message::Transfer(link)),
+                            fut: self.service.service_call(types::Message::Transfer(link)),
                             _t: marker::PhantomData,
                         });
                     }
