@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.1] - 2023-06-23
+
+* Fix client connector usage, fixes lifetime constraint
+
 ## [0.8.0] - 2023-06-22
 
 * Release v0.8.0
