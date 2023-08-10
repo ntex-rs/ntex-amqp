@@ -348,7 +348,7 @@ where
 
             // handshake protocol
             let ack = handshake
-                .service_call(if protocol == ProtocolId::Amqp {
+                .call(if protocol == ProtocolId::Amqp {
                     Handshake::new_plain(state, inner.config.clone())
                 } else {
                     Handshake::new_sasl(state, inner.config.clone())

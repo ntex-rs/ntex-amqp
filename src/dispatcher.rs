@@ -63,11 +63,10 @@ where
     }
 
     fn call_control_service(&self, frame: ControlFrame) {
-        let ctl = self.ctl_service.clone();
-        self.ctl_fut.borrow_mut().push((
-            frame.clone(),
-            Box::pin(async move { ctl.call(frame).await }),
-        ));
+        let fut = self.ctl_service.call_static(frame.clone());
+        self.ctl_fut
+            .borrow_mut()
+            .push((frame, Box::pin(async move { fut.await })));
         self.ctl_queue.waker.wake();
     }
 
@@ -154,11 +153,11 @@ where
                 ControlFrameKind::AttachReceiver(ref frm, ref link) => {
                     let link = link.clone();
                     let frm = frm.clone();
-                    let service = self.service.clone();
+                    let fut = self
+                        .service
+                        .call_static(types::Message::Attached(frm.clone(), link.clone()));
                     ntex::rt::spawn(async move {
-                        let result = service
-                            .call(types::Message::Attached(frm.clone(), link.clone()))
-                            .await;
+                        let result = fut.await;
                         if let Err(err) = result {
                             let _ = link.close_with_error(Error::from(err)).await;
                         } else {
@@ -257,11 +256,11 @@ where
             let sink = self.sink.0.get_mut();
             sink.on_close.notify();
             sink.set_error(AmqpProtocolError::Disconnected);
-            let ctl_service = self.ctl_service.clone();
+            let fut = self
+                .ctl_service
+                .call_static(ControlFrame::new_kind(ControlFrameKind::Closed));
             *shutdown = Some(Box::pin(async move {
-                let _ = ctl_service
-                    .call(ControlFrame::new_kind(ControlFrameKind::Closed))
-                    .await;
+                let _ = fut.await;
             }));
         }
 
@@ -298,7 +297,7 @@ where
                     types::Action::Transfer(link) => {
                         return Either::Left(ServiceResult {
                             link: link.clone(),
-                            fut: self.service.service_call(types::Message::Transfer(link)),
+                            fut: self.service.call(types::Message::Transfer(link)),
                             _t: marker::PhantomData,
                         });
                     }
@@ -329,9 +328,9 @@ where
                     }
                     types::Action::DetachReceiver(link, frm) => {
                         let lnk = link.clone();
-                        let svc = self.service.clone();
+                        let fut = self.service.call_static(types::Message::Detached(lnk));
                         spawn(async move {
-                            let _ = svc.call(types::Message::Detached(lnk)).await;
+                            let _ = fut.await;
                         });
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
@@ -347,9 +346,11 @@ where
                             })
                             .collect();
 
-                        let svc = self.service.clone();
+                        let fut = self
+                            .service
+                            .call_static(types::Message::DetachedAll(receivers));
                         spawn(async move {
-                            let _ = svc.call(types::Message::DetachedAll(receivers)).await;
+                            let _ = fut.await;
                         });
                         self.call_control_service(ControlFrame::new_kind(
                             ControlFrameKind::RemoteSessionEnded(links),

@@ -247,7 +247,7 @@ impl<'f, S> Future for RouterServiceResponse<'f, S> {
                         };
 
                         this.state =
-                            RouterServiceResponseState::Transfer(srv.service_call(tr), delivery_id);
+                            RouterServiceResponseState::Transfer(srv.call(tr), delivery_id);
                     } else {
                         return Poll::Ready(Ok(()));
                     }
