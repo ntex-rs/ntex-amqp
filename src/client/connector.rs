@@ -164,11 +164,7 @@ where
     }
 
     async fn _connect(&self, address: A) -> Result<Client, ConnectError> {
-        let io = self
-            .connector
-            .clone()
-            .service_call(Connect::new(address))
-            .await?;
+        let io = self.connector.call(Connect::new(address)).await?;
         let config = self.config.clone();
         let pool = self.pool;
         let disconnect = self.disconnect_timeout;
@@ -207,11 +203,7 @@ where
     }
 
     async fn _connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
-        let io = self
-            .connector
-            .clone()
-            .service_call(Connect::new(addr))
-            .await?;
+        let io = self.connector.call(Connect::new(addr)).await?;
         let config = self.config.clone();
         let pool = self.pool;
         let disconnect = self.disconnect_timeout;

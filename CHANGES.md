@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.2] - 2023-08-10
+
+* Update ntex deps
+
 ## [0.8.1] - 2023-06-23
 
 * Fix client connector usage, fixes lifetime constraint
