@@ -1076,7 +1076,7 @@ impl SessionInner {
             if let Some(val) = self.unsettled_deliveries.remove(&no) {
                 val.ready(Ok(disposition.clone()));
             } else {
-                log::error!(
+                log::info!(
                     "Could not find handler for {:?}, no: {:?}, unsettled: {:?}",
                     disposition,
                     no,
