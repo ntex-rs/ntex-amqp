@@ -341,8 +341,8 @@ impl SenderLinkInner {
             let delta = flow
                 .delivery_count()
                 .unwrap_or(0)
-                .saturating_add(credit)
-                .saturating_sub(self.delivery_count);
+                .wrapping_add(credit)
+                .wrapping_sub(self.delivery_count);
 
             trace!(
                 "Apply sender link {:?} flow, credit: {:?}({:?}) flow count: {:?}, delivery count: {:?} pending: {:?} new credit {:?}",
@@ -361,8 +361,10 @@ impl SenderLinkInner {
             // credit became available => drain pending_transfers
             while self.link_credit > 0 {
                 if let Some(transfer) = self.pending_transfers.pop_front() {
-                    self.link_credit -= 1;
-                    self.delivery_count = self.delivery_count.saturating_add(1);
+                    if !transfer.state.more() {
+                        self.link_credit -= 1;
+                    }
+                    self.delivery_count = self.delivery_count.wrapping_add(1);
                     session.send_transfer(
                         self.id as u32,
                         transfer.body,
@@ -545,8 +547,11 @@ impl SenderLinkInner {
                 body: Some(body),
             });
         } else {
-            self.link_credit -= 1;
-            self.delivery_count = self.delivery_count.saturating_add(1);
+            // reduce link credit only if transfer is last
+            if !state.more() {
+                self.link_credit -= 1;
+            }
+            self.delivery_count = self.delivery_count.wrapping_add(1);
             self.session.inner.get_mut().send_transfer(
                 self.id as u32,
                 Some(body),
@@ -572,7 +577,7 @@ impl SenderLinkInner {
     fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {
         tag.unwrap_or_else(|| {
             let delivery_tag = self.delivery_tag;
-            self.delivery_tag = delivery_tag.saturating_add(1);
+            self.delivery_tag = delivery_tag.wrapping_add(1);
 
             let mut buf = self.pool.buf_with_capacity(16);
             buf.put_u32(delivery_tag);

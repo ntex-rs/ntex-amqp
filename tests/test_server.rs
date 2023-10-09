@@ -183,9 +183,9 @@ async fn test_session_end() -> std::io::Result<()> {
         .await
         .unwrap();
     link.send(Bytes::from(b"test".as_ref())).await.unwrap();
+    session.end().await.unwrap();
     sleep(Millis(150)).await;
 
-    session.end().await.unwrap();
     assert_eq!(link_names.lock().unwrap()[0], "test");
     assert!(sink.is_opened());
 

@@ -1,5 +1,5 @@
 #![deny(rust_2018_idioms, warnings, unreachable_pub)]
-#![allow(clippy::type_complexity)]
+#![allow(clippy::type_complexity, clippy::let_underscore_future)]
 
 #[macro_use]
 extern crate derive_more;
