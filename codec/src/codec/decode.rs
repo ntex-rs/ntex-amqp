@@ -171,7 +171,7 @@ impl DecodeFormatted for char {
 impl DecodeFormatted for DateTime<Utc> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         validate_code!(fmt, codec::FORMATCODE_TIMESTAMP);
-        be_read!(input, read_i64, 8).map(datetime_from_millis)
+        be_read!(input, read_i64, 8).and_then(datetime_from_millis)
     }
 }
 
@@ -520,17 +520,21 @@ fn decode_compound32(input: &mut Bytes) -> Result<CompoundHeader, AmqpParseError
     Ok(CompoundHeader { size, count })
 }
 
-fn datetime_from_millis(millis: i64) -> DateTime<Utc> {
+fn datetime_from_millis(millis: i64) -> Result<DateTime<Utc>, AmqpParseError> {
     let seconds = millis / 1000;
     if seconds < 0 {
         // In order to handle time before 1970 correctly, we need to subtract a second
         // and use the nanoseconds field to add it back. This is a result of the nanoseconds
         // parameter being u32
         let nanoseconds = ((1000 + (millis - (seconds * 1000))) * 1_000_000).unsigned_abs();
-        Utc.timestamp(seconds - 1, nanoseconds as u32)
+        Utc.timestamp_opt(seconds - 1, nanoseconds as u32)
+            .earliest()
+            .ok_or(AmqpParseError::DatetimeParseError)
     } else {
         let nanoseconds = ((millis - (seconds * 1000)) * 1_000_000).unsigned_abs();
-        Utc.timestamp(seconds, nanoseconds as u32)
+        Utc.timestamp_opt(seconds, nanoseconds as u32)
+            .earliest()
+            .ok_or(AmqpParseError::DatetimeParseError)
     }
 }
 

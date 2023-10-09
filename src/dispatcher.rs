@@ -64,9 +64,7 @@ where
 
     fn call_control_service(&self, frame: ControlFrame) {
         let fut = self.ctl_service.call_static(frame.clone());
-        self.ctl_fut
-            .borrow_mut()
-            .push((frame, Box::pin(async move { fut.await })));
+        self.ctl_fut.borrow_mut().push((frame, Box::pin(fut)));
         self.ctl_queue.waker.wake();
     }
 
