@@ -2,7 +2,7 @@
 
 ## [0.8.4] - 2023-10-09
 
-* Fix cradit handling
+* Fix credit limit handling
 
 ## [0.8.2] - 2023-08-10
 
