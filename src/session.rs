@@ -285,7 +285,7 @@ pub(crate) enum TransferState {
 }
 
 impl TransferState {
-    fn more(&self) -> bool {
+    pub(super) fn more(&self) -> bool {
         !matches!(self, TransferState::Only(_, _) | TransferState::Last)
     }
 }
@@ -1094,8 +1094,8 @@ impl SessionInner {
         self.remote_incoming_window = flow
             .next_incoming_id()
             .unwrap_or(INITIAL_OUTGOING_ID)
-            .saturating_add(flow.incoming_window())
-            .saturating_sub(self.next_outgoing_id);
+            .wrapping_add(flow.incoming_window())
+            .wrapping_sub(self.next_outgoing_id);
 
         trace!(
             "Session received credit {:?}. window: {}, pending: {}",
@@ -1181,7 +1181,10 @@ impl SessionInner {
                 message_format,
             });
         } else {
-            self.remote_incoming_window -= 1;
+            let more = state.more();
+            if !more {
+                self.remote_incoming_window -= 1;
+            }
 
             let settled2 = settled.unwrap_or(false);
             let tr_settled = if settled2 {
@@ -1210,7 +1213,7 @@ impl SessionInner {
                 TransferState::First(promise, delivery_tag)
                 | TransferState::Only(promise, delivery_tag) => {
                     let delivery_id = self.next_outgoing_id;
-                    self.next_outgoing_id += 1;
+                    self.next_outgoing_id = self.next_outgoing_id.wrapping_add(1);
 
                     transfer.0.more = more;
                     transfer.0.batchable = more;
