@@ -376,6 +376,12 @@ where
                 )));
                 Either::Right(Ready::Ok(None))
             }
+            DispatchItem::ReadTimeout => {
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                    AmqpProtocolError::ReadTimeout,
+                )));
+                Either::Right(Ready::Ok(None))
+            }
             DispatchItem::Disconnect(e) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
                     e,

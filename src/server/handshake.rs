@@ -62,7 +62,7 @@ impl HandshakeAmqp {
         match frame {
             Frame::Open(frame) => {
                 trace!("Got open frame: {:?}", frame);
-                let remote_config = (&frame).into();
+                let remote_config = local_config.from_remote(&frame);
                 let sink = Connection::new(state.get_ref(), &local_config, &remote_config);
                 Ok(HandshakeAmqpOpened {
                     frame,

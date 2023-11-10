@@ -6,7 +6,7 @@ extern crate derive_more;
 #[macro_use]
 extern crate log;
 
-use ntex::{time::Seconds, util::ByteString};
+use ntex::{io::DispatcherConfig, time::Seconds, util::ByteString};
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner};
 use uuid::Uuid;
 
@@ -44,6 +44,9 @@ pub struct Configuration {
     pub channel_max: u16,
     pub idle_time_out: Milliseconds,
     pub hostname: Option<ByteString>,
+    pub(crate) max_size: usize,
+    pub(crate) disp_config: DispatcherConfig,
+    pub(crate) handshake_timeout: Seconds,
 }
 
 impl Default for Configuration {
@@ -55,11 +58,19 @@ impl Default for Configuration {
 impl Configuration {
     /// Create connection configuration.
     pub fn new() -> Self {
+        let disp_config = DispatcherConfig::default();
+        disp_config
+            .set_disconnect_timeout(Seconds(3))
+            .set_keepalive_timeout(Seconds(0));
+
         Configuration {
+            disp_config,
+            max_size: 0,
             max_frame_size: std::u16::MAX as u32,
             channel_max: 1024,
             idle_time_out: 120_000,
             hostname: None,
+            handshake_timeout: Seconds(5),
         }
     }
 
@@ -91,6 +102,7 @@ impl Configuration {
     /// By default idle time-out is set to 120 seconds
     pub fn idle_timeout(&mut self, timeout: u16) -> &mut Self {
         self.idle_time_out = (timeout * 1000) as Milliseconds;
+        self.disp_config.set_keepalive_timeout(Seconds(timeout));
         self
     }
 
@@ -99,6 +111,46 @@ impl Configuration {
     /// Hostname is not set by default
     pub fn hostname(&mut self, hostname: &str) -> &mut Self {
         self.hostname = Some(ByteString::from(hostname));
+        self
+    }
+
+    /// Set max inbound frame size.
+    ///
+    /// If max size is set to `0`, size is unlimited.
+    /// By default max size is set to `0`
+    pub fn max_size(mut self, size: usize) -> Self {
+        self.max_size = size;
+        self
+    }
+
+    /// Set handshake timeout.
+    ///
+    /// By default handshake timeout is 5 seconds.
+    pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
+        self.handshake_timeout = timeout;
+        self
+    }
+
+    /// Set server connection keep-alive timeout.
+    ///
+    /// To disable timeout set value to 0.
+    ///
+    /// By default keep-alive timeout is disabled.
+    pub fn keepalive_timeout(self, val: Seconds) -> Self {
+        self.disp_config.set_keepalive_timeout(val);
+        self
+    }
+
+    /// Set server connection disconnect timeout.
+    ///
+    /// Defines a timeout for disconnect connection. If a disconnect procedure does not complete
+    /// within this time, the connection get dropped.
+    ///
+    /// To disable timeout set value to 0.
+    ///
+    /// By default disconnect timeout is set to 3 seconds.
+    pub fn disconnect_timeout(self, val: Seconds) -> Self {
+        self.disp_config.set_disconnect_timeout(val);
         self
     }
 
@@ -122,14 +174,6 @@ impl Configuration {
         }))
     }
 
-    pub(crate) fn timeout_secs(&self) -> Seconds {
-        if self.idle_time_out > 0 {
-            Seconds::checked_new((self.idle_time_out / 1000) as usize)
-        } else {
-            Seconds::ZERO
-        }
-    }
-
     pub(crate) fn timeout_remote_secs(&self) -> Seconds {
         if self.idle_time_out > 0 {
             Seconds::checked_new(((self.idle_time_out as f32) * 0.75 / 1000.0) as usize)
@@ -137,15 +181,16 @@ impl Configuration {
             Seconds::ZERO
         }
     }
-}
 
-impl<'a> From<&'a Open> for Configuration {
-    fn from(open: &'a Open) -> Self {
+    pub fn from_remote(&self, open: &Open) -> Configuration {
         Configuration {
             max_frame_size: open.max_frame_size(),
             channel_max: open.channel_max(),
             idle_time_out: open.idle_time_out().unwrap_or(0),
             hostname: open.hostname().cloned(),
+            max_size: self.max_size,
+            disp_config: self.disp_config.clone(),
+            handshake_timeout: self.handshake_timeout,
         }
     }
 }

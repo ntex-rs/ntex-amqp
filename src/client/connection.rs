@@ -1,6 +1,6 @@
 use ntex::io::{Dispatcher as IoDispatcher, IoBoxed};
 use ntex::service::{fn_service, IntoService, Pipeline, Service};
-use ntex::{time::Seconds, util::Ready};
+use ntex::util::Ready;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
@@ -12,7 +12,6 @@ pub struct Client<St = ()> {
     io: IoBoxed,
     codec: AmqpCodec<AmqpFrame>,
     connection: Connection,
-    keepalive: Seconds,
     remote_config: Configuration,
     _st: State<St>,
 }
@@ -23,14 +22,12 @@ impl Client {
         io: IoBoxed,
         codec: AmqpCodec<AmqpFrame>,
         connection: Connection,
-        keepalive: Seconds,
         remote_config: Configuration,
     ) -> Self {
         Client {
             io,
             codec,
             connection,
-            keepalive,
             remote_config,
             _st: State::new(()),
         }
@@ -54,7 +51,6 @@ where
             io: self.io,
             codec: self.codec,
             connection: self.connection,
-            keepalive: self.keepalive,
             remote_config: self.remote_config,
             _st: State::new(st),
         }
@@ -71,15 +67,13 @@ where
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        let keepalive = if self.keepalive.non_zero() {
-            self.keepalive + Seconds(5)
-        } else {
-            Seconds::ZERO
-        };
-
-        IoDispatcher::new(self.io, self.codec, dispatcher)
-            .keepalive_timeout(keepalive)
-            .await
+        IoDispatcher::with_config(
+            self.io,
+            self.codec,
+            dispatcher,
+            &self.remote_config.disp_config,
+        )
+        .await
     }
 
     pub async fn start<F, S>(self, service: F) -> Result<(), AmqpDispatcherError>
@@ -97,14 +91,12 @@ where
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        let keepalive = if self.keepalive.non_zero() {
-            self.keepalive + Seconds(5)
-        } else {
-            Seconds::ZERO
-        };
-
-        IoDispatcher::new(self.io, self.codec, dispatcher)
-            .keepalive_timeout(keepalive)
-            .await
+        IoDispatcher::with_config(
+            self.io,
+            self.codec,
+            dispatcher,
+            &self.remote_config.disp_config,
+        )
+        .await
     }
 }

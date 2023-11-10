@@ -2,7 +2,7 @@ use std::{fmt, future::Future, marker, pin::Pin, rc::Rc};
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
-use ntex::time::{timeout_checked, Millis, Seconds};
+use ntex::time::{timeout_checked, Millis};
 use ntex::util::BoxFuture;
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
@@ -23,9 +23,6 @@ pub struct ServerBuilder<St, H, Ctl> {
     handshake: H,
     control: Ctl,
     config: Rc<Configuration>,
-    max_size: usize,
-    handshake_timeout: Seconds,
-    disconnect_timeout: Seconds,
     _t: marker::PhantomData<St>,
 }
 
@@ -33,9 +30,6 @@ pub(super) struct ServerInner<St, Ctl, Pb> {
     control: Ctl,
     publish: Pb,
     config: Rc<Configuration>,
-    max_size: usize,
-    handshake_timeout: Seconds,
-    disconnect_timeout: Seconds,
     _t: marker::PhantomData<St>,
 }
 
@@ -49,53 +43,24 @@ where
         F: IntoServiceFactory<H, Handshake>,
         H: ServiceFactory<Handshake, Response = HandshakeAck<St>>,
     {
+        Server::with_config(Configuration::default(), handshake)
+    }
+
+    /// Start server building process with provided handshake service
+    pub fn with_config<F, H>(
+        config: Configuration,
+        handshake: F,
+    ) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
+    where
+        F: IntoServiceFactory<H, Handshake>,
+        H: ServiceFactory<Handshake, Response = HandshakeAck<St>>,
+    {
         ServerBuilder {
             handshake: handshake.into_factory(),
-            handshake_timeout: Seconds(5),
-            disconnect_timeout: Seconds(3),
             control: DefaultControlService::default(),
-            max_size: 0,
-            config: Rc::new(Configuration::default()),
+            config: Rc::new(config),
             _t: marker::PhantomData,
         }
-    }
-}
-
-impl<St, H, Ctl> ServerBuilder<St, H, Ctl> {
-    /// Provide connection configuration
-    pub fn config(mut self, config: Configuration) -> Self {
-        self.config = Rc::new(config);
-        self
-    }
-
-    /// Set max inbound frame size.
-    ///
-    /// If max size is set to `0`, size is unlimited.
-    /// By default max size is set to `0`
-    pub fn max_size(mut self, size: usize) -> Self {
-        self.max_size = size;
-        self
-    }
-
-    /// Set handshake timeout.
-    ///
-    /// By default handshake timeout is 5 seconds.
-    pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
-        self.handshake_timeout = timeout;
-        self
-    }
-
-    /// Set server connection disconnect timeout.
-    ///
-    /// Defines a timeout for disconnect connection. If a disconnect procedure does not complete
-    /// within this time, the connection get dropped.
-    ///
-    /// To disable timeout set value to 0.
-    ///
-    /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(mut self, val: Seconds) -> Self {
-        self.disconnect_timeout = val;
-        self
     }
 }
 
@@ -118,10 +83,7 @@ where
         ServerBuilder {
             config: self.config,
             handshake: self.handshake,
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
             control: service.into_factory(),
-            max_size: self.max_size,
             _t: marker::PhantomData,
         }
     }
@@ -137,12 +99,9 @@ where
         Server {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
-                handshake_timeout: self.handshake_timeout,
                 config: self.config,
                 publish: service.into_factory(),
                 control: self.control,
-                disconnect_timeout: self.disconnect_timeout,
-                max_size: self.max_size,
                 _t: marker::PhantomData,
             }),
         }
@@ -228,23 +187,14 @@ where
         &self,
         req: IoBoxed,
     ) -> Pin<Box<dyn Future<Output = Result<(), ServerError<H::Error>>>>> {
-        req.set_disconnect_timeout(self.inner.disconnect_timeout.into());
-
-        let keepalive = self.inner.config.idle_time_out / 1000;
-        let handshake_timeout = self.inner.handshake_timeout;
-        let disconnect_timeout = self.inner.disconnect_timeout;
-        let fut = handshake(
-            req,
-            self.inner.max_size,
-            self.handshake.clone(),
-            self.inner.clone(),
-        );
+        let fut = handshake(req, self.handshake.clone(), self.inner.clone());
         let inner = self.inner.clone();
 
         Box::pin(async move {
-            let (state, codec, sink, st, idle_timeout) = timeout_checked(handshake_timeout, fut)
-                .await
-                .map_err(|_| HandshakeError::Timeout)??;
+            let (state, codec, sink, st, idle_timeout) =
+                timeout_checked(inner.config.handshake_timeout, fut)
+                    .await
+                    .map_err(|_| HandshakeError::Timeout)??;
 
             // create publish service
             let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
@@ -258,13 +208,12 @@ where
                 ServerError::ControlServiceError
             })?;
 
-            FramedDispatcher::new(
+            FramedDispatcher::with_config(
                 state,
                 codec,
                 Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),
+                &inner.config.disp_config,
             )
-            .keepalive_timeout(Seconds::checked_new(keepalive as usize))
-            .disconnect_timeout(disconnect_timeout)
             .await
             .map_err(ServerError::Dispatcher)
         })
@@ -318,7 +267,6 @@ where
 
 async fn handshake<St, H, Ctl, Pb>(
     state: IoBoxed,
-    max_size: usize,
     handshake: Pipeline<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 ) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
@@ -358,7 +306,7 @@ where
 
             let (st, sink, idle_timeout, state) = ack.into_inner();
 
-            let codec = AmqpCodec::new().max_size(max_size);
+            let codec = AmqpCodec::new().max_size(inner.config.max_size);
 
             // confirm Open
             let local = inner.config.to_open();

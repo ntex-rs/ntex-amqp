@@ -16,8 +16,6 @@ use super::{connection::Client, error::ConnectError, SaslAuth};
 pub struct Connector<A, T = ()> {
     connector: Pipeline<T>,
     config: Configuration,
-    handshake_timeout: Seconds,
-    disconnect_timeout: Seconds,
     pool: PoolRef,
     _t: PhantomData<A>,
 }
@@ -28,8 +26,6 @@ impl<A> Connector<A> {
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
             connector: Pipeline::new(connect::Connector::default()),
-            handshake_timeout: Seconds::ZERO,
-            disconnect_timeout: Seconds(3),
             config: Configuration::default(),
             pool: PoolId::P6.pool_ref(),
             _t: PhantomData,
@@ -85,7 +81,7 @@ where
     /// Handshake includes `connect` packet and response `connect-ack`.
     /// By default handshake timeuot is disabled.
     pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
-        self.handshake_timeout = timeout;
+        self.config.handshake_timeout = timeout;
         self
     }
 
@@ -97,8 +93,8 @@ where
     /// To disable timeout set value to 0.
     ///
     /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(mut self, timeout: Seconds) -> Self {
-        self.disconnect_timeout = timeout;
+    pub fn disconnect_timeout(self, timeout: Seconds) -> Self {
+        self.config.disp_config.set_disconnect_timeout(timeout);
         self
     }
 
@@ -120,8 +116,6 @@ where
         Connector {
             connector,
             config: self.config,
-            handshake_timeout: self.handshake_timeout,
-            disconnect_timeout: self.disconnect_timeout,
             pool: self.pool,
             _t: PhantomData,
         }
@@ -146,7 +140,7 @@ where
 {
     /// Connect to amqp server
     pub async fn connect(&self, address: A) -> Result<Client, ConnectError> {
-        let fut = timeout_checked(self.handshake_timeout, self._connect(address));
+        let fut = timeout_checked(self.config.handshake_timeout, self._connect(address));
         match fut.await {
             Ok(res) => res.map_err(From::from),
             Err(_) => Err(ConnectError::HandshakeTimeout),
@@ -158,8 +152,6 @@ where
         trace!("Negotiation client protocol id: Amqp");
 
         io.set_memory_pool(self.pool);
-        io.set_disconnect_timeout(self.disconnect_timeout.into());
-
         _connect_plain(io, self.config.clone())
     }
 
@@ -167,20 +159,21 @@ where
         let io = self.connector.call(Connect::new(address)).await?;
         let config = self.config.clone();
         let pool = self.pool;
-        let disconnect = self.disconnect_timeout;
 
         trace!("Negotiation client protocol id: Amqp");
 
         let io = IoBoxed::from(io);
         io.set_memory_pool(pool);
-        io.set_disconnect_timeout(disconnect.into());
 
         _connect_plain(io, config).await
     }
 
     /// Connect to amqp server
     pub async fn connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
-        let fut = timeout_checked(self.handshake_timeout, self._connect_sasl(addr, auth));
+        let fut = timeout_checked(
+            self.config.handshake_timeout,
+            self._connect_sasl(addr, auth),
+        );
         match fut.await {
             Ok(res) => res.map_err(From::from),
             Err(_) => Err(ConnectError::HandshakeTimeout),
@@ -197,7 +190,6 @@ where
 
         let config = self.config.clone();
         io.set_memory_pool(self.pool);
-        io.set_disconnect_timeout(self.disconnect_timeout.into());
 
         _connect_sasl(io, auth, config)
     }
@@ -206,11 +198,9 @@ where
         let io = self.connector.call(Connect::new(addr)).await?;
         let config = self.config.clone();
         let pool = self.pool;
-        let disconnect = self.disconnect_timeout;
 
         let io = IoBoxed::from(io);
         io.set_memory_pool(pool);
-        io.set_disconnect_timeout(disconnect.into());
 
         _connect_sasl(io, auth, config).await
     }
@@ -305,9 +295,9 @@ async fn _connect_plain(io: IoBoxed, config: Configuration) -> Result<Client, Co
 
     if let Frame::Open(open) = frame.performative() {
         trace!("Open confirmed: {:?}", open);
-        let remote_config = open.into();
+        let remote_config = config.from_remote(open);
         let connection = Connection::new(io.get_ref(), &config, &remote_config);
-        let client = Client::new(io, codec, connection, config.timeout_secs(), remote_config);
+        let client = Client::new(io, codec, connection, remote_config);
         Ok(client)
     } else {
         Err(ConnectError::ExpectOpenFrame(Box::new(frame)))

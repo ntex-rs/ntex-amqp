@@ -269,7 +269,7 @@ impl SaslSuccess {
                         trace!("Got open frame: {:?}", frame);
 
                         let local_config = self.local_config;
-                        let remote_config = (&frame).into();
+                        let remote_config = local_config.from_remote(&frame);
                         let sink = Connection::new(state.clone(), &local_config, &remote_config);
 
                         Ok(HandshakeAmqpOpened::new(
