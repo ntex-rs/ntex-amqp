@@ -154,6 +154,19 @@ impl Configuration {
         self
     }
 
+    /// Set read rate parameters for single frame.
+    ///
+    /// Set max timeout for reading single frame. If the client
+    /// sends `rate` amount of data, increase the timeout by 1 second for every.
+    /// But no more than `max_timeout` timeout.
+    ///
+    /// By default frame read rate is disabled.
+    pub fn frame_read_rate(self, timeout: Seconds, max_timeout: Seconds, rate: u16) -> Self {
+        self.disp_config
+            .set_frame_read_rate(timeout, max_timeout, rate);
+        self
+    }
+
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
         Open(Box::new(OpenInner {

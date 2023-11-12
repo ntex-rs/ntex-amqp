@@ -36,7 +36,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 env_logger = "0.10"
-ntex = { version = "0.7.9", features = ["tokio"] }
+ntex = { version = "0.7", features = ["tokio"] }
 
 [patch.crates-io]
 ntex-amqp = { path = "." }
