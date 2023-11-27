@@ -22,7 +22,7 @@ pub struct Server<St, H, Ctl, Pb> {
 pub struct ServerBuilder<St, H, Ctl> {
     handshake: H,
     control: Ctl,
-    config: Rc<Configuration>,
+    config: Configuration,
     _t: marker::PhantomData<St>,
 }
 
@@ -56,9 +56,9 @@ where
         H: ServiceFactory<Handshake, Response = HandshakeAck<St>>,
     {
         ServerBuilder {
+            config,
             handshake: handshake.into_factory(),
             control: DefaultControlService::default(),
-            config: Rc::new(config),
             _t: marker::PhantomData,
         }
     }
@@ -72,6 +72,15 @@ where
     Ctl::InitError: fmt::Debug,
     Error: From<Ctl::Error>,
 {
+    /// Modify server configuration
+    pub fn config<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut Configuration),
+    {
+        f(&mut self.config);
+        self
+    }
+
     /// Service to call with control frames
     pub fn control<F, S>(self, service: F) -> ServerBuilder<St, H, S>
     where
@@ -99,7 +108,7 @@ where
         Server {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
-                config: self.config,
+                config: Rc::new(self.config),
                 publish: service.into_factory(),
                 control: self.control,
                 _t: marker::PhantomData,

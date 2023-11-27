@@ -293,11 +293,15 @@ where
 
                 match action {
                     types::Action::Transfer(link) => {
-                        return Either::Left(ServiceResult {
-                            link: link.clone(),
-                            fut: self.service.call(types::Message::Transfer(link)),
-                            _t: marker::PhantomData,
-                        });
+                        return if self.sink.is_opened() {
+                            Either::Left(ServiceResult {
+                                link: link.clone(),
+                                fut: self.service.call(types::Message::Transfer(link)),
+                                _t: marker::PhantomData,
+                            })
+                        } else {
+                            Either::Right(Ready::Ok(None))
+                        };
                     }
                     types::Action::Flow(link, frm) => {
                         // apply flow to specific link

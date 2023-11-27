@@ -1,5 +1,11 @@
 # Changes
 
+## [0.8.6] - 2023-11-27
+
+* Better server builder
+
+* Do not handle transfers if connection is down
+
 ## [0.8.5] - 2023-11-12
 
 * Update io

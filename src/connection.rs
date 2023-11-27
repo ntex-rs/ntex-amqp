@@ -82,7 +82,7 @@ impl Connection {
         if inner.state != ConnectionState::Normal {
             return false;
         }
-        inner.error.is_none()
+        inner.error.is_none() && !inner.io.is_closed()
     }
 
     /// Get waiter for `on_close` event

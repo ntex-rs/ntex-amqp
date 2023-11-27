@@ -118,7 +118,7 @@ impl Configuration {
     ///
     /// If max size is set to `0`, size is unlimited.
     /// By default max size is set to `0`
-    pub fn max_size(mut self, size: usize) -> Self {
+    pub fn max_size(&mut self, size: usize) -> &mut Self {
         self.max_size = size;
         self
     }
@@ -126,7 +126,7 @@ impl Configuration {
     /// Set handshake timeout.
     ///
     /// By default handshake timeout is 5 seconds.
-    pub fn handshake_timeout(mut self, timeout: Seconds) -> Self {
+    pub fn handshake_timeout(&mut self, timeout: Seconds) -> &mut Self {
         self.handshake_timeout = timeout;
         self
     }
@@ -136,7 +136,7 @@ impl Configuration {
     /// To disable timeout set value to 0.
     ///
     /// By default keep-alive timeout is disabled.
-    pub fn keepalive_timeout(self, val: Seconds) -> Self {
+    pub fn keepalive_timeout(&mut self, val: Seconds) -> &mut Self {
         self.disp_config.set_keepalive_timeout(val);
         self
     }
@@ -149,19 +149,24 @@ impl Configuration {
     /// To disable timeout set value to 0.
     ///
     /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(self, val: Seconds) -> Self {
+    pub fn disconnect_timeout(&mut self, val: Seconds) -> &mut Self {
         self.disp_config.set_disconnect_timeout(val);
         self
     }
 
     /// Set read rate parameters for single frame.
     ///
-    /// Set max timeout for reading single frame. If the client
-    /// sends `rate` amount of data, increase the timeout by 1 second for every.
+    /// Set read timeout, max timeout and rate for reading payload. If the client
+    /// sends `rate` amount of data within `timeout` period of time, extend timeout by `timeout` seconds.
     /// But no more than `max_timeout` timeout.
     ///
     /// By default frame read rate is disabled.
-    pub fn frame_read_rate(self, timeout: Seconds, max_timeout: Seconds, rate: u16) -> Self {
+    pub fn frame_read_rate(
+        &mut self,
+        timeout: Seconds,
+        max_timeout: Seconds,
+        rate: u16,
+    ) -> &mut Self {
         self.disp_config
             .set_frame_read_rate(timeout, max_timeout, rate);
         self
