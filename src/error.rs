@@ -120,8 +120,16 @@ impl AmqpError {
         Self::new(protocol::AmqpError::NotImplemented)
     }
 
-    pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(ByteString::from(text.as_ref()));
+    pub fn text(mut self, text: &'static str) -> Self {
+        self.description = Some(ByteString::from_static(text));
+        self
+    }
+
+    pub fn description<T>(mut self, text: T) -> Self
+    where
+        ByteString: From<T>,
+    {
+        self.description = Some(ByteString::from(text));
         self
     }
 
@@ -191,8 +199,11 @@ impl LinkError {
         self
     }
 
-    pub fn description<T: AsRef<str>>(mut self, text: T) -> Self {
-        self.description = Some(ByteString::from(text.as_ref()));
+    pub fn description<T>(mut self, text: T) -> Self
+    where
+        ByteString: From<T>,
+    {
+        self.description = Some(ByteString::from(text));
         self
     }
 
@@ -201,7 +212,6 @@ impl LinkError {
         self
     }
 
-    #[allow(clippy::mutable_key_type)]
     pub fn fields(mut self, fields: protocol::FieldsVec) -> Self {
         self.info = Some(fields);
         self
