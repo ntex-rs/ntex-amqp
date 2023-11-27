@@ -109,7 +109,7 @@ impl<S> fmt::Debug for Link<S> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum Outcome {
     Accept,
     Reject,
