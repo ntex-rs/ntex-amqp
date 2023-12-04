@@ -101,7 +101,7 @@ impl Configuration {
     ///
     /// By default idle time-out is set to 120 seconds
     pub fn idle_timeout(&mut self, timeout: u16) -> &mut Self {
-        self.idle_time_out = (timeout * 1000) as Milliseconds;
+        self.idle_time_out = (timeout as Milliseconds) * 1000;
         self.disp_config.set_keepalive_timeout(Seconds(timeout));
         self
     }

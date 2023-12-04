@@ -160,8 +160,6 @@ where
         let config = self.config.clone();
         let pool = self.pool;
 
-        trace!("Negotiation client protocol id: Amqp");
-
         let io = IoBoxed::from(io);
         io.set_memory_pool(pool);
 

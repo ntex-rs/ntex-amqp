@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.7] - 2023-12-04
+
+* Fix overflow in Configuration::idle_timeout()
+
 ## [0.8.6] - 2023-11-27
 
 * Better server builder
