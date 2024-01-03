@@ -294,7 +294,12 @@ impl SenderLinkInner {
     }
 
     pub(crate) fn detached(&mut self, err: AmqpProtocolError) {
-        trace!("Detaching sender link {:?} with error {:?}", self.name, err);
+        log::trace!(
+            "{}: Detaching sender link {:?} with error {:?}",
+            self.session.tag(),
+            self.name,
+            err
+        );
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
@@ -344,8 +349,9 @@ impl SenderLinkInner {
                 .wrapping_add(credit)
                 .wrapping_sub(self.delivery_count);
 
-            trace!(
-                "Apply sender link {:?} flow, credit: {:?}({:?}) flow count: {:?}, delivery count: {:?} pending: {:?} new credit {:?}",
+            log::trace!(
+                "{}: Apply sender link {:?} flow, credit: {:?}({:?}) flow count: {:?}, delivery count: {:?} pending: {:?} new credit {:?}",
+                self.session.tag(),
                 self.name,
                 credit,
                 delta,
@@ -489,7 +495,8 @@ impl SenderLinkInner {
                 let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
                 let tag = self.get_tag(tag);
                 log::trace!(
-                    "Body size if larger than max size, sending multiple tranfers for {:?}",
+                    "{}: Body size if larger than max size, sending multiple tranfers for {:?}",
+                    self.session.tag(),
                     tag
                 );
 
@@ -504,18 +511,26 @@ impl SenderLinkInner {
 
                     // last chunk
                     if body.is_empty() {
-                        log::trace!("Sending last tranfer for {:?}", tag);
+                        log::trace!("{}: Sending last tranfer for {:?}", self.session.tag(), tag);
                         self.send_inner(chunk.into(), message_format, TransferState::Last);
                         break;
                     }
 
-                    log::trace!("Sending chunk tranfer for {:?}", tag);
+                    log::trace!(
+                        "{}: Sending chunk tranfer for {:?}",
+                        self.session.tag(),
+                        tag
+                    );
                     self.send_inner(chunk.into(), message_format, TransferState::Continue);
                 }
                 Ok(tag)
             } else {
                 let tag = self.get_tag(tag);
-                log::trace!("Sending non-blocking tranfer for {:?}", tag);
+                log::trace!(
+                    "{}: Sending non-blocking tranfer for {:?}",
+                    self.session.tag(),
+                    tag
+                );
                 let st =
                     TransferState::Only(DeliveryPromise::new_link(link, tag.clone()), tag.clone());
                 self.send_inner(body, message_format, st);
@@ -532,7 +547,7 @@ impl SenderLinkInner {
     ) {
         if self.link_credit == 0 || !self.pending_transfers.is_empty() {
             log::trace!(
-                "Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}) {:?}, queue size: {}",
+                "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}) {:?}, queue size: {}", self.session.tag(),
                 self.link_credit,
                 self.name,
                 self.id,
@@ -667,7 +682,7 @@ impl Future for Delivery {
             return match ready!(Pin::new(receiver).poll(cx)) {
                 Ok(r) => Poll::Ready(r),
                 Err(e) => {
-                    trace!("delivery oneshot is gone: {:?}", e);
+                    log::trace!("Delivery oneshot is gone: {:?}", e);
                     Poll::Ready(Err(AmqpProtocolError::Disconnected))
                 }
             };

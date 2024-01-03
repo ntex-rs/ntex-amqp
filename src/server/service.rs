@@ -207,13 +207,13 @@ where
 
             // create publish service
             let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
-                error!("Publish service init error: {:?}", e);
+                log::error!("Publish service init error: {:?}", e);
                 ServerError::PublishServiceError
             })?;
 
             // create control service
             let ctl_srv = inner.control.pipeline(st.clone()).await.map_err(|e| {
-                error!("Control service init error: {:?}", e);
+                log::error!("Control service init error: {:?}", e);
                 ServerError::ControlServiceError
             })?;
 
@@ -290,7 +290,10 @@ where
         .await
         .map_err(HandshakeError::from)?
         .ok_or_else(|| {
-            log::trace!("Server amqp is disconnected during handshake");
+            log::trace!(
+                "{}: Server amqp is disconnected during handshake",
+                state.tag()
+            );
             HandshakeError::Disconnected(None)
         })?;
 

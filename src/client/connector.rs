@@ -25,7 +25,7 @@ impl<A> Connector<A> {
     /// Create new amqp connector
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
-            connector: Pipeline::new(connect::Connector::default()),
+            connector: Pipeline::new(connect::Connector::default().tag("AMQP-CLIENT")),
             config: Configuration::default(),
             pool: PoolId::P6.pool_ref(),
             _t: PhantomData,
@@ -149,7 +149,7 @@ where
 
     /// Negotiate amqp protocol over opened socket
     pub fn negotiate(&self, io: IoBoxed) -> impl Future<Output = Result<Client, ConnectError>> {
-        trace!("Negotiation client protocol id: Amqp");
+        log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
         io.set_memory_pool(self.pool);
         _connect_plain(io, self.config.clone())
@@ -184,7 +184,7 @@ where
         io: IoBoxed,
         auth: SaslAuth,
     ) -> impl Future<Output = Result<Client, ConnectError>> {
-        trace!("Negotiation client protocol id: Amqp");
+        log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
         let config = self.config.clone();
         io.set_memory_pool(self.pool);
@@ -209,12 +209,12 @@ async fn _connect_sasl(
     auth: SaslAuth,
     config: Configuration,
 ) -> Result<Client, ConnectError> {
-    trace!("Negotiation client protocol id: AmqpSasl");
+    log::trace!("{}: Negotiation client protocol id: AmqpSasl", io.tag());
 
     io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec).await?;
 
     let proto = io.recv(&ProtocolIdCodec).await?.ok_or_else(|| {
-        log::trace!("Amqp server is disconnected during handshake");
+        log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
         ConnectError::Disconnected
     })?;
 
@@ -259,7 +259,7 @@ async fn _connect_sasl(
 }
 
 async fn _connect_plain(io: IoBoxed, config: Configuration) -> Result<Client, ConnectError> {
-    trace!("Negotiation client protocol id: Amqp");
+    log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
     io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
 
@@ -268,7 +268,7 @@ async fn _connect_plain(io: IoBoxed, config: Configuration) -> Result<Client, Co
         .await
         .map_err(ConnectError::from)?
         .ok_or_else(|| {
-            log::trace!("Amqp server is disconnected during handshake");
+            log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
             ConnectError::Disconnected
         })?;
 
@@ -282,17 +282,17 @@ async fn _connect_plain(io: IoBoxed, config: Configuration) -> Result<Client, Co
     let open = config.to_open();
     let codec = AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize);
 
-    trace!("Open client amqp connection: {:?}", open);
+    log::trace!("{}: Open client amqp connection: {:?}", io.tag(), open);
     io.send(AmqpFrame::new(0, Frame::Open(open)), &codec)
         .await?;
 
     let frame = io.recv(&codec).await?.ok_or_else(|| {
-        log::trace!("Amqp server is disconnected during handshake");
+        log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
         ConnectError::Disconnected
     })?;
 
     if let Frame::Open(open) = frame.performative() {
-        trace!("Open confirmed: {:?}", open);
+        log::trace!("{}: Open confirmed: {:?}", io.tag(), open);
         let remote_config = config.from_remote(open);
         let connection = Connection::new(io.get_ref(), &config, &remote_config);
         let client = Client::new(io, codec, connection, remote_config);

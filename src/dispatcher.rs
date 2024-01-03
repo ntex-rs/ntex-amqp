@@ -71,7 +71,8 @@ where
     fn handle_idle_timeout(&self, cx: &mut Context<'_>) {
         if self.idle_timeout.non_zero() && self.expire.poll_elapsed(cx).is_ready() {
             log::trace!(
-                "Send keep-alive ping, timeout: {:?} secs",
+                "{}: Send keep-alive ping, timeout: {:?} secs",
+                self.sink.tag(),
                 self.idle_timeout
             );
             self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
@@ -217,14 +218,22 @@ where
         // check readiness
         let service_poll = self.service.poll_ready(cx).map_err(|err| {
             let err = Error::from(err);
-            error!("Publish service readiness check failed: {:?}", err);
+            log::error!(
+                "{}: Publish service readiness check failed: {:?}",
+                self.sink.tag(),
+                err
+            );
             let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
 
         let ctl_service_poll = self.ctl_service.poll_ready(cx).map_err(|err| {
             let err = Error::from(err);
-            error!("Control service readiness check failed: {:?}", err);
+            log::error!(
+                "{}: Control service readiness check failed: {:?}",
+                self.sink.tag(),
+                err
+            );
             let _ = self.sink.close_with_error(err);
             AmqpDispatcherError::Service
         })?;
@@ -280,7 +289,7 @@ where
         match request {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]
-                log::trace!("incoming: {:#?}", frame);
+                log::trace!("{}: incoming: {:#?}", self.sink.tag(), frame);
 
                 let action = match self
                     .sink

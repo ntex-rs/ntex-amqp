@@ -266,7 +266,7 @@ impl SaslSuccess {
                 let frame = frame.into_parts().1;
                 match frame {
                     protocol::Frame::Open(frame) => {
-                        trace!("Got open frame: {:?}", frame);
+                        log::trace!("{}: Got open frame: {:?}", state.tag(), frame);
 
                         let local_config = self.local_config;
                         let remote_config = local_config.from_remote(&frame);

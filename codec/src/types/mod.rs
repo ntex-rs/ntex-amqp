@@ -136,6 +136,12 @@ impl From<String> for Str {
     }
 }
 
+impl<'a> From<&'a ByteString> for Str {
+    fn from(s: &'a ByteString) -> Str {
+        Str::ByteStr(s.clone())
+    }
+}
+
 impl hash::Hash for Str {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {
