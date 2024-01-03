@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.8] - 2024-01-03
+
+* Use io tags for logging
+
 ## [0.8.7] - 2023-12-04
 
 * Fix overflow in Configuration::idle_timeout()

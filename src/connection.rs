@@ -68,6 +68,12 @@ impl Connection {
     }
 
     #[inline]
+    /// Get io tag for current connection
+    pub fn tag(&self) -> &'static str {
+        self.0.get_ref().io.tag()
+    }
+
+    #[inline]
     /// Force close connection
     pub fn force_close(&self) {
         let inner = self.0.get_mut();
@@ -139,7 +145,7 @@ impl Connection {
             let inner = inner.get_mut();
 
             if let Some(ref e) = inner.error {
-                log::error!("Connection is in error state: {:?}", e);
+                log::error!("{}: Connection is in error state: {:?}", inner.io.tag(), e);
                 Err(e.clone())
             } else {
                 let (tx, rx) = oneshot::channel();
@@ -148,7 +154,7 @@ impl Connection {
                 let token = entry.key();
 
                 if token >= inner.channel_max as usize {
-                    log::trace!("Too many channels: {:?}", token);
+                    log::trace!("{}: Too many channels: {:?}", inner.io.tag(), token);
                     Err(AmqpProtocolError::TooManyChannels)
                 } else {
                     entry.insert(SessionState::Opening(Some(tx), cell));
@@ -180,10 +186,11 @@ impl Connection {
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
-        #[cfg(feature = "frame-trace")]
-        log::trace!("outgoing: {:#?}", frame);
-
         let inner = self.0.get_mut();
+
+        #[cfg(feature = "frame-trace")]
+        log::trace!("{}: outgoing: {:#?}", inner.io.tag(), frame);
+
         if let Err(e) = inner.io.encode(frame, &inner.codec) {
             inner.set_error(e.into())
         }
@@ -208,7 +215,7 @@ impl ConnectionInner {
     }
 
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
-        log::trace!("Set connection error: {:?}", err);
+        log::trace!("{}: Set connection error: {:?}", self.io.tag(), err);
         for (_, channel) in self.sessions.iter_mut() {
             match channel {
                 SessionState::Opening(_, _) | SessionState::Closing(_) => (),
@@ -227,7 +234,7 @@ impl ConnectionInner {
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {
         #[cfg(feature = "frame-trace")]
-        log::trace!("outgoing: {:#?}", frame);
+        log::trace!("{}: outgoing: {:#?}", self.io.tag(), frame);
 
         if let Err(e) = self.io.encode(frame, &self.codec) {
             self.set_error(e.into())
@@ -240,7 +247,11 @@ impl ConnectionInner {
         begin: &Begin,
         cell: &Cell<ConnectionInner>,
     ) -> Result<(), AmqpProtocolError> {
-        trace!("Remote session opened: {:?}", remote_channel_id);
+        log::trace!(
+            "{}: Remote session opened: {:?}",
+            self.io.tag(),
+            remote_channel_id
+        );
 
         let entry = self.sessions.vacant_entry();
         let local_token = entry.key();
@@ -283,8 +294,9 @@ impl ConnectionInner {
         remote_channel_id: u16,
         begin: &Begin,
     ) {
-        trace!(
-            "Begin response received: local {:?} remote {:?}",
+        log::trace!(
+            "{}: Begin response received: local {:?} remote {:?}",
+            self.io.tag(),
             local_channel_id,
             remote_channel_id,
         );
@@ -310,21 +322,24 @@ impl ConnectionInner {
                         .and_then(|tx| tx.send(Session::new(session.clone())).err());
                     *channel = SessionState::Established(session);
 
-                    trace!(
-                        "Session established: local {:?} remote {:?}",
+                    log::trace!(
+                        "{}: Session established: local {:?} remote {:?}",
+                        self.io.tag(),
                         local_channel_id,
                         remote_channel_id,
                     );
                 }
             } else {
                 // TODO: send error response
-                error!("Begin received for channel not in opening state. local channel: {} (remote channel: {})", local_channel_id, remote_channel_id);
+                log::error!("{}: Begin received for channel not in opening state. local channel: {} (remote channel: {})", self.io.tag(), local_channel_id, remote_channel_id);
             }
         } else {
             // TODO: rogue begin right now - do nothing. in future might indicate incoming attach
-            error!(
-                "Begin received for unknown local channel: {} (remote channel: {})",
-                local_channel_id, remote_channel_id
+            log::error!(
+                "{}: Begin received for unknown local channel: {} (remote channel: {})",
+                self.io.tag(),
+                local_channel_id,
+                remote_channel_id
             );
         }
     }
@@ -342,11 +357,11 @@ impl ConnectionInner {
             }
             Frame::Close(close) => {
                 if self.state == ConnectionState::Closing {
-                    log::trace!("Connection closed: {:?}", close);
+                    log::trace!("{}: Connection closed: {:?}", self.io.tag(), close);
                     self.set_error(AmqpProtocolError::Disconnected);
                     return Ok(Action::None);
                 } else {
-                    log::trace!("Connection closed remotely: {:?}", close);
+                    log::trace!("{}: Connection closed remotely: {:?}", self.io.tag(), close);
                     let err = AmqpProtocolError::Closed(close.error);
                     self.set_error(err.clone());
                     let close = Close { error: None };
@@ -370,7 +385,11 @@ impl ConnectionInner {
         }
 
         if self.error.is_some() {
-            error!("Connection closed but new framed is received: {:?}", frame);
+            log::error!(
+                "{}: Connection closed but new framed is received: {:?}",
+                self.io.tag(),
+                frame
+            );
             return Ok(Action::None);
         }
 
@@ -379,7 +398,7 @@ impl ConnectionInner {
             if let Some(state) = self.sessions.get_mut(*token) {
                 state
             } else {
-                log::error!("Inconsistent internal state");
+                log::error!("{}: Inconsistent internal state", self.io.tag());
                 return Err(AmqpProtocolError::UnknownSession(frame));
             }
         } else {
@@ -389,7 +408,11 @@ impl ConnectionInner {
         // handle session frames
         match state {
             SessionState::Opening(_, _) => {
-                error!("Unexpected opening state: {}", channel_id);
+                log::error!(
+                    "{}: Unexpected opening state: {}",
+                    self.io.tag(),
+                    channel_id
+                );
                 Err(AmqpProtocolError::UnexpectedOpeningState(frame))
             }
             SessionState::Established(ref mut session) => match frame {
@@ -420,7 +443,7 @@ impl ConnectionInner {
                     }
                 }
                 Frame::End(remote_end) => {
-                    trace!("Remote session end: {}", channel_id);
+                    log::trace!("{}: Remote session end: {}", self.io.tag(), channel_id);
                     let id = session.get_mut().id();
                     let action = session
                         .get_mut()
@@ -435,7 +458,7 @@ impl ConnectionInner {
             },
             SessionState::Closing(ref mut session) => match frame {
                 Frame::End(frm) => {
-                    trace!("Session end is confirmed: {:?}", frm);
+                    log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
                     let _ = session
                         .get_mut()
                         .end(AmqpProtocolError::SessionEnded(frm.error));
@@ -445,7 +468,11 @@ impl ConnectionInner {
                     Ok(Action::None)
                 }
                 frm => {
-                    trace!("Got frame after initiated session end: {:?}", frm);
+                    log::trace!(
+                        "{}: Got frame after initiated session end: {:?}",
+                        self.io.tag(),
+                        frm
+                    );
                     Ok(Action::None)
                 }
             },

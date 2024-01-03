@@ -3,8 +3,6 @@
 
 #[macro_use]
 extern crate derive_more;
-#[macro_use]
-extern crate log;
 
 use ntex::{io::DispatcherConfig, time::Seconds, util::ByteString};
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner};

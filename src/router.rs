@@ -95,7 +95,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     let inner = self.0.get_mut();
                     let mut link = Link::new(frm, link, inner.state.clone(), path);
                     if let Some((hnd, _info)) = inner.router.recognize(link.path_mut()) {
-                        trace!("Create handler service for {}", link.path().get_ref());
+                        log::trace!("Create handler service for {}", link.path().get_ref());
                         inner.handlers.insert(link.receiver().clone(), None);
                         let rcv_link = link.link.clone();
                         let fut = hnd.create(link);
@@ -105,7 +105,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                             state: RouterServiceResponseState::NewService(fut),
                         })
                     } else {
-                        trace!(
+                        log::trace!(
                             "Target address is not recognized: {}",
                             link.path().get_ref()
                         );
@@ -128,11 +128,11 @@ impl<S: 'static> Service<Message> for RouterService<S> {
             }
             Message::Detached(link) => {
                 if let Some(Some(srv)) = self.0.get_mut().handlers.remove(&link) {
-                    trace!("Releasing handler service for {}", link.name());
+                    log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
                     ntex::rt::spawn(async move {
                         ntex::util::poll_fn(move |cx| srv.poll_shutdown(cx)).await;
-                        trace!("Handler service for {} has shutdown", name);
+                        log::trace!("Handler service for {} has shutdown", name);
                     });
                 }
                 Either::Left(Ready::Ok(()))
@@ -143,7 +143,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     .filter_map(|link| {
                         self.0.get_mut().handlers.remove(&link).and_then(|srv| {
                             srv.map(|srv| {
-                                trace!(
+                                log::trace!(
                                     "Releasing handler service for {} (session ended)",
                                     link.name()
                                 );
@@ -153,7 +153,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     })
                     .collect();
 
-                trace!(
+                log::trace!(
                     "Shutting down {} handler services (session ended)",
                     futs.len()
                 );
@@ -161,7 +161,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                 ntex::rt::spawn(async move {
                     let len = futs.len();
                     let _ = join_all(futs).await;
-                    trace!(
+                    log::trace!(
                         "Handler services for {} links have shutdown (session ended)",
                         len
                     );

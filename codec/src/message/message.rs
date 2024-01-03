@@ -87,7 +87,7 @@ impl Message {
     /// Add property
     pub fn set_properties<F>(&mut self, f: F) -> &mut Self
     where
-        F: Fn(&mut Properties),
+        F: FnOnce(&mut Properties),
     {
         if let Some(ref mut props) = self.0.properties {
             f(props);

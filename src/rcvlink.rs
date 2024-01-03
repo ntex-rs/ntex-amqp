@@ -136,8 +136,9 @@ impl ReceiverLink {
 
     pub(crate) fn remote_closed(&self, error: Option<Error>) {
         let inner = self.inner.get_mut();
-        trace!(
-            "Receiver link has been closed remotely handle: {:?} name: {:?}",
+        log::trace!(
+            "{}: Receiver link has been closed remotely handle: {:?} name: {:?}",
+            inner.session.tag(),
             inner.remote_handle,
             inner.name
         );
@@ -360,7 +361,7 @@ impl ReceiverLinkInner {
                             inner: inner.clone(),
                         }))
                     } else {
-                        log::error!("Inconsistent state, bug");
+                        log::error!("{}: Inconsistent state, bug", self.session.tag());
                         let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::DetachForced.into(),
                             description: Some(ByteString::from_static("Internal error")),
