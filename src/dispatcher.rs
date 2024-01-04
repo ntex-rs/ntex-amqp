@@ -12,7 +12,7 @@ use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, Recei
 
 type ControlItem<R, E> = (ControlFrame, BoxFuture<'static, Result<R, E>>);
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct ControlQueue {
     pending: cell::RefCell<VecDeque<ControlFrame>>,
     waker: LocalWaker,
