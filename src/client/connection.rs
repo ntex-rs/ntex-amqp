@@ -5,7 +5,7 @@ use ntex::util::Ready;
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
 use crate::error::{AmqpDispatcherError, LinkError};
-use crate::{dispatcher::Dispatcher, Configuration, Connection, State};
+use crate::{dispatcher::Dispatcher, Configuration, Connection, ConnectionRef, State};
 
 /// Mqtt client
 pub struct Client<St = ()> {
@@ -40,8 +40,8 @@ where
 {
     #[inline]
     /// Get client sink
-    pub fn sink(&self) -> Connection {
-        self.connection.clone()
+    pub fn sink(&self) -> ConnectionRef {
+        self.connection.get_ref()
     }
 
     #[inline]

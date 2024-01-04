@@ -1,5 +1,9 @@
 # Changes
 
+## [0.8.9] - 2024-01-04
+
+* Remove internal circular references
+
 ## [0.8.8] - 2024-01-03
 
 * Use io tags for logging

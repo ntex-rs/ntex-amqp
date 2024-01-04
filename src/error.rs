@@ -57,6 +57,7 @@ pub enum AmqpProtocolError {
     UnexpectedOpeningState(protocol::Frame),
     #[display(fmt = "Unexpected frame: {:?}", _0)]
     Unexpected(protocol::Frame),
+    ConnectionDropped,
 }
 
 impl error::Error for AmqpProtocolError {}

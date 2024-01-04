@@ -18,6 +18,24 @@ pub struct ReceiverLink {
     pub(crate) inner: Cell<ReceiverLinkInner>,
 }
 
+#[derive(Debug)]
+pub(crate) struct ReceiverLinkInner {
+    name: ByteString,
+    handle: Handle,
+    remote_handle: Handle,
+    session: Session,
+    closed: bool,
+    reader_task: LocalWaker,
+    queue: VecDeque<Transfer>,
+    credit: u32,
+    delivery_count: u32,
+    error: Option<Error>,
+    partial_body: Option<BytesMut>,
+    partial_body_max: usize,
+    max_message_size: u64,
+    pool: PoolRef,
+}
+
 impl Eq for ReceiverLink {}
 
 impl PartialEq<ReceiverLink> for ReceiverLink {
@@ -195,24 +213,6 @@ impl Stream for ReceiverLink {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.poll_recv(cx)
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct ReceiverLinkInner {
-    name: ByteString,
-    handle: Handle,
-    remote_handle: Handle,
-    session: Session,
-    closed: bool,
-    reader_task: LocalWaker,
-    queue: VecDeque<Transfer>,
-    credit: u32,
-    delivery_count: u32,
-    error: Option<Error>,
-    partial_body: Option<BytesMut>,
-    partial_body_max: usize,
-    max_message_size: u64,
-    pool: PoolRef,
 }
 
 impl ReceiverLinkInner {

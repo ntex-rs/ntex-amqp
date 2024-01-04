@@ -1,4 +1,4 @@
-use std::{future::Future, rc::Rc};
+use std::{fmt, future::Future, ops, rc::Rc};
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::io::IoRef;
@@ -11,9 +11,12 @@ use crate::session::{Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
 
-#[derive(Clone)]
-pub struct Connection(pub(crate) Cell<ConnectionInner>);
+pub struct Connection(ConnectionRef);
 
+#[derive(Clone)]
+pub struct ConnectionRef(pub(crate) Cell<ConnectionInner>);
+
+#[derive(Debug)]
 pub(crate) struct ConnectionInner {
     io: IoRef,
     state: ConnectionState,
@@ -27,6 +30,7 @@ pub(crate) struct ConnectionInner {
     pub(crate) max_frame_size: u32,
 }
 
+#[derive(Debug)]
 pub(crate) enum SessionState {
     Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
     Established(Cell<SessionInner>),
@@ -53,7 +57,7 @@ impl Connection {
         local_config: &Configuration,
         remote_config: &Configuration,
     ) -> Connection {
-        Connection(Cell::new(ConnectionInner {
+        Connection(ConnectionRef(Cell::new(ConnectionInner {
             io,
             codec: AmqpCodec::new(),
             state: ConnectionState::Normal,
@@ -64,9 +68,37 @@ impl Connection {
             on_close: Condition::new(),
             channel_max: local_config.channel_max,
             max_frame_size: remote_config.max_frame_size,
-        }))
+        })))
     }
 
+    pub fn get_ref(&self) -> ConnectionRef {
+        self.0.clone()
+    }
+}
+
+impl AsRef<ConnectionRef> for Connection {
+    #[inline]
+    fn as_ref(&self) -> &ConnectionRef {
+        &self.0
+    }
+}
+
+impl ops::Deref for Connection {
+    type Target = ConnectionRef;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.0.force_close()
+    }
+}
+
+impl ConnectionRef {
     #[inline]
     /// Get io tag for current connection
     pub fn tag(&self) -> &'static str {
@@ -79,6 +111,7 @@ impl Connection {
         let inner = self.0.get_mut();
         inner.state = ConnectionState::Drop;
         inner.io.force_close();
+        inner.set_error(AmqpProtocolError::ConnectionDropped);
     }
 
     #[inline]
@@ -259,7 +292,7 @@ impl ConnectionInner {
         let session = Cell::new(SessionInner::new(
             local_token,
             false,
-            Connection(cell.clone()),
+            ConnectionRef(cell.clone()),
             remote_channel_id,
             begin.next_outgoing_id(),
             begin.incoming_window(),
@@ -309,7 +342,7 @@ impl ConnectionInner {
                     let session = Cell::new(SessionInner::new(
                         local_token,
                         true,
-                        Connection(cell.clone()),
+                        ConnectionRef(cell.clone()),
                         remote_channel_id,
                         begin.next_outgoing_id(),
                         begin.incoming_window(),
@@ -477,5 +510,11 @@ impl ConnectionInner {
                 }
             },
         }
+    }
+}
+
+impl fmt::Debug for ConnectionRef {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("ConnectionRef").finish()
     }
 }

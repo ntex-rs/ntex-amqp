@@ -11,17 +11,42 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_amqp_codec::AmqpFrame;
 
-use crate::connection::Connection;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{DeliveryPromise, SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::{cell::Cell, types::Action, ControlFrame};
+use crate::{cell::Cell, types::Action, ConnectionRef, ControlFrame};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
 
 #[derive(Clone)]
 pub struct Session {
     pub(crate) inner: Cell<SessionInner>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SessionInner {
+    id: usize,
+    sink: ConnectionRef,
+    next_outgoing_id: TransferNumber,
+    flags: Flags,
+
+    remote_channel_id: u16,
+    next_incoming_id: TransferNumber,
+    remote_outgoing_window: u32,
+    remote_incoming_window: u32,
+
+    links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
+    links_by_name: HashMap<ByteString, usize>,
+    remote_handles: HashMap<Handle, usize>,
+    error: Option<AmqpProtocolError>,
+
+    pending_transfers: VecDeque<PendingTransfer>,
+    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
+    disposition_subscribers: HashMap<DeliveryNumber, pool::Sender<Disposition>>,
+
+    pub(crate) pool: pool::Pool<Result<Disposition, AmqpProtocolError>>,
+    pool_disp: pool::Pool<Disposition>,
+    closed: condition::Condition,
 }
 
 impl fmt::Debug for Session {
@@ -42,7 +67,7 @@ impl Session {
     }
 
     #[inline]
-    pub fn connection(&self) -> &Connection {
+    pub fn connection(&self) -> &ConnectionRef {
         &self.inner.get_ref().sink
     }
 
@@ -242,6 +267,7 @@ impl ReceiverLinkState {
 }
 
 bitflags::bitflags! {
+    #[derive(Copy, Clone, Debug)]
     struct Flags: u8 {
         const LOCAL =  0b0000_0001;
         const ENDED =  0b0000_0010;
@@ -249,31 +275,7 @@ bitflags::bitflags! {
     }
 }
 
-pub(crate) struct SessionInner {
-    id: usize,
-    sink: Connection,
-    next_outgoing_id: TransferNumber,
-    flags: Flags,
-
-    remote_channel_id: u16,
-    next_incoming_id: TransferNumber,
-    remote_outgoing_window: u32,
-    remote_incoming_window: u32,
-
-    links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
-    links_by_name: HashMap<ByteString, usize>,
-    remote_handles: HashMap<Handle, usize>,
-    error: Option<AmqpProtocolError>,
-
-    pending_transfers: VecDeque<PendingTransfer>,
-    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
-    disposition_subscribers: HashMap<DeliveryNumber, pool::Sender<Disposition>>,
-
-    pub(crate) pool: pool::Pool<Result<Disposition, AmqpProtocolError>>,
-    pool_disp: pool::Pool<Disposition>,
-    closed: condition::Condition,
-}
-
+#[derive(Debug)]
 struct PendingTransfer {
     link_handle: Handle,
     body: Option<TransferBody>,
@@ -300,7 +302,7 @@ impl SessionInner {
     pub(crate) fn new(
         id: usize,
         local: bool,
-        sink: Connection,
+        sink: ConnectionRef,
         remote_channel_id: u16,
         next_incoming_id: DeliveryNumber,
         remote_incoming_window: u32,
