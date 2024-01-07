@@ -1,6 +1,9 @@
-use std::{collections::VecDeque, future::Future, hash, pin::Pin, task::Context, task::Poll};
+use std::{
+    collections::VecDeque, future::poll_fn, future::Future, hash, pin::Pin, task::Context,
+    task::Poll,
+};
 
-use ntex::util::{poll_fn, ByteString, BytesMut, PoolRef, Stream};
+use ntex::util::{ByteString, BytesMut, PoolRef, Stream};
 use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Disposition, Error, Handle, LinkError,

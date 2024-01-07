@@ -1,5 +1,9 @@
 # Changes
 
+## [1.0.0-b.0] - 2024-01-07
+
+* Use "async fn" in trait for Service definition
+
 ## [0.8.9] - 2024-01-04
 
 * Remove internal circular references

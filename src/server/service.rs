@@ -1,9 +1,8 @@
-use std::{fmt, future::Future, marker, pin::Pin, rc::Rc};
+use std::{fmt, marker, rc::Rc};
 
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
 use ntex::time::{timeout_checked, Millis};
-use ntex::util::BoxFuture;
 
 use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
 use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
@@ -132,18 +131,15 @@ where
     type Error = ServerError<H::Error>;
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
-    type Future<'f> = BoxFuture<'f, Result<Self::Service, Self::InitError>>;
 
-    fn create(&self, _: ()) -> Self::Future<'_> {
-        Box::pin(async move {
-            self.handshake
-                .pipeline(())
-                .await
-                .map(move |handshake| ServerHandler {
-                    handshake,
-                    inner: self.inner.clone(),
-                })
-        })
+    async fn create(&self, _: ()) -> Result<Self::Service, Self::InitError> {
+        self.handshake
+            .pipeline(())
+            .await
+            .map(move |handshake| ServerHandler {
+                handshake,
+                inner: self.inner.clone(),
+            })
     }
 }
 
@@ -161,18 +157,15 @@ where
     type Error = ServerError<H::Error>;
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
-    type Future<'f> = BoxFuture<'f, Result<Self::Service, Self::InitError>>;
 
-    fn create(&self, _: ()) -> Self::Future<'_> {
-        Box::pin(async move {
-            self.handshake
-                .pipeline(())
-                .await
-                .map(move |handshake| ServerHandler {
-                    handshake,
-                    inner: self.inner.clone(),
-                })
-        })
+    async fn create(&self, _: ()) -> Result<Self::Service, Self::InitError> {
+        self.handshake
+            .pipeline(())
+            .await
+            .map(move |handshake| ServerHandler {
+                handshake,
+                inner: self.inner.clone(),
+            })
     }
 }
 
@@ -192,40 +185,35 @@ where
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
-    fn create(
-        &self,
-        req: IoBoxed,
-    ) -> Pin<Box<dyn Future<Output = Result<(), ServerError<H::Error>>>>> {
-        let fut = handshake(req, self.handshake.clone(), self.inner.clone());
+    async fn create(&self, req: IoBoxed) -> Result<(), ServerError<H::Error>> {
+        let fut = handshake(req, &self.handshake, &self.inner);
         let inner = self.inner.clone();
 
-        Box::pin(async move {
-            let (state, codec, sink, st, idle_timeout) =
-                timeout_checked(inner.config.handshake_timeout, fut)
-                    .await
-                    .map_err(|_| HandshakeError::Timeout)??;
+        let (state, codec, sink, st, idle_timeout) =
+            timeout_checked(inner.config.handshake_timeout, fut)
+                .await
+                .map_err(|_| HandshakeError::Timeout)??;
 
-            // create publish service
-            let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
-                log::error!("Publish service init error: {:?}", e);
-                ServerError::PublishServiceError
-            })?;
+        // create publish service
+        let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
+            log::error!("Publish service init error: {:?}", e);
+            ServerError::PublishServiceError
+        })?;
 
-            // create control service
-            let ctl_srv = inner.control.pipeline(st.clone()).await.map_err(|e| {
-                log::error!("Control service init error: {:?}", e);
-                ServerError::ControlServiceError
-            })?;
+        // create control service
+        let ctl_srv = inner.control.pipeline(st.clone()).await.map_err(|e| {
+            log::error!("Control service init error: {:?}", e);
+            ServerError::ControlServiceError
+        })?;
 
-            FramedDispatcher::with_config(
-                state,
-                codec,
-                Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),
-                &inner.config.disp_config,
-            )
-            .await
-            .map_err(ServerError::Dispatcher)
-        })
+        FramedDispatcher::new(
+            state,
+            codec,
+            Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),
+            &inner.config.disp_config,
+        )
+        .await
+        .map_err(ServerError::Dispatcher)
     }
 }
 
@@ -242,13 +230,16 @@ where
 {
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Future<'f> = BoxFuture<'f, Result<Self::Response, Self::Error>>;
 
     ntex::forward_poll_ready!(handshake, ServerError::Service);
     ntex::forward_poll_shutdown!(handshake);
 
-    fn call<'a>(&'a self, req: Io<F>, _: ServiceCtx<'a, Self>) -> Self::Future<'a> {
-        self.create(IoBoxed::from(req))
+    async fn call(
+        &self,
+        req: Io<F>,
+        _: ServiceCtx<'_, Self>,
+    ) -> Result<Self::Response, Self::Error> {
+        self.create(IoBoxed::from(req)).await
     }
 }
 
@@ -264,20 +255,23 @@ where
 {
     type Response = ();
     type Error = ServerError<H::Error>;
-    type Future<'f> = BoxFuture<'f, Result<Self::Response, Self::Error>>;
 
     ntex::forward_poll_ready!(handshake, ServerError::Service);
     ntex::forward_poll_shutdown!(handshake);
 
-    fn call<'a>(&'a self, req: IoBoxed, _: ServiceCtx<'_, Self>) -> Self::Future<'a> {
-        self.create(req)
+    async fn call(
+        &self,
+        req: IoBoxed,
+        _: ServiceCtx<'_, Self>,
+    ) -> Result<Self::Response, Self::Error> {
+        self.create(req).await
     }
 }
 
 async fn handshake<St, H, Ctl, Pb>(
-    state: IoBoxed,
-    handshake: Pipeline<H>,
-    inner: Rc<ServerInner<St, Ctl, Pb>>,
+    io: IoBoxed,
+    handshake: &Pipeline<H>,
+    inner: &ServerInner<St, Ctl, Pb>,
 ) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
 where
     St: 'static,
@@ -285,15 +279,12 @@ where
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
 {
-    let protocol = state
+    let protocol = io
         .recv(&ProtocolIdCodec)
         .await
         .map_err(HandshakeError::from)?
         .ok_or_else(|| {
-            log::trace!(
-                "{}: Server amqp is disconnected during handshake",
-                state.tag()
-            );
+            log::trace!("{}: Server amqp is disconnected during handshake", io.tag());
             HandshakeError::Disconnected(None)
         })?;
 
@@ -301,39 +292,31 @@ where
         // start amqp processing
         ProtocolId::Amqp | ProtocolId::AmqpSasl => {
             // confirm protocol
-            state
-                .send(protocol, &ProtocolIdCodec)
+            io.send(protocol, &ProtocolIdCodec)
                 .await
                 .map_err(HandshakeError::from)?;
 
             // handshake protocol
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
-                    Handshake::new_plain(state, inner.config.clone())
+                    Handshake::new_plain(io, inner.config.clone())
                 } else {
-                    Handshake::new_sasl(state, inner.config.clone())
+                    Handshake::new_sasl(io, inner.config.clone())
                 })
                 .await
                 .map_err(ServerError::Service)?;
 
-            let (st, sink, idle_timeout, state) = ack.into_inner();
+            let (st, sink, idle_timeout, io) = ack.into_inner();
 
             let codec = AmqpCodec::new().max_size(inner.config.max_size);
 
             // confirm Open
             let local = inner.config.to_open();
-            state
-                .send(AmqpFrame::new(0, local.into()), &codec)
+            io.send(AmqpFrame::new(0, local.into()), &codec)
                 .await
                 .map_err(HandshakeError::from)?;
 
-            Ok((
-                state,
-                codec,
-                sink,
-                State::new(st),
-                Millis::from(idle_timeout),
-            ))
+            Ok((io, codec, sink, State::new(st), Millis::from(idle_timeout)))
         }
         ProtocolId::AmqpTls => Err(ServerError::Handshake(HandshakeError::from(
             ProtocolIdError::Unexpected {

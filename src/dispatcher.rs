@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::service::{Pipeline, Service, ServiceCall, ServiceCtx};
+use ntex::service::{Pipeline, Service, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
-use ntex::util::{ready, BoxFuture, Either, Ready};
+use ntex::util::{ready, BoxFuture, Either};
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
 
 use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
@@ -201,10 +201,6 @@ where
 {
     type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
-    type Future<'f> = Either<
-        ServiceResult<'f, ServiceCall<'f, Sr, types::Message>, Sr::Error>,
-        Ready<Self::Response, Self::Error>,
-    >;
 
     fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.ctl_queue.waker.register(cx.waker());
@@ -281,11 +277,11 @@ where
         }
     }
 
-    fn call<'a>(
-        &'a self,
+    async fn call(
+        &self,
         request: DispatchItem<AmqpCodec<AmqpFrame>>,
-        _: ServiceCtx<'a, Self>,
-    ) -> Self::Future<'a> {
+        _: ServiceCtx<'_, Self>,
+    ) -> Result<Self::Response, Self::Error> {
         match request {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]
@@ -297,20 +293,20 @@ where
                     .map_err(AmqpDispatcherError::Protocol)
                 {
                     Ok(a) => a,
-                    Err(e) => return Either::Right(Ready::Err(e)),
+                    Err(e) => return Err(e),
                 };
 
                 match action {
                     types::Action::Transfer(link) => {
-                        return if self.sink.is_opened() {
-                            Either::Left(ServiceResult {
-                                link: link.clone(),
-                                fut: self.service.call(types::Message::Transfer(link)),
-                                _t: marker::PhantomData,
-                            })
-                        } else {
-                            Either::Right(Ready::Ok(None))
-                        };
+                        if self.sink.is_opened() {
+                            let lnk = link.clone();
+                            if let Err(e) = self.service.call(types::Message::Transfer(link)).await
+                            {
+                                let e = Error::from(e);
+                                log::trace!("Service error {:?}", e);
+                                let _ = lnk.close_with_error(e);
+                            }
+                        }
                     }
                     types::Action::Flow(link, frm) => {
                         // apply flow to specific link
@@ -375,35 +371,33 @@ where
                     types::Action::None => (),
                 };
 
-                Either::Right(Ready::Ok(None))
+                Ok(None)
             }
             DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     err.into(),
                 )));
-                Either::Right(Ready::Ok(None))
+                Ok(None)
             }
             DispatchItem::KeepAliveTimeout => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     AmqpProtocolError::KeepAliveTimeout,
                 )));
-                Either::Right(Ready::Ok(None))
+                Ok(None)
             }
             DispatchItem::ReadTimeout => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     AmqpProtocolError::ReadTimeout,
                 )));
-                Either::Right(Ready::Ok(None))
+                Ok(None)
             }
             DispatchItem::Disconnect(e) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
                     e,
                 )));
-                Either::Right(Ready::Ok(None))
+                Ok(None)
             }
-            DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => {
-                Either::Right(Ready::Ok(None))
-            }
+            DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => Ok(None),
         }
     }
 }

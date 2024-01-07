@@ -67,7 +67,7 @@ where
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::with_config(
+        IoDispatcher::new(
             self.io,
             self.codec,
             dispatcher,
@@ -91,7 +91,7 @@ where
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::with_config(
+        IoDispatcher::new(
             self.io,
             self.codec,
             dispatcher,

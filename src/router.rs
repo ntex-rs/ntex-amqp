@@ -1,11 +1,11 @@
-use std::{convert::TryFrom, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{convert::TryFrom, future::poll_fn, marker, rc::Rc};
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{
-    boxed, fn_factory_with_config, IntoServiceFactory, Pipeline, Service, ServiceCall, ServiceCtx,
+    boxed, fn_factory_with_config, IntoServiceFactory, Pipeline, Service, ServiceCtx,
     ServiceFactory,
 };
-use ntex::util::{join_all, BoxFuture, Either, HashMap, Ready};
+use ntex::util::{join_all, HashMap, Ready};
 
 use crate::codec::protocol::{
     self, DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
@@ -82,9 +82,8 @@ struct RouterServiceInner<S> {
 impl<S: 'static> Service<Message> for RouterService<S> {
     type Response = ();
     type Error = Error;
-    type Future<'f> = Either<Ready<(), Error>, RouterServiceResponse<'f, S>>;
 
-    fn call<'a>(&'a self, msg: Message, _: ServiceCtx<'a, Self>) -> Self::Future<'_> {
+    async fn call(&self, msg: Message, _: ServiceCtx<'_, Self>) -> Result<(), Error> {
         match msg {
             Message::Attached(frm, link) => {
                 let path = frm
@@ -96,34 +95,47 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     let mut link = Link::new(frm, link, inner.state.clone(), path);
                     if let Some((hnd, _info)) = inner.router.recognize(link.path_mut()) {
                         log::trace!("Create handler service for {}", link.path().get_ref());
-                        inner.handlers.insert(link.receiver().clone(), None);
                         let rcv_link = link.link.clone();
-                        let fut = hnd.create(link);
-                        Either::Right(RouterServiceResponse {
-                            link: rcv_link,
-                            inner: &self.0,
-                            state: RouterServiceResponseState::NewService(fut),
-                        })
+                        inner.handlers.insert(link.receiver().clone(), None);
+
+                        match hnd.create(link).await {
+                            Ok(srv) => {
+                                log::trace!("Handler service is created for {}", rcv_link.name());
+                                self.0
+                                    .get_mut()
+                                    .handlers
+                                    .insert(rcv_link.clone(), Some(Pipeline::new(srv)));
+                                if let Some(tr) = rcv_link.get_transfer() {
+                                    service_call(rcv_link, tr, &self.0).await
+                                } else {
+                                    Ok(())
+                                }
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "Failed to create link service for {} err: {:?}",
+                                    rcv_link.name(),
+                                    e
+                                );
+                                Err(e)
+                            }
+                        }
                     } else {
                         log::trace!(
                             "Target address is not recognized: {}",
                             link.path().get_ref()
                         );
-                        Either::Left(Ready::Err(
-                            LinkError::force_detach()
-                                .description(format!(
-                                    "Target address is not supported: {}",
-                                    link.path().get_ref()
-                                ))
-                                .into(),
-                        ))
+                        Err(LinkError::force_detach()
+                            .description(format!(
+                                "Target address is not supported: {}",
+                                link.path().get_ref()
+                            ))
+                            .into())
                     }
                 } else {
-                    Either::Left(Ready::Err(
-                        LinkError::force_detach()
-                            .description("Target address is required")
-                            .into(),
-                    ))
+                    Err(LinkError::force_detach()
+                        .description("Target address is required")
+                        .into())
                 }
             }
             Message::Detached(link) => {
@@ -131,11 +143,11 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
                     ntex::rt::spawn(async move {
-                        ntex::util::poll_fn(move |cx| srv.poll_shutdown(cx)).await;
+                        poll_fn(move |cx| srv.poll_shutdown(cx)).await;
                         log::trace!("Handler service for {} has shutdown", name);
                     });
                 }
-                Either::Left(Ready::Ok(()))
+                Ok(())
             }
             Message::DetachedAll(links) => {
                 let futs: Vec<_> = links
@@ -147,7 +159,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                                     "Releasing handler service for {} (session ended)",
                                     link.name()
                                 );
-                                ntex::util::poll_fn(move |cx| srv.poll_shutdown(cx))
+                                poll_fn(move |cx| srv.poll_shutdown(cx))
                             })
                         })
                     })
@@ -166,141 +178,67 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                         len
                     );
                 });
-                Either::Left(Ready::Ok(()))
+                Ok(())
             }
             Message::Transfer(link) => {
                 if let Some(Some(_)) = self.0.get_ref().handlers.get(&link) {
                     if let Some(tr) = link.get_transfer() {
-                        return Either::Right(RouterServiceResponse {
-                            link,
-                            inner: &self.0,
-                            state: RouterServiceResponseState::Service(Some(tr)),
-                        });
+                        service_call(link, tr, &self.0).await?;
                     }
                 }
-                Either::Left(Ready::Ok(()))
+                Ok(())
             }
         }
     }
 }
 
-struct RouterServiceResponse<'f, S> {
-    inner: &'f Cell<RouterServiceInner<S>>,
-    link: ReceiverLink,
-    state: RouterServiceResponseState<'f>,
-}
+async fn service_call<S>(
+    mut link: ReceiverLink,
+    tr: Transfer,
+    inner: &Cell<RouterServiceInner<S>>,
+) -> Result<(), Error> {
+    if let Some(Some(srv)) = inner.handlers.get(&link) {
+        // check readiness
+        if let Err(e) = srv.ready().await {
+            log::trace!("Service readiness check failed: {:?}", e);
+            let _ = link
+                .close_with_error(LinkError::force_detach().description(format!("error: {}", e)));
+            return Ok(());
+        }
 
-enum RouterServiceResponseState<'f> {
-    Service(Option<Transfer>),
-    Transfer(ServiceCall<'f, HandleService, Transfer>, u32),
-    NewService(BoxFuture<'f, Result<boxed::BoxService<Transfer, Outcome, Error>, Error>>),
-}
-
-impl<'f, S> Future for RouterServiceResponse<'f, S> {
-    type Output = Result<(), Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.as_mut();
-        let link = this.link.clone();
-        let inner = this.inner;
-
-        loop {
-            match this.state {
-                RouterServiceResponseState::Service(ref mut tr) => {
-                    if let Some(Some(srv)) = inner.handlers.get(&link) {
-                        // check readiness
-                        match srv.poll_ready(cx) {
-                            Poll::Ready(Ok(_)) => (),
-                            Poll::Pending => {
-                                log::trace!(
-                                    "Handler service is not ready for {}",
-                                    this.link.name()
-                                );
-                                return Poll::Pending;
-                            }
-                            Poll::Ready(Err(e)) => {
-                                log::trace!("Service readiness check failed: {:?}", e);
-                                let _ = this.link.close_with_error(
-                                    LinkError::force_detach().description(format!("error: {}", e)),
-                                );
-                                return Poll::Ready(Ok(()));
-                            }
-                        }
-
-                        let tr = tr.take().unwrap();
-                        let delivery_id = match tr.delivery_id() {
-                            None => {
-                                // #2.7.5 delivery_id MUST be set. batching is handled on lower level
-                                let _ = this.link.close_with_error(
-                                    LinkError::force_detach()
-                                        .description("delivery_id MUST be set"),
-                                );
-                                return Poll::Ready(Ok(()));
-                            }
-                            Some(delivery_id) => {
-                                if this.link.credit() == 0 {
-                                    // self.has_credit = self.link.credit() != 0;
-                                    this.link.set_link_credit(50);
-                                }
-                                delivery_id
-                            }
-                        };
-
-                        this.state =
-                            RouterServiceResponseState::Transfer(srv.call(tr), delivery_id);
-                    } else {
-                        return Poll::Ready(Ok(()));
-                    }
+        let delivery_id = match tr.delivery_id() {
+            None => {
+                // #2.7.5 delivery_id MUST be set. batching is handled on lower level
+                let _ = link.close_with_error(
+                    LinkError::force_detach().description("delivery_id MUST be set"),
+                );
+                return Ok(());
+            }
+            Some(delivery_id) => {
+                if link.credit() == 0 {
+                    // self.has_credit = self.link.credit() != 0;
+                    link.set_link_credit(50);
                 }
-                RouterServiceResponseState::Transfer(ref mut fut, delivery_id) => {
-                    match Pin::new(fut).poll(cx) {
-                        Poll::Ready(Ok(outcome)) => {
-                            log::trace!("Outcome is ready {:?} for {}", outcome, this.link.name());
-                            settle(&mut this.link, delivery_id, outcome.into_delivery_state());
-                        }
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Err(e)) => {
-                            log::trace!("Service response error: {:?}", e);
-                            settle(
-                                &mut this.link,
-                                delivery_id,
-                                DeliveryState::Rejected(Rejected { error: Some(e) }),
-                            );
-                        }
-                    }
-                    if let Some(tr) = this.link.get_transfer() {
-                        this.state = RouterServiceResponseState::Service(Some(tr));
-                    } else {
-                        return Poll::Ready(Ok(()));
-                    }
-                }
-                RouterServiceResponseState::NewService(ref mut fut) => match Pin::new(fut).poll(cx)
-                {
-                    Poll::Ready(Ok(srv)) => {
-                        log::trace!("Handler service is created for {}", this.link.name());
-                        this.inner
-                            .get_mut()
-                            .handlers
-                            .insert(this.link.clone(), Some(Pipeline::new(srv)));
-                        if let Some(tr) = this.link.get_transfer() {
-                            this.state = RouterServiceResponseState::Service(Some(tr));
-                        } else {
-                            return Poll::Ready(Ok(()));
-                        }
-                    }
-                    Poll::Ready(Err(e)) => {
-                        log::error!(
-                            "Failed to create link service for {} err: {:?}",
-                            this.link.name(),
-                            e
-                        );
-                        return Poll::Ready(Err(e));
-                    }
-                    Poll::Pending => return Poll::Pending,
-                },
+                delivery_id
+            }
+        };
+
+        match srv.call(tr).await {
+            Ok(outcome) => {
+                log::trace!("Outcome is ready {:?} for {}", outcome, link.name());
+                settle(&mut link, delivery_id, outcome.into_delivery_state());
+            }
+            Err(e) => {
+                log::trace!("Service response error: {:?}", e);
+                settle(
+                    &mut link,
+                    delivery_id,
+                    DeliveryState::Rejected(Rejected { error: Some(e) }),
+                );
             }
         }
     }
+    Ok(())
 }
 
 fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
@@ -345,43 +283,14 @@ where
     type Error = Error;
     type InitError = Error;
     type Service = ResourceService<S, T::Service>;
-    type Future<'f> = ResourceServiceFactoryFut<'f, S, T> where Self: 'f;
 
-    fn create(&self, cfg: Link<S>) -> Self::Future<'_> {
-        ResourceServiceFactoryFut {
-            fut: self.factory.create(cfg),
-            _t: marker::PhantomData,
-        }
-    }
-}
+    async fn create(&self, cfg: Link<S>) -> Result<Self::Service, Self::InitError> {
+        let service = self.factory.create(cfg).await?;
 
-pin_project_lite::pin_project! {
-    struct ResourceServiceFactoryFut<'f, S, T: ServiceFactory<Transfer, Link<S>>>
-    where T: 'f, S: 'f
-    {
-        #[pin] fut: T::Future<'f>,
-        _t: marker::PhantomData<S>,
-    }
-}
-
-impl<'f, S, T> Future for ResourceServiceFactoryFut<'f, S, T>
-where
-    T: ServiceFactory<Transfer, Link<S>, Response = Outcome>,
-    Error: From<T::Error> + From<T::InitError>,
-    Outcome: TryFrom<T::Error, Error = Error>,
-{
-    type Output = Result<ResourceService<S, T::Service>, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let service = match this.fut.poll(cx).map_err(Error::from)? {
-            Poll::Ready(service) => service,
-            Poll::Pending => return Poll::Pending,
-        };
-        Poll::Ready(Ok(ResourceService {
+        Ok(ResourceService {
             service,
             _t: marker::PhantomData,
-        }))
+        })
     }
 }
 
@@ -398,43 +307,18 @@ where
 {
     type Response = Outcome;
     type Error = Error;
-    type Future<'f> = ResourceServiceFut<'f, S, T> where Self: 'f;
 
     ntex::forward_poll_ready!(service);
     ntex::forward_poll_shutdown!(service);
 
-    #[inline]
-    fn call<'a>(&'a self, req: Transfer, ctx: ServiceCtx<'a, Self>) -> Self::Future<'a> {
-        ResourceServiceFut {
-            fut: ctx.call(&self.service, req),
-            _t: marker::PhantomData,
+    async fn call(
+        &self,
+        req: Transfer,
+        ctx: ServiceCtx<'_, Self>,
+    ) -> Result<Self::Response, Self::Error> {
+        match ctx.call(&self.service, req).await {
+            Ok(v) => Ok(v),
+            Err(err) => Outcome::try_from(err),
         }
-    }
-}
-
-pin_project_lite::pin_project! {
-    struct ResourceServiceFut<'f, S, T: Service<Transfer>>
-    where T: 'f
-    {
-        #[pin]
-        fut: ServiceCall<'f, T, Transfer>,
-        _t: marker::PhantomData<S>,
-    }
-}
-
-impl<'f, S, T> Future for ResourceServiceFut<'f, S, T>
-where
-    T: Service<Transfer, Response = Outcome>,
-    Error: From<T::Error>,
-    Outcome: TryFrom<T::Error, Error = Error>,
-{
-    type Output = Result<Outcome, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(match self.project().fut.poll(cx) {
-            Poll::Ready(Ok(res)) => Ok(res),
-            Poll::Ready(Err(err)) => Outcome::try_from(err),
-            Poll::Pending => return Poll::Pending,
-        })
     }
 }
