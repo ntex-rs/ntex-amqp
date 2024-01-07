@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use ntex::service::{Service, ServiceCtx, ServiceFactory};
-use ntex::util::Ready;
 
 use crate::error::LinkError;
 use crate::{types::Link, ControlFrame, State};
@@ -20,22 +19,23 @@ impl<S, E> ServiceFactory<Link<S>, State<S>> for DefaultPublishService<S, E> {
     type Error = E;
     type InitError = LinkError;
     type Service = DefaultPublishService<S, E>;
-    type Future<'f> = Ready<Self::Service, Self::InitError> where Self: 'f;
 
-    fn create(&self, _: State<S>) -> Self::Future<'_> {
-        Ready::Err(LinkError::force_detach().description("not configured"))
+    async fn create(&self, _: State<S>) -> Result<Self::Service, Self::InitError> {
+        Err(LinkError::force_detach().description("not configured"))
     }
 }
 
 impl<S, E> Service<Link<S>> for DefaultPublishService<S, E> {
     type Response = ();
     type Error = E;
-    type Future<'f> = Ready<Self::Response, Self::Error> where Self: 'f;
 
-    #[inline]
-    fn call<'a>(&'a self, _: Link<S>, _: ServiceCtx<'a, Self>) -> Self::Future<'a> {
+    async fn call(
+        &self,
+        _: Link<S>,
+        _: ServiceCtx<'_, Self>,
+    ) -> Result<Self::Response, Self::Error> {
         log::warn!("AMQP Publish service is not configured");
-        Ready::Ok(())
+        Ok(())
     }
 }
 
@@ -53,20 +53,21 @@ impl<S, E> ServiceFactory<ControlFrame, State<S>> for DefaultControlService<S, E
     type Error = E;
     type InitError = E;
     type Service = DefaultControlService<S, E>;
-    type Future<'f> = Ready<Self::Service, Self::InitError> where Self: 'f;
 
-    fn create(&self, _: State<S>) -> Self::Future<'_> {
-        Ready::Ok(DefaultControlService(PhantomData))
+    async fn create(&self, _: State<S>) -> Result<Self::Service, Self::InitError> {
+        Ok(DefaultControlService(PhantomData))
     }
 }
 
 impl<S, E> Service<ControlFrame> for DefaultControlService<S, E> {
     type Response = ();
     type Error = E;
-    type Future<'f> = Ready<Self::Response, Self::Error> where Self: 'f;
 
-    #[inline]
-    fn call<'a>(&'a self, _: ControlFrame, _: ServiceCtx<'a, Self>) -> Self::Future<'a> {
-        Ready::Ok(())
+    async fn call(
+        &self,
+        _: ControlFrame,
+        _: ServiceCtx<'_, Self>,
+    ) -> Result<Self::Response, Self::Error> {
+        Ok(())
     }
 }
