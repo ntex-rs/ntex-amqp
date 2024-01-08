@@ -7,7 +7,7 @@ documentation = "https://docs.rs/ntex-amqp"
 repository = "https://github.com/ntex-rs/ntex-amqp.git"
 categories = ["network-programming"]
 keywords = ["AMQP", "IoT", "messaging"]
-license = "MIT"
+license = "MIT OR Apache-2.0"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
 edition = "2018"
 
