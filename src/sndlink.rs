@@ -311,6 +311,7 @@ impl SenderLinkInner {
         self.closed = true;
         self.error = Some(err);
         self.on_close.notify();
+        self.on_credit.notify();
     }
 
     pub(crate) fn close(
