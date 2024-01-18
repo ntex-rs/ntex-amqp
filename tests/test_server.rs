@@ -3,7 +3,7 @@ use std::{cell::Cell, convert::TryFrom, rc::Rc, sync::Arc, sync::Mutex};
 use ntex::server::test_server;
 use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
 use ntex::util::{Bytes, Either, Ready};
-use ntex::{http::Uri, time::sleep, time::Millis};
+use ntex::{http::Uri, rt, time::sleep, time::Millis};
 use ntex_amqp::{client, error::LinkError, server, types, ControlFrame, ControlFrameKind};
 
 async fn server(
@@ -188,6 +188,79 @@ async fn test_session_end() -> std::io::Result<()> {
 
     assert_eq!(link_names.lock().unwrap()[0], "test");
     assert!(sink.is_opened());
+
+    Ok(())
+}
+
+#[ntex::test]
+async fn test_link_detach() -> std::io::Result<()> {
+    let _ = env_logger::try_init();
+
+    let srv = test_server(move || {
+        server::Server::build(|con: server::Handshake| async move {
+            match con {
+                server::Handshake::Amqp(con) => {
+                    let con = con.open().await.unwrap();
+                    Ok(con.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            }
+        })
+        .control(move |frm: ControlFrame| {
+            if let ControlFrameKind::AttachSender(_, ref link) = frm.kind() {
+                let link = link.clone();
+                rt::spawn(async move {
+                    sleep(Millis(150)).await;
+                    let _ = link.close().await;
+                });
+            }
+            Ready::<_, ()>::Ok(())
+        })
+        .finish(
+            server::Router::<()>::new()
+                .service(
+                    "test",
+                    fn_factory_with_config(|link: types::Link<()>| async move {
+                        rt::spawn(async move {
+                            sleep(Millis(150)).await;
+                            let _ = link.receiver().close().await;
+                        });
+
+                        Ok::<_, LinkError>(boxed::service(fn_service(|_req| async move {
+                            Ok::<_, LinkError>(types::Outcome::Accept)
+                        })))
+                    }),
+                )
+                .finish(),
+        )
+    });
+
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = client::Connector::new().connect(uri).await.unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+
+    link.on_close().await;
+    assert!(link.is_closed());
+    assert!(!link.is_opened());
+
+    let link = session
+        .build_receiver_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    sleep(Millis(350)).await;
+    assert!(link.is_closed());
 
     Ok(())
 }

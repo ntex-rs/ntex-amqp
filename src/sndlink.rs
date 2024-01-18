@@ -308,6 +308,7 @@ impl SenderLinkInner {
             }
         }
 
+        self.closed = true;
         self.error = Some(err);
         self.on_close.notify();
     }

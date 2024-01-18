@@ -274,6 +274,7 @@ impl ReceiverLinkInner {
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }
+        self.closed = true;
         self.wake();
 
         async move {
