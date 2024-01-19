@@ -12,8 +12,12 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::AmqpFrame;
 
 use crate::error::AmqpProtocolError;
-use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
-use crate::sndlink::{DeliveryPromise, SenderLink, SenderLinkBuilder, SenderLinkInner};
+use crate::rcvlink::{
+    EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner,
+};
+use crate::sndlink::{
+    DeliveryPromise, EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner,
+};
 use crate::{cell::Cell, types::Action, ConnectionRef, ControlFrame};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
@@ -235,7 +239,7 @@ impl Session {
 
 #[derive(Debug)]
 enum SenderLinkState {
-    Established(SenderLink),
+    Established(EstablishedSenderLink),
     OpeningRemote,
     Opening(Option<oneshot::Sender<Result<Cell<SenderLinkInner>, AmqpProtocolError>>>),
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
@@ -250,7 +254,7 @@ enum ReceiverLinkState {
             oneshot::Sender<Result<ReceiverLink, AmqpProtocolError>>,
         )>,
     ),
-    Established(ReceiverLink),
+    Established(EstablishedReceiverLink),
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
 
@@ -388,7 +392,7 @@ impl SessionInner {
 
         self.error = Some(err);
         self.flags.insert(Flags::ENDED);
-        self.closed.notify();
+        self.closed.notify_and_lock_readiness();
     }
 
     /// End session.
@@ -406,10 +410,10 @@ impl SessionInner {
             .iter()
             .filter_map(|(_, st)| match st {
                 Either::Left(SenderLinkState::Established(ref link)) => {
-                    Some(Either::Left(link.clone()))
+                    Some(Either::Left((*link).clone()))
                 }
                 Either::Right(ReceiverLinkState::Established(ref link)) => {
-                    Some(Either::Right(link.clone()))
+                    Some(Either::Right((*link).clone()))
                 }
                 _ => None,
             })
@@ -482,8 +486,9 @@ impl SessionInner {
         *self
             .links
             .get_mut(token)
-            .expect("new remote sender entry must exist") =
-            Either::Left(SenderLinkState::Established(SenderLink::new(link.clone())));
+            .expect("new remote sender entry must exist") = Either::Left(
+            SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
+        );
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -695,7 +700,7 @@ impl SessionInner {
                         desired_capabilities: None,
                         properties: None,
                     }));
-                    *link = ReceiverLinkState::Established(ReceiverLink::new(l));
+                    *link = ReceiverLinkState::Established(EstablishedReceiverLink::new(l));
                     self.post_frame(attach.into());
                     return;
                 }
@@ -812,7 +817,7 @@ impl SessionInner {
                         .and_then(|h| self.links.get_mut(h))
                     {
                         if let SenderLinkState::Established(ref link) = link {
-                            return Ok(Action::Flow(link.clone(), flow));
+                            return Ok(Action::Flow((*link).clone(), flow));
                         }
                         log::warn!("{}: Received flow frame", self.tag());
                     }
@@ -920,7 +925,7 @@ impl SessionInner {
                         ));
                         let local_sender = std::mem::replace(
                             item,
-                            SenderLinkState::Established(SenderLink::new(link.clone())),
+                            SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
                         );
 
                         if let SenderLinkState::Opening(Some(tx)) = local_sender {
@@ -941,8 +946,9 @@ impl SessionInner {
                             if let Some((link, tx)) = opt_item.take() {
                                 self.remote_handles.insert(attach.handle(), *index);
 
-                                *item =
-                                    ReceiverLinkState::Established(ReceiverLink::new(link.clone()));
+                                *item = ReceiverLinkState::Established(
+                                    EstablishedReceiverLink::new(link.clone()),
+                                );
                                 let _ = tx.send(Ok(ReceiverLink::new(link)));
                             } else {
                                 // TODO: close session

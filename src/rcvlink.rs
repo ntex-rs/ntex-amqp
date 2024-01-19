@@ -415,6 +415,29 @@ impl ReceiverLinkInner {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct EstablishedReceiverLink(ReceiverLink);
+
+impl EstablishedReceiverLink {
+    pub(crate) fn new(inner: Cell<ReceiverLinkInner>) -> EstablishedReceiverLink {
+        EstablishedReceiverLink(ReceiverLink::new(inner))
+    }
+}
+
+impl std::ops::Deref for EstablishedReceiverLink {
+    type Target = ReceiverLink;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for EstablishedReceiverLink {
+    fn drop(&mut self) {
+        self.0.inner.get_mut().closed = true;
+    }
+}
+
 pub struct ReceiverLinkBuilder {
     frame: Attach,
     session: Cell<SessionInner>,
