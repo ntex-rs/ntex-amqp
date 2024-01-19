@@ -263,6 +263,7 @@ impl ConnectionInner {
         if self.error.is_none() {
             self.error = Some(err);
         }
+        self.on_close.notify_and_lock_readiness();
     }
 
     pub(crate) fn post_frame(&mut self, frame: AmqpFrame) {

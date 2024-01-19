@@ -256,9 +256,10 @@ where
     fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
         let mut shutdown = self.shutdown.borrow_mut();
         if !shutdown.is_some() {
-            let sink = self.sink.0.get_mut();
-            sink.on_close.notify();
-            sink.set_error(AmqpProtocolError::Disconnected);
+            self.sink
+                .0
+                .get_mut()
+                .set_error(AmqpProtocolError::Disconnected);
             let fut = self
                 .ctl_service
                 .call_static(ControlFrame::new_kind(ControlFrameKind::Closed));

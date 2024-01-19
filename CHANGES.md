@@ -1,5 +1,9 @@
 # Changes
 
+## [1.0.2] - 2024-01-19
+
+* SenderLink close notification
+
 ## [1.0.1] - 2024-01-18
 
 * Fix SenderLink closed state, if link is closed remotely

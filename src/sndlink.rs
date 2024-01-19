@@ -310,8 +310,8 @@ impl SenderLinkInner {
 
         self.closed = true;
         self.error = Some(err);
-        self.on_close.notify();
-        self.on_credit.notify();
+        self.on_close.notify_and_lock_readiness();
+        self.on_credit.notify_and_lock_readiness();
     }
 
     pub(crate) fn close(
@@ -322,8 +322,8 @@ impl SenderLinkInner {
             Either::Left(Ready::Ok(()))
         } else {
             self.closed = true;
-            self.on_close.notify();
-            self.on_credit.notify();
+            self.on_close.notify_and_lock_readiness();
+            self.on_credit.notify_and_lock_readiness();
 
             let (tx, rx) = oneshot::channel();
 
@@ -600,6 +600,34 @@ impl SenderLinkInner {
             buf.put_u32(delivery_tag);
             buf.freeze()
         })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct EstablishedSenderLink(SenderLink);
+
+impl EstablishedSenderLink {
+    pub(crate) fn new(inner: Cell<SenderLinkInner>) -> EstablishedSenderLink {
+        EstablishedSenderLink(SenderLink::new(inner))
+    }
+}
+
+impl std::ops::Deref for EstablishedSenderLink {
+    type Target = SenderLink;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for EstablishedSenderLink {
+    fn drop(&mut self) {
+        let inner = self.0.inner.get_mut();
+        if !inner.closed {
+            inner.closed = true;
+            inner.on_close.notify_and_lock_readiness();
+            inner.on_credit.notify_and_lock_readiness();
+        }
     }
 }
 
