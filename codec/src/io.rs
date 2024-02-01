@@ -135,7 +135,7 @@ impl Decoder for ProtocolIdCodec {
         if src.len() < PROTOCOL_HEADER_LEN {
             Ok(None)
         } else {
-            let src = src.split_to(8);
+            let src = src.split_to(PROTOCOL_HEADER_LEN);
             if &src[0..4] != PROTOCOL_HEADER_PREFIX {
                 Err(ProtocolIdError::InvalidHeader)
             } else if &src[5..8] != PROTOCOL_VERSION {
