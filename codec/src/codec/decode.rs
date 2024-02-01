@@ -250,6 +250,7 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
 {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = decode_map_header(input, fmt)?;
+        decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
         let count = header.count / 2;
         let mut map: collections::HashMap<K, V, S> =
@@ -267,6 +268,7 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
 impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = decode_array_header(input, fmt)?;
+        decode_check_len!(input, 1);
         let item_fmt = input[0]; // todo: support descriptor
         input.split_to(1);
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
@@ -281,6 +283,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
 impl DecodeFormatted for VecSymbolMap {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = decode_map_header(input, fmt)?;
+        decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
         let count = header.count / 2;
         let mut map = Vec::with_capacity(count as usize);
@@ -297,6 +300,7 @@ impl DecodeFormatted for VecSymbolMap {
 impl DecodeFormatted for VecStringMap {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = decode_map_header(input, fmt)?;
+        decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
         let count = header.count / 2;
         let mut map = Vec::with_capacity(count as usize);

@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.9.2] - 2024-02-01
+
+* Add more buffer length checks
+
 ## [1.0.2] - 2024-01-19
 
 * SenderLink close notification
