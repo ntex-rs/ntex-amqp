@@ -6,9 +6,8 @@ use std::{
 use ntex::util::{ByteString, BytesMut, PoolRef, Stream};
 use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
-    self as codec, Attach, DeliveryNumber, Disposition, Error, Handle, LinkError,
-    ReceiverSettleMode, Role, SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy,
-    Transfer, TransferBody,
+    self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
+    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
 };
 use ntex_amqp_codec::types::{Symbol, Variant};
 use ntex_amqp_codec::Encode;
@@ -131,14 +130,6 @@ impl ReceiverLink {
             .inner
             .get_mut()
             .post_frame(disp.into());
-    }
-
-    /// Wait for disposition with specified number
-    pub fn wait_disposition(
-        &self,
-        id: DeliveryNumber,
-    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
-        self.inner.get_mut().session.wait_disposition(id)
     }
 
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {

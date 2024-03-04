@@ -1,5 +1,9 @@
 # Changes
 
+## [1.1.0] - 2024-03-04
+
+* Add proper delivery handling
+
 ## [codec-0.9.2] - 2024-02-01
 
 * Add more buffer length checks

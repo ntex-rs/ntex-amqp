@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt, future::Future};
+use std::{collections::VecDeque, convert::TryFrom, fmt, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef, Ready};
@@ -6,18 +6,17 @@ use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
     self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, End,
-    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Source,
-    Transfer, TransferBody, TransferNumber,
+    Error, Flow, Frame, Handle, ReceiverSettleMode, Role, SenderSettleMode, Source, Transfer,
+    TransferBody, TransferNumber,
 };
-use ntex_amqp_codec::AmqpFrame;
+use ntex_amqp_codec::{AmqpFrame, Encode};
 
+use crate::delivery::DeliveryInner;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{
     EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner,
 };
-use crate::sndlink::{
-    DeliveryPromise, EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner,
-};
+use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{cell::Cell, types::Action, ConnectionRef, ControlFrame};
 
 const INITIAL_OUTGOING_ID: TransferNumber = 0;
@@ -43,14 +42,13 @@ pub(crate) struct SessionInner {
     links_by_name: HashMap<ByteString, usize>,
     remote_handles: HashMap<Handle, usize>,
     error: Option<AmqpProtocolError>,
+    closed: condition::Condition,
 
     pending_transfers: VecDeque<PendingTransfer>,
-    unsettled_deliveries: HashMap<DeliveryNumber, DeliveryPromise>,
-    disposition_subscribers: HashMap<DeliveryNumber, pool::Sender<Disposition>>,
+    pub(crate) unsettled_deliveries: HashMap<DeliveryNumber, DeliveryInner>,
 
-    pub(crate) pool: pool::Pool<Result<Disposition, AmqpProtocolError>>,
-    pool_disp: pool::Pool<Disposition>,
-    closed: condition::Condition,
+    pub(crate) pool_notify: pool::Pool<()>,
+    pub(crate) pool_credit: pool::Pool<Result<(), AmqpProtocolError>>,
 }
 
 impl fmt::Debug for Session {
@@ -227,14 +225,6 @@ impl Session {
             }
         }
     }
-
-    #[inline]
-    pub fn wait_disposition(
-        &self,
-        id: DeliveryNumber,
-    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
-        self.inner.get_mut().wait_disposition(id)
-    }
 }
 
 #[derive(Debug)]
@@ -281,25 +271,8 @@ bitflags::bitflags! {
 
 #[derive(Debug)]
 struct PendingTransfer {
+    tx: pool::Sender<Result<(), AmqpProtocolError>>,
     link_handle: Handle,
-    body: Option<TransferBody>,
-    state: TransferState,
-    settled: Option<bool>,
-    message_format: Option<MessageFormat>,
-}
-
-#[derive(Debug)]
-pub(crate) enum TransferState {
-    First(DeliveryPromise, Bytes),
-    Continue,
-    Last,
-    Only(DeliveryPromise, Bytes),
-}
-
-impl TransferState {
-    pub(super) fn more(&self) -> bool {
-        !matches!(self, TransferState::Only(_, _) | TransferState::Last)
-    }
 }
 
 impl SessionInner {
@@ -326,10 +299,9 @@ impl SessionInner {
             links_by_name: HashMap::default(),
             remote_handles: HashMap::default(),
             pending_transfers: VecDeque::new(),
-            disposition_subscribers: HashMap::default(),
             error: None,
-            pool: pool::new(),
-            pool_disp: pool::new(),
+            pool_notify: pool::new(),
+            pool_credit: pool::new(),
             closed: condition::Condition::new(),
         }
     }
@@ -357,17 +329,13 @@ impl SessionInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            if let TransferState::First(tx, _) | TransferState::Only(tx, _) = tr.state {
-                tx.ready(Err(err.clone()));
-            }
+            let _ = tr.tx.send(Err(err.clone()));
         }
 
         // drop unsettled deliveries
-        for (_, promise) in self.unsettled_deliveries.drain() {
-            promise.ready(Err(err.clone()));
+        for (_, mut promise) in self.unsettled_deliveries.drain() {
+            promise.set_error(err.clone());
         }
-
-        self.disposition_subscribers.clear();
 
         // drop links
         self.links_by_name.clear();
@@ -418,15 +386,6 @@ impl SessionInner {
                 _ => None,
             })
             .collect()
-    }
-
-    fn wait_disposition(
-        &mut self,
-        id: DeliveryNumber,
-    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>> {
-        let (tx, rx) = self.pool_disp.channel();
-        self.disposition_subscribers.insert(id, tx);
-        async move { rx.await.map_err(|_| AmqpProtocolError::Disconnected) }
     }
 
     pub(crate) fn max_frame_size(&self) -> u32 {
@@ -825,11 +784,7 @@ impl SessionInner {
                     Ok(Action::None)
                 }
                 Frame::Disposition(disp) => {
-                    if let Some(sender) = self.disposition_subscribers.remove(&disp.first()) {
-                        let _ = sender.send(disp);
-                    } else {
-                        self.settle_deliveries(disp);
-                    }
+                    self.settle_deliveries(disp);
                     Ok(Action::None)
                 }
                 Frame::Transfer(transfer) => {
@@ -921,7 +876,9 @@ impl SessionInner {
                             attach.handle(),
                             delivery_count,
                             cell,
-                            attach.max_message_size().map(|v| v as usize),
+                            attach
+                                .max_message_size()
+                                .map(|v| u32::try_from(v).unwrap_or(u32::MAX)),
                         ));
                         let local_sender = std::mem::replace(
                             item,
@@ -1012,11 +969,7 @@ impl SessionInner {
                         while idx < self.pending_transfers.len() {
                             if self.pending_transfers[idx].link_handle == handle {
                                 let tr = self.pending_transfers.remove(idx).unwrap();
-                                if let TransferState::First(tx, _) | TransferState::Only(tx, _) =
-                                    tr.state
-                                {
-                                    tx.ready(Err(err.clone()));
-                                }
+                                let _ = tr.tx.send(Err(err.clone()));
                             } else {
                                 idx += 1;
                             }
@@ -1104,42 +1057,39 @@ impl SessionInner {
         action
     }
 
-    fn settle_deliveries(&mut self, disposition: Disposition) {
-        let from = disposition.first();
-        let to = disposition.last().unwrap_or(from);
+    fn settle_deliveries(&mut self, disp: Disposition) {
+        let from = disp.first();
+        let to = disp.last();
 
         if cfg!(feature = "frame-trace") {
-            log::trace!("{}: Settle delivery: {:#?}", self.tag(), disposition);
+            log::trace!("{}: Settle delivery: {:#?}", self.tag(), disp);
         } else {
             log::trace!(
-                "{}: Settle delivery from {} - {}, state {:?} settled: {:?}",
+                "{}: Settle delivery from {} - {:?}, state {:?} settled: {:?}",
                 self.tag(),
                 from,
                 to,
-                disposition.state(),
-                disposition.settled()
+                disp.state(),
+                disp.settled()
             );
         }
 
-        if !disposition.settled() {
-            let mut disp = disposition.clone();
-            disp.0.role = Role::Sender;
-            disp.0.settled = true;
-            disp.0.state = Some(DeliveryState::Accepted(Accepted {}));
-            self.post_frame(Frame::Disposition(disp));
-        }
-
-        for no in from..=to {
-            if let Some(val) = self.unsettled_deliveries.remove(&no) {
-                val.ready(Ok(disposition.clone()));
-            } else {
-                log::info!(
-                    "{}: Could not find handler for {:?}, no: {:?}, unsettled: {:?}",
-                    self.tag(),
-                    disposition,
-                    no,
-                    self.unsettled_deliveries.len(),
-                );
+        if let Some(to) = to {
+            for no in from..=to {
+                if let Some(delivery) = self.unsettled_deliveries.get_mut(&no) {
+                    delivery.handle_disposition(disp.clone());
+                } else {
+                    log::trace!(
+                        "{}: Unknown deliveryid: {:?} disp: {:?}",
+                        self.tag(),
+                        no,
+                        disp
+                    );
+                }
+            }
+        } else {
+            if let Some(delivery) = self.unsettled_deliveries.get_mut(&from) {
+                delivery.handle_disposition(disp);
             }
         }
     }
@@ -1163,12 +1113,8 @@ impl SessionInner {
             self.pending_transfers.len(),
         );
 
-        while self.remote_incoming_window != 0 {
-            if let Some(t) = self.pending_transfers.pop_front() {
-                self.send_transfer(t.link_handle, t.body, t.state, t.settled, t.message_format);
-                continue;
-            }
-            break;
+        while let Some(tr) = self.pending_transfers.pop_front() {
+            let _ = tr.tx.send(Ok(()));
         }
 
         if flow.echo() {
@@ -1219,75 +1165,80 @@ impl SessionInner {
         self.post_frame(flow.into());
     }
 
-    pub(crate) fn send_transfer(
+    pub(crate) async fn send_transfer(
         &mut self,
         link_handle: Handle,
-        body: Option<TransferBody>,
-        state: TransferState,
-        settled: Option<bool>,
-        message_format: Option<MessageFormat>,
-    ) {
-        if self.remote_incoming_window == 0 {
-            log::trace!(
-                "{}: Remote window is 0, push to pending queue, hnd:{:?}",
-                self.sink.tag(),
-                link_handle
-            );
-            self.pending_transfers.push_back(PendingTransfer {
-                link_handle,
-                body,
-                state,
-                settled,
-                message_format,
-            });
-        } else {
-            let more = state.more();
-            if !more {
-                self.remote_incoming_window -= 1;
-            }
+        tag: Bytes,
+        body: TransferBody,
+        settled: bool,
+        max_frame_size: Option<u32>,
+    ) -> Result<DeliveryNumber, AmqpProtocolError> {
+        loop {
+            if self.remote_incoming_window == 0 {
+                log::trace!(
+                    "{}: Remote window is 0, push to pending queue, hnd:{:?}",
+                    self.sink.tag(),
+                    link_handle
+                );
+                let (tx, rx) = self.pool_credit.channel();
+                self.pending_transfers
+                    .push_back(PendingTransfer { tx, link_handle });
 
-            let settled2 = settled.unwrap_or(false);
-            let tr_settled = if settled2 {
-                Some(DeliveryState::Accepted(Accepted {}))
-            } else {
-                None
+                rx.await
+                    .map_err(|_| AmqpProtocolError::ConnectionDropped)
+                    .and_then(|v| v)?;
+                continue;
+            }
+            break;
+        }
+
+        self.remote_incoming_window -= 1;
+
+        let delivery_id = self.next_outgoing_id;
+        self.next_outgoing_id = self.next_outgoing_id.wrapping_add(1);
+
+        let tr_settled = if settled {
+            Some(DeliveryState::Accepted(Accepted {}))
+        } else {
+            None
+        };
+        let message_format = body.message_format();
+
+        let max_frame_size = max_frame_size.unwrap_or_else(|| self.max_frame_size());
+        let max_frame_size = if max_frame_size > 2048 {
+            max_frame_size - 2048
+        } else if max_frame_size == 0 {
+            u32::MAX
+        } else {
+            max_frame_size
+        } as usize;
+
+        // body is larger than allowed frame size, send body as a set of transfers
+        if body.len() > max_frame_size {
+            let mut body = match body {
+                TransferBody::Data(data) => data,
+                TransferBody::Message(msg) => {
+                    let mut buf = self.memory_pool().buf_with_capacity(msg.encoded_size());
+                    msg.encode(&mut buf);
+                    buf.freeze()
+                }
             };
 
-            let mut transfer = Transfer(Box::new(codec::TransferInner {
-                body,
-                settled,
-                message_format,
-                more: false,
-                handle: link_handle,
-                state: tr_settled,
-                delivery_id: None,
-                delivery_tag: None,
-                rcv_settle_mode: None,
-                resume: false,
-                aborted: false,
-                batchable: false,
-            }));
+            let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
 
-            let more = state.more();
-            match state {
-                TransferState::First(promise, delivery_tag)
-                | TransferState::Only(promise, delivery_tag) => {
-                    let delivery_id = self.next_outgoing_id;
-                    self.next_outgoing_id = self.next_outgoing_id.wrapping_add(1);
+            let mut transfer = Transfer(Default::default());
+            transfer.0.body = Some(TransferBody::Data(chunk));
+            transfer.0.more = true;
+            transfer.0.settled = Some(settled);
+            transfer.0.state = tr_settled;
+            transfer.0.batchable = true;
+            transfer.0.delivery_id = Some(delivery_id);
+            transfer.0.delivery_tag = Some(tag.clone());
+            transfer.0.message_format = message_format;
 
-                    transfer.0.more = more;
-                    transfer.0.batchable = more;
-                    transfer.0.delivery_id = Some(delivery_id);
-                    transfer.0.delivery_tag = Some(delivery_tag);
-                    self.unsettled_deliveries.insert(delivery_id, promise);
-                }
-                TransferState::Continue => {
-                    transfer.0.more = true;
-                    transfer.0.batchable = true;
-                }
-                TransferState::Last => {
-                    transfer.0.more = false;
-                }
+            if !settled {
+                self.unsettled_deliveries
+                    .insert(delivery_id, DeliveryInner::new());
             }
 
             log::trace!(
@@ -1301,8 +1252,44 @@ impl SessionInner {
                 transfer.settled(),
             );
 
+            loop {
+                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+
+                // last chunk
+                if body.is_empty() {
+                    log::trace!("{}: Sending last tranfer for {:?}", self.tag(), tag);
+
+                    let mut transfer = Transfer(Default::default());
+                    transfer.0.more = false;
+                    self.post_frame(Frame::Transfer(transfer));
+                    break;
+                }
+
+                log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
+
+                let mut transfer = Transfer(Default::default());
+                transfer.0.body = Some(TransferBody::Data(chunk));
+                transfer.0.more = true;
+                transfer.0.batchable = true;
+                self.post_frame(Frame::Transfer(transfer));
+            }
+        } else {
+            let mut transfer = Transfer(Default::default());
+            transfer.0.body = Some(body);
+            transfer.0.settled = Some(settled);
+            transfer.0.state = tr_settled;
+            transfer.0.delivery_id = Some(delivery_id);
+            transfer.0.delivery_tag = Some(tag);
+            transfer.0.message_format = message_format;
+
+            if !settled {
+                self.unsettled_deliveries
+                    .insert(delivery_id, DeliveryInner::new());
+            }
             self.post_frame(Frame::Transfer(transfer));
         }
+
+        Ok(delivery_id)
     }
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {
