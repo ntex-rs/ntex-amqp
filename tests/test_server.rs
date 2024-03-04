@@ -1,10 +1,12 @@
-use std::{cell::Cell, convert::TryFrom, rc::Rc, sync::Arc, sync::Mutex};
+use std::{convert::TryFrom, sync::Arc, sync::Mutex};
 
 use ntex::server::test_server;
 use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
 use ntex::util::{Bytes, Either, Ready};
 use ntex::{http::Uri, rt, time::sleep, time::Millis};
-use ntex_amqp::{client, error::LinkError, server, types, ControlFrame, ControlFrameKind};
+use ntex_amqp::{
+    client, codec::protocol, error::LinkError, server, types, ControlFrame, ControlFrameKind,
+};
 
 async fn server(
     link: types::Link<()>,
@@ -50,19 +52,13 @@ async fn test_simple() -> std::io::Result<()> {
         .attach()
         .await
         .unwrap();
-    link.send(Bytes::from(b"test".as_ref())).await.unwrap();
-
-    let res = Rc::new(Cell::new(false));
-    let res2 = res.clone();
-
-    link.on_disposition(move |_tag, result| {
-        if result.is_ok() {
-            res2.set(true);
-        }
-    });
-    link.send_no_block(Bytes::from(b"test".as_ref())).unwrap();
-    sleep(Millis(500)).await;
-    assert!(res.get());
+    let delivery = link
+        .delivery(Bytes::from(b"test".as_ref()))
+        .send()
+        .await
+        .unwrap();
+    let st = delivery.wait().await.unwrap().unwrap();
+    assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
 
     Ok(())
 }
@@ -182,7 +178,11 @@ async fn test_session_end() -> std::io::Result<()> {
         .attach()
         .await
         .unwrap();
-    link.send(Bytes::from(b"test".as_ref())).await.unwrap();
+    let _delivery = link
+        .delivery(Bytes::from(b"test".as_ref()))
+        .send()
+        .await
+        .unwrap();
     session.end().await.unwrap();
     sleep(Millis(150)).await;
 

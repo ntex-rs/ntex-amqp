@@ -1,4 +1,4 @@
-#![deny(rust_2018_idioms, warnings, unreachable_pub)]
+//#![deny(rust_2018_idioms, warnings, unreachable_pub)]
 #![allow(clippy::type_complexity, clippy::let_underscore_future)]
 
 #[macro_use]
@@ -13,6 +13,7 @@ pub mod client;
 mod connection;
 mod control;
 mod default;
+mod delivery;
 mod dispatcher;
 pub mod error;
 pub mod error_code;
@@ -26,6 +27,7 @@ pub mod types;
 
 pub use self::connection::{Connection, ConnectionRef};
 pub use self::control::{ControlFrame, ControlFrameKind};
+pub use self::delivery::{Delivery, DeliveryBuilder};
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};

@@ -1,16 +1,15 @@
-use std::collections::VecDeque;
-use std::{convert::TryFrom, future::Future, mem, pin::Pin, task::Context, task::Poll};
+use std::{collections::VecDeque, convert::TryFrom, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ready, BufMut, ByteString, Bytes, Either, PoolRef, Ready};
+use ntex::util::{BufMut, ByteString, Bytes, Either, PoolRef, Ready};
 use ntex_amqp_codec::protocol::{
-    self as codec, Attach, DeliveryNumber, DeliveryState, Disposition, Error, Flow, MessageFormat,
-    ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Target, TerminusDurability,
-    TerminusExpiryPolicy, TransferBody,
+    self as codec, Attach, DeliveryNumber, Error, Flow, ReceiverSettleMode, Role, SenderSettleMode,
+    SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 
-use crate::session::{Session, SessionInner, TransferState};
-use crate::{cell::Cell, codec::Encode, error::AmqpProtocolError, Handle};
+use crate::delivery::DeliveryBuilder;
+use crate::session::{Session, SessionInner};
+use crate::{cell::Cell, error::AmqpProtocolError, Handle};
 
 #[derive(Clone)]
 pub struct SenderLink {
@@ -20,26 +19,18 @@ pub struct SenderLink {
 pub(crate) struct SenderLinkInner {
     pub(crate) id: usize,
     name: ByteString,
-    session: Session,
+    pub(crate) session: Session,
     remote_handle: Handle,
     delivery_count: SequenceNo,
     delivery_tag: u32,
     link_credit: u32,
-    pending_transfers: VecDeque<PendingTransfer>,
-    error: Option<AmqpProtocolError>,
-    closed: bool,
+    pending_transfers: VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>,
+    pub(crate) error: Option<AmqpProtocolError>,
+    pub(crate) closed: bool,
+    pub(crate) max_message_size: Option<u32>,
     on_close: condition::Condition,
     on_credit: condition::Condition,
-    on_disposition: Box<dyn Fn(Bytes, Result<Disposition, AmqpProtocolError>)>,
-    max_message_size: Option<usize>,
     pool: PoolRef,
-}
-
-struct PendingTransfer {
-    body: Option<TransferBody>,
-    state: TransferState,
-    settle: Option<bool>,
-    message_format: Option<MessageFormat>,
 }
 
 impl std::fmt::Debug for SenderLink {
@@ -129,46 +120,12 @@ impl SenderLink {
         self.inner.get_ref().error.as_ref()
     }
 
-    /// Send body
-    pub fn send<T>(&self, body: T) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
+    /// Start delivery process
+    pub fn delivery<T>(&self, body: T) -> DeliveryBuilder
     where
         T: Into<TransferBody>,
     {
-        self.inner.get_mut().send(body, None)
-    }
-
-    /// Send body with specific delivery tag
-    pub fn send_with_tag<T>(
-        &self,
-        body: T,
-        tag: Bytes,
-    ) -> impl Future<Output = Result<Disposition, AmqpProtocolError>>
-    where
-        T: Into<TransferBody>,
-    {
-        self.inner.get_mut().send(body, Some(tag))
-    }
-
-    pub fn send_no_block<T>(&self, body: T) -> Result<Bytes, AmqpProtocolError>
-    where
-        T: Into<TransferBody>,
-    {
-        self.inner
-            .get_mut()
-            .send_no_block(body, None, self.inner.clone())
-    }
-
-    pub fn send_no_block_with_tag<T>(&self, body: T, tag: Bytes) -> Result<Bytes, AmqpProtocolError>
-    where
-        T: Into<TransferBody>,
-    {
-        self.inner
-            .get_mut()
-            .send_no_block(body, Some(tag), self.inner.clone())
-    }
-
-    pub fn settle_message(&self, id: DeliveryNumber, state: DeliveryState) {
-        self.inner.get_mut().settle_message(id, state);
+        DeliveryBuilder::new(body.into(), self.inner.clone())
     }
 
     /// Close sender link
@@ -199,18 +156,11 @@ impl SenderLink {
         self.inner.get_ref().on_credit.wait()
     }
 
-    pub fn on_disposition<F>(&self, f: F)
-    where
-        F: Fn(Bytes, Result<Disposition, AmqpProtocolError>) + 'static,
-    {
-        self.inner.get_mut().on_disposition = Box::new(f);
+    pub fn max_message_size(&self) -> Option<u32> {
+        self.inner.get_ref().max_message_size
     }
 
-    pub fn max_message_size(&self) -> Option<usize> {
-        self.inner.get_mut().max_message_size
-    }
-
-    pub fn set_max_message_size(&self, value: usize) {
+    pub fn set_max_message_size(&self, value: u32) {
         self.inner.get_mut().max_message_size = Some(value)
     }
 }
@@ -222,7 +172,7 @@ impl SenderLinkInner {
         handle: Handle,
         delivery_count: SequenceNo,
         session: Cell<SessionInner>,
-        max_message_size: Option<usize>,
+        max_message_size: Option<u32>,
     ) -> SenderLinkInner {
         let pool = session.get_ref().memory_pool();
         SenderLinkInner {
@@ -240,7 +190,6 @@ impl SenderLinkInner {
             delivery_tag: 0,
             on_close: condition::Condition::new(),
             on_credit: condition::Condition::new(),
-            on_disposition: Box::new(|_, _| ()),
         }
     }
 
@@ -251,30 +200,22 @@ impl SenderLinkInner {
                 name = Some(addr.clone());
             }
         }
-        let pool = session.get_ref().memory_pool();
-        let delivery_count = frame.initial_delivery_count().unwrap_or(0);
         let mut name = name.unwrap_or_default();
         name.trimdown();
 
-        SenderLinkInner {
+        let delivery_count = frame.initial_delivery_count().unwrap_or(0);
+        let max_message_size = frame
+            .max_message_size()
+            .map(|size| u32::try_from(size).unwrap_or(u32::MAX));
+
+        SenderLinkInner::new(
             id,
-            pool,
             name,
+            frame.handle(),
             delivery_count,
-            session: Session::new(session),
-            remote_handle: frame.handle(),
-            link_credit: 0,
-            delivery_tag: 0,
-            pending_transfers: VecDeque::new(),
-            error: None,
-            closed: false,
-            on_close: condition::Condition::new(),
-            on_credit: condition::Condition::new(),
-            on_disposition: Box::new(|_, _| ()),
-            max_message_size: frame
-                .max_message_size()
-                .map(|size| usize::try_from(size).unwrap_or(usize::MAX)),
-        }
+            session,
+            max_message_size,
+        )
     }
 
     pub(crate) fn id(&self) -> u32 {
@@ -289,7 +230,7 @@ impl SenderLinkInner {
         &self.name
     }
 
-    pub(crate) fn max_message_size(&self) -> Option<usize> {
+    pub(crate) fn max_message_size(&self) -> Option<u32> {
         self.max_message_size
     }
 
@@ -302,10 +243,8 @@ impl SenderLinkInner {
         );
 
         // drop pending transfers
-        for tr in self.pending_transfers.drain(..) {
-            if let TransferState::First(tx, _) | TransferState::Only(tx, _) = tr.state {
-                tx.ready(Err(err.clone()));
-            }
+        for tx in self.pending_transfers.drain(..) {
+            let _ = tx.send(Err(err.clone()));
         }
 
         self.closed = true;
@@ -364,25 +303,10 @@ impl SenderLinkInner {
             );
 
             self.link_credit += delta;
-            let session = self.session.inner.get_mut();
 
             // credit became available => drain pending_transfers
-            while self.link_credit > 0 {
-                if let Some(transfer) = self.pending_transfers.pop_front() {
-                    if !transfer.state.more() {
-                        self.link_credit -= 1;
-                    }
-                    self.delivery_count = self.delivery_count.wrapping_add(1);
-                    session.send_transfer(
-                        self.id as u32,
-                        transfer.body,
-                        transfer.state,
-                        transfer.settle,
-                        transfer.message_format,
-                    );
-                } else {
-                    break;
-                }
+            while let Some(tx) = self.pending_transfers.pop_front() {
+                let _ = tx.send(Ok(()));
             }
 
             // notify available credit waiters
@@ -392,203 +316,46 @@ impl SenderLinkInner {
         }
     }
 
-    fn send<T: Into<TransferBody>>(&mut self, body: T, tag: Option<Bytes>) -> Delivery {
-        if let Some(ref err) = self.error {
-            Delivery::Resolved(Err(err.clone()))
-        } else {
-            let body = body.into();
-            let message_format = body.message_format();
-
-            if let Some(limit) = self.max_message_size {
-                if body.len() > limit {
-                    return Delivery::Resolved(Err(AmqpProtocolError::BodyTooLarge));
-                }
-            }
-
-            let (delivery_tx, delivery_rx) = self.session.inner.get_ref().pool.channel();
-
-            let max_frame_size = self.session.inner.get_ref().max_frame_size();
-            let max_frame_size = if max_frame_size > 2048 {
-                max_frame_size - 2048
-            } else if max_frame_size == 0 {
-                u32::MAX
-            } else {
-                max_frame_size
-            } as usize;
-
-            // body is larger than allowed frame size, send body as a set of transfers
-            if body.len() > max_frame_size {
-                let mut body = match body {
-                    TransferBody::Data(data) => data,
-                    TransferBody::Message(msg) => {
-                        let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
-                        msg.encode(&mut buf);
-                        buf.freeze()
-                    }
-                };
-
-                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
-                let tag = self.get_tag(tag);
-
-                self.send_inner(
-                    chunk.into(),
-                    message_format,
-                    TransferState::First(DeliveryPromise::new(delivery_tx), tag),
-                );
-
-                loop {
-                    let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
-
-                    // last chunk
-                    if body.is_empty() {
-                        self.send_inner(chunk.into(), message_format, TransferState::Last);
-                        break;
-                    }
-
-                    self.send_inner(chunk.into(), message_format, TransferState::Continue);
-                }
-            } else {
-                let st = TransferState::Only(DeliveryPromise::new(delivery_tx), self.get_tag(tag));
-                self.send_inner(body, message_format, st);
-            }
-
-            Delivery::Pending(delivery_rx)
-        }
-    }
-
-    fn send_no_block<T: Into<TransferBody>>(
+    pub(crate) async fn send<T: Into<TransferBody>>(
         &mut self,
         body: T,
         tag: Option<Bytes>,
-        link: Cell<SenderLinkInner>,
-    ) -> Result<Bytes, AmqpProtocolError> {
+    ) -> Result<DeliveryNumber, AmqpProtocolError> {
         if let Some(ref err) = self.error {
             Err(err.clone())
         } else {
             let body = body.into();
-            let message_format = body.message_format();
+            let tag = self.get_tag(tag);
 
-            if let Some(limit) = self.max_message_size {
-                if body.len() > limit {
-                    return Err(AmqpProtocolError::BodyTooLarge);
-                }
-            }
-
-            let max_frame_size = self.session.inner.get_ref().max_frame_size();
-            let max_frame_size = if max_frame_size > 2048 {
-                max_frame_size - 2048
-            } else if max_frame_size == 0 {
-                u32::MAX
-            } else {
-                max_frame_size
-            } as usize;
-
-            // body is larger than allowed frame size, send body as a set of transfers
-            if body.len() > max_frame_size {
-                let mut body = match body {
-                    TransferBody::Data(data) => data,
-                    TransferBody::Message(msg) => {
-                        let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
-                        msg.encode(&mut buf);
-                        buf.freeze()
-                    }
-                };
-
-                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
-                let tag = self.get_tag(tag);
-                log::trace!(
-                    "{}: Body size if larger than max size, sending multiple tranfers for {:?}",
-                    self.session.tag(),
-                    tag
-                );
-
-                self.send_inner(
-                    chunk.into(),
-                    message_format,
-                    TransferState::First(DeliveryPromise::new_link(link, tag.clone()), tag.clone()),
-                );
-
-                loop {
-                    let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
-
-                    // last chunk
-                    if body.is_empty() {
-                        log::trace!("{}: Sending last tranfer for {:?}", self.session.tag(), tag);
-                        self.send_inner(chunk.into(), message_format, TransferState::Last);
-                        break;
-                    }
-
+            loop {
+                if self.link_credit == 0 || !self.pending_transfers.is_empty() {
                     log::trace!(
-                        "{}: Sending chunk tranfer for {:?}",
-                        self.session.tag(),
-                        tag
+                        "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}", self.session.tag(),
+                        self.link_credit,
+                        self.name,
+                        self.id,
+                        self.remote_handle,
+                        self.pending_transfers.len()
                     );
-                    self.send_inner(chunk.into(), message_format, TransferState::Continue);
+                    let (tx, rx) = self.session.inner.get_ref().pool_credit.channel();
+                    self.pending_transfers.push_back(tx);
+                    rx.await
+                        .map_err(|_| AmqpProtocolError::ConnectionDropped)
+                        .and_then(|v| v)?;
+                    continue;
                 }
-                Ok(tag)
-            } else {
-                let tag = self.get_tag(tag);
-                log::trace!(
-                    "{}: Sending non-blocking tranfer for {:?}",
-                    self.session.tag(),
-                    tag
-                );
-                let st =
-                    TransferState::Only(DeliveryPromise::new_link(link, tag.clone()), tag.clone());
-                self.send_inner(body, message_format, st);
-                Ok(tag)
+                break;
             }
-        }
-    }
 
-    fn send_inner(
-        &mut self,
-        body: TransferBody,
-        message_format: Option<MessageFormat>,
-        state: TransferState,
-    ) {
-        if self.link_credit == 0 || !self.pending_transfers.is_empty() {
-            log::trace!(
-                "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}) {:?}, queue size: {}", self.session.tag(),
-                self.link_credit,
-                self.name,
-                self.id,
-                self.remote_handle,
-                state,
-                self.pending_transfers.len()
-            );
-            self.pending_transfers.push_back(PendingTransfer {
-                state,
-                message_format,
-                settle: Some(false),
-                body: Some(body),
-            });
-        } else {
-            // reduce link credit only if transfer is last
-            if !state.more() {
-                self.link_credit -= 1;
-            }
+            // reduce link credit
+            self.link_credit -= 1;
             self.delivery_count = self.delivery_count.wrapping_add(1);
-            self.session.inner.get_mut().send_transfer(
-                self.id as u32,
-                Some(body),
-                state,
-                None,
-                message_format,
-            );
+            self.session
+                .inner
+                .get_mut()
+                .send_transfer(self.id as u32, tag, body, false, self.max_message_size)
+                .await
         }
-    }
-
-    pub(crate) fn settle_message(&mut self, id: DeliveryNumber, state: DeliveryState) {
-        let disp = Disposition(Box::new(codec::DispositionInner {
-            role: Role::Sender,
-            first: id,
-            last: None,
-            settled: true,
-            state: Some(state),
-            batchable: false,
-        }));
-        self.session.inner.get_mut().post_frame(disp.into());
     }
 
     fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {
@@ -694,61 +461,6 @@ impl SenderLinkBuilder {
             Ok(Ok(inner)) => Ok(SenderLink { inner }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(AmqpProtocolError::Disconnected),
-        }
-    }
-}
-
-enum Delivery {
-    Resolved(Result<Disposition, AmqpProtocolError>),
-    Pending(pool::Receiver<Result<Disposition, AmqpProtocolError>>),
-    Gone,
-}
-
-impl Future for Delivery {
-    type Output = Result<Disposition, AmqpProtocolError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Delivery::Pending(ref mut receiver) = *self {
-            return match ready!(Pin::new(receiver).poll(cx)) {
-                Ok(r) => Poll::Ready(r),
-                Err(e) => {
-                    log::trace!("Delivery oneshot is gone: {:?}", e);
-                    Poll::Ready(Err(AmqpProtocolError::Disconnected))
-                }
-            };
-        }
-
-        let old_v = mem::replace(&mut *self, Delivery::Gone);
-        if let Delivery::Resolved(r) = old_v {
-            return match r {
-                Ok(state) => Poll::Ready(Ok(state)),
-                Err(e) => Poll::Ready(Err(e)),
-            };
-        }
-        panic!("Polling Delivery after it was polled as ready is an error.");
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct DeliveryPromise(
-    Either<pool::Sender<Result<Disposition, AmqpProtocolError>>, (Cell<SenderLinkInner>, Bytes)>,
-);
-
-impl DeliveryPromise {
-    fn new(tx: pool::Sender<Result<Disposition, AmqpProtocolError>>) -> Self {
-        DeliveryPromise(Either::Left(tx))
-    }
-
-    fn new_link(link: Cell<SenderLinkInner>, tag: Bytes) -> Self {
-        DeliveryPromise(Either::Right((link, tag)))
-    }
-
-    pub(crate) fn ready(self, result: Result<Disposition, AmqpProtocolError>) {
-        match self.0 {
-            Either::Left(tx) => {
-                let _r = tx.send(result);
-            }
-            Either::Right((inner, tag)) => (*inner.get_ref().on_disposition)(tag, result),
         }
     }
 }
