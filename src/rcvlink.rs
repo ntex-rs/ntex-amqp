@@ -9,11 +9,10 @@ use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
 };
-use ntex_amqp_codec::types::{Symbol, Variant};
-use ntex_amqp_codec::Encode;
+use ntex_amqp_codec::{types::Symbol, types::Variant, Encode};
 
 use crate::session::{Session, SessionInner};
-use crate::{cell::Cell, error::AmqpProtocolError, types::Action};
+use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Delivery};
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
@@ -28,7 +27,7 @@ pub(crate) struct ReceiverLinkInner {
     session: Session,
     closed: bool,
     reader_task: LocalWaker,
-    queue: VecDeque<Transfer>,
+    queue: VecDeque<(Delivery, Transfer)>,
     credit: u32,
     delivery_count: u32,
     error: Option<Error>,
@@ -112,13 +111,13 @@ impl ReceiverLink {
         self.inner.get_mut().set_max_partial_transfer(size);
     }
 
-    /// Check transfer frame
-    pub fn has_transfers(&self) -> bool {
+    /// Check deliveries
+    pub fn has_deliveries(&self) -> bool {
         !self.inner.get_mut().queue.is_empty()
     }
 
-    /// Get transfer frame
-    pub fn get_transfer(&self) -> Option<Transfer> {
+    /// Get delivery
+    pub fn get_delivery(&self) -> Option<(Delivery, Transfer)> {
         self.inner.get_mut().queue.pop_front()
     }
 
@@ -162,7 +161,7 @@ impl ReceiverLink {
     /// Attempt to pull out the next value of this receiver, registering
     /// the current task for wakeup if the value is not yet available,
     /// and returning None if the stream is exhausted.
-    pub async fn recv(&self) -> Option<Result<Transfer, AmqpProtocolError>> {
+    pub async fn recv(&self) -> Option<Result<(Delivery, Transfer), AmqpProtocolError>> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
@@ -172,7 +171,7 @@ impl ReceiverLink {
     pub fn poll_recv(
         &self,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Transfer, AmqpProtocolError>>> {
+    ) -> Poll<Option<Result<(Delivery, Transfer), AmqpProtocolError>>> {
         let inner = self.inner.get_mut();
 
         if inner.partial_body.is_some() && inner.queue.len() == 1 {
@@ -202,7 +201,7 @@ impl ReceiverLink {
 }
 
 impl Stream for ReceiverLink {
-    type Item = Result<Transfer, AmqpProtocolError>;
+    type Item = Result<(Delivery, Transfer), AmqpProtocolError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.poll_recv(cx)
@@ -305,15 +304,18 @@ impl ReceiverLinkInner {
             let _ = self.close(Some(err));
             Ok(Action::None)
         } else {
-            self.credit -= 1;
+            if !transfer.0.more {
+                self.credit -= 1;
+            }
 
+            // handle batched transfer
             if let Some(ref mut body) = self.partial_body {
                 if transfer.0.delivery_id.is_some() {
                     // if delivery_id is set, then it should be equal to first transfer
                     if self
                         .queue
                         .back()
-                        .map_or(true, |back| back.0.delivery_id != transfer.0.delivery_id)
+                        .map_or(true, |back| Some(back.0.id()) != transfer.0.delivery_id)
                     {
                         let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::DetachForced.into(),
@@ -340,14 +342,15 @@ impl ReceiverLinkInner {
                     transfer_body.encode(body);
                 }
 
-                // received last partial transfer
-                if transfer.0.more {
+                if !transfer.more() {
+                    // dont need to update queue, we use first transfer frame as primary
                     Ok(Action::None)
                 } else {
+                    // received last partial transfer
                     self.delivery_count += 1;
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
-                        self.queue.back_mut().unwrap().0.body =
+                        self.queue.back_mut().unwrap().1 .0.body =
                             Some(TransferBody::Data(partial_body.unwrap().freeze()));
                         if self.queue.len() == 1 {
                             self.wake();
@@ -367,15 +370,8 @@ impl ReceiverLinkInner {
                     }
                 }
             } else if transfer.more() {
-                if transfer.delivery_id().is_none() {
-                    let err = Error(Box::new(codec::ErrorInner {
-                        condition: LinkError::DetachForced.into(),
-                        description: Some(ByteString::from_static("delivery_id is required")),
-                        info: None,
-                    }));
-                    let _ = self.close(Some(err));
-                    Ok(Action::None)
-                } else {
+                // handle first transfer in batch
+                if let Some(id) = transfer.delivery_id() {
                     let body = if let Some(body) = transfer.0.body.take() {
                         match body {
                             TransferBody::Data(data) => BytesMut::copy_from_slice(&data),
@@ -389,18 +385,45 @@ impl ReceiverLinkInner {
                         self.pool.buf_with_capacity(16)
                     };
                     self.partial_body = Some(body);
-                    self.queue.push_back(transfer);
+
+                    let delivery = Delivery::new_rcv(
+                        id,
+                        transfer.settled().unwrap_or_default(),
+                        self.session.clone(),
+                    );
+                    self.queue.push_back((delivery, transfer));
+                    Ok(Action::None)
+                } else {
+                    let err = Error(Box::new(codec::ErrorInner {
+                        condition: LinkError::DetachForced.into(),
+                        description: Some(ByteString::from_static("delivery_id is required")),
+                        info: None,
+                    }));
+                    let _ = self.close(Some(err));
                     Ok(Action::None)
                 }
-            } else {
+            } else if let Some(id) = transfer.delivery_id() {
                 self.delivery_count += 1;
-                self.queue.push_back(transfer);
+                let delivery = Delivery::new_rcv(
+                    id,
+                    transfer.settled().unwrap_or_default(),
+                    self.session.clone(),
+                );
+                self.queue.push_back((delivery, transfer));
                 if self.queue.len() == 1 {
                     self.wake();
                 }
                 Ok(Action::Transfer(ReceiverLink {
                     inner: inner.clone(),
                 }))
+            } else {
+                let err = Error(Box::new(codec::ErrorInner {
+                    condition: LinkError::DetachForced.into(),
+                    description: Some(ByteString::from_static("delivery_id is required")),
+                    info: None,
+                }));
+                let _ = self.close(Some(err));
+                Ok(Action::None)
             }
         }
     }
@@ -488,6 +511,15 @@ impl ReceiverLinkBuilder {
             Some(value) => props.insert(key, value.into()),
             None => props.remove(&key),
         };
+        self
+    }
+
+    /// Modify attach frame
+    pub fn with_frame<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut Attach),
+    {
+        f(&mut self.frame);
         self
     }
 

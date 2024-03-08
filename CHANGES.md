@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.0] - 2024-03-08
+
+* Add proper delivery handling on receiver side
+
 ## [2.0.0] - 2024-03-06
 
 * Add proper delivery handling

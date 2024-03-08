@@ -7,12 +7,10 @@ use ntex::service::{
 };
 use ntex::util::{join_all, HashMap, Ready};
 
-use crate::codec::protocol::{
-    self, DeliveryNumber, DeliveryState, Disposition, Error, Rejected, Role, Transfer,
-};
+use crate::codec::protocol::{DeliveryState, Error, Rejected, Transfer};
 use crate::error::LinkError;
 use crate::types::{Link, Message, Outcome};
-use crate::{cell::Cell, rcvlink::ReceiverLink, State};
+use crate::{cell::Cell, rcvlink::ReceiverLink, Delivery, State};
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Transfer, Outcome, Error, Error>;
 type HandleService = boxed::BoxService<Transfer, Outcome, Error>;
@@ -105,8 +103,8 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                                     .get_mut()
                                     .handlers
                                     .insert(rcv_link.clone(), Some(Pipeline::new(srv)));
-                                if let Some(tr) = rcv_link.get_transfer() {
-                                    service_call(rcv_link, tr, &self.0).await
+                                if let Some((delivery, tr)) = rcv_link.get_delivery() {
+                                    service_call(rcv_link, delivery, tr, &self.0).await
                                 } else {
                                     Ok(())
                                 }
@@ -182,8 +180,8 @@ impl<S: 'static> Service<Message> for RouterService<S> {
             }
             Message::Transfer(link) => {
                 if let Some(Some(_)) = self.0.get_ref().handlers.get(&link) {
-                    if let Some(tr) = link.get_transfer() {
-                        service_call(link, tr, &self.0).await?;
+                    if let Some((delivery, tr)) = link.get_delivery() {
+                        service_call(link, delivery, tr, &self.0).await?;
                     }
                 }
                 Ok(())
@@ -193,7 +191,8 @@ impl<S: 'static> Service<Message> for RouterService<S> {
 }
 
 async fn service_call<S>(
-    mut link: ReceiverLink,
+    link: ReceiverLink,
+    mut delivery: Delivery,
     tr: Transfer,
     inner: &Cell<RouterServiceInner<S>>,
 ) -> Result<(), Error> {
@@ -206,51 +205,23 @@ async fn service_call<S>(
             return Ok(());
         }
 
-        let delivery_id = match tr.delivery_id() {
-            None => {
-                // #2.7.5 delivery_id MUST be set. batching is handled on lower level
-                let _ = link.close_with_error(
-                    LinkError::force_detach().description("delivery_id MUST be set"),
-                );
-                return Ok(());
-            }
-            Some(delivery_id) => {
-                if link.credit() == 0 {
-                    // self.has_credit = self.link.credit() != 0;
-                    link.set_link_credit(50);
-                }
-                delivery_id
-            }
-        };
+        if link.credit() == 0 {
+            // self.has_credit = self.link.credit() != 0;
+            link.set_link_credit(50);
+        }
 
         match srv.call(tr).await {
             Ok(outcome) => {
                 log::trace!("Outcome is ready {:?} for {}", outcome, link.name());
-                settle(&mut link, delivery_id, outcome.into_delivery_state());
+                delivery.settle(outcome.into_delivery_state());
             }
             Err(e) => {
                 log::trace!("Service response error: {:?}", e);
-                settle(
-                    &mut link,
-                    delivery_id,
-                    DeliveryState::Rejected(Rejected { error: Some(e) }),
-                );
+                delivery.settle(DeliveryState::Rejected(Rejected { error: Some(e) }));
             }
         }
     }
     Ok(())
-}
-
-fn settle(link: &mut ReceiverLink, id: DeliveryNumber, state: DeliveryState) {
-    let disposition = Disposition(Box::new(protocol::DispositionInner {
-        state: Some(state),
-        role: Role::Receiver,
-        first: id,
-        last: None,
-        settled: true,
-        batchable: false,
-    }));
-    link.send_disposition(disposition);
 }
 
 struct ResourceServiceFactory<S, T> {

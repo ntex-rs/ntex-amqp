@@ -45,7 +45,8 @@ pub(crate) struct SessionInner {
     closed: condition::Condition,
 
     pending_transfers: VecDeque<PendingTransfer>,
-    pub(crate) unsettled_deliveries: HashMap<DeliveryNumber, DeliveryInner>,
+    pub(crate) unsettled_snd_deliveries: HashMap<DeliveryNumber, DeliveryInner>,
+    pub(crate) unsettled_rcv_deliveries: HashMap<DeliveryNumber, DeliveryInner>,
 
     pub(crate) pool_notify: pool::Pool<()>,
     pub(crate) pool_credit: pool::Pool<Result<(), AmqpProtocolError>>,
@@ -294,7 +295,8 @@ impl SessionInner {
             remote_outgoing_window,
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_OUTGOING_ID,
-            unsettled_deliveries: HashMap::default(),
+            unsettled_snd_deliveries: HashMap::default(),
+            unsettled_rcv_deliveries: HashMap::default(),
             links: Slab::new(),
             links_by_name: HashMap::default(),
             remote_handles: HashMap::default(),
@@ -319,6 +321,17 @@ impl SessionInner {
         self.sink.0.memory_pool()
     }
 
+    pub(crate) fn unsettled_deliveries(
+        &mut self,
+        sender: bool,
+    ) -> &mut HashMap<DeliveryNumber, DeliveryInner> {
+        if sender {
+            &mut self.unsettled_snd_deliveries
+        } else {
+            &mut self.unsettled_rcv_deliveries
+        }
+    }
+
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!(
@@ -333,7 +346,10 @@ impl SessionInner {
         }
 
         // drop unsettled deliveries
-        for (_, mut promise) in self.unsettled_deliveries.drain() {
+        for (_, mut promise) in self.unsettled_snd_deliveries.drain() {
+            promise.set_error(err.clone());
+        }
+        for (_, mut promise) in self.unsettled_rcv_deliveries.drain() {
             promise.set_error(err.clone());
         }
 
@@ -1074,21 +1090,27 @@ impl SessionInner {
             );
         }
 
+        let deliveries = if disp.role() == Role::Receiver {
+            &mut self.unsettled_snd_deliveries
+        } else {
+            &mut self.unsettled_rcv_deliveries
+        };
+
         if let Some(to) = to {
             for no in from..=to {
-                if let Some(delivery) = self.unsettled_deliveries.get_mut(&no) {
+                if let Some(delivery) = deliveries.get_mut(&no) {
                     delivery.handle_disposition(disp.clone());
                 } else {
                     log::trace!(
                         "{}: Unknown deliveryid: {:?} disp: {:?}",
-                        self.tag(),
+                        self.sink.tag(),
                         no,
                         disp
                     );
                 }
             }
         } else {
-            if let Some(delivery) = self.unsettled_deliveries.get_mut(&from) {
+            if let Some(delivery) = deliveries.get_mut(&from) {
                 delivery.handle_disposition(disp);
             }
         }
@@ -1237,7 +1259,7 @@ impl SessionInner {
             transfer.0.message_format = message_format;
 
             if !settled {
-                self.unsettled_deliveries
+                self.unsettled_snd_deliveries
                     .insert(delivery_id, DeliveryInner::new());
             }
 
@@ -1283,7 +1305,7 @@ impl SessionInner {
             transfer.0.message_format = message_format;
 
             if !settled {
-                self.unsettled_deliveries
+                self.unsettled_snd_deliveries
                     .insert(delivery_id, DeliveryInner::new());
             }
             self.post_frame(Frame::Transfer(transfer));
