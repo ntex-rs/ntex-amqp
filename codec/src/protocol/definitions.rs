@@ -1,11 +1,9 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
 use super::*;
-use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
-use crate::error::AmqpParseError;
+use crate::codec::{decode_format_code, decode_list_header};
 use derive_more::From;
-use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use std::u8;
-use uuid::Uuid;
+
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum Frame {
     Open(Open),

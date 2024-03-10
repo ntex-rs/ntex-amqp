@@ -36,6 +36,14 @@ pub(crate) struct DeliveryInner {
 
 impl Delivery {
     pub(crate) fn new_rcv(id: DeliveryNumber, settled: bool, session: Session) -> Delivery {
+        if !settled {
+            session
+                .inner
+                .get_mut()
+                .unsettled_rcv_deliveries
+                .insert(id, DeliveryInner::new());
+        }
+
         Delivery {
             id,
             session,
@@ -176,10 +184,8 @@ impl Delivery {
                 // return clone of terminal state
                 Some(Ok(Some(st.clone())))
             }
-        } else if let Some(ref err) = inner.error {
-            Some(Err(err.clone()))
         } else {
-            None
+            inner.error.as_ref().map(|err| Err(err.clone()))
         }
     }
 }
@@ -287,26 +293,24 @@ impl DeliveryBuilder {
 
         if let Some(ref err) = inner.error {
             Err(err.clone())
+        } else if inner
+            .max_message_size
+            .map(|l| self.data.len() > l as usize)
+            .unwrap_or_default()
+        {
+            Err(AmqpProtocolError::BodyTooLarge)
         } else {
-            if inner
-                .max_message_size
-                .map(|l| self.data.len() > l as usize)
-                .unwrap_or_default()
-            {
-                Err(AmqpProtocolError::BodyTooLarge)
-            } else {
-                let id = self.sender.get_mut().send(self.data, self.tag).await?;
+            let id = self.sender.get_mut().send(self.data, self.tag).await?;
 
-                Ok(Delivery {
-                    id,
-                    session: self.sender.get_ref().session.clone(),
-                    flags: StdCell::new(if self.settled {
-                        Flags::SENDER | Flags::LOCAL_SETTLED
-                    } else {
-                        Flags::SENDER
-                    }),
-                })
-            }
+            Ok(Delivery {
+                id,
+                session: self.sender.get_ref().session.clone(),
+                flags: StdCell::new(if self.settled {
+                    Flags::SENDER | Flags::LOCAL_SETTLED
+                } else {
+                    Flags::SENDER
+                }),
+            })
         }
     }
 }

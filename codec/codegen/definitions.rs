@@ -2,12 +2,9 @@
 
 use std::u8;
 use derive_more::From;
-use ntex_bytes::{BufMut, Bytes, BytesMut, ByteString};
-use uuid::Uuid;
 
 use super::*;
-use crate::error::AmqpParseError;
-use crate::codec::{self, decode_format_code, decode_list_header, Decode, DecodeFormatted, Encode};
+use crate::codec::{decode_format_code, decode_list_header};
 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum Frame {

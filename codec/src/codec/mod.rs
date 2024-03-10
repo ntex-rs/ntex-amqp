@@ -1,5 +1,4 @@
 use ntex_bytes::{Bytes, BytesMut};
-use std::marker::Sized;
 
 use crate::error::AmqpParseError;
 

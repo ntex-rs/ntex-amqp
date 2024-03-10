@@ -19,7 +19,7 @@ use crate::rcvlink::{
 use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{cell::Cell, types::Action, ConnectionRef, ControlFrame};
 
-const INITIAL_OUTGOING_ID: TransferNumber = 0;
+pub(crate) const INITIAL_OUTGOING_ID: TransferNumber = 1;
 
 #[derive(Clone)]
 pub struct Session {
@@ -1109,10 +1109,8 @@ impl SessionInner {
                     );
                 }
             }
-        } else {
-            if let Some(delivery) = deliveries.get_mut(&from) {
-                delivery.handle_disposition(disp);
-            }
+        } else if let Some(delivery) = deliveries.get_mut(&from) {
+            delivery.handle_disposition(disp);
         }
     }
 

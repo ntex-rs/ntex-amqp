@@ -28,11 +28,11 @@ impl<S: 'static> Router<S> {
         Router(Vec::new())
     }
 
-    pub fn service<T, F, U: 'static>(mut self, address: T, service: F) -> Self
+    pub fn service<T, F, U>(mut self, address: T, service: F) -> Self
     where
         T: IntoPattern,
         F: IntoServiceFactory<U, Transfer, Link<S>>,
-        U: ServiceFactory<Transfer, Link<S>, Response = Outcome>,
+        U: ServiceFactory<Transfer, Link<S>, Response = Outcome> + 'static,
         Error: From<U::Error> + From<U::InitError>,
         Outcome: TryFrom<U::Error, Error = Error>,
     {
