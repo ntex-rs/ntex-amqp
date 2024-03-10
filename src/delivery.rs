@@ -19,6 +19,7 @@ bitflags::bitflags! {
     }
 }
 
+#[derive(Debug)]
 pub struct Delivery {
     id: DeliveryNumber,
     session: Session,
@@ -34,12 +35,36 @@ pub(crate) struct DeliveryInner {
 }
 
 impl Delivery {
+    pub(crate) fn new_rcv(id: DeliveryNumber, settled: bool, session: Session) -> Delivery {
+        if !settled {
+            session
+                .inner
+                .get_mut()
+                .unsettled_rcv_deliveries
+                .insert(id, DeliveryInner::new());
+        }
+
+        Delivery {
+            id,
+            session,
+            flags: StdCell::new(if settled {
+                Flags::LOCAL_SETTLED
+            } else {
+                Flags::empty()
+            }),
+        }
+    }
+
+    pub fn id(&self) -> DeliveryNumber {
+        self.id
+    }
+
     pub fn remote_state(&self) -> Option<DeliveryState> {
         if let Some(inner) = self
             .session
             .inner
             .get_mut()
-            .unsettled_deliveries
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
             .get_mut(&self.id)
         {
             inner.state.clone()
@@ -113,7 +138,7 @@ impl Delivery {
             .session
             .inner
             .get_mut()
-            .unsettled_deliveries
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
             .get_mut(&self.id)
         {
             if let Some(st) = self.check_inner(inner) {
@@ -134,7 +159,7 @@ impl Delivery {
             .session
             .inner
             .get_mut()
-            .unsettled_deliveries
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
             .get_mut(&self.id)
         {
             if inner.settled {
@@ -159,10 +184,8 @@ impl Delivery {
                 // return clone of terminal state
                 Some(Ok(Some(st.clone())))
             }
-        } else if let Some(ref err) = inner.error {
-            Some(Err(err.clone()))
         } else {
-            None
+            inner.error.as_ref().map(|err| Err(err.clone()))
         }
     }
 }
@@ -170,8 +193,11 @@ impl Delivery {
 impl Drop for Delivery {
     fn drop(&mut self) {
         let inner = self.session.inner.get_mut();
+        let deliveries = inner.unsettled_deliveries(self.is_set(Flags::SENDER));
 
-        if inner.unsettled_deliveries.contains_key(&self.id) {
+        if deliveries.contains_key(&self.id) {
+            deliveries.remove(&self.id);
+
             if !self.is_set(Flags::REMOTE_SETTLED) && !self.is_set(Flags::LOCAL_SETTLED) {
                 let err = Error::build()
                     .condition(ErrorCondition::Custom(Symbol(Str::Static(
@@ -193,8 +219,6 @@ impl Drop for Delivery {
                 }));
                 inner.post_frame(disp.into());
             }
-
-            inner.unsettled_deliveries.remove(&self.id);
         }
     }
 }
@@ -269,26 +293,24 @@ impl DeliveryBuilder {
 
         if let Some(ref err) = inner.error {
             Err(err.clone())
+        } else if inner
+            .max_message_size
+            .map(|l| self.data.len() > l as usize)
+            .unwrap_or_default()
+        {
+            Err(AmqpProtocolError::BodyTooLarge)
         } else {
-            if inner
-                .max_message_size
-                .map(|l| self.data.len() > l as usize)
-                .unwrap_or_default()
-            {
-                Err(AmqpProtocolError::BodyTooLarge)
-            } else {
-                let id = self.sender.get_mut().send(self.data, self.tag).await?;
+            let id = self.sender.get_mut().send(self.data, self.tag).await?;
 
-                Ok(Delivery {
-                    id,
-                    session: self.sender.get_ref().session.clone(),
-                    flags: StdCell::new(if self.settled {
-                        Flags::SENDER | Flags::LOCAL_SETTLED
-                    } else {
-                        Flags::SENDER
-                    }),
-                })
-            }
+            Ok(Delivery {
+                id,
+                session: self.sender.get_ref().session.clone(),
+                flags: StdCell::new(if self.settled {
+                    Flags::SENDER | Flags::LOCAL_SETTLED
+                } else {
+                    Flags::SENDER
+                }),
+            })
         }
     }
 }
