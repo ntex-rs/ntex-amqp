@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.1] - 2024-03-12
+
+* Fix default flow's next-incoming-id
+
 ## [2.1.0] - 2024-03-08
 
 * Add proper delivery handling on receiver side

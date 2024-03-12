@@ -7,7 +7,7 @@ use ntex::util::{HashMap, PoolRef, Ready};
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::dispatcher::ControlQueue;
-use crate::session::{Session, SessionInner, INITIAL_OUTGOING_ID};
+use crate::session::{Session, SessionInner, INITIAL_NEXT_OUTGOING_ID};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
 
@@ -194,7 +194,7 @@ impl ConnectionRef {
 
                     let begin = Begin(Box::new(codec::BeginInner {
                         remote_channel: None,
-                        next_outgoing_id: INITIAL_OUTGOING_ID,
+                        next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
                         incoming_window: std::u32::MAX,
                         outgoing_window: std::u32::MAX,
                         handle_max: std::u32::MAX,
