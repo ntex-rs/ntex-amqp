@@ -16,7 +16,7 @@ use crate::rcvlink::{ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{DeliveryPromise, SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{cell::Cell, types::Action, ConnectionRef, ControlFrame};
 
-const INITIAL_OUTGOING_ID: TransferNumber = 0;
+pub(crate) const INITIAL_NEXT_OUTGOING_ID: TransferNumber = 1;
 
 #[derive(Clone)]
 pub struct Session {
@@ -316,7 +316,7 @@ impl SessionInner {
             remote_incoming_window,
             remote_outgoing_window,
             flags: if local { Flags::LOCAL } else { Flags::empty() },
-            next_outgoing_id: INITIAL_OUTGOING_ID,
+            next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
             unsettled_deliveries: HashMap::default(),
             links: Slab::new(),
             links_by_name: HashMap::default(),
@@ -1145,7 +1145,7 @@ impl SessionInner {
 
         self.remote_incoming_window = flow
             .next_incoming_id()
-            .unwrap_or(INITIAL_OUTGOING_ID)
+            .unwrap_or(0)
             .wrapping_add(flow.incoming_window())
             .wrapping_sub(self.next_outgoing_id);
 

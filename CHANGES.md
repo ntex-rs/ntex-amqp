@@ -1,5 +1,9 @@
 # Changes
 
+## [1.2.0] - 2024-03-12
+
+* Fix initial next outgoing id value
+
 ## [1.0.1] - 2024-01-18
 
 * Fix SenderLink closed state, if link is closed remotely
