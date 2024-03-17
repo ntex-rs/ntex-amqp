@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.2] - 2024-03-17
+
+* Set transfer handle
+
 ## [2.1.1] - 2024-03-12
 
 * Fix default flow's next-incoming-id

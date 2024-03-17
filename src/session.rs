@@ -818,7 +818,10 @@ impl SessionInner {
                     if let Some(link) = self.links.get_mut(idx) {
                         match link {
                             Either::Left(_) => {
-                                log::error!("{}: Got trasfer from sender link", self.tag());
+                                log::error!(
+                                    "{}: Got unexpected trasfer from sender link",
+                                    self.tag()
+                                );
                                 Err(AmqpProtocolError::Unexpected(Frame::Transfer(transfer)))
                             }
                             Either::Right(link) => match link {
@@ -1247,6 +1250,7 @@ impl SessionInner {
             let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
 
             let mut transfer = Transfer(Default::default());
+            transfer.0.handle = link_handle;
             transfer.0.body = Some(TransferBody::Data(chunk));
             transfer.0.more = true;
             transfer.0.settled = Some(settled);
@@ -1288,6 +1292,7 @@ impl SessionInner {
                 log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
 
                 let mut transfer = Transfer(Default::default());
+                transfer.0.handle = link_handle;
                 transfer.0.body = Some(TransferBody::Data(chunk));
                 transfer.0.more = true;
                 transfer.0.batchable = true;
@@ -1295,6 +1300,7 @@ impl SessionInner {
             }
         } else {
             let mut transfer = Transfer(Default::default());
+            transfer.0.handle = link_handle;
             transfer.0.body = Some(body);
             transfer.0.settled = Some(settled);
             transfer.0.state = tr_settled;
