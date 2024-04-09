@@ -134,7 +134,7 @@ impl Delivery {
     }
 
     pub async fn wait(&self) -> Result<Option<DeliveryState>, AmqpProtocolError> {
-        if self.0.flags.get().contains(Flags::LOCAL_SETTLED) {
+        if self.flags.get().contains(Flags::LOCAL_SETTLED) {
             return Ok(None);
         }
 
