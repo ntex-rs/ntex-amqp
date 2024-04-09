@@ -1253,14 +1253,15 @@ impl SessionInner {
             transfer.0.handle = link_handle;
             transfer.0.body = Some(TransferBody::Data(chunk));
             transfer.0.more = true;
-            transfer.0.settled = Some(settled);
             transfer.0.state = tr_settled;
             transfer.0.batchable = true;
             transfer.0.delivery_id = Some(delivery_id);
             transfer.0.delivery_tag = Some(tag.clone());
             transfer.0.message_format = message_format;
 
-            if !settled {
+            if settled {
+                transfer.0.settled = Some(true);
+            } else {
                 self.unsettled_snd_deliveries
                     .insert(delivery_id, DeliveryInner::new());
             }
@@ -1302,13 +1303,14 @@ impl SessionInner {
             let mut transfer = Transfer(Default::default());
             transfer.0.handle = link_handle;
             transfer.0.body = Some(body);
-            transfer.0.settled = Some(settled);
             transfer.0.state = tr_settled;
             transfer.0.delivery_id = Some(delivery_id);
             transfer.0.delivery_tag = Some(tag);
             transfer.0.message_format = message_format;
 
-            if !settled {
+            if settled {
+                transfer.0.settled = Some(true);
+            } else {
                 self.unsettled_snd_deliveries
                     .insert(delivery_id, DeliveryInner::new());
             }

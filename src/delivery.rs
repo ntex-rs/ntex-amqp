@@ -300,7 +300,11 @@ impl DeliveryBuilder {
         {
             Err(AmqpProtocolError::BodyTooLarge)
         } else {
-            let id = self.sender.get_mut().send(self.data, self.tag).await?;
+            let id = self
+                .sender
+                .get_mut()
+                .send(self.data, self.tag, self.settled)
+                .await?;
 
             Ok(Delivery {
                 id,
