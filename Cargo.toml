@@ -9,7 +9,7 @@ categories = ["network-programming"]
 keywords = ["AMQP", "IoT", "messaging"]
 license = "MIT OR Apache-2.0"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
-edition = "2018"
+edition = "2021"
 
 [workspace]
 members = [
