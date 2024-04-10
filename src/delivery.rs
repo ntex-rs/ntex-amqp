@@ -134,6 +134,10 @@ impl Delivery {
     }
 
     pub async fn wait(&self) -> Result<Option<DeliveryState>, AmqpProtocolError> {
+        if self.flags.get().contains(Flags::LOCAL_SETTLED) {
+            return Ok(None);
+        }
+
         let rx = if let Some(inner) = self
             .session
             .inner
@@ -300,7 +304,11 @@ impl DeliveryBuilder {
         {
             Err(AmqpProtocolError::BodyTooLarge)
         } else {
-            let id = self.sender.get_mut().send(self.data, self.tag).await?;
+            let id = self
+                .sender
+                .get_mut()
+                .send(self.data, self.tag, self.settled)
+                .await?;
 
             Ok(Delivery {
                 id,

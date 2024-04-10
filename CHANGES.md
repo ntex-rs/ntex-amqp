@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.3] - 2024-04-11
+
+* Handle settled transfers
+
 ## [2.1.2] - 2024-03-17
 
 * Set transfer handle

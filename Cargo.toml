@@ -9,7 +9,7 @@ categories = ["network-programming"]
 keywords = ["AMQP", "IoT", "messaging"]
 license = "MIT OR Apache-2.0"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
-edition = "2018"
+edition = "2021"
 
 [workspace]
 members = [
@@ -24,7 +24,7 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = "1.0"
+ntex = "1"
 ntex-util = "1.0.1"
 ntex-amqp-codec = "0.9"
 
@@ -37,7 +37,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 env_logger = "0.11"
-ntex = { version = "1.0", features = ["tokio"] }
+ntex = { version = "1", features = ["tokio"] }
 
 [patch.crates-io]
 ntex-amqp = { path = "." }

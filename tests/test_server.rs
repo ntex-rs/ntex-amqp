@@ -1,4 +1,5 @@
-use std::{convert::TryFrom, sync::Arc, sync::Mutex};
+use std::convert::TryFrom;
+use std::sync::{atomic::AtomicUsize, atomic::Ordering, Arc, Mutex};
 
 use ntex::server::test_server;
 use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
@@ -9,17 +10,30 @@ use ntex_amqp::{
 };
 
 async fn server(
-    link: types::Link<()>,
+    _link: types::Link<()>,
 ) -> Result<BoxService<types::Transfer, types::Outcome, LinkError>, LinkError> {
-    println!("OPEN LINK: {:?}", link);
     Ok(boxed::service(fn_service(|_req| {
+        Ready::Ok(types::Outcome::Accept)
+    })))
+}
+
+async fn server_count(
+    count: Arc<AtomicUsize>,
+) -> Result<BoxService<types::Transfer, types::Outcome, LinkError>, LinkError> {
+    Ok(boxed::service(fn_service(move |_req| {
+        let val = count.load(Ordering::Relaxed);
+        count.store(val + 1, Ordering::Release);
         Ready::Ok(types::Outcome::Accept)
     })))
 }
 
 #[ntex::test]
 async fn test_simple() -> std::io::Result<()> {
-    let srv = test_server(|| {
+    let count = Arc::new(AtomicUsize::new(0));
+
+    let count2 = count.clone();
+    let srv = test_server(move || {
+        let count = count2.clone();
         server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -31,7 +45,10 @@ async fn test_simple() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::new()
-                .service("test", fn_factory_with_config(server))
+                .service(
+                    "test",
+                    fn_factory_with_config(move |_: types::Link<()>| server_count(count.clone())),
+                )
                 .finish(),
         )
     });
@@ -60,6 +77,17 @@ async fn test_simple() -> std::io::Result<()> {
     let st = delivery.wait().await.unwrap().unwrap();
     assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
 
+    let delivery = link
+        .delivery(Bytes::from(b"test".as_ref()))
+        .settled()
+        .send()
+        .await
+        .unwrap();
+    let st = delivery.wait().await.unwrap();
+    assert_eq!(st, None);
+    sleep(Millis(250)).await;
+
+    assert_eq!(count.load(Ordering::Relaxed), 2);
     Ok(())
 }
 
@@ -194,8 +222,6 @@ async fn test_session_end() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach() -> std::io::Result<()> {
-    let _ = env_logger::try_init();
-
     let srv = test_server(move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {
@@ -267,8 +293,6 @@ async fn test_link_detach() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach_on_session_end() -> std::io::Result<()> {
-    let _ = env_logger::try_init();
-
     let srv = test_server(move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {
@@ -322,8 +346,6 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
-    let _ = env_logger::try_init();
-
     let srv = test_server(move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {

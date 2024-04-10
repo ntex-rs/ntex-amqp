@@ -320,6 +320,7 @@ impl SenderLinkInner {
         &mut self,
         body: T,
         tag: Option<Bytes>,
+        settled: bool,
     ) -> Result<DeliveryNumber, AmqpProtocolError> {
         if let Some(ref err) = self.error {
             Err(err.clone())
@@ -353,7 +354,7 @@ impl SenderLinkInner {
             self.session
                 .inner
                 .get_mut()
-                .send_transfer(self.id as u32, tag, body, false, self.max_message_size)
+                .send_transfer(self.id as u32, tag, body, settled, self.max_message_size)
                 .await
         }
     }
