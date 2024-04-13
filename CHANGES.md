@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.4] - 2024-04-13
+
+* Fix large transfers handling
+
 ## [2.1.3] - 2024-04-11
 
 * Handle settled transfers
