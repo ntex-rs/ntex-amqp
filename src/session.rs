@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::TryFrom, fmt, future::Future};
+use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef, Ready};
@@ -899,7 +899,7 @@ impl SessionInner {
                                 .max_message_size()
                                 .map(|v| u32::try_from(v).unwrap_or(u32::MAX)),
                         ));
-                        let local_sender = std::mem::replace(
+                        let local_sender = mem::replace(
                             item,
                             SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
                         );
@@ -1147,7 +1147,7 @@ impl SessionInner {
                 } else {
                     None
                 },
-                incoming_window: std::u32::MAX,
+                incoming_window: u32::MAX,
                 next_outgoing_id: self.next_outgoing_id,
                 outgoing_window: self.remote_incoming_window,
                 handle: None,
@@ -1174,7 +1174,7 @@ impl SessionInner {
             } else {
                 None
             },
-            incoming_window: std::u32::MAX,
+            incoming_window: u32::MAX,
             next_outgoing_id: self.next_outgoing_id,
             outgoing_window: self.remote_incoming_window,
             handle: Some(handle),
@@ -1247,7 +1247,7 @@ impl SessionInner {
                 }
             };
 
-            let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+            let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
             let mut transfer = Transfer(Default::default());
             transfer.0.handle = link_handle;
@@ -1284,7 +1284,7 @@ impl SessionInner {
                     break;
                 }
 
-                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+                let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
                 log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
                 let mut transfer = Transfer(Default::default());

@@ -297,6 +297,8 @@ impl DeliveryBuilder {
 
         if let Some(ref err) = inner.error {
             Err(err.clone())
+        } else if inner.closed {
+            Err(AmqpProtocolError::Disconnected)
         } else {
             let id = self
                 .sender

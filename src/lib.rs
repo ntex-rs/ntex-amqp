@@ -66,7 +66,7 @@ impl Configuration {
         Configuration {
             disp_config,
             max_size: 0,
-            max_frame_size: std::u16::MAX as u32,
+            max_frame_size: u16::MAX as u32,
             channel_max: 1024,
             idle_time_out: 120_000,
             hostname: None,

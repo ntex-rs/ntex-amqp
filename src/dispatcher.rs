@@ -155,7 +155,7 @@ where
                     let fut = self
                         .service
                         .call_static(types::Message::Attached(frm.clone(), link.clone()));
-                    ntex::rt::spawn(async move {
+                    let _ = ntex::rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
                             let _ = link.close_with_error(Error::from(err)).await;
@@ -337,7 +337,7 @@ where
                     types::Action::DetachReceiver(link, frm) => {
                         let lnk = link.clone();
                         let fut = self.service.call_static(types::Message::Detached(lnk));
-                        spawn(async move {
+                        let _ = spawn(async move {
                             let _ = fut.await;
                         });
                         self.call_control_service(ControlFrame::new(
@@ -357,7 +357,7 @@ where
                         let fut = self
                             .service
                             .call_static(types::Message::DetachedAll(receivers));
-                        spawn(async move {
+                        let _ = spawn(async move {
                             let _ = fut.await;
                         });
                         self.call_control_service(ControlFrame::new_kind(

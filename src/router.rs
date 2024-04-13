@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, future::poll_fn, marker, rc::Rc};
+use std::{future::poll_fn, marker, rc::Rc};
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{
@@ -140,7 +140,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                 if let Some(Some(srv)) = self.0.get_mut().handlers.remove(&link) {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
-                    ntex::rt::spawn(async move {
+                    let _ = ntex::rt::spawn(async move {
                         poll_fn(move |cx| srv.poll_shutdown(cx)).await;
                         log::trace!("Handler service for {} has shutdown", name);
                     });
@@ -168,7 +168,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     futs.len()
                 );
 
-                ntex::rt::spawn(async move {
+                let _ = ntex::rt::spawn(async move {
                     let len = futs.len();
                     let _ = join_all(futs).await;
                     log::trace!(

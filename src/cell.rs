@@ -1,14 +1,8 @@
 //! Custom cell impl
-use std::cell::UnsafeCell;
-use std::ops::Deref;
-use std::rc::{Rc, Weak};
+use std::{cell::UnsafeCell, ops::Deref, rc::Rc};
 
 pub(crate) struct Cell<T> {
     inner: Rc<UnsafeCell<T>>,
-}
-
-pub(crate) struct WeakCell<T> {
-    inner: Weak<UnsafeCell<T>>,
 }
 
 impl<T> Clone for Cell<T> {
@@ -47,11 +41,5 @@ impl<T> Cell<T> {
     #[allow(clippy::mut_from_ref)]
     pub(crate) fn get_mut(&self) -> &mut T {
         unsafe { &mut *self.inner.as_ref().get() }
-    }
-}
-
-impl<T: std::fmt::Debug> std::fmt::Debug for WeakCell<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.fmt(f)
     }
 }

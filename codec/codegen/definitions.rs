@@ -1,6 +1,5 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
 
-use std::u8;
 use derive_more::From;
 
 use super::*;
