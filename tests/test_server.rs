@@ -8,6 +8,7 @@ use ntex::{http::Uri, rt, time::sleep, time::Millis};
 use ntex_amqp::{
     client, codec::protocol, error::LinkError, server, types, ControlFrame, ControlFrameKind,
 };
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 async fn server(
     _link: types::Link<()>,
@@ -88,6 +89,69 @@ async fn test_simple() -> std::io::Result<()> {
     sleep(Millis(250)).await;
 
     assert_eq!(count.load(Ordering::Relaxed), 2);
+    Ok(())
+}
+
+#[ntex::test]
+async fn test_large_transfer() -> std::io::Result<()> {
+    let mut rng = thread_rng();
+    let data: String = (0..2048)
+        .map(|_| rng.sample(Alphanumeric) as char)
+        .collect();
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let count2 = count.clone();
+    let srv = test_server(move || {
+        let count = count2.clone();
+        server::Server::build(|con: server::Handshake| async move {
+            match con {
+                server::Handshake::Amqp(con) => {
+                    let con = con.open().await.unwrap();
+                    Ok(con.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            }
+        })
+        .control(|msg: ControlFrame| async move {
+            if let ControlFrameKind::AttachReceiver(_, rcv) = msg.kind() {
+                rcv.set_max_message_size(1024);
+            }
+            Ok::<_, ()>(())
+        })
+        .finish(
+            server::Router::<()>::new()
+                .service(
+                    "test",
+                    fn_factory_with_config(move |_: types::Link<()>| server_count(count.clone())),
+                )
+                .finish(),
+        )
+    });
+
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = client::Connector::new().connect(uri).await.unwrap();
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+
+    let delivery = link
+        .delivery(Bytes::from(data.clone()))
+        .send()
+        .await
+        .unwrap();
+    let st = delivery.wait().await.unwrap().unwrap();
+    assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
+    sleep(Millis(250)).await;
+
+    assert_eq!(count.load(Ordering::Relaxed), 1);
     Ok(())
 }
 

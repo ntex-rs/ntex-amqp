@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::TryFrom, fmt, future::Future};
+use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef, Ready};
@@ -899,7 +899,7 @@ impl SessionInner {
                                 .max_message_size()
                                 .map(|v| u32::try_from(v).unwrap_or(u32::MAX)),
                         ));
-                        let local_sender = std::mem::replace(
+                        let local_sender = mem::replace(
                             item,
                             SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
                         );
@@ -1147,7 +1147,7 @@ impl SessionInner {
                 } else {
                     None
                 },
-                incoming_window: std::u32::MAX,
+                incoming_window: u32::MAX,
                 next_outgoing_id: self.next_outgoing_id,
                 outgoing_window: self.remote_incoming_window,
                 handle: None,
@@ -1174,7 +1174,7 @@ impl SessionInner {
             } else {
                 None
             },
-            incoming_window: std::u32::MAX,
+            incoming_window: u32::MAX,
             next_outgoing_id: self.next_outgoing_id,
             outgoing_window: self.remote_incoming_window,
             handle: Some(handle),
@@ -1247,7 +1247,7 @@ impl SessionInner {
                 }
             };
 
-            let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
+            let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
             let mut transfer = Transfer(Default::default());
             transfer.0.handle = link_handle;
@@ -1278,24 +1278,20 @@ impl SessionInner {
             );
 
             loop {
-                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
-
                 // last chunk
                 if body.is_empty() {
-                    log::trace!("{}: Sending last tranfer for {:?}", self.tag(), tag);
-
-                    let mut transfer = Transfer(Default::default());
-                    transfer.0.more = false;
-                    self.post_frame(Frame::Transfer(transfer));
+                    log::trace!("{}: Last tranfer for {:?} is sent", self.tag(), tag);
                     break;
                 }
 
-                log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
+                let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
+                log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
                 let mut transfer = Transfer(Default::default());
+                transfer.0.delivery_id = Some(delivery_id);
                 transfer.0.handle = link_handle;
                 transfer.0.body = Some(TransferBody::Data(chunk));
-                transfer.0.more = true;
+                transfer.0.more = !body.is_empty();
                 transfer.0.batchable = true;
                 self.post_frame(Frame::Transfer(transfer));
             }

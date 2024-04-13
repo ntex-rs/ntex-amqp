@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, error, io};
+use std::{error, io};
 
 use ntex::util::{ByteString, Either};
 

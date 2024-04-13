@@ -1,4 +1,4 @@
-use std::{char, collections, convert::TryFrom, hash::BuildHasher, hash::Hash, u8};
+use std::{char, collections, convert::TryFrom, hash::BuildHasher, hash::Hash};
 
 use byteorder::{BigEndian, ByteOrder};
 use chrono::{DateTime, TimeZone, Utc};

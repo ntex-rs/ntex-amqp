@@ -1,5 +1,4 @@
-use std::hash::{BuildHasher, Hash};
-use std::{collections::HashMap, i8, u8};
+use std::{collections::HashMap, hash::BuildHasher, hash::Hash};
 
 use chrono::{DateTime, Utc};
 use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};

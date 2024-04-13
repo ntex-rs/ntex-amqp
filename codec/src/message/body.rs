@@ -45,7 +45,7 @@ impl Encode for MessageBody {
             .fold(0, |a, seq| a + seq.encoded_size() + SECTION_PREFIX_LENGTH);
         size += self.messages.iter().fold(0, |a, m| {
             let length = m.encoded_size();
-            let size = length + if length > std::u8::MAX as usize { 5 } else { 2 };
+            let size = length + if length > u8::MAX as usize { 5 } else { 2 };
             a + size + SECTION_PREFIX_LENGTH
         });
 
@@ -75,7 +75,7 @@ impl Encode for MessageBody {
 
             // Bytes prefix
             let length = m.encoded_size();
-            if length > std::u8::MAX as usize {
+            if length > u8::MAX as usize {
                 dst.put_u8(FORMATCODE_BINARY32);
                 dst.put_u32(length as u32);
             } else {

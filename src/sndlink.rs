@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, convert::TryFrom, future::Future};
+use std::{collections::VecDeque, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{BufMut, ByteString, Bytes, Either, PoolRef, Ready};

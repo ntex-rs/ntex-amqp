@@ -260,7 +260,7 @@ impl Message {
     /// Create new message and set `correlation_id` property
     pub fn reply_message(&self) -> Message {
         Message::default().if_some(&self.0.properties, |mut msg, data| {
-            msg.set_properties(|props| props.correlation_id = data.message_id.clone());
+            msg.set_properties(|props| props.correlation_id.clone_from(&data.message_id));
             msg
         })
     }
