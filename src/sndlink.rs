@@ -354,7 +354,7 @@ impl SenderLinkInner {
             self.session
                 .inner
                 .get_mut()
-                .send_transfer(self.id as u32, tag, body, settled, self.max_message_size)
+                .send_transfer(self.id as u32, tag, body, settled)
                 .await
         }
     }

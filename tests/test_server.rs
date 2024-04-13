@@ -94,6 +94,8 @@ async fn test_simple() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_large_transfer() -> std::io::Result<()> {
+    env_logger::init();
+
     let mut rng = thread_rng();
     let data: String = (0..2048)
         .map(|_| rng.sample(Alphanumeric) as char)
@@ -112,9 +114,12 @@ async fn test_large_transfer() -> std::io::Result<()> {
                 server::Handshake::Sasl(_) => Err(()),
             }
         })
+        .config(|cfg| {
+            cfg.max_frame_size(1024);
+        })
         .control(|msg: ControlFrame| async move {
             if let ControlFrameKind::AttachReceiver(_, rcv) = msg.kind() {
-                rcv.set_max_message_size(1024);
+                rcv.set_max_message_size(10 * 1024);
             }
             Ok::<_, ()>(())
         })
