@@ -94,8 +94,6 @@ async fn test_simple() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_large_transfer() -> std::io::Result<()> {
-    let _ = env_logger::init();
-
     let mut rng = thread_rng();
     let data: String = (0..2048)
         .map(|_| rng.sample(Alphanumeric) as char)
