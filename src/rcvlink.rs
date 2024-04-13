@@ -32,7 +32,6 @@ pub(crate) struct ReceiverLinkInner {
     delivery_count: u32,
     error: Option<Error>,
     partial_body: Option<BytesMut>,
-    partial_body_max: usize,
     max_message_size: u64,
     pool: PoolRef,
 }
@@ -102,13 +101,6 @@ impl ReceiverLink {
     /// Set max message size.
     pub fn set_max_message_size(&self, size: u64) {
         self.inner.get_mut().max_message_size = size;
-    }
-
-    /// Set max total size for partial transfers.
-    ///
-    /// Default is 256Kb
-    pub fn set_max_partial_transfer_size(&self, size: usize) {
-        self.inner.get_mut().set_max_partial_transfer(size);
     }
 
     /// Check deliveries
@@ -230,9 +222,8 @@ impl ReceiverLinkInner {
             credit: 0,
             error: None,
             partial_body: None,
-            partial_body_max: 262_144,
             delivery_count: frame.initial_delivery_count().unwrap_or(0),
-            max_message_size: frame.max_message_size().unwrap_or(0),
+            max_message_size: 262_144,
             reader_task: LocalWaker::new(),
         }
     }
@@ -276,10 +267,6 @@ impl ReceiverLinkInner {
         }
     }
 
-    fn set_max_partial_transfer(&mut self, size: usize) {
-        self.partial_body_max = size;
-    }
-
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
         self.credit += credit;
         self.session
@@ -308,6 +295,8 @@ impl ReceiverLinkInner {
                 self.credit -= 1;
             }
 
+            println!("============= {:#?}\n{:?}", transfer, self.partial_body);
+
             // handle batched transfer
             if let Some(ref mut body) = self.partial_body {
                 if transfer.0.delivery_id.is_some() {
@@ -329,7 +318,7 @@ impl ReceiverLinkInner {
 
                 // merge transfer data and check size
                 if let Some(transfer_body) = transfer.0.body.take() {
-                    if body.len() + transfer_body.len() > self.partial_body_max {
+                    if body.len() + transfer_body.len() > self.max_message_size as usize {
                         let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::MessageSizeExceeded.into(),
                             description: None,
@@ -342,7 +331,7 @@ impl ReceiverLinkInner {
                     transfer_body.encode(body);
                 }
 
-                if !transfer.more() {
+                if transfer.more() {
                     // dont need to update queue, we use first transfer frame as primary
                     Ok(Action::None)
                 } else {

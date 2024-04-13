@@ -4,6 +4,8 @@
 
 * Fix large transfers handling
 
+* Fix Receiver link message size handling
+
 ## [2.1.3] - 2024-04-11
 
 * Handle settled transfers

@@ -300,6 +300,12 @@ impl DeliveryBuilder {
         } else if inner.closed {
             Err(AmqpProtocolError::Disconnected)
         } else {
+            if let Some(limit) = inner.max_message_size {
+                if self.data.len() > limit as usize {
+                    return Err(AmqpProtocolError::BodyTooLarge);
+                }
+            }
+
             let id = self
                 .sender
                 .get_mut()

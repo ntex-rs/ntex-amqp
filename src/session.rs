@@ -1194,7 +1194,6 @@ impl SessionInner {
         tag: Bytes,
         body: TransferBody,
         settled: bool,
-        max_frame_size: Option<u32>,
     ) -> Result<DeliveryNumber, AmqpProtocolError> {
         loop {
             if self.remote_incoming_window == 0 {
@@ -1227,7 +1226,7 @@ impl SessionInner {
         };
         let message_format = body.message_format();
 
-        let max_frame_size = max_frame_size.unwrap_or_else(|| self.max_frame_size());
+        let max_frame_size = self.max_frame_size();
         let max_frame_size = if max_frame_size > 2048 {
             max_frame_size - 2048
         } else if max_frame_size == 0 {
@@ -1276,6 +1275,7 @@ impl SessionInner {
                 transfer.batchable(),
                 transfer.settled(),
             );
+            self.post_frame(Frame::Transfer(transfer));
 
             loop {
                 // last chunk
@@ -1288,11 +1288,11 @@ impl SessionInner {
 
                 log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
                 let mut transfer = Transfer(Default::default());
-                transfer.0.delivery_id = Some(delivery_id);
                 transfer.0.handle = link_handle;
                 transfer.0.body = Some(TransferBody::Data(chunk));
                 transfer.0.more = !body.is_empty();
                 transfer.0.batchable = true;
+                transfer.0.message_format = message_format;
                 self.post_frame(Frame::Transfer(transfer));
             }
         } else {
