@@ -297,12 +297,6 @@ impl DeliveryBuilder {
 
         if let Some(ref err) = inner.error {
             Err(err.clone())
-        } else if inner
-            .max_message_size
-            .map(|l| self.data.len() > l as usize)
-            .unwrap_or_default()
-        {
-            Err(AmqpProtocolError::BodyTooLarge)
         } else {
             let id = self
                 .sender

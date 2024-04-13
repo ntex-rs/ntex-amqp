@@ -1278,24 +1278,20 @@ impl SessionInner {
             );
 
             loop {
-                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
-
                 // last chunk
                 if body.is_empty() {
-                    log::trace!("{}: Sending last tranfer for {:?}", self.tag(), tag);
-
-                    let mut transfer = Transfer(Default::default());
-                    transfer.0.more = false;
-                    self.post_frame(Frame::Transfer(transfer));
+                    log::trace!("{}: Last tranfer for {:?} is sent", self.tag(), tag);
                     break;
                 }
 
-                log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
+                let chunk = body.split_to(std::cmp::min(max_frame_size, body.len()));
 
+                log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
                 let mut transfer = Transfer(Default::default());
+                transfer.0.delivery_id = Some(delivery_id);
                 transfer.0.handle = link_handle;
                 transfer.0.body = Some(TransferBody::Data(chunk));
-                transfer.0.more = true;
+                transfer.0.more = !body.is_empty();
                 transfer.0.batchable = true;
                 self.post_frame(Frame::Transfer(transfer));
             }
