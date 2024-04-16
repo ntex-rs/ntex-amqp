@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.5] - 2024-04-17
+
+* Fix receiver's delivery queue handling
+
 ## [2.1.4] - 2024-04-13
 
 * Fix large transfers handling

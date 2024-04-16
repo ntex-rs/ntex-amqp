@@ -105,12 +105,22 @@ impl ReceiverLink {
 
     /// Check deliveries
     pub fn has_deliveries(&self) -> bool {
-        !self.inner.get_mut().queue.is_empty()
+        let inner = self.inner.get_ref();
+        if inner.partial_body.is_none() {
+            !inner.queue.is_empty()
+        } else {
+            inner.queue.len() > 1
+        }
     }
 
     /// Get delivery
     pub fn get_delivery(&self) -> Option<(Delivery, Transfer)> {
-        self.inner.get_mut().queue.pop_front()
+        let inner = self.inner.get_mut();
+        if inner.partial_body.is_none() || inner.queue.len() > 1 {
+            inner.queue.pop_front()
+        } else {
+            None
+        }
     }
 
     /// Send disposition frame
@@ -294,8 +304,6 @@ impl ReceiverLinkInner {
             if !transfer.0.more {
                 self.credit -= 1;
             }
-
-            println!("============= {:#?}\n{:?}", transfer, self.partial_body);
 
             // handle batched transfer
             if let Some(ref mut body) = self.partial_body {
