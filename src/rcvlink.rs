@@ -385,10 +385,7 @@ impl ReceiverLinkInner {
 
                     let delivery = Delivery::new_rcv(
                         id,
-                        transfer
-                            .delivery_tag()
-                            .cloned()
-                            .unwrap_or_else(Bytes::new),
+                        transfer.delivery_tag().cloned().unwrap_or_else(Bytes::new),
                         transfer.settled().unwrap_or_default(),
                         self.session.clone(),
                     );
@@ -407,10 +404,7 @@ impl ReceiverLinkInner {
                 self.delivery_count += 1;
                 let delivery = Delivery::new_rcv(
                     id,
-                    transfer
-                        .delivery_tag()
-                        .cloned()
-                        .unwrap_or_else(Bytes::new),
+                    transfer.delivery_tag().cloned().unwrap_or_else(Bytes::new),
                     transfer.settled().unwrap_or_default(),
                     self.session.clone(),
                 );
