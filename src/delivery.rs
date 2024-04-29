@@ -22,6 +22,7 @@ bitflags::bitflags! {
 #[derive(Debug)]
 pub struct Delivery {
     id: DeliveryNumber,
+    tag: Bytes,
     session: Session,
     flags: StdCell<Flags>,
 }
@@ -35,7 +36,12 @@ pub(crate) struct DeliveryInner {
 }
 
 impl Delivery {
-    pub(crate) fn new_rcv(id: DeliveryNumber, settled: bool, session: Session) -> Delivery {
+    pub(crate) fn new_rcv(
+        id: DeliveryNumber,
+        tag: Bytes,
+        settled: bool,
+        session: Session,
+    ) -> Delivery {
         if !settled {
             session
                 .inner
@@ -46,6 +52,7 @@ impl Delivery {
 
         Delivery {
             id,
+            tag,
             session,
             flags: StdCell::new(if settled {
                 Flags::LOCAL_SETTLED
@@ -57,6 +64,10 @@ impl Delivery {
 
     pub fn id(&self) -> DeliveryNumber {
         self.id
+    }
+
+    pub fn tag(&self) -> &Bytes {
+        &self.tag
     }
 
     pub fn remote_state(&self) -> Option<DeliveryState> {
@@ -306,7 +317,7 @@ impl DeliveryBuilder {
                 }
             }
 
-            let id = self
+            let (id, tag) = self
                 .sender
                 .get_mut()
                 .send(self.data, self.tag, self.settled)
@@ -314,6 +325,7 @@ impl DeliveryBuilder {
 
             Ok(Delivery {
                 id,
+                tag,
                 session: self.sender.get_ref().session.clone(),
                 flags: StdCell::new(if self.settled {
                     Flags::SENDER | Flags::LOCAL_SETTLED

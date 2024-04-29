@@ -321,7 +321,7 @@ impl SenderLinkInner {
         body: T,
         tag: Option<Bytes>,
         settled: bool,
-    ) -> Result<DeliveryNumber, AmqpProtocolError> {
+    ) -> Result<(DeliveryNumber, Bytes), AmqpProtocolError> {
         if let Some(ref err) = self.error {
             Err(err.clone())
         } else {
@@ -351,11 +351,14 @@ impl SenderLinkInner {
             // reduce link credit
             self.link_credit -= 1;
             self.delivery_count = self.delivery_count.wrapping_add(1);
-            self.session
+            let id = self
+                .session
                 .inner
                 .get_mut()
-                .send_transfer(self.id as u32, tag, body, settled)
-                .await
+                .send_transfer(self.id as u32, tag.clone(), body, settled)
+                .await?;
+
+            Ok((id, tag))
         }
     }
 
