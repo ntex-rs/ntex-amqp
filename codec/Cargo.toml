@@ -1,15 +1,15 @@
 [package]
 name = "ntex-amqp-codec"
-version = "0.9.2"
+version = "0.9.3"
 description = "AMQP 1.0 Protocol Codec"
 authors = ["Nikolay Kim <fafhrd91@gmail.com>", "Max Gortman <mgortman@microsoft.com>", "Mike Yagley <myagley@gmail.com>"]
 license = "MIT/Apache-2.0"
 edition = "2018"
 
 [dependencies]
-ntex-bytes = "0.1.24"
-ntex-codec = "0.6.2"
-byteorder = "1.5"
+ntex-bytes = "0.1"
+ntex-codec = "0.6"
+byteorder = "1"
 fxhash = "0.2.1"
 chrono = { version = "0.4", default-features = false }
 derive_more = "0.99"

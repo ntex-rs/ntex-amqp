@@ -646,11 +646,11 @@ impl Encode for List {
     fn encode(&self, buf: &mut BytesMut) {
         let size = list_encoded_size(self);
         if size + 1 > u8::MAX as usize {
-            buf.put_u8(codec::FORMATCODE_ARRAY32);
+            buf.put_u8(codec::FORMATCODE_LIST32);
             buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
             buf.put_u32(self.len() as u32);
         } else {
-            buf.put_u8(codec::FORMATCODE_ARRAY8);
+            buf.put_u8(codec::FORMATCODE_LIST8);
             buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follow
             buf.put_u8(self.len() as u8);
         }
