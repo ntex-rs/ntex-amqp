@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.6] - 2024-04-29
+
+* Give access to delivery tag
+
 ## [2.1.5] - 2024-04-17
 
 * Fix receiver's delivery queue handling

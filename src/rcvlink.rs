@@ -3,7 +3,7 @@ use std::{
     task::Poll,
 };
 
-use ntex::util::{ByteString, BytesMut, PoolRef, Stream};
+use ntex::util::{ByteString, Bytes, BytesMut, PoolRef, Stream};
 use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
@@ -385,6 +385,10 @@ impl ReceiverLinkInner {
 
                     let delivery = Delivery::new_rcv(
                         id,
+                        transfer
+                            .delivery_tag()
+                            .cloned()
+                            .unwrap_or_else(Bytes::new),
                         transfer.settled().unwrap_or_default(),
                         self.session.clone(),
                     );
@@ -403,6 +407,10 @@ impl ReceiverLinkInner {
                 self.delivery_count += 1;
                 let delivery = Delivery::new_rcv(
                     id,
+                    transfer
+                        .delivery_tag()
+                        .cloned()
+                        .unwrap_or_else(Bytes::new),
                     transfer.settled().unwrap_or_default(),
                     self.session.clone(),
                 );
