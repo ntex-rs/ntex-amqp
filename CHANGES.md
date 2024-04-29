@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.9.3] - 2024-04-29
+
+* Fix `Variant::List` encoding
+
 ## [2.1.6] - 2024-04-29
 
 * Give access to delivery tag

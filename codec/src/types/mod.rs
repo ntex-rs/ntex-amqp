@@ -68,6 +68,12 @@ impl List {
     }
 }
 
+impl From<Vec<Variant>> for List {
+    fn from(data: Vec<Variant>) -> List {
+        List(data)
+    }
+}
+
 #[derive(Display, Clone, Eq, Ord, PartialOrd)]
 pub enum Str {
     String(String),

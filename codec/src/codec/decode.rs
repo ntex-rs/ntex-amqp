@@ -399,12 +399,13 @@ impl DecodeFormatted for Variant {
                 .map(|o| Variant::Map(VariantMap::new(o))),
             codec::FORMATCODE_MAP32 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
                 .map(|o| Variant::Map(VariantMap::new(o))),
-            // codec::FORMATCODE_ARRAY8 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
-            // codec::FORMATCODE_ARRAY32 => Vec::<Variant>::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Array(o))),
             codec::FORMATCODE_DESCRIBED => {
                 let descriptor = Descriptor::decode(input)?;
                 let value = Variant::decode(input)?;
                 Ok(Variant::Described((descriptor, Box::new(value))))
+            }
+            codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
+                Err(AmqpParseError::ArrayTypeIsNotSupported)
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }

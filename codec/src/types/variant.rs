@@ -87,6 +87,12 @@ pub enum Variant {
     Described((Descriptor, Box<Variant>)),
 }
 
+impl From<Vec<Variant>> for Variant {
+    fn from(data: Vec<Variant>) -> Self {
+        Variant::List(List(data))
+    }
+}
+
 impl From<ByteString> for Variant {
     fn from(s: ByteString) -> Self {
         Str::from(s).into()
