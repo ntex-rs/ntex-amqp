@@ -11,7 +11,7 @@ macro_rules! decode_check_len {
 }
 
 #[macro_use]
-mod decode;
+pub(crate) mod decode;
 mod encode;
 
 pub(crate) use self::decode::decode_list_header;

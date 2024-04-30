@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.9.4] - 2024-04-30
+
+* Add Variant::Array() type
+
 ## [codec-0.9.3] - 2024-04-29
 
 * Fix `Variant::List` encoding

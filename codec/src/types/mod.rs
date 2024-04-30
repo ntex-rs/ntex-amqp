@@ -2,9 +2,11 @@ use std::{borrow, fmt, hash, ops, str};
 
 use ntex_bytes::ByteString;
 
+mod array;
 mod symbol;
 mod variant;
 
+pub use self::array::Array;
 pub use self::symbol::{StaticSymbol, Symbol};
 pub use self::variant::{Variant, VariantMap, VecStringMap, VecSymbolMap};
 

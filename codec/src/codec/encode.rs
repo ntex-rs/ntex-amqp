@@ -454,6 +454,7 @@ fn map_encoded_size<K: Hash + Eq + Encode, V: Encode, S: BuildHasher>(
     map.iter()
         .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
 }
+
 impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, S> {
     fn encoded_size(&self) -> usize {
         let size = map_encoded_size(self);
@@ -683,6 +684,7 @@ impl Encode for Variant {
             Variant::Symbol(ref s) => s.encoded_size(),
             Variant::StaticSymbol(ref s) => s.encoded_size(),
             Variant::List(ref l) => l.encoded_size(),
+            Variant::Array(ref a) => a.encoded_size(),
             Variant::Map(ref m) => m.map.encoded_size(),
             Variant::Described(ref dv) => dv.0.encoded_size() + dv.1.encoded_size(),
         }
@@ -712,6 +714,7 @@ impl Encode for Variant {
             Variant::StaticSymbol(ref s) => s.encode(buf),
             Variant::List(ref l) => l.encode(buf),
             Variant::Map(ref m) => m.map.encode(buf),
+            Variant::Array(ref a) => a.encode(buf),
             Variant::Described(ref dv) => {
                 dv.0.encode(buf);
                 dv.1.encode(buf);

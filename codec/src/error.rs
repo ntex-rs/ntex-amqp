@@ -11,8 +11,6 @@ pub enum AmqpParseError {
     #[from(ignore)]
     #[display(fmt = "Unexpected format code: '{}'", "_0")]
     InvalidFormatCode(u8),
-    #[display(fmt = "Array type is not supported in Amqp Value")]
-    ArrayTypeIsNotSupported,
     #[display(fmt = "Invalid value converting to char: {}", "_0")]
     InvalidChar(u32),
     #[display(fmt = "Unexpected descriptor: '{:?}'", "_0")]
