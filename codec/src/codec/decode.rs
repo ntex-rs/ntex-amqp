@@ -11,7 +11,7 @@ use crate::error::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol::{self, CompoundHeader};
 use crate::types::{
-    Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecStringMap, VecSymbolMap,
+    Array, Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecStringMap, VecSymbolMap,
 };
 use crate::HashMap;
 
@@ -376,36 +376,30 @@ impl DecodeFormatted for Variant {
                 DateTime::<Utc>::decode_with_format(input, fmt).map(Variant::Timestamp)
             }
             codec::FORMATCODE_UUID => Uuid::decode_with_format(input, fmt).map(Variant::Uuid),
-            codec::FORMATCODE_BINARY8 => Bytes::decode_with_format(input, fmt).map(Variant::Binary),
-            codec::FORMATCODE_BINARY32 => {
+            codec::FORMATCODE_BINARY8 | codec::FORMATCODE_BINARY32 => {
                 Bytes::decode_with_format(input, fmt).map(Variant::Binary)
             }
-            codec::FORMATCODE_STRING8 => {
+            codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
                 ByteString::decode_with_format(input, fmt).map(|o| Variant::String(o.into()))
             }
-            codec::FORMATCODE_STRING32 => {
-                ByteString::decode_with_format(input, fmt).map(|o| Variant::String(o.into()))
-            }
-            codec::FORMATCODE_SYMBOL8 => {
-                Symbol::decode_with_format(input, fmt).map(Variant::Symbol)
-            }
-            codec::FORMATCODE_SYMBOL32 => {
+            codec::FORMATCODE_SYMBOL8 | codec::FORMATCODE_SYMBOL32 => {
                 Symbol::decode_with_format(input, fmt).map(Variant::Symbol)
             }
             codec::FORMATCODE_LIST0 => Ok(Variant::List(List(vec![]))),
-            codec::FORMATCODE_LIST8 => List::decode_with_format(input, fmt).map(Variant::List),
-            codec::FORMATCODE_LIST32 => List::decode_with_format(input, fmt).map(Variant::List),
-            codec::FORMATCODE_MAP8 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
-                .map(|o| Variant::Map(VariantMap::new(o))),
-            codec::FORMATCODE_MAP32 => HashMap::<Variant, Variant>::decode_with_format(input, fmt)
-                .map(|o| Variant::Map(VariantMap::new(o))),
+            codec::FORMATCODE_LIST8 | codec::FORMATCODE_LIST32 => {
+                List::decode_with_format(input, fmt).map(Variant::List)
+            }
+            codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
+                Array::decode_with_format(input, fmt).map(Variant::Array)
+            }
+            codec::FORMATCODE_MAP8 | codec::FORMATCODE_MAP32 => {
+                HashMap::<Variant, Variant>::decode_with_format(input, fmt)
+                    .map(|o| Variant::Map(VariantMap::new(o)))
+            }
             codec::FORMATCODE_DESCRIBED => {
                 let descriptor = Descriptor::decode(input)?;
                 let value = Variant::decode(input)?;
                 Ok(Variant::Described((descriptor, Box::new(value))))
-            }
-            codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
-                Err(AmqpParseError::ArrayTypeIsNotSupported)
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -475,7 +469,10 @@ fn decode_frame_header(input: &mut Bytes, expected_frame_type: u8) -> Result<u16
     Ok(channel_id)
 }
 
-fn decode_array_header(input: &mut Bytes, fmt: u8) -> Result<CompoundHeader, AmqpParseError> {
+pub(crate) fn decode_array_header(
+    input: &mut Bytes,
+    fmt: u8,
+) -> Result<CompoundHeader, AmqpParseError> {
     match fmt {
         codec::FORMATCODE_ARRAY8 => decode_compound8(input),
         codec::FORMATCODE_ARRAY32 => decode_compound32(input),

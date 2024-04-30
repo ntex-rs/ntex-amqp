@@ -5,7 +5,7 @@ use ntex_bytes::{ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::types::{Descriptor, List, StaticSymbol, Str, Symbol};
+use crate::types::{Array, Descriptor, List, StaticSymbol, Str, Symbol};
 use crate::{protocol::Annotations, HashMap};
 
 /// Represents an AMQP type for use in polymorphic collections
@@ -82,6 +82,10 @@ pub enum Variant {
     /// Map
     Map(VariantMap),
 
+    /// Array
+    #[display(fmt = "Array({:?})", _0)]
+    Array(Array),
+
     /// Described value
     #[display(fmt = "Described{:?}", _0)]
     Described((Descriptor, Box<Variant>)),
@@ -90,6 +94,12 @@ pub enum Variant {
 impl From<Vec<Variant>> for Variant {
     fn from(data: Vec<Variant>) -> Self {
         Variant::List(List(data))
+    }
+}
+
+impl From<HashMap<Variant, Variant>> for Variant {
+    fn from(data: HashMap<Variant, Variant>) -> Self {
+        Variant::Map(VariantMap { map: data })
     }
 }
 
