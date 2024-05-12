@@ -49,9 +49,7 @@ pub type Annotations = HashMap<Symbol, Variant>;
     clippy::match_bool,
     clippy::large_enum_variant
 )]
-#[cfg(not(tarpaulin_include))]
 mod definitions;
-#[cfg(not(tarpaulin_include))]
 pub use self::definitions::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, From, Display)]
