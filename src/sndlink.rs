@@ -234,8 +234,8 @@ impl SenderLinkInner {
         self.max_message_size
     }
 
-    pub(crate) fn detached(&mut self, err: AmqpProtocolError) {
-        log::trace!(
+    pub(crate) fn remote_detached(&mut self, err: AmqpProtocolError) {
+        log::error!(
             "{}: Detaching sender link {:?} with error {:?}",
             self.session.tag(),
             self.name,

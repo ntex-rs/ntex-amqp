@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::service::{Pipeline, Service, ServiceCtx};
+use ntex::service::{Pipeline, PipelineCall, Service, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
 use ntex::util::{ready, BoxFuture, Either};
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
@@ -9,8 +9,6 @@ use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
 use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
 use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
-
-type ControlItem<R, E> = (ControlFrame, BoxFuture<'static, Result<R, E>>);
 
 #[derive(Default, Debug)]
 pub(crate) struct ControlQueue {
@@ -30,7 +28,7 @@ pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
     sink: Connection,
     service: Pipeline<Sr>,
     ctl_service: Pipeline<Ctl>,
-    ctl_fut: cell::RefCell<Vec<ControlItem<Ctl::Response, Ctl::Error>>>,
+    ctl_fut: cell::RefCell<Vec<(ControlFrame, PipelineCall<Ctl, ControlFrame>)>>,
     ctl_queue: Rc<ControlQueue>,
     shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
     expire: Sleep,
@@ -64,7 +62,7 @@ where
 
     fn call_control_service(&self, frame: ControlFrame) {
         let fut = self.ctl_service.call_static(frame.clone());
-        self.ctl_fut.borrow_mut().push((frame, Box::pin(fut)));
+        self.ctl_fut.borrow_mut().push((frame, fut));
         self.ctl_queue.waker.wake();
     }
 

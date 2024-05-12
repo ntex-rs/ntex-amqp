@@ -542,9 +542,11 @@ fn datetime_from_millis(millis: i64) -> Result<DateTime<Utc>, AmqpParseError> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeDelta;
+    use ntex_bytes::{BufMut, BytesMut};
+
     use super::*;
     use crate::codec::{Decode, Encode};
-    use ntex_bytes::{BufMut, BytesMut};
 
     const LOREM: &str = include_str!("lorem.txt");
 
@@ -675,10 +677,12 @@ mod tests {
     #[test]
     fn test_timestamp() {
         let mut b1 = BytesMut::with_capacity(0);
-        let datetime = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let datetime =
+            Utc.with_ymd_and_hms(2011, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         datetime.encode(&mut b1);
 
-        let expected = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let expected =
+            Utc.with_ymd_and_hms(2011, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         assert_eq!(
             expected,
             unwrap_value(DateTime::<Utc>::decode(&mut b1.freeze()))
@@ -688,10 +692,12 @@ mod tests {
     #[test]
     fn test_timestamp_pre_unix() {
         let mut b1 = BytesMut::with_capacity(0);
-        let datetime = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let datetime =
+            Utc.with_ymd_and_hms(1968, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         datetime.encode(&mut b1);
 
-        let expected = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let expected =
+            Utc.with_ymd_and_hms(1968, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         assert_eq!(
             expected,
             unwrap_value(DateTime::<Utc>::decode(&mut b1.freeze()))
@@ -747,10 +753,12 @@ mod tests {
     #[test]
     fn variant_timestamp() {
         let mut b1 = BytesMut::with_capacity(0);
-        let datetime = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let datetime =
+            Utc.with_ymd_and_hms(2011, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         Variant::Timestamp(datetime).encode(&mut b1);
 
-        let expected = Utc.ymd(2011, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let expected =
+            Utc.with_ymd_and_hms(2011, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         assert_eq!(
             Variant::Timestamp(expected),
             unwrap_value(Variant::decode(&mut b1.freeze()))
@@ -760,10 +768,12 @@ mod tests {
     #[test]
     fn variant_timestamp_pre_unix() {
         let mut b1 = BytesMut::with_capacity(0);
-        let datetime = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let datetime =
+            Utc.with_ymd_and_hms(1968, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         Variant::Timestamp(datetime).encode(&mut b1);
 
-        let expected = Utc.ymd(1968, 7, 26).and_hms_milli(18, 21, 3, 521);
+        let expected =
+            Utc.with_ymd_and_hms(1968, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         assert_eq!(
             Variant::Timestamp(expected),
             unwrap_value(Variant::decode(&mut b1.freeze()))

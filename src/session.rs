@@ -359,7 +359,7 @@ impl SessionInner {
             match st {
                 Either::Left(SenderLinkState::Opening(_)) => (),
                 Either::Left(SenderLinkState::Established(ref mut link)) => {
-                    link.inner.get_mut().detached(err.clone());
+                    link.inner.get_mut().remote_detached(err.clone());
                 }
                 Either::Left(SenderLinkState::Closing(ref mut link)) => {
                     if let Some(tx) = link.take() {
@@ -367,7 +367,7 @@ impl SessionInner {
                     }
                 }
                 Either::Right(ReceiverLinkState::Established(ref mut link)) => {
-                    link.remote_closed(None);
+                    link.remote_detached(None);
                 }
                 _ => (),
             }
@@ -512,6 +512,7 @@ impl SessionInner {
                         closed,
                         error,
                     }));
+
                     *link = SenderLinkState::Closing(Some(tx));
                     self.post_frame(detach.clone().into());
                     self.sink
@@ -994,8 +995,16 @@ impl SessionInner {
                             }
                         }
 
+                        // drop unsettled transfers
+                        let handle = link.inner.get_ref().id() as Handle;
+                        for delivery in self.unsettled_snd_deliveries.values_mut() {
+                            if delivery.handle() == handle {
+                                delivery.set_error(err.clone());
+                            }
+                        }
+
                         // detach snd link
-                        link.inner.get_mut().detached(err);
+                        link.inner.get_mut().remote_detached(err);
                         self.sink
                             .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
                         action = Action::DetachSender(link.clone(), frame);
@@ -1037,7 +1046,16 @@ impl SessionInner {
                         true
                     }
                     ReceiverLinkState::Established(link) => {
-                        link.remote_closed(frame.0.error.take());
+                        let error = frame.0.error.take();
+
+                        // drop unsettled transfers
+                        let err = AmqpProtocolError::LinkDetached(error.clone());
+                        let handle = link.inner.get_ref().id();
+                        for delivery in self.unsettled_rcv_deliveries.values_mut() {
+                            if delivery.handle() == handle {
+                                delivery.set_error(err.clone());
+                            }
+                        }
 
                         // detach from remote endpoint
                         let detach = Detach(Box::new(codec::DetachInner {
@@ -1045,10 +1063,11 @@ impl SessionInner {
                             closed: true,
                             error: None,
                         }));
-
-                        // detach rcv link
                         self.sink
                             .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
+
+                        // detach rcv link
+                        link.remote_detached(error);
                         action = Action::DetachReceiver(link.clone(), frame);
                         true
                     }
@@ -1262,7 +1281,7 @@ impl SessionInner {
                 transfer.0.settled = Some(true);
             } else {
                 self.unsettled_snd_deliveries
-                    .insert(delivery_id, DeliveryInner::new());
+                    .insert(delivery_id, DeliveryInner::new(link_handle));
             }
 
             log::trace!(
@@ -1308,7 +1327,7 @@ impl SessionInner {
                 transfer.0.settled = Some(true);
             } else {
                 self.unsettled_snd_deliveries
-                    .insert(delivery_id, DeliveryInner::new());
+                    .insert(delivery_id, DeliveryInner::new(link_handle));
             }
             self.post_frame(Frame::Transfer(transfer));
         }

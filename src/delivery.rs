@@ -2,8 +2,8 @@ use std::cell::Cell as StdCell;
 
 use ntex::{channel::pool, util::Bytes};
 use ntex_amqp_codec::protocol::{
-    DeliveryNumber, DeliveryState, Disposition, DispositionInner, Error, ErrorCondition, Rejected,
-    Role, TransferBody,
+    DeliveryNumber, DeliveryState, Disposition, DispositionInner, Error, ErrorCondition, Handle,
+    Rejected, Role, TransferBody,
 };
 use ntex_amqp_codec::types::{Str, Symbol};
 
@@ -29,6 +29,7 @@ pub struct Delivery {
 
 #[derive(Default, Debug)]
 pub(crate) struct DeliveryInner {
+    handle: Handle,
     settled: bool,
     state: Option<DeliveryState>,
     error: Option<AmqpProtocolError>,
@@ -38,6 +39,7 @@ pub(crate) struct DeliveryInner {
 impl Delivery {
     pub(crate) fn new_rcv(
         id: DeliveryNumber,
+        link_handle: Handle,
         tag: Bytes,
         settled: bool,
         session: Session,
@@ -47,7 +49,7 @@ impl Delivery {
                 .inner
                 .get_mut()
                 .unsettled_rcv_deliveries
-                .insert(id, DeliveryInner::new());
+                .insert(id, DeliveryInner::new(link_handle));
         }
 
         Delivery {
@@ -239,13 +241,18 @@ impl Drop for Delivery {
 }
 
 impl DeliveryInner {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(handle: Handle) -> Self {
         Self {
+            handle,
             tx: None,
             state: None,
             error: None,
             settled: false,
         }
+    }
+
+    pub(crate) fn handle(&self) -> Handle {
+        self.handle
     }
 
     pub(crate) fn set_error(&mut self, error: AmqpProtocolError) {

@@ -147,14 +147,24 @@ impl ReceiverLink {
         self.inner.get_mut().close(Some(error.into()))
     }
 
-    pub(crate) fn remote_closed(&self, error: Option<Error>) {
+    pub(crate) fn remote_detached(&self, error: Option<Error>) {
         let inner = self.inner.get_mut();
-        log::trace!(
-            "{}: Receiver link has been closed remotely handle: {:?} name: {:?}",
-            inner.session.tag(),
-            inner.remote_handle,
-            inner.name
-        );
+        if let Some(ref error) = error {
+            log::error!(
+                "{}: Receiver link has been closed remotely handle: {:?} name: {:?} error: {:?}",
+                inner.session.tag(),
+                inner.remote_handle,
+                inner.name,
+                error
+            );
+        } else {
+            log::trace!(
+                "{}: Receiver link has been closed remotely handle: {:?} name: {:?}",
+                inner.session.tag(),
+                inner.remote_handle,
+                inner.name
+            );
+        }
         inner.closed = true;
         inner.error = error;
         inner.wake();
@@ -240,6 +250,10 @@ impl ReceiverLinkInner {
 
     fn wake(&self) {
         self.reader_task.wake();
+    }
+
+    pub(crate) fn id(&self) -> Handle {
+        self.handle
     }
 
     pub(crate) fn name(&self) -> &ByteString {
@@ -385,6 +399,7 @@ impl ReceiverLinkInner {
 
                     let delivery = Delivery::new_rcv(
                         id,
+                        self.handle,
                         transfer.delivery_tag().cloned().unwrap_or_else(Bytes::new),
                         transfer.settled().unwrap_or_default(),
                         self.session.clone(),
@@ -404,6 +419,7 @@ impl ReceiverLinkInner {
                 self.delivery_count += 1;
                 let delivery = Delivery::new_rcv(
                     id,
+                    self.handle,
                     transfer.delivery_tag().cloned().unwrap_or_else(Bytes::new),
                     transfer.settled().unwrap_or_default(),
                     self.session.clone(),
