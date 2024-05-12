@@ -1,5 +1,9 @@
 # Changes
 
+## [2.1.7] - 2024-05-12
+
+* Cleanup pending transfers and deliveries on link detach
+
 ## [codec-0.9.4] - 2024-04-30
 
 * Add Variant::Array() type
