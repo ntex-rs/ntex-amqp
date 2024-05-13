@@ -465,3 +465,66 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[ntex::test]
+async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
+    let srv = test_server(move || {
+        server::Server::build(|con: server::Handshake| async move {
+            match con {
+                server::Handshake::Amqp(con) => {
+                    let con = con.open().await.unwrap();
+                    Ok(con.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            }
+        })
+        .finish(
+            server::Router::<()>::new()
+                .service(
+                    "test",
+                    fn_factory_with_config(|link: types::Link<()>| async move {
+                        rt::spawn(async move {
+                            sleep(Millis(150)).await;
+                            let _ = link.receiver().close().await;
+                        });
+
+                        Ok::<_, LinkError>(boxed::service(fn_service(|_req| async move {
+                            sleep(Millis(1500000)).await;
+                            Ok::<_, LinkError>(types::Outcome::Accept)
+                        })))
+                    }),
+                )
+                .finish(),
+        )
+    });
+
+    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = client::Connector::new().connect(uri).await.unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+
+    let delivery = link
+        .delivery(Bytes::from(b"test".as_ref()))
+        .send()
+        .await
+        .unwrap();
+
+    let res = delivery.wait().await;
+    assert!(res.is_err());
+
+    let res = delivery.wait().await;
+    assert!(res.is_err());
+
+    assert!(link.is_closed());
+    Ok(())
+}
