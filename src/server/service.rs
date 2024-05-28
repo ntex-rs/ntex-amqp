@@ -231,8 +231,15 @@ where
     type Response = ();
     type Error = ServerError<H::Error>;
 
-    ntex::forward_poll_ready!(handshake, ServerError::Service);
-    ntex::forward_poll_shutdown!(handshake);
+    #[inline]
+    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
+        self.handshake.ready().await.map_err(ServerError::Service)
+    }
+
+    #[inline]
+    async fn shutdown(&self) {
+        self.handshake.shutdown().await
+    }
 
     async fn call(
         &self,
@@ -256,9 +263,17 @@ where
     type Response = ();
     type Error = ServerError<H::Error>;
 
-    ntex::forward_poll_ready!(handshake, ServerError::Service);
-    ntex::forward_poll_shutdown!(handshake);
+    #[inline]
+    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
+        self.handshake.ready().await.map_err(ServerError::Service)
+    }
 
+    #[inline]
+    async fn shutdown(&self) {
+        self.handshake.shutdown().await
+    }
+
+    #[inline]
     async fn call(
         &self,
         req: IoBoxed,

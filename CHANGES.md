@@ -1,5 +1,9 @@
 # Changes
 
+## [3.0.0] - 2024-05-28
+
+* Use ntex-service 3.0
+
 ## [2.1.7] - 2024-05-12
 
 * Cleanup pending transfers and deliveries on link detach
