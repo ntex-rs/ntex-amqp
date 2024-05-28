@@ -1,4 +1,4 @@
-use std::{future::poll_fn, marker, rc::Rc};
+use std::{marker, rc::Rc};
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{
@@ -141,34 +141,41 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
                     let _ = ntex::rt::spawn(async move {
-                        poll_fn(move |cx| srv.poll_shutdown(cx)).await;
+                        srv.shutdown().await;
                         log::trace!("Handler service for {} has shutdown", name);
                     });
                 }
                 Ok(())
             }
             Message::DetachedAll(links) => {
-                let futs: Vec<_> = links
+                let links: Vec<_> = links
                     .into_iter()
                     .filter_map(|link| {
-                        self.0.get_mut().handlers.remove(&link).and_then(|srv| {
-                            srv.map(|srv| {
-                                log::trace!(
-                                    "Releasing handler service for {} (session ended)",
-                                    link.name()
-                                );
-                                poll_fn(move |cx| srv.poll_shutdown(cx))
-                            })
-                        })
+                        self.0
+                            .get_mut()
+                            .handlers
+                            .remove(&link)
+                            .and_then(move |srv| srv.map(|srv| (link, srv)))
                     })
                     .collect();
 
                 log::trace!(
                     "Shutting down {} handler services (session ended)",
-                    futs.len()
+                    links.len()
                 );
 
                 let _ = ntex::rt::spawn(async move {
+                    let futs: Vec<_> = links
+                        .iter()
+                        .map(|(link, srv)| {
+                            log::trace!(
+                                "Releasing handler service for {} (session ended)",
+                                link.name()
+                            );
+                            srv.shutdown()
+                        })
+                        .collect();
+
                     let len = futs.len();
                     let _ = join_all(futs).await;
                     log::trace!(
@@ -279,8 +286,8 @@ where
     type Response = Outcome;
     type Error = Error;
 
-    ntex::forward_poll_ready!(service);
-    ntex::forward_poll_shutdown!(service);
+    ntex::forward_ready!(service);
+    ntex::forward_shutdown!(service);
 
     async fn call(
         &self,

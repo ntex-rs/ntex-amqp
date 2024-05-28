@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
-use std::{cell, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{
+    cell, future::poll_fn, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll,
+};
 
-use ntex::service::{Pipeline, PipelineCall, Service, ServiceCtx};
+use ntex::service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
-use ntex::util::{ready, BoxFuture, Either};
+use ntex::util::{ready, Either};
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
 
 use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
@@ -24,13 +26,12 @@ impl ControlQueue {
 }
 
 /// Amqp server dispatcher service.
-pub(crate) struct Dispatcher<Sr, Ctl: Service<ControlFrame>> {
+pub(crate) struct Dispatcher<Sr: Service<types::Message>, Ctl: Service<ControlFrame>> {
     sink: Connection,
-    service: Pipeline<Sr>,
-    ctl_service: Pipeline<Ctl>,
+    service: PipelineBinding<Sr, types::Message>,
+    ctl_service: PipelineBinding<Ctl, ControlFrame>,
     ctl_fut: cell::RefCell<Vec<(ControlFrame, PipelineCall<Ctl, ControlFrame>)>>,
     ctl_queue: Rc<ControlQueue>,
-    shutdown: cell::RefCell<Option<BoxFuture<'static, ()>>>,
     expire: Sleep,
     idle_timeout: Millis,
 }
@@ -51,17 +52,16 @@ where
         Dispatcher {
             sink,
             idle_timeout,
-            service,
-            ctl_service,
             ctl_queue,
+            service: service.bind(),
+            ctl_service: ctl_service.bind(),
             ctl_fut: cell::RefCell::new(Vec::new()),
-            shutdown: cell::RefCell::new(None),
             expire: sleep(idle_timeout),
         }
     }
 
     fn call_control_service(&self, frame: ControlFrame) {
-        let fut = self.ctl_service.call_static(frame.clone());
+        let fut = self.ctl_service.call(frame.clone());
         self.ctl_fut.borrow_mut().push((frame, fut));
         self.ctl_queue.waker.wake();
     }
@@ -152,7 +152,7 @@ where
                     let frm = frm.clone();
                     let fut = self
                         .service
-                        .call_static(types::Message::Attached(frm.clone(), link.clone()));
+                        .call(types::Message::Attached(frm.clone(), link.clone()));
                     let _ = ntex::rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
@@ -200,80 +200,72 @@ where
     type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
 
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.ctl_queue.waker.register(cx.waker());
+    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
+        poll_fn(|cx| {
+            self.ctl_queue.waker.register(cx.waker());
 
-        // idle timeout
-        self.handle_idle_timeout(cx);
+            // idle timeout
+            self.handle_idle_timeout(cx);
 
-        // process control frame
-        let mut control_fut_pending = !self.handle_control_fut(cx)?;
+            // process control frame
+            let mut control_fut_pending = !self.handle_control_fut(cx)?;
 
-        // check readiness
-        let service_poll = self.service.poll_ready(cx).map_err(|err| {
-            let err = Error::from(err);
-            log::error!(
-                "{}: Publish service readiness check failed: {:?}",
-                self.sink.tag(),
-                err
-            );
-            let _ = self.sink.close_with_error(err);
-            AmqpDispatcherError::Service
-        })?;
+            // check readiness
+            let service_poll = self.service.poll_ready(cx).map_err(|err| {
+                let err = Error::from(err);
+                log::error!(
+                    "{}: Publish service readiness check failed: {:?}",
+                    self.sink.tag(),
+                    err
+                );
+                let _ = self.sink.close_with_error(err);
+                AmqpDispatcherError::Service
+            })?;
 
-        let ctl_service_poll = self.ctl_service.poll_ready(cx).map_err(|err| {
-            let err = Error::from(err);
-            log::error!(
-                "{}: Control service readiness check failed: {:?}",
-                self.sink.tag(),
-                err
-            );
-            let _ = self.sink.close_with_error(err);
-            AmqpDispatcherError::Service
-        })?;
+            let ctl_service_poll = self.ctl_service.poll_ready(cx).map_err(|err| {
+                let err = Error::from(err);
+                log::error!(
+                    "{}: Control service readiness check failed: {:?}",
+                    self.sink.tag(),
+                    err
+                );
+                let _ = self.sink.close_with_error(err);
+                AmqpDispatcherError::Service
+            })?;
 
-        // enqueue pending control frames
-        if ctl_service_poll.is_ready() && !self.ctl_queue.pending.borrow().is_empty() {
-            self.ctl_queue
-                .pending
-                .borrow_mut()
-                .drain(..)
-                .for_each(|frame| {
-                    self.call_control_service(frame);
-                });
-            control_fut_pending = true;
-        }
+            // enqueue pending control frames
+            if ctl_service_poll.is_ready() && !self.ctl_queue.pending.borrow().is_empty() {
+                self.ctl_queue
+                    .pending
+                    .borrow_mut()
+                    .drain(..)
+                    .for_each(|frame| {
+                        self.call_control_service(frame);
+                    });
+                control_fut_pending = true;
+            }
 
-        if control_fut_pending || service_poll.is_pending() || ctl_service_poll.is_pending() {
-            Poll::Pending
-        } else {
-            Poll::Ready(Ok(()))
-        }
+            if control_fut_pending || service_poll.is_pending() || ctl_service_poll.is_pending() {
+                Poll::Pending
+            } else {
+                Poll::Ready(Ok(()))
+            }
+        })
+        .await
     }
 
-    fn poll_shutdown(&self, cx: &mut Context<'_>) -> Poll<()> {
-        let mut shutdown = self.shutdown.borrow_mut();
-        if !shutdown.is_some() {
-            self.sink
-                .0
-                .get_mut()
-                .set_error(AmqpProtocolError::Disconnected);
-            let fut = self
-                .ctl_service
-                .call_static(ControlFrame::new_kind(ControlFrameKind::Closed));
-            *shutdown = Some(Box::pin(async move {
-                let _ = fut.await;
-            }));
-        }
+    async fn shutdown(&self) {
+        self.sink
+            .0
+            .get_mut()
+            .set_error(AmqpProtocolError::Disconnected);
+        let _ = self
+            .ctl_service
+            .call(ControlFrame::new_kind(ControlFrameKind::Closed))
+            .await;
 
-        let res0 = shutdown.as_mut().expect("guard above").as_mut().poll(cx);
-        let res1 = self.service.poll_shutdown(cx);
-        let res2 = self.ctl_service.poll_shutdown(cx);
-        if res0.is_pending() || res1.is_pending() || res2.is_pending() {
-            Poll::Pending
-        } else {
-            Poll::Ready(())
-        }
+        self.service.shutdown().await;
+        self.ctl_service.shutdown().await;
     }
 
     async fn call(
@@ -334,7 +326,7 @@ where
                     }
                     types::Action::DetachReceiver(link, frm) => {
                         let lnk = link.clone();
-                        let fut = self.service.call_static(types::Message::Detached(lnk));
+                        let fut = self.service.call(types::Message::Detached(lnk));
                         let _ = spawn(async move {
                             let _ = fut.await;
                         });
@@ -352,9 +344,7 @@ where
                             })
                             .collect();
 
-                        let fut = self
-                            .service
-                            .call_static(types::Message::DetachedAll(receivers));
+                        let fut = self.service.call(types::Message::DetachedAll(receivers));
                         let _ = spawn(async move {
                             let _ = fut.await;
                         });
