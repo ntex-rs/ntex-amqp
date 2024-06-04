@@ -148,6 +148,7 @@ impl Delivery {
 
     pub async fn wait(&self) -> Result<Option<DeliveryState>, AmqpProtocolError> {
         if self.flags.get().contains(Flags::LOCAL_SETTLED) {
+            log::error!("Delivery {:?} is settled locally", self.id);
             return Ok(None);
         }
 
@@ -166,7 +167,8 @@ impl Delivery {
             inner.tx = Some(tx);
             rx
         } else {
-            return Ok(None);
+            // session ended
+            return Err(AmqpProtocolError::LinkDetached(None));
         };
         if rx.await.is_err() {
             return Err(AmqpProtocolError::ConnectionDropped);
@@ -185,6 +187,9 @@ impl Delivery {
             if let Some(st) = self.check_inner(inner) {
                 return st;
             }
+        } else {
+            // session ended
+            return Err(AmqpProtocolError::LinkDetached(None));
         }
         Ok(None)
     }
