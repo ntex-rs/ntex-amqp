@@ -1,5 +1,9 @@
 # Changes
 
+## [3.0.1] - 2024-06-04
+
+* Better handling "session end" for inflight deliveries
+
 ## [3.0.0] - 2024-05-28
 
 * Use ntex-service 3.0
