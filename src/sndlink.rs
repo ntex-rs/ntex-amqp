@@ -235,7 +235,7 @@ impl SenderLinkInner {
     }
 
     pub(crate) fn remote_detached(&mut self, err: AmqpProtocolError) {
-        log::error!(
+        log::trace!(
             "{}: Detaching sender link {:?} with error {:?}",
             self.session.tag(),
             self.name,
