@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
-use std::{
-    cell, future::poll_fn, future::Future, marker, pin::Pin, rc::Rc, task::Context, task::Poll,
-};
+use std::task::{Context, Poll};
+use std::{cell, cmp, future::poll_fn, future::Future, marker, pin::Pin, rc::Rc};
 
 use ntex::service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
@@ -48,6 +47,7 @@ where
         ctl_service: Pipeline<Ctl>,
         idle_timeout: Millis,
     ) -> Self {
+        let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
         let ctl_queue = sink.get_control_queue().clone();
         Dispatcher {
             sink,

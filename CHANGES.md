@@ -1,5 +1,9 @@
 # Changes
 
+## [3.0.2] - 2024-06-27
+
+* Tune idle timeout
+
 ## [3.0.1] - 2024-06-04
 
 * Better handling "session end" for inflight deliveries
