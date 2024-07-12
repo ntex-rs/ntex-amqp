@@ -148,7 +148,7 @@ impl Delivery {
 
     pub async fn wait(&self) -> Result<Option<DeliveryState>, AmqpProtocolError> {
         if self.flags.get().contains(Flags::LOCAL_SETTLED) {
-            log::error!("Delivery {:?} is settled locally", self.id);
+            log::debug!("Delivery {:?} is settled locally", self.id);
             return Ok(None);
         }
 

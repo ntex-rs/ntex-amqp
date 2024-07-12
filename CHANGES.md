@@ -1,5 +1,9 @@
 # Changes
 
+## [3.0.3] - 2024-07-12
+
+* Tune log levels
+
 ## [3.0.2] - 2024-06-27
 
 * Tune idle timeout

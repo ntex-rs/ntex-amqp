@@ -150,7 +150,7 @@ impl ReceiverLink {
     pub(crate) fn remote_detached(&self, error: Option<Error>) {
         let inner = self.inner.get_mut();
         if let Some(ref error) = error {
-            log::error!(
+            log::warn!(
                 "{}: Receiver link has been closed remotely handle: {:?} name: {:?} error: {:?}",
                 inner.session.tag(),
                 inner.remote_handle,

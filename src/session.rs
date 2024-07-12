@@ -540,7 +540,7 @@ impl SessionInner {
             }
         } else {
             let _ = tx.send(Ok(()));
-            log::error!(
+            log::debug!(
                 "{}: Sender link does not exist while detaching: {}",
                 self.tag(),
                 id
@@ -808,7 +808,7 @@ impl SessionInner {
                     let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
                         *idx
                     } else {
-                        log::error!(
+                        log::debug!(
                             "{}: Transfer's link {:?} is unknown",
                             self.tag(),
                             transfer.handle()
@@ -819,7 +819,7 @@ impl SessionInner {
                     if let Some(link) = self.links.get_mut(idx) {
                         match link {
                             Either::Left(_) => {
-                                log::error!(
+                                log::debug!(
                                     "{}: Got unexpected trasfer from sender link",
                                     self.tag()
                                 );
@@ -827,7 +827,7 @@ impl SessionInner {
                             }
                             Either::Right(link) => match link {
                                 ReceiverLinkState::Opening(_) => {
-                                    log::error!(
+                                    log::debug!(
                                         "{}: Got transfer for opening link: {} -> {}",
                                         self.tag(),
                                         transfer.handle(),
@@ -838,7 +838,7 @@ impl SessionInner {
                                     )))
                                 }
                                 ReceiverLinkState::OpeningLocal(_) => {
-                                    log::error!(
+                                    log::debug!(
                                         "{}: Got transfer for opening link: {} -> {}",
                                         self.tag(),
                                         transfer.handle(),
@@ -862,7 +862,7 @@ impl SessionInner {
                 }
                 Frame::Detach(detach) => Ok(self.handle_detach(detach)),
                 frame => {
-                    log::error!("{}: Unexpected frame: {:?}", self.tag(), frame);
+                    log::debug!("{}: Unexpected frame: {:?}", self.tag(), frame);
                     Ok(Action::None)
                 }
             }
@@ -1011,7 +1011,7 @@ impl SessionInner {
                         true
                     }
                     SenderLinkState::OpeningRemote => {
-                        log::error!(
+                        log::warn!(
                             "{}: Detach frame received for unconfirmed sender link: {:?}",
                             self.tag(),
                             frame

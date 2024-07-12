@@ -365,11 +365,11 @@ impl ConnectionInner {
                 }
             } else {
                 // TODO: send error response
-                log::error!("{}: Begin received for channel not in opening state. local channel: {} (remote channel: {})", self.io.tag(), local_channel_id, remote_channel_id);
+                log::warn!("{}: Begin received for channel not in opening state. local channel: {} (remote channel: {})", self.io.tag(), local_channel_id, remote_channel_id);
             }
         } else {
             // TODO: rogue begin right now - do nothing. in future might indicate incoming attach
-            log::error!(
+            log::warn!(
                 "{}: Begin received for unknown local channel: {} (remote channel: {})",
                 self.io.tag(),
                 local_channel_id,
