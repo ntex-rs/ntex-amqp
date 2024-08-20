@@ -1,5 +1,9 @@
 # Changes
 
+## [3.1.0] - 2024-0x-xx
+
+* Use derive_more 1.0
+
 ## [3.0.3] - 2024-07-12
 
 * Tune log levels

@@ -54,13 +54,13 @@ pub use self::definitions::*;
 
 #[derive(Debug, Eq, PartialEq, Clone, From, Display)]
 pub enum MessageId {
-    #[display(fmt = "{}", _0)]
+    #[display("{}", _0)]
     Ulong(u64),
-    #[display(fmt = "{}", _0)]
+    #[display("{}", _0)]
     Uuid(Uuid),
-    #[display(fmt = "{:?}", _0)]
+    #[display("{:?}", _0)]
     Binary(Bytes),
-    #[display(fmt = "{}", _0)]
+    #[display("{}", _0)]
     String(ByteString),
 }
 

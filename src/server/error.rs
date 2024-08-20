@@ -7,25 +7,25 @@ use crate::error::{AmqpDispatcherError, AmqpProtocolError};
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display)]
 pub enum ServerError<E> {
-    #[display(fmt = "Message handler service error")]
+    #[display("Message handler service error")]
     /// Message handler service error
     Service(E),
-    #[display(fmt = "Handshake error: {}", _0)]
+    #[display("Handshake error: {}", _0)]
     /// Amqp handshake error
     Handshake(HandshakeError),
     /// Amqp codec error
-    #[display(fmt = "Amqp codec error: {:?}", _0)]
+    #[display("Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
     /// Amqp protocol error
-    #[display(fmt = "Amqp protocol error: {:?}", _0)]
+    #[display("Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
     /// Dispatcher error
     Dispatcher(AmqpDispatcherError),
     /// Control service init error
-    #[display(fmt = "Control service init error")]
+    #[display("Control service init error")]
     ControlServiceError,
     /// Publish service init error
-    #[display(fmt = "Publish service init error")]
+    #[display("Publish service init error")]
     PublishServiceError,
 }
 
@@ -51,31 +51,31 @@ impl<E> From<HandshakeError> for ServerError<E> {
 #[derive(Debug, Display, From)]
 pub enum HandshakeError {
     /// Amqp codec error
-    #[display(fmt = "Amqp codec error: {:?}", _0)]
+    #[display("Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
     /// Handshake timeout
-    #[display(fmt = "Handshake timeout")]
+    #[display("Handshake timeout")]
     Timeout,
     /// Protocol negotiation error
-    #[display(fmt = "Peer disconnected")]
+    #[display("Peer disconnected")]
     ProtocolNegotiation(ProtocolIdError),
     #[from(ignore)]
     /// Expected open frame
-    #[display(fmt = "Expect open frame, got: {:?}", _0)]
+    #[display("Expect open frame, got: {:?}", _0)]
     ExpectOpenFrame(AmqpFrame),
-    #[display(fmt = "Unexpected frame, got: {:?}", _0)]
+    #[display("Unexpected frame, got: {:?}", _0)]
     Unexpected(protocol::Frame),
-    #[display(fmt = "Unexpected sasl frame: {:?}", _0)]
+    #[display("Unexpected sasl frame: {:?}", _0)]
     UnexpectedSaslFrame(Box<SaslFrame>),
-    #[display(fmt = "Unexpected sasl frame body: {:?}", _0)]
+    #[display("Unexpected sasl frame body: {:?}", _0)]
     UnexpectedSaslBodyFrame(Box<protocol::SaslFrameBody>),
-    #[display(fmt = "Unsupported sasl mechanism: {}", _0)]
+    #[display("Unsupported sasl mechanism: {}", _0)]
     UnsupportedSaslMechanism(String),
     /// Sasl error code
-    #[display(fmt = "Sasl error code: {:?}", _0)]
+    #[display("Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
     /// Unexpected io error, peer disconnected
-    #[display(fmt = "Peer disconnected, with error {:?}", _0)]
+    #[display("Peer disconnected, with error {:?}", _0)]
     Disconnected(Option<std::io::Error>),
 }
 

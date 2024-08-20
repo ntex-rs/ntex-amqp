@@ -9,14 +9,14 @@ use crate::{codec::protocol, types::Outcome};
 /// Errors which can occur when attempting to handle amqp connection.
 #[derive(Debug, Display, From)]
 pub enum AmqpDispatcherError {
-    #[display(fmt = "Service error")]
+    #[display("Service error")]
     /// Service error
     Service,
     /// Amqp protocol error
-    #[display(fmt = "Amqp protocol error: {:?}", _0)]
+    #[display("Amqp protocol error: {:?}", _0)]
     Protocol(AmqpProtocolError),
     /// Peer disconnect
-    #[display(fmt = "Peer disconnected error: {:?}", _0)]
+    #[display("Peer disconnected error: {:?}", _0)]
     Disconnected(Option<io::Error>),
 }
 
@@ -43,19 +43,19 @@ pub enum AmqpProtocolError {
     KeepAliveTimeout,
     ReadTimeout,
     Disconnected,
-    #[display(fmt = "Unknown session: {:?}", _0)]
+    #[display("Unknown session: {:?}", _0)]
     UnknownSession(protocol::Frame),
-    #[display(fmt = "Unknown link in session: {:?}", _0)]
+    #[display("Unknown link in session: {:?}", _0)]
     UnknownLink(protocol::Frame),
-    #[display(fmt = "Connection closed, error: {:?}", _0)]
+    #[display("Connection closed, error: {:?}", _0)]
     Closed(Option<protocol::Error>),
-    #[display(fmt = "Session ended, error: {:?}", _0)]
+    #[display("Session ended, error: {:?}", _0)]
     SessionEnded(Option<protocol::Error>),
-    #[display(fmt = "Link detached, error: {:?}", _0)]
+    #[display("Link detached, error: {:?}", _0)]
     LinkDetached(Option<protocol::Error>),
-    #[display(fmt = "Unexpected frame for opening state, got: {:?}", _0)]
+    #[display("Unexpected frame for opening state, got: {:?}", _0)]
     UnexpectedOpeningState(protocol::Frame),
-    #[display(fmt = "Unexpected frame: {:?}", _0)]
+    #[display("Unexpected frame: {:?}", _0)]
     Unexpected(protocol::Frame),
     ConnectionDropped,
 }
@@ -69,7 +69,7 @@ impl From<AmqpCodecError> for AmqpProtocolError {
 }
 
 #[derive(Clone, Debug, Display)]
-#[display(fmt = "Amqp error: {:?} {:?} ({:?})", err, description, info)]
+#[display("Amqp error: {:?} {:?} ({:?})", err, description, info)]
 pub struct AmqpError {
     err: Either<protocol::AmqpError, protocol::ErrorCondition>,
     description: Option<ByteString>,
@@ -163,7 +163,7 @@ impl TryFrom<AmqpError> for Outcome {
 }
 
 #[derive(Clone, Debug, Display)]
-#[display(fmt = "Link error: {:?} {:?} ({:?})", err, description, info)]
+#[display("Link error: {:?} {:?} ({:?})", err, description, info)]
 pub struct LinkError {
     err: Either<protocol::LinkError, protocol::ErrorCondition>,
     description: Option<ByteString>,

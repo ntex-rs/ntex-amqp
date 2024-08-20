@@ -6,25 +6,25 @@ use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError};
 #[derive(Debug, Display, From)]
 pub enum ConnectError {
     /// Amqp codec error
-    #[display(fmt = "Amqp codec error: {:?}", _0)]
+    #[display("Amqp codec error: {:?}", _0)]
     Codec(AmqpCodecError),
     /// Handshake timeout
-    #[display(fmt = "Handshake timeout")]
+    #[display("Handshake timeout")]
     HandshakeTimeout,
     /// Protocol negotiation error
-    #[display(fmt = "Peer disconnected")]
+    #[display("Peer disconnected")]
     ProtocolNegotiation(ProtocolIdError),
     #[from(ignore)]
     /// Expected open frame
-    #[display(fmt = "Expect open frame, got: {:?}", _0)]
+    #[display("Expect open frame, got: {:?}", _0)]
     ExpectOpenFrame(Box<AmqpFrame>),
     /// Peer disconnected
-    #[display(fmt = "Sasl error code: {:?}", _0)]
+    #[display("Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
-    #[display(fmt = "Peer disconnected")]
+    #[display("Peer disconnected")]
     Disconnected,
     /// Connect error
-    #[display(fmt = "Connect error: {}", _0)]
+    #[display("Connect error: {}", _0)]
     Connect(ntex::connect::ConnectError),
     /// Unexpected io error
     Io(std::io::Error),

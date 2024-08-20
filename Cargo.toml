@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "3.0.3"
+version = "3.1.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -10,6 +10,7 @@ keywords = ["AMQP", "IoT", "messaging"]
 license = "MIT OR Apache-2.0"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
 edition = "2021"
+rust-version = "1.75"
 
 [workspace]
 members = [
@@ -28,11 +29,11 @@ ntex = "2"
 ntex-amqp-codec = "0.9"
 
 bitflags = "2"
-derive_more = "0.99"
 log = "0.4"
 pin-project-lite = "0.2"
 slab = "0.4"
 uuid = { version = "1", features = ["v4"] }
+derive_more = { version = "1", features = ["display", "from"] }
 
 [dev-dependencies]
 env_logger = "0.11"

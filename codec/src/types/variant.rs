@@ -63,7 +63,7 @@ pub enum Variant {
     Uuid(Uuid),
 
     /// A sequence of octets.
-    #[display(fmt = "Binary({:?})", _0)]
+    #[display("Binary({:?})", _0)]
     Binary(Bytes),
 
     /// A sequence of Unicode characters
@@ -76,18 +76,18 @@ pub enum Variant {
     StaticSymbol(StaticSymbol),
 
     /// List
-    #[display(fmt = "List({:?})", _0)]
+    #[display("List({:?})", _0)]
     List(List),
 
     /// Map
     Map(VariantMap),
 
     /// Array
-    #[display(fmt = "Array({:?})", _0)]
+    #[display("Array({:?})", _0)]
     Array(Array),
 
     /// Described value
-    #[display(fmt = "Described{:?}", _0)]
+    #[display("Described{:?}", _0)]
     Described((Descriptor, Box<Variant>)),
 }
 
@@ -171,7 +171,7 @@ impl Variant {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Display)]
-#[display(fmt = "{:?}", map)]
+#[display("{:?}", map)]
 pub struct VariantMap {
     pub map: HashMap<Variant, Variant>,
 }
@@ -190,7 +190,7 @@ impl Hash for VariantMap {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Display)]
-#[display(fmt = "{:?}", _0)]
+#[display("{:?}", _0)]
 pub struct VecSymbolMap(pub Vec<(Symbol, Variant)>);
 
 impl Default for VecSymbolMap {
@@ -226,7 +226,7 @@ impl std::ops::DerefMut for VecSymbolMap {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Display)]
-#[display(fmt = "{:?}", _0)]
+#[display("{:?}", _0)]
 pub struct VecStringMap(pub Vec<(Str, Variant)>);
 
 impl Default for VecStringMap {
