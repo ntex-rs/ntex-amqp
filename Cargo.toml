@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "3.1.0"
+version = "3.0.4"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -38,7 +38,6 @@ derive_more = { version = "1", features = ["display", "from"] }
 [dev-dependencies]
 env_logger = "0.11"
 rand = "0.8"
-ntex = { version = "2", features = ["tokio"] }
 ntex-amqp = { path = ".", features = ["frame-trace"] }
 
 [patch.crates-io]

@@ -25,7 +25,9 @@ fn main() {
 
 #[cfg(feature = "from-spec")]
 fn generate_from_spec() {
-    use handlebars::{Handlebars, Helper, RenderContext, RenderError};
+    use handlebars::{
+        Context, Handlebars, Helper, Output, RenderContext, RenderError, RenderErrorReason,
+    };
     use std::env;
     use std::fs::File;
     use std::io::Write;
@@ -47,14 +49,25 @@ fn generate_from_spec() {
     codegen.register_helper(
         "snake",
         Box::new(
-            |h: &Helper, _: &Handlebars, rc: &mut RenderContext| -> Result<(), RenderError> {
-                let value = h
-                    .param(0)
-                    .ok_or_else(|| RenderError::new("Param not found for helper \"snake\""))?;
-                let param = value.value().as_str().ok_or_else(|| {
-                    RenderError::new("Non-string param given to helper \"snake\"")
+            |h: &Helper,
+             _: &Handlebars,
+             _: &Context,
+             _rc: &mut RenderContext,
+             out: &mut dyn Output|
+             -> Result<(), RenderError> {
+                let value = h.param(0).ok_or_else(|| {
+                    RenderErrorReason::ParamNotFoundForName(
+                        "Param not found for helper",
+                        "snake".to_string(),
+                    )
                 })?;
-                rc.writer.write_all(codegen::snake_case(param).as_bytes())?;
+                let param = value.value().as_str().ok_or_else(|| {
+                    RenderErrorReason::ParamNotFoundForName(
+                        "Param not found for helper",
+                        "snake".to_string(),
+                    )
+                })?;
+                out.write(&codegen::snake_case(param))?;
                 Ok(())
             },
         ),
