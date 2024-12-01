@@ -1188,11 +1188,7 @@ impl SessionInner {
 
     pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
         let flow = Flow(Box::new(codec::FlowInner {
-            next_incoming_id: if self.flags.contains(Flags::LOCAL) {
-                Some(self.next_incoming_id)
-            } else {
-                None
-            },
+            next_incoming_id: Some(self.next_incoming_id),
             incoming_window: u32::MAX,
             next_outgoing_id: self.next_outgoing_id,
             outgoing_window: self.remote_incoming_window,

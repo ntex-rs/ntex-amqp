@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "3.0.4"
+version = "3.1.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
