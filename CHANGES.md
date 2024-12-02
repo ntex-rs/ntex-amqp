@@ -1,5 +1,9 @@
 # Changes
 
+## [3.1.0] - 2024-12-01
+
+* Set "next_incoming_id" for Flow frame
+
 ## [3.0.4] - 2024-09-17
 
 * Use derive_more 1.0
