@@ -582,7 +582,9 @@ impl SessionInner {
         }));
         self.post_frame(detach.into());
 
-        self.links.remove(token);
+        if self.links.contains(token) {
+            self.links.remove(token);
+        }
     }
 
     pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
@@ -723,7 +725,9 @@ impl SessionInner {
                     }));
                     self.post_frame(detach.into());
                     let _ = tx.send(Ok(()));
-                    let _ = self.links.remove(id as usize);
+                    if self.links.contains(id as usize) {
+                        let _ = self.links.remove(id as usize);
+                    }
                 }
                 ReceiverLinkState::Established(receiver_link) => {
                     let receiver_link = receiver_link.clone();
@@ -742,7 +746,9 @@ impl SessionInner {
                 }
                 ReceiverLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
-                    let _ = self.links.remove(id as usize);
+                    if self.links.contains(id as usize) {
+                        let _ = self.links.remove(id as usize);
+                    }
                     log::error!(
                         "{}: Unexpected receiver link state: closing - {}",
                         self.tag(),
@@ -1089,7 +1095,9 @@ impl SessionInner {
         };
 
         if remove {
-            self.links.remove(idx);
+            if self.links.contains(idx) {
+                self.links.remove(idx);
+            }
             self.remote_handles.remove(&handle);
         }
         action

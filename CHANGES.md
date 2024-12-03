@@ -1,5 +1,9 @@
 # Changes
 
+## [3.2.1] - 2024-12-03
+
+* Handle unknown links
+
 ## [3.2.0] - 2024-12-03
 
 * Fix control queue handling
