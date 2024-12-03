@@ -1,6 +1,6 @@
-use std::{fmt, io};
+use std::{cell::RefCell, collections::VecDeque, fmt, io};
 
-use ntex::util::Either;
+use ntex::{task::LocalWaker, util::Either};
 use ntex_amqp_codec::protocol;
 
 use crate::cell::Cell;
@@ -70,5 +70,18 @@ impl ControlFrame {
 
     pub fn session(&self) -> Option<Session> {
         self.0.get_ref().session.clone().map(Session::new)
+    }
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct ControlQueue {
+    pub(crate) pending: RefCell<VecDeque<ControlFrame>>,
+    pub(crate) waker: LocalWaker,
+}
+
+impl ControlQueue {
+    pub(crate) fn enqueue_frame(&self, frame: ControlFrame) {
+        self.pending.borrow_mut().push_back(frame);
+        self.waker.wake();
     }
 }

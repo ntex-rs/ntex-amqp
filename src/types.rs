@@ -19,6 +19,7 @@ pub enum Message {
     Transfer(ReceiverLink),
 }
 
+#[derive(Debug)]
 pub(crate) enum Action {
     None,
     AttachSender(SenderLink, Attach),
