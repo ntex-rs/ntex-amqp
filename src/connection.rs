@@ -6,7 +6,7 @@ use ntex::util::{HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame};
-use crate::dispatcher::ControlQueue;
+use crate::control::ControlQueue;
 use crate::session::{Session, SessionInner, INITIAL_NEXT_OUTGOING_ID};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
