@@ -1,5 +1,9 @@
 # Changes
 
+## [3.3.0] - 2024-12-04
+
+* Use updated Service trait
+
 ## [3.2.1] - 2024-12-03
 
 * Handle unknown links

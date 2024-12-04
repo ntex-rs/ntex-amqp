@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "3.2.1"
+version = "3.3.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -25,8 +25,8 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex = "2.9"
-ntex-util = "2.7"
+ntex = "2.10"
+ntex-io = "2.9.1"
 ntex-amqp-codec = "0.9"
 
 bitflags = "2"
