@@ -470,7 +470,7 @@ impl SessionInner {
             handle: token as Handle,
             role: Role::Sender,
             snd_settle_mode: attach.snd_settle_mode(),
-            rcv_settle_mode: ReceiverSettleMode::First,
+            rcv_settle_mode: attach.rcv_settle_mode(),
             source: attach.0.source.clone(),
             target: attach.0.target.clone(),
             unsettled: None,

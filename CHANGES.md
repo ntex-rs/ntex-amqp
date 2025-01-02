@@ -1,5 +1,9 @@
 # Changes
 
+## [3.3.1] - 2025-01-02
+
+* Fix rcv-settle-mode for sender links
+
 ## [3.3.0] - 2024-12-04
 
 * Use updated Service trait
