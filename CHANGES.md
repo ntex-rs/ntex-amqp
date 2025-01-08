@@ -1,5 +1,9 @@
 # Changes
 
+## [3.4.0] - 2025-01-08
+
+* Allow to set Transfer format
+
 ## [3.3.1] - 2025-01-02
 
 * Fix rcv-settle-mode for sender links

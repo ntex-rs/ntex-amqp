@@ -3,8 +3,8 @@ use std::{collections::VecDeque, future::Future};
 use ntex::channel::{condition, oneshot, pool};
 use ntex::util::{BufMut, ByteString, Bytes, Either, PoolRef, Ready};
 use ntex_amqp_codec::protocol::{
-    self as codec, Attach, DeliveryNumber, Error, Flow, ReceiverSettleMode, Role, SenderSettleMode,
-    SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
+    self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
+    SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 
 use crate::delivery::DeliveryBuilder;
@@ -321,6 +321,7 @@ impl SenderLinkInner {
         body: T,
         tag: Option<Bytes>,
         settled: bool,
+        format: Option<MessageFormat>,
     ) -> Result<(DeliveryNumber, Bytes), AmqpProtocolError> {
         if let Some(ref err) = self.error {
             Err(err.clone())
@@ -355,7 +356,7 @@ impl SenderLinkInner {
                 .session
                 .inner
                 .get_mut()
-                .send_transfer(self.id as u32, tag.clone(), body, settled)
+                .send_transfer(self.id as u32, tag.clone(), body, settled, format)
                 .await?;
 
             Ok((id, tag))
