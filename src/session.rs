@@ -6,8 +6,8 @@ use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
     self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, End,
-    Error, Flow, Frame, Handle, ReceiverSettleMode, Role, SenderSettleMode, Source, Transfer,
-    TransferBody, TransferNumber,
+    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Source,
+    Transfer, TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::{AmqpFrame, Encode};
 
@@ -1217,6 +1217,7 @@ impl SessionInner {
         tag: Bytes,
         body: TransferBody,
         settled: bool,
+        format: Option<MessageFormat>,
     ) -> Result<DeliveryNumber, AmqpProtocolError> {
         loop {
             if self.remote_incoming_window == 0 {
@@ -1247,7 +1248,11 @@ impl SessionInner {
         } else {
             None
         };
-        let message_format = body.message_format();
+        let message_format = if format.is_none() {
+            body.message_format()
+        } else {
+            format
+        };
 
         let max_frame_size = self.max_frame_size();
         let max_frame_size = if max_frame_size > 2048 {

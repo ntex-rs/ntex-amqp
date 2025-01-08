@@ -3,7 +3,7 @@ use std::cell::Cell as StdCell;
 use ntex::{channel::pool, util::Bytes};
 use ntex_amqp_codec::protocol::{
     DeliveryNumber, DeliveryState, Disposition, DispositionInner, Error, ErrorCondition, Handle,
-    Rejected, Role, TransferBody,
+    MessageFormat, Rejected, Role, TransferBody,
 };
 use ntex_amqp_codec::types::{Str, Symbol};
 
@@ -292,6 +292,7 @@ pub struct DeliveryBuilder {
     tag: Option<Bytes>,
     settled: bool,
     data: TransferBody,
+    format: Option<MessageFormat>,
     sender: Cell<SenderLinkInner>,
 }
 
@@ -300,6 +301,7 @@ impl DeliveryBuilder {
         Self {
             tag: None,
             settled: false,
+            format: None,
             data,
             sender,
         }
@@ -312,6 +314,11 @@ impl DeliveryBuilder {
 
     pub fn settled(mut self) -> Self {
         self.settled = true;
+        self
+    }
+
+    pub fn format(mut self, fmt: MessageFormat) -> Self {
+        self.format = Some(fmt);
         self
     }
 
@@ -332,7 +339,7 @@ impl DeliveryBuilder {
             let (id, tag) = self
                 .sender
                 .get_mut()
-                .send(self.data, self.tag, self.settled)
+                .send(self.data, self.tag, self.settled, self.format)
                 .await?;
 
             Ok(Delivery {
