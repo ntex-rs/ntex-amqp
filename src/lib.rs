@@ -27,7 +27,7 @@ pub mod types;
 
 pub use self::connection::{Connection, ConnectionRef};
 pub use self::control::{ControlFrame, ControlFrameKind};
-pub use self::delivery::{Delivery, DeliveryBuilder};
+pub use self::delivery::{Delivery, TransferBuilder};
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};
 pub use self::session::Session;
 pub use self::sndlink::{SenderLink, SenderLinkBuilder};

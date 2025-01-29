@@ -288,7 +288,7 @@ impl Drop for DeliveryInner {
     }
 }
 
-pub struct DeliveryBuilder {
+pub struct TransferBuilder {
     tag: Option<Bytes>,
     settled: bool,
     data: TransferBody,
@@ -296,7 +296,7 @@ pub struct DeliveryBuilder {
     sender: Cell<SenderLinkInner>,
 }
 
-impl DeliveryBuilder {
+impl TransferBuilder {
     pub(crate) fn new(data: TransferBody, sender: Cell<SenderLinkInner>) -> Self {
         Self {
             tag: None,

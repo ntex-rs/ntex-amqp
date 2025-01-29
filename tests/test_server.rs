@@ -71,7 +71,7 @@ async fn test_simple() -> std::io::Result<()> {
         .await
         .unwrap();
     let delivery = link
-        .delivery(Bytes::from(b"test".as_ref()))
+        .transfer(Bytes::from(b"test".as_ref()))
         .send()
         .await
         .unwrap();
@@ -79,7 +79,7 @@ async fn test_simple() -> std::io::Result<()> {
     assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
 
     let delivery = link
-        .delivery(Bytes::from(b"test".as_ref()))
+        .transfer(Bytes::from(b"test".as_ref()))
         .settled()
         .send()
         .await
@@ -146,7 +146,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
         .unwrap();
 
     let delivery = link
-        .delivery(Bytes::from(data.clone()))
+        .transfer(Bytes::from(data.clone()))
         .send()
         .await
         .unwrap();
@@ -274,7 +274,7 @@ async fn test_session_end() -> std::io::Result<()> {
         .await
         .unwrap();
     let _delivery = link
-        .delivery(Bytes::from(b"test".as_ref()))
+        .transfer(Bytes::from(b"test".as_ref()))
         .send()
         .await
         .unwrap();
@@ -512,7 +512,8 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
         .unwrap();
 
     let delivery = link
-        .delivery(Bytes::from(b"test".as_ref()))
+        .transfer(Bytes::from(b"test".as_ref()))
+        .format(1)
         .send()
         .await
         .unwrap();
