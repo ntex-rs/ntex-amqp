@@ -7,7 +7,7 @@ use ntex_amqp_codec::protocol::{
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 
-use crate::delivery::DeliveryBuilder;
+use crate::delivery::TransferBuilder;
 use crate::session::{Session, SessionInner};
 use crate::{cell::Cell, error::AmqpProtocolError, Handle};
 
@@ -120,12 +120,22 @@ impl SenderLink {
         self.inner.get_ref().error.as_ref()
     }
 
+    #[doc(hidden)]
+    #[deprecated]
     /// Start delivery process
-    pub fn delivery<T>(&self, body: T) -> DeliveryBuilder
+    pub fn delivery<T>(&self, body: T) -> TransferBuilder
     where
         T: Into<TransferBody>,
     {
-        DeliveryBuilder::new(body.into(), self.inner.clone())
+        self.transfer(body)
+    }
+
+    /// Start delivery process
+    pub fn transfer<T>(&self, body: T) -> TransferBuilder
+    where
+        T: Into<TransferBody>,
+    {
+        TransferBuilder::new(body.into(), self.inner.clone())
     }
 
     /// Close sender link

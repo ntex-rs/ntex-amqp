@@ -139,16 +139,14 @@ where
         }
 
         // handle idle timeout
-        if self.idle_timeout.non_zero() {
-            if self.idle_sleep.poll_elapsed(cx).is_ready() {
-                log::trace!(
-                    "{}: Send keep-alive ping, timeout: {:?} secs",
-                    self.sink.tag(),
-                    self.idle_timeout
-                );
-                self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
-                self.idle_sleep.reset(self.idle_timeout);
-            }
+        if self.idle_timeout.non_zero() && self.idle_sleep.poll_elapsed(cx).is_ready() {
+            log::trace!(
+                "{}: Send keep-alive ping, timeout: {:?} secs",
+                self.sink.tag(),
+                self.idle_timeout
+            );
+            self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
+            self.idle_sleep.reset(self.idle_timeout);
         }
 
         Ok(())
@@ -391,7 +389,7 @@ pin_project_lite::pin_project! {
     }
 }
 
-impl<'f, F, E> Future for ServiceResult<'f, F, E>
+impl<F, E> Future for ServiceResult<'_, F, E>
 where
     F: Future<Output = Result<(), E>>,
     E: Into<Error>,

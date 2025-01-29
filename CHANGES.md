@@ -1,5 +1,9 @@
 # Changes
 
+## [3.5.0] - 2025-01-29
+
+* Rename DeliveryBuilder to TransferBuilder
+
 ## [3.4.0] - 2025-01-08
 
 * Allow to set Transfer format

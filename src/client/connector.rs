@@ -140,11 +140,10 @@ where
 {
     /// Connect to amqp server
     pub async fn connect(&self, address: A) -> Result<Client, ConnectError> {
-        let fut = timeout_checked(self.config.handshake_timeout, self._connect(address));
-        match fut.await {
-            Ok(res) => res.map_err(From::from),
-            Err(_) => Err(ConnectError::HandshakeTimeout),
-        }
+        timeout_checked(self.config.handshake_timeout, self._connect(address))
+            .await
+            .map_err(|_| ConnectError::HandshakeTimeout)
+            .and_then(|res| res)
     }
 
     /// Negotiate amqp protocol over opened socket
@@ -168,14 +167,13 @@ where
 
     /// Connect to amqp server
     pub async fn connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
-        let fut = timeout_checked(
+        timeout_checked(
             self.config.handshake_timeout,
             self._connect_sasl(addr, auth),
-        );
-        match fut.await {
-            Ok(res) => res.map_err(From::from),
-            Err(_) => Err(ConnectError::HandshakeTimeout),
-        }
+        )
+        .await
+        .map_err(|_| ConnectError::HandshakeTimeout)
+        .and_then(|res| res)
     }
 
     /// Negotiate amqp sasl protocol over opened socket
