@@ -15,26 +15,28 @@ jobs:
     runs-on: macOS-latest
 
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
 
       - name: Install ${{ matrix.version }}
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: ${{ matrix.version }}-aarch64-apple-darwin
-          profile: minimal
-          override: true
+          toolchain: ${{ matrix.version }}-x86_64-unknown-linux-gnu
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
 
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
-          key: ${{ matrix.version }}-aarch64-apple-darwin-cargo-registry-trimmed-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-registry-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo index
         uses: actions/cache@v4
         with:
           path: ~/.cargo/git
-          key: ${{ matrix.version }}-aarch64-apple-darwin-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
         uses: actions-rs/cargo@v1
