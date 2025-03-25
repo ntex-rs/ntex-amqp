@@ -37,6 +37,15 @@ impl<A, T> Connector<A, T>
 where
     A: Address,
 {
+    /// Modify client configuration
+    pub fn config<F>(&mut self, f: F) -> &mut Self
+    where
+        F: FnOnce(&mut Configuration),
+    {
+        f(&mut self.config);
+        self
+    }
+
     /// The channel-max value is the highest channel number that
     /// may be used on the Connection. This value plus one is the maximum
     /// number of Sessions that can be simultaneously active on the Connection.

@@ -1,5 +1,9 @@
 # Changes
 
+## [3.5.2] - 2025-03-2x
+
+* Allow to change client config
+
 ## [3.5.1] - 2025-03-25
 
 * Allow to provide offered/desired capabilities
