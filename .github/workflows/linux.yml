@@ -23,7 +23,6 @@ jobs:
         with:
           toolchain: ${{ matrix.version }}-x86_64-unknown-linux-gnu
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 

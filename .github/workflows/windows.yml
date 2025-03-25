@@ -23,29 +23,27 @@ jobs:
       - name: Install ${{ matrix.version }}
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: ${{ matrix.version }}-x86_64-unknown-linux-gnu
-
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+          toolchain: ${{ matrix.version }}-x86_64-pc-windows-msvc
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed\x64-windows\
+          key: x86_64-pc-windows-msvc-openssl
 
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
-          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-registry-trimmed-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.version }}-x86_64-pc-windows-msvc-cargo-registry-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo index
         uses: actions/cache@v4
         with:
           path: ~/.cargo/git
-          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
-
-      # - name: Cache vcpkg
-      #   uses: actions/cache@v1
-      #   with:
-      #     path: C:\vcpkg\installed\x64-windows\
-      #     key: x86_64-pc-windows-msvc-openssl
+          key: ${{ matrix.version }}-x86_64-pc-windows-msvc-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install OpenSSL
         run: |
