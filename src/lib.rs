@@ -5,7 +5,8 @@
 extern crate derive_more;
 
 use ntex::{io::DispatcherConfig, time::Seconds, util::ByteString};
-use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner};
+use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner, Symbols};
+use ntex_amqp_codec::types::Symbol;
 use uuid::Uuid;
 
 mod cell;
@@ -44,6 +45,8 @@ pub struct Configuration {
     pub channel_max: u16,
     pub idle_time_out: Milliseconds,
     pub hostname: Option<ByteString>,
+    pub offered_capabilities: Option<Symbols>,
+    pub desired_capabilities: Option<Symbols>,
     pub(crate) max_size: usize,
     pub(crate) disp_config: DispatcherConfig,
     pub(crate) handshake_timeout: Seconds,
@@ -71,6 +74,8 @@ impl Configuration {
             idle_time_out: 120_000,
             hostname: None,
             handshake_timeout: Seconds(5),
+            offered_capabilities: None,
+            desired_capabilities: None,
         }
     }
 
@@ -111,6 +116,18 @@ impl Configuration {
     /// Hostname is not set by default
     pub fn hostname(&mut self, hostname: &str) -> &mut Self {
         self.hostname = Some(ByteString::from(hostname));
+        self
+    }
+
+    /// Set offered capabilities
+    pub fn offered_capabilities(&mut self, caps: Symbols) -> &mut Self {
+        self.offered_capabilities = Some(caps);
+        self
+    }
+
+    /// Set desired capabilities
+    pub fn desired_capabilities(&mut self, caps: Symbols) -> &mut Self {
+        self.desired_capabilities = Some(caps);
         self
     }
 
@@ -172,6 +189,24 @@ impl Configuration {
         self
     }
 
+    /// Get offered capabilities
+    pub fn get_offered_capabilities(&self) -> &[Symbol] {
+        if let Some(caps) = &self.offered_capabilities {
+            &caps.0
+        } else {
+            &[]
+        }
+    }
+
+    /// Get desired capabilities
+    pub fn get_desired_capabilities(&self) -> &[Symbol] {
+        if let Some(caps) = &self.desired_capabilities {
+            &caps.0
+        } else {
+            &[]
+        }
+    }
+
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
         Open(Box::new(OpenInner {
@@ -186,8 +221,8 @@ impl Configuration {
             },
             outgoing_locales: None,
             incoming_locales: None,
-            offered_capabilities: None,
-            desired_capabilities: None,
+            offered_capabilities: self.offered_capabilities.clone(),
+            desired_capabilities: self.desired_capabilities.clone(),
             properties: None,
         }))
     }
@@ -209,6 +244,8 @@ impl Configuration {
             max_size: self.max_size,
             disp_config: self.disp_config.clone(),
             handshake_timeout: self.handshake_timeout,
+            offered_capabilities: open.0.offered_capabilities.clone(),
+            desired_capabilities: open.0.desired_capabilities.clone(),
         }
     }
 }

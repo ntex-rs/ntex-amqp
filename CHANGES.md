@@ -1,5 +1,9 @@
 # Changes
 
+## [3.5.1] - 2025-03-25
+
+* Allow to provide offered/desired capabilities
+
 ## [3.5.0] - 2025-01-29
 
 * Rename DeliveryBuilder to TransferBuilder
