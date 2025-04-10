@@ -8,6 +8,7 @@ use crate::error::AmqpProtocolError;
 use crate::rcvlink::ReceiverLink;
 use crate::session::{Session, SessionInner};
 use crate::sndlink::SenderLink;
+use crate::types::Wrapper;
 
 pub struct ControlFrame(pub(super) Cell<FrameInner>);
 
@@ -26,8 +27,8 @@ impl fmt::Debug for ControlFrame {
 
 #[derive(Debug)]
 pub enum ControlFrameKind {
-    AttachSender(protocol::Attach, SenderLink),
-    AttachReceiver(protocol::Attach, ReceiverLink),
+    AttachSender(protocol::Attach, Wrapper<protocol::Attach>, SenderLink),
+    AttachReceiver(protocol::Attach, Wrapper<protocol::Attach>, ReceiverLink),
     Flow(protocol::Flow, SenderLink),
     LocalDetachSender(protocol::Detach, SenderLink),
     RemoteDetachSender(protocol::Detach, SenderLink),

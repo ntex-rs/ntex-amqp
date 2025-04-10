@@ -409,9 +409,29 @@ impl SessionInner {
     }
 
     /// Initialize creation of remote sender link
-    pub(crate) fn new_remote_sender(&mut self) -> usize {
-        self.links
-            .insert(Either::Left(SenderLinkState::OpeningRemote))
+    pub(crate) fn new_remote_sender(&mut self, attach: &Attach) -> (usize, Attach) {
+        let id = self
+            .links
+            .insert(Either::Left(SenderLinkState::OpeningRemote));
+
+        let attach = Attach(Box::new(codec::AttachInner {
+            name: attach.0.name.clone(),
+            handle: id as Handle,
+            role: Role::Sender,
+            snd_settle_mode: attach.snd_settle_mode(),
+            rcv_settle_mode: attach.rcv_settle_mode(),
+            source: attach.0.source.clone(),
+            target: attach.0.target.clone(),
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: Some(attach.initial_delivery_count().unwrap_or(0)),
+            max_message_size: None,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        }));
+
+        (id, attach)
     }
 
     /// Open sender link
@@ -442,6 +462,7 @@ impl SessionInner {
     pub(crate) fn attach_remote_sender_link(
         &mut self,
         attach: &Attach,
+        mut response: Attach,
         link: Cell<SenderLinkInner>,
     ) -> SenderLink {
         log::trace!(
@@ -465,24 +486,10 @@ impl SessionInner {
             SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
         );
 
-        let attach = Attach(Box::new(codec::AttachInner {
-            name: attach.0.name.clone(),
-            handle: token as Handle,
-            role: Role::Sender,
-            snd_settle_mode: attach.snd_settle_mode(),
-            rcv_settle_mode: attach.rcv_settle_mode(),
-            source: attach.0.source.clone(),
-            target: attach.0.target.clone(),
-            unsettled: None,
-            incomplete_unsettled: false,
-            initial_delivery_count: Some(attach.initial_delivery_count().unwrap_or(0)),
-            max_message_size: link.max_message_size().map(|v| v as u64),
-            offered_capabilities: None,
-            desired_capabilities: None,
-            properties: None,
-        }));
-        self.post_frame(attach.into());
+        *response.handle_mut() = token as Handle;
+        *response.max_message_size_mut() = link.max_message_size().map(|v| v as u64);
 
+        self.post_frame(response.into());
         SenderLink::new(link)
     }
 
@@ -612,7 +619,7 @@ impl SessionInner {
         &mut self,
         cell: Cell<SessionInner>,
         attach: &Attach,
-    ) -> ReceiverLink {
+    ) -> (Attach, ReceiverLink) {
         let handle = attach.handle();
         let entry = self.links.vacant_entry();
         let token = entry.key();
@@ -623,7 +630,25 @@ impl SessionInner {
             attach.source().cloned(),
         ))))));
         self.remote_handles.insert(handle, token);
-        ReceiverLink::new(inner)
+
+        let response = Attach(Box::new(codec::AttachInner {
+            name: attach.0.name.clone(),
+            handle: token as Handle,
+            role: Role::Receiver,
+            snd_settle_mode: attach.snd_settle_mode(),
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: attach.0.source.clone(),
+            target: attach.0.target.clone(),
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: Some(0),
+            offered_capabilities: None,
+            desired_capabilities: None,
+            max_message_size: None,
+            properties: None,
+        }));
+
+        (response, ReceiverLink::new(inner))
     }
 
     pub(crate) fn attach_local_receiver_link(
@@ -656,30 +681,15 @@ impl SessionInner {
     pub(crate) fn confirm_receiver_link(
         &mut self,
         token: Handle,
-        attach: &Attach,
+        mut response: Attach,
         max_message_size: Option<u64>,
     ) {
         if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
             if let ReceiverLinkState::Opening(l) = link {
                 if let Some((l, _)) = l.take() {
-                    let attach = Attach(Box::new(codec::AttachInner {
-                        max_message_size,
-                        name: attach.0.name.clone(),
-                        handle: token as Handle,
-                        role: Role::Receiver,
-                        snd_settle_mode: attach.snd_settle_mode(),
-                        rcv_settle_mode: ReceiverSettleMode::First,
-                        source: attach.0.source.clone(),
-                        target: attach.0.target.clone(),
-                        unsettled: None,
-                        incomplete_unsettled: false,
-                        initial_delivery_count: Some(0),
-                        offered_capabilities: None,
-                        desired_capabilities: None,
-                        properties: None,
-                    }));
+                    *response.max_message_size_mut() = max_message_size;
                     *link = ReceiverLinkState::Established(EstablishedReceiverLink::new(l));
-                    self.post_frame(attach.into());
+                    self.post_frame(response.into());
                     return;
                 }
             }

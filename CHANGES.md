@@ -1,6 +1,10 @@
 # Changes
 
-## [3.5.2] - 2025-03-2x
+## [3.5.3] - 2025-04-10
+
+* Allow to change response Attach frame
+
+## [3.5.2] - 2025-04-03
 
 * Allow to change client config
 

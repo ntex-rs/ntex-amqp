@@ -458,20 +458,20 @@ impl ConnectionInner {
                         match attach.0.role {
                             Role::Receiver => {
                                 // remotly opened sender link
-                                let id = session.get_mut().new_remote_sender();
+                                let (id, response) = session.get_mut().new_remote_sender(&attach);
                                 let link = SenderLink::new(Cell::new(SenderLinkInner::with(
                                     id,
                                     &attach,
                                     session.clone(),
                                 )));
-                                Ok(Action::AttachSender(link, attach))
+                                Ok(Action::AttachSender(link, attach, response))
                             }
                             Role::Sender => {
                                 // receiver link
-                                let link = session
+                                let (response, link) = session
                                     .get_mut()
                                     .attach_remote_receiver_link(session.clone(), &attach);
-                                Ok(Action::AttachReceiver(link, attach))
+                                Ok(Action::AttachReceiver(link, attach, response))
                             }
                         }
                     }

@@ -204,16 +204,16 @@ where
                             ControlFrameKind::Flow(frm, link.clone()),
                         ));
                     }
-                    types::Action::AttachSender(link, frame) => {
+                    types::Action::AttachSender(link, pfrm, frame) => {
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::AttachSender(frame, link),
+                            ControlFrameKind::AttachSender(frame, types::Wrapper::new(pfrm), link),
                         ));
                     }
-                    types::Action::AttachReceiver(link, frm) => {
+                    types::Action::AttachReceiver(link, pfrm, frm) => {
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
-                            ControlFrameKind::AttachReceiver(frm, link),
+                            ControlFrameKind::AttachReceiver(frm, types::Wrapper::new(pfrm), link),
                         ));
                     }
                     types::Action::DetachSender(link, frm) => {
@@ -302,10 +302,10 @@ where
     ) -> Result<(), AmqpDispatcherError> {
         if let Some(err) = err {
             match &frame.0.get_mut().kind {
-                ControlFrameKind::AttachReceiver(_, ref link) => {
+                ControlFrameKind::AttachReceiver(_, _, ref link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::AttachSender(ref frm, ref link) => {
+                ControlFrameKind::AttachSender(ref frm, _, ref link) => {
                     frame
                         .session_cell()
                         .get_mut()
@@ -334,27 +334,29 @@ where
             }
         } else {
             match frame.0.get_mut().kind {
-                ControlFrameKind::AttachReceiver(ref frm, ref link) => {
+                ControlFrameKind::AttachReceiver(ref frm, ref mut pfrm, ref link) => {
                     let link = link.clone();
-                    let frm = frm.clone();
                     let fut = self
                         .service
                         .call(types::Message::Attached(frm.clone(), link.clone()));
+                    let response = pfrm.take();
+
                     let _ = ntex::rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
                             let _ = link.close_with_error(Error::from(err)).await;
                         } else {
-                            link.confirm_receiver_link(&frm);
+                            link.confirm_receiver_link(response);
                             link.set_link_credit(50);
                         }
                     });
                 }
-                ControlFrameKind::AttachSender(ref frm, ref link) => {
-                    frame
-                        .session_cell()
-                        .get_mut()
-                        .attach_remote_sender_link(frm, link.inner.clone());
+                ControlFrameKind::AttachSender(ref frm, ref mut pfrm, ref link) => {
+                    frame.session_cell().get_mut().attach_remote_sender_link(
+                        frm,
+                        pfrm.take(),
+                        link.inner.clone(),
+                    );
                 }
                 ControlFrameKind::Flow(ref frm, ref link) => {
                     frame.session_cell().get_mut().handle_flow(frm, Some(link));

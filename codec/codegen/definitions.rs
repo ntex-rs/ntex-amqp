@@ -355,8 +355,8 @@ impl {{list.name}} {
 
     {{#if field.optional}}
     #[inline]
-    pub fn {{field.name}}_mut(&mut self) -> Option<&mut {{field.ty}}> {
-        self.{{list.inner}}{{field.name}}.as_mut()
+    pub fn {{field.name}}_mut(&mut self) -> &mut Option<{{field.ty}}> {
+        &mut self.{{list.inner}}{{field.name}}
     }
     {{else}}
     #[inline]

@@ -7,7 +7,8 @@ use ntex::util::{ByteString, Bytes, BytesMut, PoolRef, Stream};
 use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
+    SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer,
+    TransferBody,
 };
 use ntex_amqp_codec::{types::Symbol, types::Variant, Encode};
 
@@ -83,7 +84,7 @@ impl ReceiverLink {
         self.inner.get_ref().error.as_ref()
     }
 
-    pub(crate) fn confirm_receiver_link(&self, frm: &Attach) {
+    pub(crate) fn confirm_receiver_link(&self, response: Attach) {
         let inner = self.inner.get_mut();
         let size = self.inner.get_ref().max_message_size;
         let size = if size != 0 { Some(size) } else { None };
@@ -91,7 +92,7 @@ impl ReceiverLink {
             .session
             .inner
             .get_mut()
-            .confirm_receiver_link(inner.handle, frm, size);
+            .confirm_receiver_link(inner.handle, response, size);
     }
 
     pub fn set_link_credit(&self, credit: u32) {
@@ -526,6 +527,12 @@ impl ReceiverLinkBuilder {
             Some(value) => props.insert(key, value.into()),
             None => props.remove(&key),
         };
+        self
+    }
+
+    /// Set link capabilities
+    pub fn capabilities(&mut self, caps: Symbols) -> &mut Self {
+        self.frame.source_mut().as_mut().unwrap().capabilities = Some(caps);
         self
     }
 

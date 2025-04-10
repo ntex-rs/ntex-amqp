@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc};
+use std::{cell::RefCell, fmt, rc::Rc};
 
 use ntex::router::Path;
 use ntex::util::{ByteString, Either};
@@ -22,8 +22,8 @@ pub enum Message {
 #[derive(Debug)]
 pub(crate) enum Action {
     None,
-    AttachSender(SenderLink, Attach),
-    AttachReceiver(ReceiverLink, Attach),
+    AttachSender(SenderLink, Attach, Attach),
+    AttachReceiver(ReceiverLink, Attach, Attach),
     DetachSender(SenderLink, Detach),
     DetachReceiver(ReceiverLink, Detach),
     SessionEnded(Vec<Either<SenderLink, ReceiverLink>>),
@@ -124,5 +124,29 @@ impl Outcome {
             Outcome::Reject => DeliveryState::Rejected(Rejected { error: None }),
             Outcome::Error(e) => DeliveryState::Rejected(Rejected { error: Some(e) }),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Wrapper<T> {
+    inner: RefCell<Option<T>>,
+}
+
+impl<T> Wrapper<T> {
+    pub(crate) fn new(inner: T) -> Self {
+        Self {
+            inner: RefCell::new(Some(inner)),
+        }
+    }
+
+    pub(crate) fn take(&self) -> T {
+        self.inner.borrow_mut().take().unwrap()
+    }
+
+    pub fn with<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        f(self.inner.borrow_mut().as_mut().unwrap())
     }
 }

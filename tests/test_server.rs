@@ -116,7 +116,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
             cfg.max_frame_size(1024);
         })
         .control(|msg: ControlFrame| async move {
-            if let ControlFrameKind::AttachReceiver(_, rcv) = msg.kind() {
+            if let ControlFrameKind::AttachReceiver(_, _, rcv) = msg.kind() {
                 rcv.set_max_message_size(10 * 1024);
             }
             Ok::<_, ()>(())
@@ -300,7 +300,7 @@ async fn test_link_detach() -> std::io::Result<()> {
             }
         })
         .control(move |frm: ControlFrame| {
-            if let ControlFrameKind::AttachSender(_, ref link) = frm.kind() {
+            if let ControlFrameKind::AttachSender(_, _, ref link) = frm.kind() {
                 let link = link.clone();
                 rt::spawn(async move {
                     sleep(Millis(150)).await;
