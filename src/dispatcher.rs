@@ -204,13 +204,13 @@ where
                             ControlFrameKind::Flow(frm, link.clone()),
                         ));
                     }
-                    types::Action::AttachSender(link, pfrm, frame) => {
+                    types::Action::AttachSender(link, frame, pfrm) => {
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::AttachSender(frame, types::Wrapper::new(pfrm), link),
                         ));
                     }
-                    types::Action::AttachReceiver(link, pfrm, frm) => {
+                    types::Action::AttachReceiver(link, frm, pfrm) => {
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::AttachReceiver(frm, types::Wrapper::new(pfrm), link),
