@@ -112,6 +112,113 @@ impl Encode for Frame {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeliveryState {
+    Received(Received),
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for DeliveryState {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let descriptor = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(35) => decode_received_inner(input).map(DeliveryState::Received),
+            Descriptor::Ulong(36) => decode_accepted_inner(input).map(DeliveryState::Accepted),
+            Descriptor::Ulong(37) => decode_rejected_inner(input).map(DeliveryState::Rejected),
+            Descriptor::Ulong(38) => decode_released_inner(input).map(DeliveryState::Released),
+            Descriptor::Ulong(39) => decode_modified_inner(input).map(DeliveryState::Modified),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(DeliveryState::Received)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(DeliveryState::Accepted)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(DeliveryState::Rejected)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(DeliveryState::Released)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(DeliveryState::Modified)
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for DeliveryState {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
+            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
+            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
+            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
+            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
+            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
+            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
+            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
+            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let descriptor = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => decode_accepted_inner(input).map(Outcome::Accepted),
+            Descriptor::Ulong(37) => decode_rejected_inner(input).map(Outcome::Rejected),
+            Descriptor::Ulong(38) => decode_released_inner(input).map(Outcome::Released),
+            Descriptor::Ulong(39) => decode_modified_inner(input).map(Outcome::Modified),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(Outcome::Accepted)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(Outcome::Rejected)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(Outcome::Released)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(Outcome::Modified)
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytesMut) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
     Header(Header),
     DeliveryAnnotations(DeliveryAnnotations),
@@ -264,113 +371,6 @@ impl Encode for SaslFrameBody {
             SaslFrameBody::SaslChallenge(ref v) => encode_sasl_challenge_inner(v, buf),
             SaslFrameBody::SaslResponse(ref v) => encode_sasl_response_inner(v, buf),
             SaslFrameBody::SaslOutcome(ref v) => encode_sasl_outcome_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for Outcome {
-    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let descriptor = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(36) => decode_accepted_inner(input).map(Outcome::Accepted),
-            Descriptor::Ulong(37) => decode_rejected_inner(input).map(Outcome::Rejected),
-            Descriptor::Ulong(38) => decode_released_inner(input).map(Outcome::Released),
-            Descriptor::Ulong(39) => decode_modified_inner(input).map(Outcome::Modified),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(Outcome::Accepted)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(Outcome::Rejected)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(Outcome::Released)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(Outcome::Modified)
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
-        }
-    }
-}
-impl Encode for Outcome {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DeliveryState {
-    Received(Received),
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for DeliveryState {
-    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let descriptor = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(35) => decode_received_inner(input).map(DeliveryState::Received),
-            Descriptor::Ulong(36) => decode_accepted_inner(input).map(DeliveryState::Accepted),
-            Descriptor::Ulong(37) => decode_rejected_inner(input).map(DeliveryState::Rejected),
-            Descriptor::Ulong(38) => decode_released_inner(input).map(DeliveryState::Released),
-            Descriptor::Ulong(39) => decode_modified_inner(input).map(DeliveryState::Modified),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
-                decode_received_inner(input).map(DeliveryState::Received)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(DeliveryState::Accepted)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(DeliveryState::Rejected)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(DeliveryState::Released)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(DeliveryState::Modified)
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
-        }
-    }
-}
-impl Encode for DeliveryState {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
-            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
-            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
-            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
-            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
-            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
-            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
-            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
-            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -1017,7 +1017,7 @@ fn encode_footer_inner(dr: &Footer, buf: &mut BytesMut) {
     Descriptor::Ulong(120).encode(buf);
     dr.encode(buf);
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Error(pub Box<ErrorInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ErrorBuilder(pub Box<ErrorInner>);
@@ -1173,7 +1173,7 @@ impl Encode for Error {
         encode_error_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Open(pub Box<OpenInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenBuilder(pub Box<OpenInner>);
@@ -1513,7 +1513,7 @@ impl Encode for Open {
         encode_open_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Begin(pub Box<BeginInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BeginBuilder(pub Box<BeginInner>);
@@ -1804,7 +1804,7 @@ impl Encode for Begin {
         encode_begin_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Attach(pub Box<AttachInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AttachBuilder(pub Box<AttachInner>);
@@ -2247,7 +2247,7 @@ impl Encode for Attach {
         encode_attach_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Flow(pub Box<FlowInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlowBuilder(pub Box<FlowInner>);
@@ -2614,7 +2614,7 @@ impl Encode for Flow {
         encode_flow_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Transfer(pub Box<TransferInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransferBuilder(pub Box<TransferInner>);
@@ -2994,7 +2994,7 @@ impl Encode for Transfer {
         encode_transfer_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Disposition(pub Box<DispositionInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DispositionBuilder(pub Box<DispositionInner>);
@@ -3228,7 +3228,7 @@ impl Encode for Disposition {
         encode_disposition_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Detach(pub Box<DetachInner>);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DetachBuilder(pub Box<DetachInner>);
@@ -3385,7 +3385,7 @@ impl Encode for Detach {
         encode_detach_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct End {
     pub error: Option<Error>,
 }
@@ -3466,7 +3466,7 @@ impl Encode for End {
         encode_end_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Close {
     pub error: Option<Error>,
 }
@@ -3547,7 +3547,7 @@ impl Encode for Close {
         encode_close_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SaslMechanisms {
     pub sasl_server_mechanisms: Symbols,
 }
@@ -3633,7 +3633,7 @@ impl Encode for SaslMechanisms {
         encode_sasl_mechanisms_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SaslInit {
     pub mechanism: Symbol,
     pub initial_response: Option<Bytes>,
@@ -3759,7 +3759,7 @@ impl Encode for SaslInit {
         encode_sasl_init_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SaslChallenge {
     pub challenge: Bytes,
 }
@@ -3841,7 +3841,7 @@ impl Encode for SaslChallenge {
         encode_sasl_challenge_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SaslResponse {
     pub response: Bytes,
 }
@@ -3923,7 +3923,7 @@ impl Encode for SaslResponse {
         encode_sasl_response_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct SaslOutcome {
     pub code: SaslCode,
     pub additional_data: Option<Bytes>,
@@ -4025,7 +4025,7 @@ impl Encode for SaslOutcome {
         encode_sasl_outcome_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Source {
     pub address: Option<Address>,
     pub durable: TerminusDurability,
@@ -4314,7 +4314,7 @@ impl Encode for Source {
         encode_source_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Target {
     pub address: Option<Address>,
     pub durable: TerminusDurability,
@@ -4523,7 +4523,7 @@ impl Encode for Target {
         encode_target_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Header {
     pub durable: bool,
     pub priority: u8,
@@ -4692,7 +4692,7 @@ impl Encode for Header {
         encode_header_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Properties {
     pub message_id: Option<MessageId>,
     pub user_id: Option<Bytes>,
@@ -5017,7 +5017,7 @@ impl Encode for Properties {
         encode_properties_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Received {
     pub section_number: u32,
     pub section_offset: u64,
@@ -5120,7 +5120,7 @@ impl Encode for Received {
         encode_received_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Accepted {}
 impl Accepted {
     #[allow(clippy::identity_op)]
@@ -5182,7 +5182,7 @@ impl Encode for Accepted {
         encode_accepted_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Rejected {
     pub error: Option<Error>,
 }
@@ -5263,7 +5263,7 @@ impl Encode for Rejected {
         encode_rejected_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Released {}
 impl Released {
     #[allow(clippy::identity_op)]
@@ -5325,7 +5325,7 @@ impl Encode for Released {
         encode_released_inner(self, buf)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Modified {
     pub delivery_failed: Option<bool>,
     pub undeliverable_here: Option<bool>,

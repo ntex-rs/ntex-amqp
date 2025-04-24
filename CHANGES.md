@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-0.9.7] - 2025-04-24
+
+* Add default impl to definitions
+
 ## [3.5.3] - 2025-04-10
 
 * Allow to change response Attach frame

@@ -277,7 +277,7 @@ fn encode_{{snake dr.name}}_inner(dr: &{{dr.name}}, buf: &mut BytesMut) {
 
 {{#each defs.lists as |list|}}
 {{#if list.boxed}}
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct {{list.name}}(pub Box<{{list.name}}Inner>);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -297,7 +297,7 @@ pub struct {{list.name}}Inner {
     {{/if}}
 }
 {{else}}
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct {{list.name}} {
     {{#each list.fields as |field|}}
     {{#if field.optional}}

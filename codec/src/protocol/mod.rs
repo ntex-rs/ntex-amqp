@@ -214,27 +214,6 @@ impl SaslInit {
     }
 }
 
-#[allow(clippy::derivable_impls)]
-impl Default for Properties {
-    fn default() -> Properties {
-        Properties {
-            message_id: None,
-            user_id: None,
-            to: None,
-            subject: None,
-            reply_to: None,
-            correlation_id: None,
-            content_type: None,
-            content_encoding: None,
-            absolute_expiry_time: None,
-            creation_time: None,
-            group_id: None,
-            group_sequence: None,
-            reply_to_group_id: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, From, PartialEq, Eq)]
 pub enum TransferBody {
     Data(Bytes),
@@ -307,6 +286,24 @@ impl Default for SenderSettleMode {
 impl Default for ReceiverSettleMode {
     fn default() -> ReceiverSettleMode {
         ReceiverSettleMode::First
+    }
+}
+
+impl Default for TerminusDurability {
+    fn default() -> TerminusDurability {
+        TerminusDurability::None
+    }
+}
+
+impl Default for TerminusExpiryPolicy {
+    fn default() -> TerminusExpiryPolicy {
+        TerminusExpiryPolicy::LinkDetach
+    }
+}
+
+impl Default for SaslCode {
+    fn default() -> SaslCode {
+        SaslCode::Ok
     }
 }
 

@@ -33,6 +33,12 @@ impl Symbol {
     }
 }
 
+impl Default for Symbol {
+    fn default() -> Symbol {
+        Symbol::from_static("")
+    }
+}
+
 impl From<&'static str> for Symbol {
     fn from(s: &'static str) -> Symbol {
         Symbol::from_static(s)
