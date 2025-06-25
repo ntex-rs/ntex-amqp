@@ -28,7 +28,7 @@ impl<T> Multiple<T> {
         self.0.is_empty()
     }
 
-    pub fn iter(&self) -> ::std::slice::Iter<T> {
+    pub fn iter(&self) -> ::std::slice::Iter<'_, T> {
         self.0.iter()
     }
 }
@@ -65,7 +65,7 @@ impl List {
         self.0.is_empty()
     }
 
-    pub fn iter(&self) -> ::std::slice::Iter<Variant> {
+    pub fn iter(&self) -> ::std::slice::Iter<'_, Variant> {
         self.0.iter()
     }
 }

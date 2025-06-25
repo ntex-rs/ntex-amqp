@@ -1,11 +1,11 @@
-use std::{fmt, future::Future, ops, rc::Rc};
+use std::{fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex::io::IoRef;
 use ntex::util::{HashMap, PoolRef, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
-use crate::codec::{AmqpCodec, AmqpFrame};
+use crate::codec::{types, AmqpCodec, AmqpFrame};
 use crate::control::ControlQueue;
 use crate::session::{Session, SessionInner, INITIAL_NEXT_OUTGOING_ID};
 use crate::sndlink::{SenderLink, SenderLinkInner};
@@ -170,44 +170,8 @@ impl ConnectionRef {
     }
 
     /// Opens the session
-    pub fn open_session(&self) -> impl Future<Output = Result<Session, AmqpProtocolError>> {
-        let cell = self.0.clone();
-        let inner = self.0.clone();
-
-        async move {
-            let inner = inner.get_mut();
-
-            if let Some(ref e) = inner.error {
-                log::error!("{}: Connection is in error state: {:?}", inner.io.tag(), e);
-                Err(e.clone())
-            } else {
-                let (tx, rx) = oneshot::channel();
-
-                let entry = inner.sessions.vacant_entry();
-                let token = entry.key();
-
-                if token >= inner.channel_max as usize {
-                    log::trace!("{}: Too many channels: {:?}", inner.io.tag(), token);
-                    Err(AmqpProtocolError::TooManyChannels)
-                } else {
-                    entry.insert(SessionState::Opening(Some(tx), cell));
-
-                    let begin = Begin(Box::new(codec::BeginInner {
-                        remote_channel: None,
-                        next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
-                        incoming_window: u32::MAX,
-                        outgoing_window: u32::MAX,
-                        handle_max: u32::MAX,
-                        offered_capabilities: None,
-                        desired_capabilities: None,
-                        properties: None,
-                    }));
-                    inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
-
-                    rx.await.map_err(|_| AmqpProtocolError::Disconnected)
-                }
-            }
-        }
+    pub fn open_session(&self) -> OpenSession {
+        OpenSession::new(self.0.clone())
     }
 
     pub(crate) fn close_session(&self, id: usize) {
@@ -517,5 +481,123 @@ impl ConnectionInner {
 impl fmt::Debug for ConnectionRef {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("ConnectionRef").finish()
+    }
+}
+
+/// Open new session
+pub struct OpenSession {
+    con: Cell<ConnectionInner>,
+    fut: Option<Pin<Box<dyn Future<Output = Result<Session, AmqpProtocolError>>>>>,
+    props: Option<HashMap<types::Symbol, types::Variant>>,
+    offered_capabilities: Option<codec::Symbols>,
+    desired_capabilities: Option<codec::Symbols>,
+}
+
+impl OpenSession {
+    pub(crate) fn new(con: Cell<ConnectionInner>) -> Self {
+        Self {
+            con,
+            fut: None,
+            props: None,
+            offered_capabilities: None,
+            desired_capabilities: None,
+        }
+    }
+
+    /// Set session offered capabilities
+    pub fn offered_capabilities(mut self, caps: codec::Symbols) -> Self {
+        self.offered_capabilities = Some(caps);
+        self
+    }
+
+    /// Set session desired capabilities
+    pub fn desired_capabilities(mut self, caps: codec::Symbols) -> Self {
+        self.desired_capabilities = Some(caps);
+        self
+    }
+
+    pub fn property<K, V>(mut self, key: K, value: V) -> Self
+    where
+        K: Into<types::Symbol>,
+        V: Into<types::Variant>,
+    {
+        if self.props.is_none() {
+            self.props = Some(HashMap::default());
+        }
+        self.props
+            .as_mut()
+            .unwrap()
+            .insert(key.into(), value.into());
+        self
+    }
+
+    pub async fn attach(self) -> Result<Session, AmqpProtocolError> {
+        open_session(
+            self.con,
+            self.offered_capabilities,
+            self.desired_capabilities,
+            self.props,
+        )
+        .await
+    }
+}
+
+impl Future for OpenSession {
+    type Output = Result<Session, AmqpProtocolError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut slf = self.as_mut();
+
+        if slf.fut.is_none() {
+            slf.fut = Some(Box::pin(open_session(
+                slf.con.clone(),
+                slf.offered_capabilities.take(),
+                slf.desired_capabilities.take(),
+                slf.props.take(),
+            )));
+        }
+
+        Pin::new(slf.fut.as_mut().unwrap()).poll(cx)
+    }
+}
+
+async fn open_session(
+    con: Cell<ConnectionInner>,
+    offered_capabilities: Option<codec::Symbols>,
+    desired_capabilities: Option<codec::Symbols>,
+    properties: Option<HashMap<types::Symbol, types::Variant>>,
+) -> Result<Session, AmqpProtocolError> {
+    let inner = con.get_mut();
+
+    if let Some(ref e) = inner.error {
+        log::error!("{}: Connection is in error state: {:?}", inner.io.tag(), e);
+        Err(e.clone())
+    } else {
+        let (tx, rx) = oneshot::channel();
+
+        let entry = inner.sessions.vacant_entry();
+        let token = entry.key();
+
+        if token >= inner.channel_max as usize {
+            log::trace!("{}: Too many channels: {:?}", inner.io.tag(), token);
+            Err(AmqpProtocolError::TooManyChannels)
+        } else {
+            entry.insert(SessionState::Opening(Some(tx), con.clone()));
+
+            let begin = Begin(Box::new(codec::BeginInner {
+                offered_capabilities,
+                desired_capabilities,
+                properties,
+                remote_channel: None,
+                next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
+                incoming_window: u32::MAX,
+                outgoing_window: u32::MAX,
+                handle_max: u32::MAX,
+            }));
+            inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
+            let _ = inner;
+
+            rx.await.map_err(|_| AmqpProtocolError::Disconnected)
+        }
     }
 }
