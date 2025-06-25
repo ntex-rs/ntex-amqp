@@ -26,7 +26,7 @@ mod sndlink;
 mod state;
 pub mod types;
 
-pub use self::connection::{Connection, ConnectionRef};
+pub use self::connection::{Connection, ConnectionRef, OpenSession};
 pub use self::control::{ControlFrame, ControlFrameKind};
 pub use self::delivery::{Delivery, TransferBuilder};
 pub use self::rcvlink::{ReceiverLink, ReceiverLinkBuilder};

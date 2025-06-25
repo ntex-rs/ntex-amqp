@@ -1,5 +1,9 @@
 # Changes
 
+## [3.6.0] - 2025-06-25
+
+* Allow to configure open session (Begin) frame
+
 ## [codec-0.9.7] - 2025-04-24
 
 * Add default impl to definitions
