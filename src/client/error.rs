@@ -3,34 +3,32 @@ use ntex::util::Either;
 use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError};
 
 /// Errors which can occur when attempting to handle amqp client connection.
-#[derive(Debug, Display, From)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
     /// Amqp codec error
-    #[display("Amqp codec error: {:?}", _0)]
-    Codec(AmqpCodecError),
+    #[error("Amqp codec error: {:?}", _0)]
+    Codec(#[from] AmqpCodecError),
     /// Handshake timeout
-    #[display("Handshake timeout")]
+    #[error("Handshake timeout")]
     HandshakeTimeout,
     /// Protocol negotiation error
-    #[display("Peer disconnected")]
-    ProtocolNegotiation(ProtocolIdError),
-    #[from(ignore)]
+    #[error("Peer disconnected")]
+    ProtocolNegotiation(#[from] ProtocolIdError),
     /// Expected open frame
-    #[display("Expect open frame, got: {:?}", _0)]
+    #[error("Expect open frame, got: {:?}", _0)]
     ExpectOpenFrame(Box<AmqpFrame>),
     /// Peer disconnected
-    #[display("Sasl error code: {:?}", _0)]
+    #[error("Sasl error code: {:?}", _0)]
     Sasl(protocol::SaslCode),
-    #[display("Peer disconnected")]
+    #[error("Peer disconnected")]
     Disconnected,
     /// Connect error
-    #[display("Connect error: {}", _0)]
-    Connect(ntex::connect::ConnectError),
+    #[error("Connect error: {}", _0)]
+    Connect(#[from] ntex::connect::ConnectError),
     /// Unexpected io error
-    Io(std::io::Error),
+    #[error("Io error: {}", _0)]
+    Io(#[from] std::io::Error),
 }
-
-impl std::error::Error for ConnectError {}
 
 impl Clone for ConnectError {
     fn clone(&self) -> Self {

@@ -26,14 +26,15 @@ frame-trace = []
 
 [dependencies]
 ntex = "2.10"
-ntex-amqp-codec = "0.9.6"
+ntex-amqp-codec = "0.9.8"
 
 bitflags = "2"
 log = "0.4"
 pin-project-lite = "0.2"
 slab = "0.4"
 uuid = { version = "1", features = ["v4"] }
-derive_more = { version = "1", features = ["display", "from"] }
+derive_more = { version = "2", features = ["display", "from"] }
+thiserror = "2"
 
 [dev-dependencies]
 env_logger = "0.11"
