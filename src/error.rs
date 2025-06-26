@@ -1,4 +1,4 @@
-use std::{error, io};
+use std::io;
 
 use ntex::util::{ByteString, Either};
 
@@ -7,20 +7,18 @@ pub use crate::codec::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 use crate::{codec::protocol, types::Outcome};
 
 /// Errors which can occur when attempting to handle amqp connection.
-#[derive(Debug, Display, From)]
+#[derive(Debug, thiserror::Error)]
 pub enum AmqpDispatcherError {
-    #[display("Service error")]
+    #[error("Service error")]
     /// Service error
     Service,
     /// Amqp protocol error
-    #[display("Amqp protocol error: {:?}", _0)]
-    Protocol(AmqpProtocolError),
+    #[error("Amqp protocol error: {:?}", _0)]
+    Protocol(#[from] AmqpProtocolError),
     /// Peer disconnect
-    #[display("Peer disconnected error: {:?}", _0)]
+    #[error("Peer disconnected error: {:?}", _0)]
     Disconnected(Option<io::Error>),
 }
-
-impl error::Error for AmqpDispatcherError {}
 
 impl Clone for AmqpDispatcherError {
     fn clone(&self) -> Self {
@@ -35,41 +33,40 @@ impl Clone for AmqpDispatcherError {
     }
 }
 
-#[derive(Clone, Debug, Display)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum AmqpProtocolError {
-    Codec(AmqpCodecError),
+    #[error("Codec error: {:?}", _0)]
+    Codec(#[from] AmqpCodecError),
+    #[error("Too many channels")]
     TooManyChannels,
+    #[error("Body is too large")]
     BodyTooLarge,
+    #[error("Keep-alive timeout")]
     KeepAliveTimeout,
+    #[error("Read timeout")]
     ReadTimeout,
+    #[error("Disconnected")]
     Disconnected,
-    #[display("Unknown session: {:?}", _0)]
+    #[error("Unknown session: {:?}", _0)]
     UnknownSession(protocol::Frame),
-    #[display("Unknown link in session: {:?}", _0)]
+    #[error("Unknown link in session: {:?}", _0)]
     UnknownLink(protocol::Frame),
-    #[display("Connection closed, error: {:?}", _0)]
+    #[error("Connection closed, error: {:?}", _0)]
     Closed(Option<protocol::Error>),
-    #[display("Session ended, error: {:?}", _0)]
+    #[error("Session ended, error: {:?}", _0)]
     SessionEnded(Option<protocol::Error>),
-    #[display("Link detached, error: {:?}", _0)]
+    #[error("Link detached, error: {:?}", _0)]
     LinkDetached(Option<protocol::Error>),
-    #[display("Unexpected frame for opening state, got: {:?}", _0)]
+    #[error("Unexpected frame for opening state, got: {:?}", _0)]
     UnexpectedOpeningState(protocol::Frame),
-    #[display("Unexpected frame: {:?}", _0)]
+    #[error("Unexpected frame: {:?}", _0)]
     Unexpected(protocol::Frame),
+    #[error("Connection is dropped")]
     ConnectionDropped,
 }
 
-impl error::Error for AmqpProtocolError {}
-
-impl From<AmqpCodecError> for AmqpProtocolError {
-    fn from(err: AmqpCodecError) -> Self {
-        AmqpProtocolError::Codec(err)
-    }
-}
-
-#[derive(Clone, Debug, Display)]
-#[display("Amqp error: {:?} {:?} ({:?})", err, description, info)]
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("Amqp error: {:?} {:?} ({:?})", err, description, info)]
 pub struct AmqpError {
     err: Either<protocol::AmqpError, protocol::ErrorCondition>,
     description: Option<ByteString>,
@@ -162,8 +159,8 @@ impl TryFrom<AmqpError> for Outcome {
     }
 }
 
-#[derive(Clone, Debug, Display)]
-#[display("Link error: {:?} {:?} ({:?})", err, description, info)]
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("Link error: {:?} {:?} ({:?})", err, description, info)]
 pub struct LinkError {
     err: Either<protocol::LinkError, protocol::ErrorCondition>,
     description: Option<ByteString>,

@@ -2,58 +2,56 @@ use crate::protocol::{AmqpError, ProtocolId};
 pub use crate::protocol::{Error, ErrorInner};
 use crate::types::Descriptor;
 
-#[derive(Debug, Display, From, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AmqpParseError {
-    #[display("Loaded item size is invalid")]
+    #[error("Loaded item size is invalid")]
     InvalidSize,
-    #[display("More data required during frame parsing: '{:?}'", "_0")]
+    #[error("More data required during frame parsing: '{:?}'", "_0")]
     Incomplete(usize),
-    #[from(ignore)]
-    #[display("Unexpected format code: '{}'", "_0")]
+    #[error("Unexpected format code: '{}'", "_0")]
     InvalidFormatCode(u8),
-    #[display("Invalid value converting to char: {}", "_0")]
+    #[error("Invalid value converting to char: {}", "_0")]
     InvalidChar(u32),
-    #[display("Unexpected descriptor: '{:?}'", "_0")]
+    #[error("Unexpected descriptor: '{:?}'", "_0")]
     InvalidDescriptor(Box<Descriptor>),
-    #[from(ignore)]
-    #[display("Unexpected frame type: '{:?}'", "_0")]
+    #[error("Unexpected frame type: '{:?}'", "_0")]
     UnexpectedFrameType(u8),
-    #[from(ignore)]
-    #[display("Required field '{:?}' was omitted.", "_0")]
+    #[error("Required field '{:?}' was omitted.", "_0")]
     RequiredFieldOmitted(&'static str),
-    #[from(ignore)]
-    #[display("Unknown {:?} option.", "_0")]
+    #[error("Unknown {:?} option.", "_0")]
     UnknownEnumOption(&'static str),
+    #[error("Cannot parse uuid value")]
     UuidParseError,
+    #[error("Cannot parse datetime value")]
     DatetimeParseError,
-    #[from(ignore)]
-    #[display("Unexpected type: '{:?}'", "_0")]
+    #[error("Unexpected type: '{:?}'", "_0")]
     UnexpectedType(&'static str),
-    #[display("Value is not valid utf8 string")]
+    #[error("Value is not valid utf8 string")]
     Utf8Error,
 }
 
-#[derive(Debug, Display, From, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AmqpCodecError {
-    ParseError(AmqpParseError),
-    #[display("Bytes left unparsed at the frame trail")]
+    #[error("Parse failed: {:?}", _0)]
+    ParseError(#[from] AmqpParseError),
+    #[error("Bytes left unparsed at the frame trail")]
     UnparsedBytesLeft,
-    #[display("Max inbound frame size exceeded")]
+    #[error("Max inbound frame size exceeded")]
     MaxSizeExceeded,
-    #[display("Invalid inbound frame size")]
+    #[error("Invalid inbound frame size")]
     InvalidFrameSize,
 }
 
-#[derive(Debug, Display, From, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ProtocolIdError {
+    #[error("Invalid header")]
     InvalidHeader,
+    #[error("Incompatible")]
     Incompatible,
+    #[error("Unknown protocol")]
     Unknown,
-    #[display("Expected {:?} protocol id, seen {:?} instead.", exp, got)]
-    Unexpected {
-        exp: ProtocolId,
-        got: ProtocolId,
-    },
+    #[error("Expected {:?} protocol id, seen {:?} instead.", exp, got)]
+    Unexpected { exp: ProtocolId, got: ProtocolId },
 }
 
 impl From<()> for Error {

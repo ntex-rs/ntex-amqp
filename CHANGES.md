@@ -4,6 +4,8 @@
 
 * Allow to configure open session (Begin) frame
 
+* Refactor error types
+
 ## [codec-0.9.7] - 2025-04-24
 
 * Add default impl to definitions
