@@ -196,13 +196,13 @@ where
 
         // create publish service
         let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
-            log::error!("Publish service init error: {:?}", e);
+            log::error!("Publish service init error: {e:?}");
             ServerError::PublishServiceError
         })?;
 
         // create control service
         let ctl_srv = inner.control.pipeline(st.clone()).await.map_err(|e| {
-            log::error!("Control service init error: {:?}", e);
+            log::error!("Control service init error: {e:?}");
             ServerError::ControlServiceError
         })?;
 

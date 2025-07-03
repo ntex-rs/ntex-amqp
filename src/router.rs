@@ -111,9 +111,8 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                             }
                             Err(e) => {
                                 log::error!(
-                                    "Failed to create link service for {} err: {:?}",
-                                    rcv_link.name(),
-                                    e
+                                    "Failed to create link service for {} err: {e:?}",
+                                    rcv_link.name()
                                 );
                                 Err(e)
                             }
@@ -142,7 +141,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     let name = link.name().clone();
                     let _ = ntex::rt::spawn(async move {
                         srv.shutdown().await;
-                        log::trace!("Handler service for {} has shutdown", name);
+                        log::trace!("Handler service for {name} has shutdown");
                     });
                 }
                 Ok(())
@@ -178,10 +177,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
 
                     let len = futs.len();
                     let _ = join_all(futs).await;
-                    log::trace!(
-                        "Handler services for {} links have shutdown (session ended)",
-                        len
-                    );
+                    log::trace!("Handler services for {len} links have shutdown (session ended)");
                 });
                 Ok(())
             }
@@ -206,9 +202,9 @@ async fn service_call<S>(
     if let Some(Some(srv)) = inner.handlers.get(&link) {
         // check readiness
         if let Err(e) = srv.ready().await {
-            log::trace!("Service readiness check failed: {:?}", e);
-            let _ = link
-                .close_with_error(LinkError::force_detach().description(format!("error: {}", e)));
+            log::trace!("Service readiness check failed: {e:?}");
+            let _ =
+                link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
             return Ok(());
         }
 
@@ -219,11 +215,11 @@ async fn service_call<S>(
 
         match srv.call(tr).await {
             Ok(outcome) => {
-                log::trace!("Outcome is ready {:?} for {}", outcome, link.name());
+                log::trace!("Outcome is ready {outcome:?} for {}", link.name());
                 delivery.settle(outcome.into_delivery_state());
             }
             Err(e) => {
-                log::trace!("Service response error: {:?}", e);
+                log::trace!("Service response error: {e:?}");
                 delivery.settle(DeliveryState::Rejected(Rejected { error: Some(e) }));
             }
         }

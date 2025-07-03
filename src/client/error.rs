@@ -43,7 +43,7 @@ impl Clone for ConnectError {
             ConnectError::Disconnected => ConnectError::Disconnected,
             ConnectError::Connect(err) => ConnectError::Connect(err.clone()),
             ConnectError::Io(err) => {
-                ConnectError::Io(std::io::Error::new(err.kind(), format!("{}", err)))
+                ConnectError::Io(std::io::Error::new(err.kind(), format!("{err}")))
             }
         }
     }

@@ -189,11 +189,11 @@ impl Session {
             match rx.await {
                 Ok(Ok(_)) => Ok(()),
                 Ok(Err(e)) => {
-                    log::trace!("Cannot complete detach receiver link {:?}", e);
+                    log::trace!("Cannot complete detach receiver link {e:?}");
                     Err(e)
                 }
                 Err(_) => {
-                    log::trace!("Cannot complete detach receiver link, connection is gone",);
+                    log::trace!("Cannot complete detach receiver link, connection is gone");
                     Err(AmqpProtocolError::Disconnected)
                 }
             }
@@ -216,7 +216,7 @@ impl Session {
             match rx.await {
                 Ok(Ok(_)) => Ok(()),
                 Ok(Err(e)) => {
-                    log::trace!("Cannot complete detach sender link {:?}", e);
+                    log::trace!("Cannot complete detach sender link {e:?}");
                     Err(e)
                 }
                 Err(_) => {
@@ -335,9 +335,8 @@ impl SessionInner {
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!(
-            "{}: Connection is failed, dropping state: {:?}",
-            self.tag(),
-            err
+            "{}: Connection is failed, dropping state: {err:?}",
+            self.tag()
         );
 
         // drop pending transfers
@@ -381,7 +380,7 @@ impl SessionInner {
 
     /// End session.
     pub(crate) fn end(&mut self, err: AmqpProtocolError) -> Action {
-        log::trace!("{}: Session is ended: {:?}", self.tag(), err);
+        log::trace!("{}: Session is ended: {err:?}", self.tag());
 
         let links = self.get_all_links();
         self.set_error(err);
@@ -445,10 +444,9 @@ impl SessionInner {
         let token = entry.key();
         entry.insert(Either::Left(SenderLinkState::Opening(Some(tx))));
         log::trace!(
-            "{}: Local sender link opening: {:?} hnd:{:?}",
+            "{}: Local sender link opening: {:?} hnd:{token:?}",
             self.tag(),
             frame.name(),
-            token
         );
 
         frame.0.handle = token as Handle;
@@ -531,26 +529,23 @@ impl SessionInner {
                 SenderLinkState::OpeningRemote => {
                     let _ = tx.send(Ok(()));
                     log::error!(
-                        "{}: Unexpected sender link state: opening remote - {}",
-                        self.tag(),
-                        id
+                        "{}: Unexpected sender link state: opening remote - {id}",
+                        self.tag()
                     );
                 }
                 SenderLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
                     log::error!(
-                        "{}: Unexpected sender link state: closing - {}",
-                        self.tag(),
-                        id
+                        "{}: Unexpected sender link state: closing - {id}",
+                        self.tag()
                     );
                 }
             }
         } else {
             let _ = tx.send(Ok(()));
             log::debug!(
-                "{}: Sender link does not exist while detaching: {}",
-                self.tag(),
-                id
+                "{}: Sender link does not exist while detaching: {id}",
+                self.tag()
             );
         }
     }
@@ -760,9 +755,8 @@ impl SessionInner {
                         let _ = self.links.remove(id as usize);
                     }
                     log::error!(
-                        "{}: Unexpected receiver link state: closing - {}",
-                        self.tag(),
-                        id
+                        "{}: Unexpected receiver link state: closing - {id}",
+                        self.tag()
                     );
                 }
                 ReceiverLinkState::OpeningLocal(_inner) => unimplemented!(),
@@ -770,9 +764,8 @@ impl SessionInner {
         } else {
             let _ = tx.send(Ok(()));
             log::error!(
-                "{}: Receiver link does not exist while detaching: {}",
-                self.tag(),
-                id
+                "{}: Receiver link does not exist while detaching: {id}",
+                self.tag()
             );
         }
     }
@@ -844,10 +837,9 @@ impl SessionInner {
                             Either::Right(link) => match link {
                                 ReceiverLinkState::Opening(_) => {
                                     log::debug!(
-                                        "{}: Got transfer for opening link: {} -> {}",
+                                        "{}: Got transfer for opening link: {} -> {idx}",
                                         self.tag(),
-                                        transfer.handle(),
-                                        idx
+                                        transfer.handle()
                                     );
                                     Err(AmqpProtocolError::UnexpectedOpeningState(Frame::Transfer(
                                         transfer,
@@ -855,10 +847,9 @@ impl SessionInner {
                                 }
                                 ReceiverLinkState::OpeningLocal(_) => {
                                     log::debug!(
-                                        "{}: Got transfer for opening link: {} -> {}",
+                                        "{}: Got transfer for opening link: {} -> {idx}",
                                         self.tag(),
-                                        transfer.handle(),
-                                        idx
+                                        transfer.handle()
                                     );
                                     Err(AmqpProtocolError::UnexpectedOpeningState(Frame::Transfer(
                                         transfer,
@@ -878,7 +869,7 @@ impl SessionInner {
                 }
                 Frame::Detach(detach) => Ok(self.handle_detach(detach)),
                 frame => {
-                    log::debug!("{}: Unexpected frame: {:?}", self.tag(), frame);
+                    log::debug!("{}: Unexpected frame: {frame:?}", self.tag());
                     Ok(Action::None)
                 }
             }
@@ -896,10 +887,8 @@ impl SessionInner {
                 Some(Either::Left(item)) => {
                     if item.is_opening() {
                         log::trace!(
-                            "{}: Local sender link attached: {:?} {} -> {}, {:?}",
+                            "{}: Local sender link attached: {name:?} {index} -> {}, {:?}",
                             self.sink.tag(),
-                            name,
-                            index,
                             attach.handle(),
                             self.remote_handles.contains_key(&attach.handle())
                         );
@@ -929,10 +918,8 @@ impl SessionInner {
                 Some(Either::Right(item)) => {
                     if item.is_opening() {
                         log::trace!(
-                            "{}: Local receiver link attached: {:?} {} -> {}",
+                            "{}: Local receiver link attached: {name:?} {index} -> {}",
                             self.sink.tag(),
-                            name,
-                            index,
                             attach.handle()
                         );
                         if let ReceiverLinkState::OpeningLocal(opt_item) = item {
@@ -970,7 +957,7 @@ impl SessionInner {
             frame.handle() as usize
         } else {
             // should not happen, error
-            log::info!("{}: Detaching unknown link: {:?}", self.tag(), frame);
+            log::info!("{}: Detaching unknown link: {frame:?}", self.tag());
             return Action::None;
         };
 
@@ -1028,9 +1015,8 @@ impl SessionInner {
                     }
                     SenderLinkState::OpeningRemote => {
                         log::warn!(
-                            "{}: Detach frame received for unconfirmed sender link: {:?}",
-                            self.tag(),
-                            frame
+                            "{}: Detach frame received for unconfirmed sender link: {frame:?}",
+                            self.tag()
                         );
                         true
                     }
@@ -1118,13 +1104,11 @@ impl SessionInner {
         let to = disp.last();
 
         if cfg!(feature = "frame-trace") {
-            log::trace!("{}: Settle delivery: {:#?}", self.tag(), disp);
+            log::trace!("{}: Settle delivery: {disp:#?}", self.tag());
         } else {
             log::trace!(
-                "{}: Settle delivery from {} - {:?}, state {:?} settled: {:?}",
+                "{}: Settle delivery from {from} - {to:?}, state {:?} settled: {:?}",
                 self.tag(),
-                from,
-                to,
                 disp.state(),
                 disp.settled()
             );
@@ -1142,10 +1126,8 @@ impl SessionInner {
                     delivery.handle_disposition(disp.clone());
                 } else {
                     log::trace!(
-                        "{}: Unknown deliveryid: {:?} disp: {:?}",
-                        self.sink.tag(),
-                        no,
-                        disp
+                        "{}: Unknown deliveryid: {no:?} disp: {disp:?}",
+                        self.sink.tag()
                     );
                 }
             }
@@ -1232,9 +1214,8 @@ impl SessionInner {
         loop {
             if self.remote_incoming_window == 0 {
                 log::trace!(
-                    "{}: Remote window is 0, push to pending queue, hnd:{:?}",
-                    self.sink.tag(),
-                    link_handle
+                    "{}: Remote window is 0, push to pending queue, hnd:{link_handle:?}",
+                    self.sink.tag()
                 );
                 let (tx, rx) = self.pool_credit.channel();
                 self.pending_transfers
@@ -1304,8 +1285,7 @@ impl SessionInner {
             }
 
             log::trace!(
-                "{}: Sending transfer over handle {}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}", self.sink.tag(),
-                link_handle,
+                "{}: Sending transfer over handle {link_handle}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}", self.sink.tag(),
                 self.remote_incoming_window,
                 transfer.delivery_id(),
                 transfer.delivery_tag(),
@@ -1318,13 +1298,13 @@ impl SessionInner {
             loop {
                 // last chunk
                 if body.is_empty() {
-                    log::trace!("{}: Last tranfer for {:?} is sent", self.tag(), tag);
+                    log::trace!("{}: Last tranfer for {tag:?} is sent", self.tag());
                     break;
                 }
 
                 let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
-                log::trace!("{}: Sending chunk tranfer for {:?}", self.tag(), tag);
+                log::trace!("{}: Sending chunk tranfer for {tag:?}", self.tag());
                 let mut transfer = Transfer(Default::default());
                 transfer.0.handle = link_handle;
                 transfer.0.body = Some(TransferBody::Data(chunk));

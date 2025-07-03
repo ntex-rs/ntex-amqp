@@ -205,9 +205,9 @@ impl PartialEq<str> for Str {
 impl fmt::Debug for Str {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Str::String(s) => write!(f, "ST:\"{}\"", s),
-            Str::ByteStr(s) => write!(f, "B:\"{}\"", s),
-            Str::Static(s) => write!(f, "S:\"{}\"", s),
+            Str::String(s) => write!(f, "ST:\"{s}\""),
+            Str::ByteStr(s) => write!(f, "B:\"{s}\""),
+            Str::Static(s) => write!(f, "S:\"{s}\""),
         }
     }
 }

@@ -11,7 +11,7 @@ use crate::{error::AmqpParseError, message::Message, types::*, HashMap};
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -210,7 +210,7 @@ impl Encode for DistributionMode {
 
 impl SaslInit {
     pub fn prepare_response(authz_id: &str, authn_id: &str, password: &str) -> Bytes {
-        Bytes::from(format!("{}\x00{}\x00{}", authz_id, authn_id, password))
+        Bytes::from(format!("{authz_id}\x00{authn_id}\x00{password}"))
     }
 }
 

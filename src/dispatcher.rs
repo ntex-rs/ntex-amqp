@@ -174,7 +174,7 @@ where
         match request {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]
-                log::trace!("{}: incoming: {:#?}", self.sink.tag(), frame);
+                log::trace!("{}: incoming: {frame:#?}", self.sink.tag());
 
                 let action = match self
                     .sink
@@ -192,7 +192,7 @@ where
                             if let Err(e) = self.service.call(types::Message::Transfer(link)).await
                             {
                                 let e = Error::from(e);
-                                log::trace!("Service error {:?}", e);
+                                log::trace!("Service error {e:?}");
                                 let _ = lnk.close_with_error(e);
                             }
                         }
@@ -403,7 +403,7 @@ where
 
         if let Err(e) = ready!(this.fut.poll(cx)) {
             let e = e.into();
-            log::trace!("Service error {:?}", e);
+            log::trace!("Service error {e:?}");
             let _ = this.link.close_with_error(e);
             Poll::Ready(Ok::<_, AmqpDispatcherError>(None))
         } else {
