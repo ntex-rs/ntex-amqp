@@ -222,7 +222,7 @@ impl Drop for Delivery {
 
             if !self.is_set(Flags::REMOTE_SETTLED) && !self.is_set(Flags::LOCAL_SETTLED) {
                 let err = Error::build()
-                    .condition(ErrorCondition::Custom(Symbol(Str::Static(
+                    .condition(ErrorCondition::Custom(Symbol(Str::from_static(
                         "Internal error",
                     ))))
                     .finish();

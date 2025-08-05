@@ -3,7 +3,7 @@
 use derive_more::From;
 
 use super::*;
-use crate::codec::{decode_format_code, decode_list_header};
+use crate::codec::{decode_format_code, ListHeader};
 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum Frame {
@@ -424,7 +424,7 @@ impl {{list.name}}Builder {
 #[allow(unused_mut)]
 fn decode_{{snake list.name}}_inner(input: &mut Bytes) -> Result<{{list.name}}, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     {{#if list.fields}}
@@ -462,7 +462,7 @@ fn decode_{{snake list.name}}_inner(input: &mut Bytes) -> Result<{{list.name}}, 
     {{/if}}
     {{/each}}
     {{else}}
-    input.split_to(size);
+    input.advance(size);
     {{/if}}
 
     {{#if list.transfer}}
