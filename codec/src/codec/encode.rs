@@ -15,7 +15,7 @@ fn encode_null(buf: &mut BytesMut) {
     buf.put_u8(codec::FORMATCODE_NULL);
 }
 
-pub trait FixedEncode {}
+trait FixedEncode {}
 
 impl<T: FixedEncode + ArrayEncode> Encode for T {
     fn encoded_size(&self) -> usize {
@@ -580,25 +580,26 @@ fn array_encoded_size<T: ArrayEncode>(vec: &[T]) -> usize {
 
 impl<T: ArrayEncode> Encode for Vec<T> {
     fn encoded_size(&self) -> usize {
+        let ctor_size = T::ARRAY_CONSTRUCTOR.encoded_size();
         let content_size = array_encoded_size(self);
-        // format_code + size + count + item constructor -- todo: support described ctor?
-        (if content_size + 1 > u8::MAX as usize {
-            10
+        (if content_size + 1 + ctor_size > u8::MAX as usize {
+            9 // 1 for format code, 4 for size, 4 for count
         } else {
-            4
-        }) // +1 for 1 byte count and 1 byte format code
+            3 // 1 for format code, 1 for size, 1 for count
+        }) + ctor_size
             + content_size
     }
 
     fn encode(&self, buf: &mut BytesMut) {
         let size = array_encoded_size(self);
-        if size + 1 > u8::MAX as usize {
+        let ctor_size = T::ARRAY_CONSTRUCTOR.encoded_size();
+        if size + 1 + ctor_size > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32((size + 5) as u32); // +4 for 4 byte count and 1 byte item ctor that follow
+            buf.put_u32((size + 4 + ctor_size) as u32); // +4 for count
             buf.put_u32(self.len() as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
-            buf.put_u8((size + 2) as u8); // +1 for 1 byte count and 1 byte item ctor that follow
+            buf.put_u8((size + 1 + ctor_size) as u8); // +1 for count
             buf.put_u8(self.len() as u8);
         }
         T::ARRAY_CONSTRUCTOR.encode(buf);
@@ -611,21 +612,19 @@ impl<T: ArrayEncode> Encode for Vec<T> {
 impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
     fn encoded_size(&self) -> usize {
         let count = self.len();
-        if count == 1 {
-            // special case: single item is encoded without array encoding
-            self.0[0].encoded_size()
-        } else {
-            self.0.encoded_size()
+        match count {
+            0 => 1, // only NULL format code
+            1 => self.0[0].encoded_size(),
+            _ => self.0.encoded_size(),
         }
     }
 
     fn encode(&self, buf: &mut BytesMut) {
         let count = self.0.len();
-        if count == 1 {
-            // special case: single item is encoded without array encoding
-            self.0[0].encode(buf)
-        } else {
-            self.0.encode(buf)
+        match count {
+            0 => encode_null(buf),
+            1 => self.0[0].encode(buf),
+            _ => self.0.encode(buf),
         }
     }
 }
