@@ -183,11 +183,9 @@ impl Encode for i32 {
 
 impl ArrayEncode for i32 {
     const ARRAY_CONSTRUCTOR: Constructor = Constructor::FormatCode(codec::FORMATCODE_INT);
-
     fn array_encoded_size(&self) -> usize {
         4
     }
-
     fn array_encode(&self, buf: &mut BytesMut) {
         buf.put_i32(*self);
     }
@@ -613,7 +611,6 @@ impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
     fn encoded_size(&self) -> usize {
         let count = self.len();
         match count {
-            0 => 1, // only NULL format code
             1 => self.0[0].encoded_size(),
             _ => self.0.encoded_size(),
         }
@@ -622,7 +619,6 @@ impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
     fn encode(&self, buf: &mut BytesMut) {
         let count = self.0.len();
         match count {
-            0 => encode_null(buf),
             1 => self.0[0].encode(buf),
             _ => self.0.encode(buf),
         }

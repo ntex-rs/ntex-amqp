@@ -12,7 +12,9 @@ mod message;
 pub mod protocol;
 pub mod types;
 
-pub use self::codec::{format_codes, ArrayEncode, Decode, DecodeFormatted, Encode, ListHeader, MapHeader, ArrayHeader, decode_format_code};
+pub use self::codec::{
+    format_codes, ArrayEncode, ArrayHeader, Decode, DecodeFormatted, Encode, ListHeader, MapHeader,
+};
 pub use self::error::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 pub use self::framing::{AmqpFrame, SaslFrame};
 pub use self::io::{AmqpCodec, ProtocolIdCodec};

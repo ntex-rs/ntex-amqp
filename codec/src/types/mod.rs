@@ -6,6 +6,8 @@ mod array;
 mod symbol;
 mod variant;
 
+use crate::AmqpParseError;
+
 pub use self::array::Array;
 pub use self::symbol::{StaticSymbol, Symbol};
 pub use self::variant::{DescribedCompound, Variant, VariantMap, VecStringMap, VecSymbolMap};
@@ -30,6 +32,23 @@ impl Constructor {
         match self {
             Constructor::FormatCode(code) => *code,
             Constructor::Described { format_code, .. } => *format_code,
+        }
+    }
+
+    pub fn descriptor(&self) -> Option<&Descriptor> {
+        match self {
+            Constructor::FormatCode(_) => None,
+            Constructor::Described { descriptor, .. } => Some(descriptor),
+        }
+    }
+
+    pub fn ensure_described(&self, descriptor: &Descriptor) -> Result<(), AmqpParseError> {
+        match self {
+            Constructor::Described { descriptor: d, .. } if d == descriptor => Ok(()),
+            Constructor::Described { descriptor: d, .. } => {
+                Err(AmqpParseError::InvalidDescriptor(Box::new(d.clone())))
+            }
+            Constructor::FormatCode(fmt) => Err(AmqpParseError::InvalidFormatCode(*fmt)),
         }
     }
 }

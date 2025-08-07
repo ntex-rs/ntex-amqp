@@ -88,10 +88,10 @@ impl Encode for Array {
 impl DecodeFormatted for Array {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = ArrayHeader::decode_with_format(input, fmt)?;
-        let size = header.size as usize - 1;
-        let element_constructor = Constructor::decode(input)?;
+        let size = header.size as usize;
         decode_check_len!(input, size);
-        let payload = input.split_to(size);
+        let mut payload = input.split_to(size);
+        let element_constructor = Constructor::decode(&mut payload)?;
 
         Ok(Array {
             element_constructor,

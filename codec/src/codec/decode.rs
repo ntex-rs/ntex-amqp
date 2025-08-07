@@ -6,9 +6,7 @@ use ntex_bytes::{Buf, ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::codec::{
-    self, decode_format_code, ArrayHeader, Decode, DecodeFormatted, ListHeader, MapHeader,
-};
+use crate::codec::{self, ArrayHeader, Decode, DecodeFormatted, ListHeader, MapHeader};
 use crate::error::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
 use crate::protocol;
@@ -265,12 +263,21 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
 impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = ArrayHeader::decode_with_format(input, fmt)?;
-        let item_fmt = decode_format_code(input)?; // todo: mg: support descriptor
+        decode_check_len!(input, header.size as usize);
+        let elem_ctor = Constructor::decode(input)?;
+        let elem_fmt = match elem_ctor {
+            Constructor::FormatCode(code) => code,
+            Constructor::Described { descriptor, .. } => {
+                // todo: mg: described types are not supported OOTB at this point
+                return Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)));
+            }
+        };
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
-            let decoded = T::decode_with_format(input, item_fmt)?;
+            let decoded = T::decode_with_format(input, elem_fmt)?;
             result.push(decoded);
         }
+        // todo: ensure header.size bytes were read out from input
         Ok(result)
     }
 }
@@ -285,9 +292,9 @@ impl DecodeFormatted for VecSymbolMap {
         for _ in 0..count {
             let key = Symbol::decode(&mut map_input)?;
             let value = Variant::decode(&mut map_input)?;
-            map.push((key, value)); // todo: ensure None returned?
+            map.push((key, value)); // todo: mg: ensure None is returned
         }
-        // todo: validate map_input is empty
+        // todo: ensure header.size bytes were read out from input after header
         Ok(VecSymbolMap(map))
     }
 }
@@ -315,6 +322,11 @@ impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
             codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
                 let items = Vec::<T>::decode_with_format(input, fmt)?;
                 Ok(Multiple(items))
+            }
+            codec::FORMATCODE_DESCRIBED => {
+                let descriptor = Descriptor::decode_with_format(input, fmt)?;
+                // todo: mg: described types are not supported OOTB at this point
+                return Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)));
             }
             _ => {
                 let item = T::decode_with_format(input, fmt)?;
