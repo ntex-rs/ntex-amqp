@@ -1,5 +1,13 @@
 # Changes
 
+## [4.0.0] - 2025-08-xx
+
+* Add support for described compound types in Variant #68
+
+## [codec-1.0.0] - 2025-08-xx
+
+* Add support for described compound types in Variant #68
+
 ## [3.6.0] - 2025-06-25
 
 * Allow to configure open session (Begin) frame

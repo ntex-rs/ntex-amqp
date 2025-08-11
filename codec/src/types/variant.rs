@@ -227,7 +227,7 @@ impl Variant {
             Variant::Ubyte(v) => Some(*v as u64),
             Variant::Ushort(v) => Some(*v as u64),
             Variant::Uint(v) => Some(*v as u64),
-            Variant::Ulong(v) => Some(*v as u64),
+            Variant::Ulong(v) => Some(*v),
             _ => None,
         }
     }

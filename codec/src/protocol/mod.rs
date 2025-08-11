@@ -319,8 +319,10 @@ mod tests {
     #[test]
     fn test_properties() -> Result<(), AmqpCodecError> {
         let id = Uuid::new_v4();
-        let mut props = Properties::default();
-        props.correlation_id = Some(id.into());
+        let props = Properties {
+            correlation_id: Some(id.into()),
+            ..Default::default()
+        };
 
         let mut buf = BytesMut::new();
         buf.reserve(id.encoded_size());

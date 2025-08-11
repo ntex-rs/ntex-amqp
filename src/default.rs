@@ -5,6 +5,7 @@ use ntex::service::{Service, ServiceCtx, ServiceFactory};
 use crate::error::LinkError;
 use crate::{types::Link, ControlFrame, State};
 
+#[allow(dead_code)]
 /// Default publish service
 pub(crate) struct DefaultPublishService<S, E>(PhantomData<(S, E)>);
 
