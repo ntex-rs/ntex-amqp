@@ -326,7 +326,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
             codec::FORMATCODE_DESCRIBED => {
                 let descriptor = Descriptor::decode_with_format(input, fmt)?;
                 // todo: mg: described types are not supported OOTB at this point
-                return Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)));
+                Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
             }
             _ => {
                 let item = T::decode_with_format(input, fmt)?;
@@ -727,24 +727,24 @@ mod tests {
     fn test_bool_true() {
         let mut b1 = BytesMut::with_capacity(0);
         b1.put_u8(0x41);
-        assert_eq!(true, unwrap_value(bool::decode(&mut b1.freeze())));
+        assert!(unwrap_value(bool::decode(&mut b1.freeze())));
 
         let mut b2 = BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x01);
-        assert_eq!(true, unwrap_value(bool::decode(&mut b2.freeze())));
+        assert!(unwrap_value(bool::decode(&mut b2.freeze())));
     }
 
     #[test]
     fn test_bool_false() {
         let mut b1 = BytesMut::with_capacity(0);
         b1.put_u8(0x42u8);
-        assert_eq!(false, unwrap_value(bool::decode(&mut b1.freeze())));
+        assert!(!unwrap_value(bool::decode(&mut b1.freeze())));
 
         let mut b2 = BytesMut::with_capacity(0);
         b2.put_u8(0x56);
         b2.put_u8(0x00);
-        assert_eq!(false, unwrap_value(bool::decode(&mut b2.freeze())));
+        assert!(!unwrap_value(bool::decode(&mut b2.freeze())));
     }
 
     /// UTC with a precision of milliseconds. For example, 1311704463521
