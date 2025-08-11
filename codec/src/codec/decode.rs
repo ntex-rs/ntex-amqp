@@ -2,37 +2,40 @@ use std::{char, collections, convert::TryFrom, hash::BuildHasher, hash::Hash};
 
 use byteorder::{BigEndian, ByteOrder};
 use chrono::{DateTime, TimeZone, Utc};
-use ntex_bytes::{ByteString, Bytes};
+use ntex_bytes::{Buf, ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::codec::{self, ArrayDecode, Decode, DecodeFormatted};
+use crate::codec::{self, ArrayHeader, Decode, DecodeFormatted, ListHeader, MapHeader};
 use crate::error::AmqpParseError;
 use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
-use crate::protocol::{self, CompoundHeader};
+use crate::protocol;
 use crate::types::{
-    Array, Descriptor, List, Multiple, Str, Symbol, Variant, VariantMap, VecStringMap, VecSymbolMap,
+    Array, Constructor, DescribedCompound, Descriptor, List, Multiple, Str, Symbol, Variant,
+    VariantMap, VecStringMap, VecSymbolMap,
 };
 use crate::HashMap;
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
         decode_check_len!($input, $size);
-        Ok(BigEndian::$fn(&$input.split_to($size)))
+        let result = BigEndian::$fn(&$input);
+        $input.advance($size);
+        Ok(result)
     }};
 }
 
 fn read_u8(input: &mut Bytes) -> Result<u8, AmqpParseError> {
     decode_check_len!(input, 1);
     let code = input[0];
-    input.split_to(1);
+    input.advance(1);
     Ok(code)
 }
 
 fn read_i8(input: &mut Bytes) -> Result<i8, AmqpParseError> {
     decode_check_len!(input, 1);
     let code = input[0] as i8;
-    input.split_to(1);
+    input.advance(1);
     Ok(code)
 }
 
@@ -213,7 +216,7 @@ impl DecodeFormatted for ByteString {
 
 impl DecodeFormatted for Str {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        Ok(Str::ByteStr(ByteString::decode_with_format(input, fmt)?))
+        Ok(Str::from(ByteString::decode_with_format(input, fmt)?))
     }
 }
 
@@ -222,13 +225,13 @@ impl DecodeFormatted for Symbol {
         match fmt {
             codec::FORMATCODE_SYMBOL8 => {
                 let bytes = read_bytes_u8(input)?;
-                Ok(Symbol(Str::ByteStr(
+                Ok(Symbol(Str::from(
                     ByteString::try_from(bytes).map_err(|_| AmqpParseError::Utf8Error)?,
                 )))
             }
             codec::FORMATCODE_SYMBOL32 => {
                 let bytes = read_bytes_u32(input)?;
-                Ok(Symbol(Str::ByteStr(
+                Ok(Symbol(Str::from(
                     ByteString::try_from(bytes).map_err(|_| AmqpParseError::Utf8Error)?,
                 )))
             }
@@ -237,19 +240,11 @@ impl DecodeFormatted for Symbol {
     }
 }
 
-impl ArrayDecode for Symbol {
-    fn array_decode(input: &mut Bytes) -> Result<Self, AmqpParseError> {
-        let bytes =
-            ByteString::try_from(read_bytes_u32(input)?).map_err(|_| AmqpParseError::Utf8Error)?;
-        Ok(Symbol(Str::ByteStr(bytes)))
-    }
-}
-
 impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
     for collections::HashMap<K, V, S>
 {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = decode_map_header(input, fmt)?;
+        let header = MapHeader::decode_with_format(input, fmt)?;
         decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
         let count = header.count / 2;
@@ -267,22 +262,29 @@ impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
 
 impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = decode_array_header(input, fmt)?;
-        decode_check_len!(input, 1);
-        let item_fmt = input[0]; // todo: support descriptor
-        input.split_to(1);
+        let header = ArrayHeader::decode_with_format(input, fmt)?;
+        decode_check_len!(input, header.size as usize);
+        let elem_ctor = Constructor::decode(input)?;
+        let elem_fmt = match elem_ctor {
+            Constructor::FormatCode(code) => code,
+            Constructor::Described { descriptor, .. } => {
+                // todo: mg: described types are not supported OOTB at this point
+                return Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)));
+            }
+        };
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
-            let decoded = T::decode_with_format(input, item_fmt)?;
+            let decoded = T::decode_with_format(input, elem_fmt)?;
             result.push(decoded);
         }
+        // todo: ensure header.size bytes were read out from input
         Ok(result)
     }
 }
 
 impl DecodeFormatted for VecSymbolMap {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = decode_map_header(input, fmt)?;
+        let header = MapHeader::decode_with_format(input, fmt)?;
         decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
         let count = header.count / 2;
@@ -290,16 +292,16 @@ impl DecodeFormatted for VecSymbolMap {
         for _ in 0..count {
             let key = Symbol::decode(&mut map_input)?;
             let value = Variant::decode(&mut map_input)?;
-            map.push((key, value)); // todo: ensure None returned?
+            map.push((key, value)); // todo: mg: ensure None is returned
         }
-        // todo: validate map_input is empty
+        // todo: ensure header.size bytes were read out from input after header
         Ok(VecSymbolMap(map))
     }
 }
 
 impl DecodeFormatted for VecStringMap {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = decode_map_header(input, fmt)?;
+        let header = MapHeader::decode_with_format(input, fmt)?;
         decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
         let count = header.count / 2;
@@ -314,12 +316,17 @@ impl DecodeFormatted for VecStringMap {
     }
 }
 
-impl<T: ArrayDecode + DecodeFormatted> DecodeFormatted for Multiple<T> {
+impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         match fmt {
             codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
                 let items = Vec::<T>::decode_with_format(input, fmt)?;
                 Ok(Multiple(items))
+            }
+            codec::FORMATCODE_DESCRIBED => {
+                let descriptor = Descriptor::decode_with_format(input, fmt)?;
+                // todo: mg: described types are not supported OOTB at this point
+                return Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)));
             }
             _ => {
                 let item = T::decode_with_format(input, fmt)?;
@@ -331,7 +338,7 @@ impl<T: ArrayDecode + DecodeFormatted> DecodeFormatted for Multiple<T> {
 
 impl DecodeFormatted for List {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = decode_list_header(input, fmt)?;
+        let header = ListHeader::decode_with_format(input, fmt)?;
         let mut result: Vec<Variant> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
             let decoded = Variant::decode(input)?;
@@ -368,9 +375,9 @@ impl DecodeFormatted for Variant {
             codec::FORMATCODE_DOUBLE => {
                 f64::decode_with_format(input, fmt).map(|o| Variant::Double(OrderedFloat(o)))
             }
-            // codec::FORMATCODE_DECIMAL32 => x::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Decimal(o))),
-            // codec::FORMATCODE_DECIMAL64 => x::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Decimal(o))),
-            // codec::FORMATCODE_DECIMAL128 => x::decode_with_format(input, fmt).map(|(i, o)| (i, Variant::Decimal(o))),
+            codec::FORMATCODE_DECIMAL32 => read_fixed_bytes(input).map(Variant::Decimal32),
+            codec::FORMATCODE_DECIMAL64 => read_fixed_bytes(input).map(Variant::Decimal64),
+            codec::FORMATCODE_DECIMAL128 => read_fixed_bytes(input).map(Variant::Decimal128),
             codec::FORMATCODE_CHAR => char::decode_with_format(input, fmt).map(Variant::Char),
             codec::FORMATCODE_TIMESTAMP => {
                 DateTime::<Utc>::decode_with_format(input, fmt).map(Variant::Timestamp)
@@ -398,8 +405,45 @@ impl DecodeFormatted for Variant {
             }
             codec::FORMATCODE_DESCRIBED => {
                 let descriptor = Descriptor::decode(input)?;
-                let value = Variant::decode(input)?;
-                Ok(Variant::Described((descriptor, Box::new(value))))
+                let format_code = {
+                    decode_check_len!(input, 1);
+                    let code = input[0];
+                    Ok(code)
+                }?;
+                match format_code {
+                    codec::FORMATCODE_LIST0 => {
+                        input.advance(1); // advance past format code
+                        Ok(Variant::DescribedCompound(DescribedCompound::new(
+                            descriptor,
+                            Bytes::from_static(&[codec::FORMATCODE_LIST0]),
+                        )))
+                    }
+                    codec::FORMATCODE_LIST8 | codec::FORMATCODE_MAP8 | codec::FORMATCODE_ARRAY8 => {
+                        decode_check_len!(input, 2);
+                        let size = input[1] as usize;
+                        decode_check_len!(input, 2 + size);
+                        let data = input.split_to(2 + size);
+                        Ok(Variant::DescribedCompound(DescribedCompound::new(
+                            descriptor, data,
+                        )))
+                    }
+                    codec::FORMATCODE_LIST32
+                    | codec::FORMATCODE_MAP32
+                    | codec::FORMATCODE_ARRAY32 => {
+                        decode_check_len!(input, 5);
+                        let size = u32::from_be_bytes(input[1..5].try_into().unwrap()) as usize;
+                        decode_check_len!(input, 5 + size);
+                        let data = input.split_to(5 + size);
+                        Ok(Variant::DescribedCompound(DescribedCompound::new(
+                            descriptor, data,
+                        )))
+                    }
+                    _ => {
+                        input.advance(1); // advance past format code
+                        let value = Variant::decode_with_format(input, format_code)?;
+                        Ok(Variant::Described((descriptor, Box::new(value))))
+                    }
+                }
             }
             _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
@@ -433,6 +477,22 @@ impl DecodeFormatted for Descriptor {
     }
 }
 
+impl DecodeFormatted for Constructor {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        match fmt {
+            codec::FORMATCODE_DESCRIBED => {
+                let descriptor = Descriptor::decode(input)?;
+                let format_code = codec::decode_format_code(input)?;
+                Ok(Constructor::Described {
+                    descriptor,
+                    format_code,
+                })
+            }
+            _ => Ok(Constructor::FormatCode(fmt)),
+        }
+    }
+}
+
 impl Decode for AmqpFrame {
     fn decode(input: &mut Bytes) -> Result<Self, AmqpParseError> {
         let channel_id = decode_frame_header(input, framing::FRAME_TYPE_AMQP)?;
@@ -446,6 +506,49 @@ impl Decode for SaslFrame {
         let _ = decode_frame_header(input, framing::FRAME_TYPE_SASL)?;
         let frame = protocol::SaslFrameBody::decode(input)?;
         Ok(SaslFrame { body: frame })
+    }
+}
+
+impl DecodeFormatted for ListHeader {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        match fmt {
+            codec::FORMATCODE_LIST0 => Ok(ListHeader { count: 0, size: 0 }),
+            codec::FORMATCODE_LIST8 => {
+                decode_compound8(input).map(|(size, count)| ListHeader { count, size })
+            }
+            codec::FORMATCODE_LIST32 => {
+                decode_compound32(input).map(|(size, count)| ListHeader { count, size })
+            }
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
+        }
+    }
+}
+
+impl DecodeFormatted for MapHeader {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        match fmt {
+            codec::FORMATCODE_MAP8 => {
+                decode_compound8(input).map(|(size, count)| MapHeader { count, size })
+            }
+            codec::FORMATCODE_MAP32 => {
+                decode_compound32(input).map(|(size, count)| MapHeader { count, size })
+            }
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
+        }
+    }
+}
+
+impl DecodeFormatted for ArrayHeader {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        match fmt {
+            codec::FORMATCODE_ARRAY8 => {
+                decode_compound8(input).map(|(size, count)| ArrayHeader { count, size })
+            }
+            codec::FORMATCODE_ARRAY32 => {
+                decode_compound32(input).map(|(size, count)| ArrayHeader { count, size })
+            }
+            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
+        }
     }
 }
 
@@ -465,61 +568,24 @@ fn decode_frame_header(input: &mut Bytes, expected_frame_type: u8) -> Result<u16
     // skipping remaining two header bytes and ext header
     let ext_header_len = doff - HEADER_LEN + 4;
     decode_check_len!(input, ext_header_len);
-    input.split_to(ext_header_len);
+    input.advance(ext_header_len);
     Ok(channel_id)
 }
 
-pub(crate) fn decode_array_header(
-    input: &mut Bytes,
-    fmt: u8,
-) -> Result<CompoundHeader, AmqpParseError> {
-    match fmt {
-        codec::FORMATCODE_ARRAY8 => decode_compound8(input),
-        codec::FORMATCODE_ARRAY32 => decode_compound32(input),
-        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
-    }
-}
-
-pub(crate) fn decode_list_header(
-    input: &mut Bytes,
-    fmt: u8,
-) -> Result<CompoundHeader, AmqpParseError> {
-    match fmt {
-        codec::FORMATCODE_LIST0 => Ok(CompoundHeader::empty()),
-        codec::FORMATCODE_LIST8 => decode_compound8(input),
-        codec::FORMATCODE_LIST32 => decode_compound32(input),
-        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
-    }
-}
-
-pub(crate) fn decode_map_header(
-    input: &mut Bytes,
-    fmt: u8,
-) -> Result<CompoundHeader, AmqpParseError> {
-    match fmt {
-        codec::FORMATCODE_MAP8 => decode_compound8(input),
-        codec::FORMATCODE_MAP32 => decode_compound32(input),
-        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
-    }
-}
-
-fn decode_compound8(input: &mut Bytes) -> Result<CompoundHeader, AmqpParseError> {
+fn decode_compound8(input: &mut Bytes) -> Result<(u32, u32), AmqpParseError> {
     decode_check_len!(input, 2);
     let size = input[0] - 1; // -1 for 1 byte count
     let count = input[1];
-    input.split_to(2);
-    Ok(CompoundHeader {
-        size: u32::from(size),
-        count: u32::from(count),
-    })
+    input.advance(2);
+    Ok((u32::from(size), u32::from(count)))
 }
 
-fn decode_compound32(input: &mut Bytes) -> Result<CompoundHeader, AmqpParseError> {
+fn decode_compound32(input: &mut Bytes) -> Result<(u32, u32), AmqpParseError> {
     decode_check_len!(input, 8);
     let size = BigEndian::read_u32(input) - 4; // -4 for 4 byte count
     let count = BigEndian::read_u32(&input[4..]);
-    input.split_to(8);
-    Ok(CompoundHeader { size, count })
+    input.advance(8);
+    Ok((size, count))
 }
 
 fn datetime_from_millis(millis: i64) -> Result<DateTime<Utc>, AmqpParseError> {
@@ -540,10 +606,19 @@ fn datetime_from_millis(millis: i64) -> Result<DateTime<Utc>, AmqpParseError> {
     }
 }
 
+fn read_fixed_bytes<const N: usize>(input: &mut Bytes) -> Result<[u8; N], AmqpParseError> {
+    decode_check_len!(input, N);
+    let mut data = [0u8; N];
+    data.copy_from_slice(&input[..N]);
+    input.advance(N);
+    Ok(data)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeDelta;
     use ntex_bytes::{BufMut, BytesMut};
+    use test_case::test_case;
 
     use super::*;
     use crate::codec::{Decode, Encode};
@@ -778,6 +853,97 @@ mod tests {
             Variant::Timestamp(expected),
             unwrap_value(Variant::decode(&mut b1.freeze()))
         );
+    }
+
+    #[test_case(
+        b"\x00\xa3\x07foo:bar\xc0\x03\x01\x50\x03",
+        Descriptor::Symbol("foo:bar".into()),
+        List(vec![Variant::Ubyte(3)]);
+        "described 'foo:bar', list8 w/one u8 field with value 3")]
+    #[test_case(
+        b"\x00\x80\x00\x00\x01\x37\x00\x00\x03\xe9\x45",
+        Descriptor::Ulong((311 << 32) + 1001), List(vec![]); "described 311:1001, list0")]
+    #[test_case(
+        b"\x00\x80\x00\x01\xd4\xc0\x00\x03\x82\x70\xd0\x00\x00\x00\x0c\x00\x00\x00\x03\x53\x6f\xa1\x03abc\x42",
+        Descriptor::Ulong((120_000 << 32) + 230_000),
+        List(vec![Variant::Ulong(111), Variant::String("abc".into()), Variant::Boolean(false)]);
+        "described 120000:230000, list32 w/3 fields: smallulong: 111, string8: 'abc', booleanfalse")]
+    fn decode_described_list(
+        input: &'static [u8],
+        expected_descriptor: Descriptor,
+        expected_list: List,
+    ) {
+        let mut buf = Bytes::from(input);
+        let variant = Variant::decode(&mut buf).unwrap();
+        assert!(buf.is_empty(), "Expected no remaining bytes after decoding");
+        let dc = match variant {
+            Variant::DescribedCompound(dc) => dc,
+            _ => panic!("Expected a DescribedCompound variant"),
+        };
+        assert_eq!(dc.descriptor(), &expected_descriptor);
+        println!("{:02x?}", dc.data.as_ref());
+        let decoded_list: List = dc.decode().expect("Failed to decode List");
+        assert_eq!(decoded_list, expected_list);
+    }
+
+    #[test_case(
+        b"\x00\xa3\x05a:b:c\xc1\x08\x04\x50\x03\x41\x50\xc8\x56\x00",
+        Descriptor::Symbol("a:b:c".into()),
+        vec![(Variant::Ubyte(3), Variant::Boolean(true)), (Variant::Ubyte(200), Variant::Boolean(false))];
+        "described 'a:b:c', map8 with 2 pairs: (ubyte(3), true), (ubyte(200), false)")]
+    #[test_case(
+        b"\x00\x80\x00\x01\xd4\xc0\x00\x03\x82\x70\xd1\x00\x00\x00\x0a\x00\x00\x00\x02\x73\x00\x00\x00z\x40",
+        Descriptor::Ulong((120_000 << 32) + 230_000),
+        vec![(Variant::Char('z'), Variant::Null)];
+        "described 120000:230000, map32 with 1 pair: char: 'z', null")]
+    fn decode_described_map(
+        input: &'static [u8],
+        expected_descriptor: Descriptor,
+        expected_map: Vec<(Variant, Variant)>,
+    ) {
+        let mut buf = Bytes::from(input);
+        let variant = Variant::decode(&mut buf).unwrap();
+        assert!(buf.is_empty(), "Expected no remaining bytes after decoding");
+        let dc = match variant {
+            Variant::DescribedCompound(dc) => dc,
+            _ => panic!("Expected a DescribedCompound variant"),
+        };
+        assert_eq!(dc.descriptor(), &expected_descriptor);
+        println!("{:02x?}", dc.data.as_ref());
+        let decoded_map: HashMap<Variant, Variant> = dc.decode().expect("Failed to decode List");
+        let expected_map: HashMap<Variant, Variant> = expected_map.into_iter().collect();
+        assert_eq!(decoded_map, expected_map);
+    }
+
+    #[test_case(
+        b"\x00\xa3\x07foo:bar\xe0\x05\x03\x50\x01\x02\x03",
+        Descriptor::Symbol("foo:bar".into()),
+        Constructor::FormatCode(codec::FORMATCODE_UBYTE),
+        vec![Variant::Ubyte(1), Variant::Ubyte(2), Variant::Ubyte(3)];
+        "described 'foo:bar', array8 w/3 u8 elements: 1, 2, 3")]
+    fn decode_described_array(
+        input: &'static [u8],
+        expected_descriptor: Descriptor,
+        expected_el_ctor: Constructor,
+        expected_array: Vec<Variant>,
+    ) {
+        // todo: mg: array decoding: add check that all bytes are read out according to size when done decoding array elements /
+        // list fields / map key-value pairs according to count
+        let mut buf = Bytes::from(input);
+        let variant = Variant::decode(&mut buf).unwrap();
+        assert!(buf.is_empty(), "Expected no remaining bytes after decoding");
+        let dc = match variant {
+            Variant::DescribedCompound(dc) => dc,
+            _ => panic!("Expected a DescribedCompound variant"),
+        };
+        assert_eq!(dc.descriptor(), &expected_descriptor);
+        println!("{:02x?}", dc.data.as_ref());
+        let decoded_array: Array = dc.decode().expect("Failed to decode Array");
+        assert_eq!(decoded_array.element_constructor(), &expected_el_ctor);
+        let array_items: Vec<Variant> = decoded_array
+            .decode()
+            .expect("Failed to decode Array items using Variant type");
+        assert_eq!(array_items, expected_array);
     }
 
     #[test]

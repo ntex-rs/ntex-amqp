@@ -12,11 +12,12 @@ mod message;
 pub mod protocol;
 pub mod types;
 
-pub use self::codec::{Decode, Encode};
+pub use self::codec::{
+    format_codes, ArrayEncode, ArrayHeader, Decode, DecodeFormatted, Encode, ListHeader, MapHeader,
+};
 pub use self::error::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 pub use self::framing::{AmqpFrame, SaslFrame};
 pub use self::io::{AmqpCodec, ProtocolIdCodec};
 pub use self::message::{Message, MessageBody};
 
-/// A `HashMap` using a ahash::RandomState hasher.
 type HashMap<K, V> = std::collections::HashMap<K, V, fxhash::FxBuildHasher>;

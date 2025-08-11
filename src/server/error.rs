@@ -1,31 +1,31 @@
-use derive_more::Display;
 use ntex::util::Either;
 
 use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError};
 
 /// Errors which can occur when attempting to handle amqp connection.
-#[derive(Debug, Display)]
+#[derive(Debug, thiserror::Error)]
 pub enum ServerError<E> {
-    #[display("Message handler service error")]
+    #[error("Message handler service error")]
     /// Message handler service error
     Service(E),
-    #[display("Handshake error: {}", _0)]
+    #[error("Handshake error: {}", 0)]
     /// Amqp handshake error
     Handshake(HandshakeError),
     /// Amqp codec error
-    #[display("Amqp codec error: {:?}", _0)]
+    #[error("Amqp codec error: {:?}", 0)]
     Codec(AmqpCodecError),
     /// Amqp protocol error
-    #[display("Amqp protocol error: {:?}", _0)]
+    #[error("Amqp protocol error: {:?}", 0)]
     Protocol(AmqpProtocolError),
     /// Dispatcher error
+    #[error("Amqp dispatcher error: {:?}", 0)]
     Dispatcher(AmqpDispatcherError),
     /// Control service init error
-    #[display("Control service init error")]
+    #[error("Control service init error")]
     ControlServiceError,
     /// Publish service init error
-    #[display("Publish service init error")]
+    #[error("Publish service init error")]
     PublishServiceError,
 }
 
@@ -48,38 +48,36 @@ impl<E> From<HandshakeError> for ServerError<E> {
 }
 
 /// Errors which can occur when attempting to handle amqp handshake.
-#[derive(Debug, Display, From)]
+#[derive(Debug, From, thiserror::Error)]
 pub enum HandshakeError {
     /// Amqp codec error
-    #[display("Amqp codec error: {:?}", _0)]
+    #[error("Amqp codec error: {:?}", 0)]
     Codec(AmqpCodecError),
     /// Handshake timeout
-    #[display("Handshake timeout")]
+    #[error("Handshake timeout")]
     Timeout,
     /// Protocol negotiation error
-    #[display("Peer disconnected")]
+    #[error("Peer disconnected")]
     ProtocolNegotiation(ProtocolIdError),
     #[from(ignore)]
     /// Expected open frame
-    #[display("Expect open frame, got: {:?}", _0)]
+    #[error("Expect open frame, got: {:?}", 0)]
     ExpectOpenFrame(AmqpFrame),
-    #[display("Unexpected frame, got: {:?}", _0)]
+    #[error("Unexpected frame, got: {:?}", 0)]
     Unexpected(protocol::Frame),
-    #[display("Unexpected sasl frame: {:?}", _0)]
+    #[error("Unexpected sasl frame: {:?}", 0)]
     UnexpectedSaslFrame(Box<SaslFrame>),
-    #[display("Unexpected sasl frame body: {:?}", _0)]
+    #[error("Unexpected sasl frame body: {:?}", 0)]
     UnexpectedSaslBodyFrame(Box<protocol::SaslFrameBody>),
-    #[display("Unsupported sasl mechanism: {}", _0)]
+    #[error("Unsupported sasl mechanism: {}", 0)]
     UnsupportedSaslMechanism(String),
     /// Sasl error code
-    #[display("Sasl error code: {:?}", _0)]
+    #[error("Sasl error code: {:?}", 0)]
     Sasl(protocol::SaslCode),
     /// Unexpected io error, peer disconnected
-    #[display("Peer disconnected, with error {:?}", _0)]
+    #[error("Peer disconnected, with error {:?}", 0)]
     Disconnected(Option<std::io::Error>),
 }
-
-impl std::error::Error for HandshakeError {}
 
 impl From<Either<AmqpCodecError, std::io::Error>> for HandshakeError {
     fn from(err: Either<AmqpCodecError, std::io::Error>) -> Self {

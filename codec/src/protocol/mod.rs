@@ -3,27 +3,18 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 use derive_more::From;
-use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
+use ntex_bytes::{Buf, BufMut, ByteString, Bytes, BytesMut};
 use uuid::Uuid;
 
-use super::codec::{self, Decode, DecodeFormatted, Encode};
-use crate::{error::AmqpParseError, message::Message, types::*, HashMap};
+use crate::codec::{self, Decode, DecodeFormatted, Encode};
+use crate::types::{
+    Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant, VecStringMap, VecSymbolMap,
+};
+use crate::{error::AmqpParseError, message::Message, HashMap};
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{self:?}")
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct CompoundHeader {
-    pub size: u32,
-    pub count: u32,
-}
-
-impl CompoundHeader {
-    pub fn empty() -> CompoundHeader {
-        CompoundHeader { size: 0, count: 0 }
     }
 }
 
@@ -52,15 +43,11 @@ pub type Annotations = HashMap<Symbol, Variant>;
 mod definitions;
 pub use self::definitions::*;
 
-#[derive(Debug, Eq, PartialEq, Clone, From, Display)]
+#[derive(Debug, Eq, PartialEq, Clone, From)]
 pub enum MessageId {
-    #[display("{}", _0)]
     Ulong(u64),
-    #[display("{}", _0)]
     Uuid(Uuid),
-    #[display("{:?}", _0)]
     Binary(Bytes),
-    #[display("{}", _0)]
     String(ByteString),
 }
 

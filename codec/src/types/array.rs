@@ -1,12 +1,13 @@
 use ntex_bytes::{BufMut, Bytes, BytesMut};
 
-use crate::codec::{self, decode, ArrayEncode, DecodeFormatted, Encode};
+use crate::codec::{self, ArrayEncode, ArrayHeader, Decode, DecodeFormatted, Encode};
 use crate::error::AmqpParseError;
+use crate::types::Constructor;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Array {
-    len: u32,
-    format: u8,
+    count: u32,
+    element_constructor: Constructor,
     payload: Bytes,
 }
 
@@ -24,17 +25,23 @@ impl Array {
         }
 
         Array {
-            len,
+            count: len,
             payload: buf.freeze(),
-            format: T::ARRAY_FORMAT_CODE,
+            element_constructor: T::ARRAY_CONSTRUCTOR,
         }
     }
 
+    pub fn element_constructor(&self) -> &Constructor {
+        &self.element_constructor
+    }
+
+    /// Attempts to decode the array into a vector of type `T`. Format code supplied to T::decode_with_format is the format code of the underlying
+    /// AMQP type of array's element constructor. Use `Array::element_constructor` to access full constructor if needed.
     pub fn decode<T: DecodeFormatted>(&self) -> Result<Vec<T>, AmqpParseError> {
         let mut buf = self.payload.clone();
-        let mut result: Vec<T> = Vec::with_capacity(self.len as usize);
-        for _ in 0..self.len {
-            let decoded = T::decode_with_format(&mut buf, self.format)?;
+        let mut result: Vec<T> = Vec::with_capacity(self.count as usize);
+        for _ in 0..self.count {
+            let decoded = T::decode_with_format(&mut buf, self.element_constructor.format_code())?;
             result.push(decoded);
         }
         Ok(result)
@@ -52,44 +59,44 @@ where
 
 impl Encode for Array {
     fn encoded_size(&self) -> usize {
-        // format_code + size + count + item constructor -- todo: support described ctor?
-        (if self.payload.len() + 1 > u8::MAX as usize {
-            10
+        let ctor_len = self.element_constructor.encoded_size();
+        let header_len = if self.payload.len() + ctor_len + 1 > u8::MAX as usize {
+            9 // 1 for format code, 4 for size, 4 for count
         } else {
-            4
-        }) // +1 for 1 byte count and 1 byte format code
-            + self.payload.len()
+            3 // 1 for format code, 1 for size, 1 for count
+        };
+
+        header_len + ctor_len + self.payload.len()
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        if self.payload.len() + 1 > u8::MAX as usize {
+        let ctor_len = self.element_constructor.encoded_size();
+        if self.payload.len() + ctor_len + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32((self.payload.len() + 5) as u32); // +4 for 4 byte count and 1 byte item ctor that follow
-            buf.put_u32(self.len);
+            buf.put_u32((4 + ctor_len + self.payload.len()) as u32); // size. 4 for count
+            buf.put_u32(self.count);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
-            buf.put_u8((self.payload.len() + 2) as u8); // +1 for 1 byte count and 1 byte item ctor that follow
-            buf.put_u8(self.len as u8);
+            buf.put_u8((1 + ctor_len + self.payload.len()) as u8); // size. 1 for count
+            buf.put_u8(self.count as u8);
         }
-        buf.put_u8(self.format);
-        buf.extend_from_slice(&self.payload[..]);
+        self.element_constructor.encode(buf);
+        buf.extend_from_slice(self.payload.as_ref());
     }
 }
 
 impl DecodeFormatted for Array {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = decode::decode_array_header(input, fmt)?;
-        decode_check_len!(input, 1);
-        let size = header.size as usize - 1;
-        let format = input[0]; // todo: support descriptor
-        input.split_to(1);
+        let header = ArrayHeader::decode_with_format(input, fmt)?;
+        let size = header.size as usize;
         decode_check_len!(input, size);
-        let payload = input.split_to(size);
+        let mut payload = input.split_to(size);
+        let element_constructor = Constructor::decode(&mut payload)?;
 
         Ok(Array {
-            format,
+            element_constructor,
             payload,
-            len: header.count,
+            count: header.count,
         })
     }
 }

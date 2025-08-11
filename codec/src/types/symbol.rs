@@ -4,16 +4,16 @@ use ntex_bytes::ByteString;
 
 use super::Str;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Display)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Symbol(pub Str);
 
 impl Symbol {
     pub const fn from_static(s: &'static str) -> Symbol {
-        Symbol(Str::Static(s))
+        Symbol(Str::from_static(s))
     }
 
     pub fn from_slice(s: &str) -> Symbol {
-        Symbol(Str::ByteStr(ByteString::from(s)))
+        Symbol(Str(ByteString::from(s)))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -59,7 +59,7 @@ impl From<std::string::String> for Symbol {
 
 impl From<ByteString> for Symbol {
     fn from(s: ByteString) -> Symbol {
-        Symbol(Str::ByteStr(s))
+        Symbol(Str(s))
     }
 }
 
@@ -75,7 +75,7 @@ impl PartialEq<str> for Symbol {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StaticSymbol(pub &'static str);
 
 impl StaticSymbol {

@@ -1,6 +1,6 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
 use super::*;
-use crate::codec::{decode_format_code, decode_list_header};
+use crate::codec::{decode_format_code, ListHeader};
 use derive_more::From;
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum Frame {
@@ -1084,7 +1084,7 @@ impl ErrorBuilder {
 #[allow(unused_mut)]
 fn decode_error_inner(input: &mut Bytes) -> Result<Error, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -1345,7 +1345,7 @@ impl OpenBuilder {
 #[allow(unused_mut)]
 fn decode_open_inner(input: &mut Bytes) -> Result<Open, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -1657,7 +1657,7 @@ impl BeginBuilder {
 #[allow(unused_mut)]
 fn decode_begin_inner(input: &mut Bytes) -> Result<Begin, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -2032,7 +2032,7 @@ impl AttachBuilder {
 #[allow(unused_mut)]
 fn decode_attach_inner(input: &mut Bytes) -> Result<Attach, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -2433,7 +2433,7 @@ impl FlowBuilder {
 #[allow(unused_mut)]
 fn decode_flow_inner(input: &mut Bytes) -> Result<Flow, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -2803,7 +2803,7 @@ impl TransferBuilder {
 #[allow(unused_mut)]
 fn decode_transfer_inner(input: &mut Bytes) -> Result<Transfer, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3103,7 +3103,7 @@ impl DispositionBuilder {
 #[allow(unused_mut)]
 fn decode_disposition_inner(input: &mut Bytes) -> Result<Disposition, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3295,7 +3295,7 @@ impl DetachBuilder {
 #[allow(unused_mut)]
 fn decode_detach_inner(input: &mut Bytes) -> Result<Detach, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3404,7 +3404,7 @@ impl End {
 #[allow(unused_mut)]
 fn decode_end_inner(input: &mut Bytes) -> Result<End, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3485,7 +3485,7 @@ impl Close {
 #[allow(unused_mut)]
 fn decode_close_inner(input: &mut Bytes) -> Result<Close, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3566,7 +3566,7 @@ impl SaslMechanisms {
 #[allow(unused_mut)]
 fn decode_sasl_mechanisms_inner(input: &mut Bytes) -> Result<SaslMechanisms, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3670,7 +3670,7 @@ impl SaslInit {
 #[allow(unused_mut)]
 fn decode_sasl_init_inner(input: &mut Bytes) -> Result<SaslInit, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3778,7 +3778,7 @@ impl SaslChallenge {
 #[allow(unused_mut)]
 fn decode_sasl_challenge_inner(input: &mut Bytes) -> Result<SaslChallenge, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3860,7 +3860,7 @@ impl SaslResponse {
 #[allow(unused_mut)]
 fn decode_sasl_response_inner(input: &mut Bytes) -> Result<SaslResponse, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -3951,7 +3951,7 @@ impl SaslOutcome {
 #[allow(unused_mut)]
 fn decode_sasl_outcome_inner(input: &mut Bytes) -> Result<SaslOutcome, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -4134,7 +4134,7 @@ impl Source {
 #[allow(unused_mut)]
 fn decode_source_inner(input: &mut Bytes) -> Result<Source, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -4387,7 +4387,7 @@ impl Target {
 #[allow(unused_mut)]
 fn decode_target_inner(input: &mut Bytes) -> Result<Target, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -4578,7 +4578,7 @@ impl Header {
 #[allow(unused_mut)]
 fn decode_header_inner(input: &mut Bytes) -> Result<Header, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -4819,7 +4819,7 @@ impl Properties {
 #[allow(unused_mut)]
 fn decode_properties_inner(input: &mut Bytes) -> Result<Properties, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -5045,7 +5045,7 @@ impl Received {
 #[allow(unused_mut)]
 fn decode_received_inner(input: &mut Bytes) -> Result<Received, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -5129,10 +5129,10 @@ impl Accepted {
 #[allow(unused_mut)]
 fn decode_accepted_inner(input: &mut Bytes) -> Result<Accepted, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    input.split_to(size);
+    input.advance(size);
     Ok(Accepted {})
 }
 fn encoded_size_accepted_inner(list: &Accepted) -> usize {
@@ -5201,7 +5201,7 @@ impl Rejected {
 #[allow(unused_mut)]
 fn decode_rejected_inner(input: &mut Bytes) -> Result<Rejected, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);
@@ -5272,10 +5272,10 @@ impl Released {
 #[allow(unused_mut)]
 fn decode_released_inner(input: &mut Bytes) -> Result<Released, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
-    input.split_to(size);
+    input.advance(size);
     Ok(Released {})
 }
 fn encoded_size_released_inner(list: &Released) -> usize {
@@ -5362,7 +5362,7 @@ impl Modified {
 #[allow(unused_mut)]
 fn decode_modified_inner(input: &mut Bytes) -> Result<Modified, AmqpParseError> {
     let format = decode_format_code(input)?;
-    let header = decode_list_header(input, format)?;
+    let header = ListHeader::decode_with_format(input, format)?;
     let size = header.size as usize;
     decode_check_len!(input, size);
     let mut data = input.split_to(size);

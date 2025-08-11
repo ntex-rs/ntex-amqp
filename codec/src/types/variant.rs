@@ -1,15 +1,16 @@
 use std::hash::{Hash, Hasher};
 
 use chrono::{DateTime, Utc};
-use ntex_bytes::{ByteString, Bytes};
+use ntex_bytes::{ByteString, Bytes, BytesMut};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::types::{Array, Descriptor, List, StaticSymbol, Str, Symbol};
+use crate::types::{Array, Descriptor, List, Str, Symbol};
 use crate::{protocol::Annotations, HashMap};
+use crate::{AmqpParseError, Decode, Encode};
 
 /// Represents an AMQP type for use in polymorphic collections
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Display, From)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, From)]
 pub enum Variant {
     /// Indicates an empty value.
     Null,
@@ -47,9 +48,15 @@ pub enum Variant {
     /// 64-bit floating point number (IEEE 754-2008 binary64).
     Double(OrderedFloat<f64>),
 
-    // Decimal32(d32),
-    // Decimal64(d64),
-    // Decimal128(d128),
+    /// 32-bit decimal number, represented per IEEE 754-2008 decimal32 specification.
+    Decimal32([u8; 4]),
+
+    /// 64-bit decimal number, represented per IEEE 754-2008 decimal64 specification.
+    Decimal64([u8; 8]),
+
+    /// 128-bit decimal number, represented per IEEE 754-2008 decimal128 specification.
+    Decimal128([u8; 16]),
+
     /// A single Unicode character.
     Char(char),
 
@@ -63,7 +70,6 @@ pub enum Variant {
     Uuid(Uuid),
 
     /// A sequence of octets.
-    #[display("Binary({:?})", _0)]
     Binary(Bytes),
 
     /// A sequence of Unicode characters
@@ -72,28 +78,88 @@ pub enum Variant {
     /// Symbolic values from a constrained domain.
     Symbol(Symbol),
 
-    /// Same as Symbol but for static refs
-    StaticSymbol(StaticSymbol),
-
     /// List
-    #[display("List({:?})", _0)]
     List(List),
 
     /// Map
     Map(VariantMap),
 
     /// Array
-    #[display("Array({:?})", _0)]
     Array(Array),
 
-    /// Described value
-    #[display("Described{:?}", _0)]
+    /// Described value of primitive type. See `Variant::DescribedCompound` for
     Described((Descriptor, Box<Variant>)),
+
+    /// Described value of compound or array type. See `Variant::DescribedCompound` for details.
+    DescribedCompound(DescribedCompound),
 }
 
-impl From<Vec<Variant>> for Variant {
-    fn from(data: Vec<Variant>) -> Self {
-        Variant::List(List(data))
+/// Represents a compound value with a descriptor. The value contains data starting with format code for the underlying AMQP type
+/// (right after the descriptor).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DescribedCompound {
+    descriptor: Descriptor,
+    pub(crate) data: Bytes,
+}
+
+impl DescribedCompound {
+    /// Creates a representation of described value of compound value type based on `T` type's AMQP encoding.
+    /// `T`'s implementation of `Encode` is expected to produce the binary representation of the T in an underlying AMQP type value, starting from the format code.
+    /// For instance, if the described value is to be represented as an AMQP list with 1 ubyte field with a value of 3:
+    /// ```text
+    /// 0x00 0xa3 0x07 "foo:bar" 0xc0 0x02 0x01 0x50 0x03
+    /// ```
+    /// The `T::encode` method is expected to produce the following output:
+    /// ```text
+    /// 0xc0 0x02 0x01 0x50 0x03
+    /// ```
+    pub fn create<T: Encode>(descriptor: Descriptor, value: T) -> Self {
+        let size = value.encoded_size();
+        let mut buf = BytesMut::with_capacity(size);
+        value.encode(&mut buf);
+        DescribedCompound {
+            descriptor,
+            data: buf.freeze(),
+        }
+    }
+
+    pub(crate) fn new(descriptor: Descriptor, data: Bytes) -> Self {
+        DescribedCompound { descriptor, data }
+    }
+
+    pub fn descriptor(&self) -> &Descriptor {
+        &self.descriptor
+    }
+
+    /// Attempts to decode the described value as `T`.
+    /// `T`'s implementation of `Decode` is expected to parse the underlying AMQP type starting from the format code.
+    /// For instance, if the value is of described type represented by AMQP list with 1 ubyte field with a value of 3:
+    /// ```text
+    /// 0x00 0xa3 0x07 "foo:bar" 0xc0 0x02 0x01 0x50 0x03
+    /// ```
+    /// The `T::decode` method will be called with the following input:
+    /// ```text
+    /// 0xc0 0x02 0x01 0x50 0x03
+    /// ```
+    pub fn decode<T: Decode>(self) -> Result<T, AmqpParseError> {
+        let mut buf = self.data.clone();
+        let result = T::decode(&mut buf)?;
+        if buf.is_empty() {
+            Ok(result)
+        } else {
+            Err(AmqpParseError::InvalidSize)
+        }
+    }
+}
+
+impl Encode for DescribedCompound {
+    fn encoded_size(&self) -> usize {
+        self.descriptor.encoded_size() + self.data.len()
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        self.descriptor.encode(buf);
+        buf.extend_from_slice(&self.data);
     }
 }
 
@@ -140,23 +206,28 @@ impl Variant {
         }
     }
 
-    pub fn as_int(&self) -> Option<i32> {
-        match self {
-            Variant::Int(v) => Some(*v),
-            _ => None,
-        }
-    }
-
+    /// Expresses integer-typed variant values as i64 value when possible. Notably, does not include ulong.
+    /// Returns `None` for variants other than supported integers.
     pub fn as_long(&self) -> Option<i64> {
         match self {
             Variant::Ubyte(v) => Some(*v as i64),
             Variant::Ushort(v) => Some(*v as i64),
             Variant::Uint(v) => Some(*v as i64),
-            Variant::Ulong(v) => Some(*v as i64),
             Variant::Byte(v) => Some(*v as i64),
             Variant::Short(v) => Some(*v as i64),
             Variant::Int(v) => Some(*v as i64),
             Variant::Long(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Expresses unsigned integer-typed variant values as u64 value. Returns `None` for variants other than unsigned integers.
+    pub fn as_ulong(&self) -> Option<u64> {
+        match self {
+            Variant::Ubyte(v) => Some(*v as u64),
+            Variant::Ushort(v) => Some(*v as u64),
+            Variant::Uint(v) => Some(*v as u64),
+            Variant::Ulong(v) => Some(*v as u64),
             _ => None,
         }
     }
@@ -170,8 +241,7 @@ impl Variant {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Display)]
-#[display("{:?}", map)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct VariantMap {
     pub map: HashMap<Variant, Variant>,
 }
@@ -189,8 +259,7 @@ impl Hash for VariantMap {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Display)]
-#[display("{:?}", _0)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct VecSymbolMap(pub Vec<(Symbol, Variant)>);
 
 impl Default for VecSymbolMap {
@@ -225,8 +294,7 @@ impl std::ops::DerefMut for VecSymbolMap {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Display)]
-#[display("{:?}", _0)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct VecStringMap(pub Vec<(Str, Variant)>);
 
 impl Default for VecStringMap {
@@ -263,6 +331,10 @@ impl std::ops::DerefMut for VecStringMap {
 
 #[cfg(test)]
 mod tests {
+    use ntex_bytes::{Buf, BufMut};
+
+    use crate::{codec::ListHeader, format_codes};
+
     use super::*;
 
     #[test]
@@ -291,5 +363,110 @@ mod tests {
 
         assert_eq!(Variant::Symbol(Symbol::from("hello")), a);
         assert!(a != b);
+    }
+
+    // <type name="mqtt-metadata" class="composite" source="list">
+    //   <descriptor name="contoso:test"/>
+    //   <field name="field1" type="string" mandatory="true"/>
+    //   <field name="field2" type="ubyte" mandatory="true"/>
+    //   <field name="field3" type="string"/>
+    // </type>
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    struct CustomList {
+        field1: ByteString,
+        field2: u8,
+        field3: Option<ByteString>,
+    }
+
+    impl CustomList {
+        fn encoded_data_size(&self) -> usize {
+            let mut size = self.field1.encoded_size() + self.field2.encoded_size();
+            if let Some(ref field3) = self.field3 {
+                size += field3.encoded_size();
+            }
+            size
+        }
+    }
+
+    impl crate::DecodeFormatted for CustomList {
+        fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+            let header = ListHeader::decode_with_format(input, fmt)?;
+            if header.count < 2 {
+                return Err(AmqpParseError::RequiredFieldOmitted("field2"));
+            }
+            let field1 = ByteString::decode(input)?;
+            let field2 = u8::decode(input)?;
+            let field3 = if header.count == 3 {
+                Some(ByteString::decode(input)?)
+            } else {
+                None
+            };
+            if input.has_remaining() {
+                return Err(AmqpParseError::InvalidSize);
+            }
+            Ok(CustomList {
+                field1,
+                field2,
+                field3,
+            })
+        }
+    }
+
+    impl crate::Encode for CustomList {
+        fn encoded_size(&self) -> usize {
+            let size = self.encoded_data_size();
+            if size + 1 > u8::MAX as usize {
+                size + 9 // 1 for format code, 4 for size, 4 for count
+            } else {
+                size + 3 // 1 for format code, 1 for size, 1 for count
+            }
+        }
+
+        fn encode(&self, buf: &mut BytesMut) {
+            let count = if self.field3.is_some() { 3u8 } else { 2u8 };
+            let data_size = self.encoded_data_size();
+            if data_size + 1 > u8::MAX as usize {
+                buf.put_u8(format_codes::FORMATCODE_LIST32);
+                buf.put_u32((4 + data_size) as u32); // size. 4 for count
+                buf.put_u32(count as u32); // count
+            } else {
+                buf.put_u8(format_codes::FORMATCODE_LIST8);
+                buf.put_u8((1 + data_size) as u8); // size. 1 for count
+                buf.put_u8(count); // count
+            }
+            self.field1.encode(buf);
+            self.field2.encode(buf);
+            if let Some(ref field3) = self.field3 {
+                field3.encode(buf);
+            }
+        }
+    }
+
+    #[test]
+    fn described_custom_list_recoding() {
+        let custom_list = CustomList {
+            field1: ByteString::from("value1"),
+            field2: 115,
+            field3: Some(ByteString::from("value3")),
+        };
+        let value = Variant::DescribedCompound(DescribedCompound::create(
+            Descriptor::Symbol("contoso:test".into()),
+            custom_list.clone(),
+        ));
+        let mut buf = BytesMut::with_capacity(value.encoded_size());
+        value.encode(&mut buf);
+        let data = buf.freeze();
+        assert_eq!(
+            data.as_ref(),
+            &b"\x00\xa3\x0ccontoso:test\xc0\x13\x03\xa1\x06value1\x50\x73\xa1\x06value3"[..]
+        );
+        let mut input = data.clone();
+        let decoded = Variant::decode(&mut input).unwrap();
+        assert_eq!(decoded, value);
+        let decoded_list = match decoded {
+            Variant::DescribedCompound(desc) => desc.decode::<CustomList>().unwrap(),
+            _ => panic!("Expected a described compound"),
+        };
+        assert_eq!(decoded_list, custom_list);
     }
 }
