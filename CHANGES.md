@@ -1,20 +1,16 @@
 # Changes
 
-## [4.1.0] - 2025-09-10
-
-* Use ahash instead of fxhash
-
-## [codec-1.1.0] - 2025-09-10
-
-* Use ahash instead of fxhash
-
-## [4.0.0] - 2025-08-xx
+## [4.0.0] - 2025-09-10
 
 * Add support for described compound types in Variant #68
 
-## [codec-1.0.0] - 2025-08-xx
+* Use ahash instead of fxhash
+
+## [codec-1.0.0] - 2025-09-10
 
 * Add support for described compound types in Variant #68
+
+* Use ahash instead of fxhash
 
 ## [3.6.0] - 2025-06-25
 
