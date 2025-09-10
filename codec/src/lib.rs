@@ -20,4 +20,4 @@ pub use self::framing::{AmqpFrame, SaslFrame};
 pub use self::io::{AmqpCodec, ProtocolIdCodec};
 pub use self::message::{Message, MessageBody};
 
-type HashMap<K, V> = std::collections::HashMap<K, V, fxhash::FxBuildHasher>;
+type HashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;
