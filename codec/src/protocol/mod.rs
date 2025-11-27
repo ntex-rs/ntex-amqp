@@ -10,7 +10,7 @@ use crate::codec::{self, Decode, DecodeFormatted, Encode};
 use crate::types::{
     Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant, VecStringMap, VecSymbolMap,
 };
-use crate::{error::AmqpParseError, message::Message, HashMap};
+use crate::{HashMap, error::AmqpParseError, message::Message};
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -217,7 +217,7 @@ impl TransferBody {
     pub fn message_format(&self) -> Option<MessageFormat> {
         match self {
             TransferBody::Data(_) => None,
-            TransferBody::Message(ref data) => data.0.message_format,
+            TransferBody::Message(data) => data.0.message_format,
         }
     }
 }
@@ -226,8 +226,8 @@ impl Encode for TransferBody {
     #[inline]
     fn encoded_size(&self) -> usize {
         match self {
-            TransferBody::Data(ref data) => data.len(),
-            TransferBody::Message(ref data) => data.encoded_size(),
+            TransferBody::Data(data) => data.len(),
+            TransferBody::Message(data) => data.encoded_size(),
         }
     }
     #[inline]
@@ -243,14 +243,14 @@ impl Transfer {
     #[inline]
     pub fn get_body(&self) -> Option<&Bytes> {
         match self.body() {
-            Some(TransferBody::Data(ref b)) => Some(b),
+            Some(TransferBody::Data(b)) => Some(b),
             _ => None,
         }
     }
 
     #[inline]
     pub fn load_message<T: Decode>(&self) -> Result<T, AmqpParseError> {
-        if let Some(TransferBody::Data(ref b)) = self.body() {
+        if let Some(TransferBody::Data(b)) = self.body() {
             Ok(T::decode(&mut b.clone())?)
         } else {
             Err(AmqpParseError::UnexpectedType("body"))

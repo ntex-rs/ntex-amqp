@@ -1,3 +1,4 @@
+use ntex::{ServiceFactory, SharedCfg};
 use ntex_amqp::client;
 
 #[ntex::main]
@@ -6,7 +7,10 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let driver = client::Connector::new()
-        .connect("127.0.0.1:5671")
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call("127.0.0.1:5671")
         .await
         .unwrap();
     let sink = driver.sink();

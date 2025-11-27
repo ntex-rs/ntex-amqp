@@ -6,15 +6,15 @@ use ntex_bytes::{Buf, ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
+use crate::HashMap;
 use crate::codec::{self, ArrayHeader, Decode, DecodeFormatted, ListHeader, MapHeader};
 use crate::error::AmqpParseError;
-use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
+use crate::framing::{self, AmqpFrame, HEADER_LEN, SaslFrame};
 use crate::protocol;
 use crate::types::{
     Array, Constructor, DescribedCompound, Descriptor, List, Multiple, Str, Symbol, Variant,
     VariantMap, VecStringMap, VecSymbolMap,
 };
-use crate::HashMap;
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{

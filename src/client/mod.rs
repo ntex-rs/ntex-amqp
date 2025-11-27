@@ -8,7 +8,7 @@ pub use self::connection::Client;
 pub use self::connector::Connector;
 pub use self::error::ConnectError;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// Sasl authentication parameters
 pub struct SaslAuth {
     pub authz_id: ByteString,

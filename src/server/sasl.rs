@@ -11,18 +11,11 @@ use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslF
 use super::{handshake::HandshakeAmqpOpened, HandshakeError};
 use crate::{connection::Connection, Configuration};
 
+#[derive(Debug)]
 pub struct Sasl {
     state: IoBoxed,
     mechanisms: Symbols,
     local_config: Rc<Configuration>,
-}
-
-impl fmt::Debug for Sasl {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("SaslAuth")
-            .field("mechanisms", &self.mechanisms)
-            .finish()
-    }
 }
 
 impl Sasl {

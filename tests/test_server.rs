@@ -4,7 +4,7 @@ use std::sync::{atomic::AtomicUsize, atomic::Ordering, Arc, Mutex};
 use ntex::server::test_server;
 use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
 use ntex::util::{Bytes, Either, Ready};
-use ntex::{http::Uri, rt, time::sleep, time::Millis};
+use ntex::{http::Uri, rt, time::sleep, time::Millis, ServiceFactory, SharedCfg};
 use ntex_amqp::{
     client, codec::protocol, error::LinkError, server, types, ControlFrame, ControlFrameKind,
 };
@@ -56,7 +56,13 @@ async fn test_simple() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -132,7 +138,13 @@ async fn test_large_transfer() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
     let sink = client.sink();
     ntex::rt::spawn(async move {
         let _ = client.start_default().await;
@@ -206,14 +218,15 @@ async fn test_sasl() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let _client = client::Connector::new()
-        .connect_sasl(
-            uri,
-            client::SaslAuth {
-                authz_id: "".into(),
-                authn_id: "user1".into(),
-                password: "password1".into(),
-            },
-        )
+        .sasl_auth(client::SaslAuth {
+            authz_id: "".into(),
+            authn_id: "user1".into(),
+            password: "password1".into(),
+        })
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
         .await;
 
     Ok(())
@@ -260,7 +273,13 @@ async fn test_session_end() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -329,7 +348,13 @@ async fn test_link_detach() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -390,7 +415,13 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -443,7 +474,13 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {
@@ -497,7 +534,13 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = client::Connector::new().connect(uri).await.unwrap();
+    let client = client::Connector::new()
+        .pipeline(SharedCfg::default())
+        .await
+        .unwrap()
+        .call(uri)
+        .await
+        .unwrap();
 
     let sink = client.sink();
     ntex::rt::spawn(async move {

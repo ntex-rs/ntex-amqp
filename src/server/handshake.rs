@@ -8,6 +8,7 @@ use crate::{connection::Connection, Configuration};
 
 use super::{error::HandshakeError, sasl::Sasl};
 
+#[derive(Debug)]
 /// Connection handshake
 pub enum Handshake {
     Amqp(HandshakeAmqp),
@@ -35,6 +36,7 @@ impl Handshake {
     }
 }
 
+#[derive(Debug)]
 /// Open new connection
 pub struct HandshakeAmqp {
     state: IoBoxed,

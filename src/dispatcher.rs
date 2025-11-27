@@ -1,9 +1,9 @@
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use std::{cell, cmp, future::poll_fn, future::Future, marker, pin::Pin};
 
 use ntex::service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
 use ntex::time::{sleep, Millis, Sleep};
-use ntex::util::{ready, Either};
+use ntex::util::Either;
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
 
 use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};

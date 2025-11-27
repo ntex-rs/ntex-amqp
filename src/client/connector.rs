@@ -1,10 +1,10 @@
-use std::{future::Future, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ntex::connect::{self, Address, Connect};
 use ntex::io::IoBoxed;
-use ntex::service::{Pipeline, Service};
+use ntex::service::{cfg::SharedCfg, Service, ServiceCtx, ServiceFactory};
 use ntex::time::{timeout_checked, Seconds};
-use ntex::util::{ByteString, PoolId, PoolRef};
+use ntex::util::ByteString;
 
 use crate::codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
@@ -14,9 +14,9 @@ use super::{connection::Client, error::ConnectError, SaslAuth};
 
 /// Amqp client connector
 pub struct Connector<A, T = ()> {
-    connector: Pipeline<T>,
+    connector: T,
     config: Configuration,
-    pool: PoolRef,
+    saslauth: Option<SaslAuth>,
     _t: PhantomData<A>,
 }
 
@@ -25,9 +25,9 @@ impl<A> Connector<A> {
     /// Create new amqp connector
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
-            connector: Pipeline::new(connect::Connector::default().tag("AMQP-CLIENT")),
+            connector: connect::Connector::default(),
             config: Configuration::default(),
-            pool: PoolId::P6.pool_ref(),
+            saslauth: None,
             _t: PhantomData,
         }
     }
@@ -38,11 +38,17 @@ where
     A: Address,
 {
     /// Modify client configuration
-    pub fn config<F>(&mut self, f: F) -> &mut Self
+    pub fn config<F>(mut self, f: F) -> Self
     where
         F: FnOnce(&mut Configuration),
     {
         f(&mut self.config);
+        self
+    }
+
+    /// Use Sasl auth
+    pub fn sasl_auth(mut self, auth: SaslAuth) -> Self {
+        self.saslauth = Some(auth);
         self
     }
 
@@ -51,7 +57,7 @@ where
     /// number of Sessions that can be simultaneously active on the Connection.
     ///
     /// By default channel max value is set to 1024
-    pub fn channel_max(&mut self, num: u16) -> &mut Self {
+    pub fn channel_max(mut self, num: u16) -> Self {
         self.config.channel_max = num;
         self
     }
@@ -59,7 +65,7 @@ where
     /// Set max frame size for the connection.
     ///
     /// By default max size is set to 64kb
-    pub fn max_frame_size(&mut self, size: u32) -> &mut Self {
+    pub fn max_frame_size(mut self, size: u32) -> Self {
         self.config.max_frame_size = size;
         self
     }
@@ -72,7 +78,7 @@ where
     /// Set idle time-out for the connection.
     ///
     /// By default idle time-out is set to 120 seconds
-    pub fn idle_timeout(&mut self, timeout: Seconds) -> &mut Self {
+    pub fn idle_timeout(mut self, timeout: Seconds) -> Self {
         self.config.idle_time_out = (timeout.seconds() * 1000) as u32;
         self
     }
@@ -80,7 +86,7 @@ where
     /// Set connection hostname
     ///
     /// Hostname is not set by default
-    pub fn hostname(&mut self, hostname: &str) -> &mut Self {
+    pub fn hostname(mut self, hostname: &str) -> Self {
         self.config.hostname = Some(ByteString::from(hostname));
         self
     }
@@ -94,50 +100,67 @@ where
         self
     }
 
-    /// Set client connection disconnect timeout.
-    ///
-    /// Defines a timeout for disconnect connection. If a disconnect procedure does not complete
-    /// within this time, the connection get dropped.
-    ///
-    /// To disable timeout set value to 0.
-    ///
-    /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(self, timeout: Seconds) -> Self {
-        self.config.disp_config.set_disconnect_timeout(timeout);
-        self
-    }
-
-    /// Set memory pool.
-    ///
-    /// Use specified memory pool for memory allocations. By default P6
-    /// memory pool is used.
-    pub fn memory_pool(mut self, id: PoolId) -> Self {
-        self.pool = id.pool_ref();
-        self
-    }
-
     /// Use custom connector
-    pub fn connector<U>(self, connector: Pipeline<U>) -> Connector<A, U>
+    pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
-        U: Service<Connect<A>, Error = connect::ConnectError>,
+        U: ServiceFactory<Connect<A>, SharedCfg, Error = connect::ConnectError>,
         IoBoxed: From<U::Response>,
     {
         Connector {
             connector,
             config: self.config,
-            pool: self.pool,
+            saslauth: self.saslauth,
             _t: PhantomData,
         }
     }
+}
 
-    #[doc(hidden)]
-    #[deprecated]
-    /// Use custom connector
-    pub fn boxed_connector<U>(self, connector: Pipeline<U>) -> Connector<A, U>
-    where
-        U: Service<Connect<A>, Response = IoBoxed, Error = connect::ConnectError>,
-    {
-        self.connector(connector)
+impl<A, T> ServiceFactory<A, SharedCfg> for Connector<A, T>
+where
+    A: Address,
+    T: ServiceFactory<Connect<A>, SharedCfg, Error = connect::ConnectError>,
+    IoBoxed: From<T::Response>,
+{
+    type Response = Client;
+    type Error = ConnectError;
+    type Service = Connector<A, T::Service>;
+    type InitError = T::InitError;
+
+    async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
+        Ok(Connector {
+            connector: self.connector.create(cfg).await?,
+            config: self.config.clone(),
+            saslauth: self.saslauth.clone(),
+            _t: PhantomData,
+        })
+    }
+}
+
+impl<A, T> Service<A> for Connector<A, T>
+where
+    A: Address,
+    T: Service<Connect<A>, Error = connect::ConnectError>,
+    IoBoxed: From<T::Response>,
+{
+    type Response = Client;
+    type Error = ConnectError;
+
+    /// Connect to amqp server
+    async fn call(&self, req: A, ctx: ServiceCtx<'_, Self>) -> Result<Client, ConnectError> {
+        let fut = async {
+            let io = ctx.call(&self.connector, Connect::new(req)).await?;
+            let io = IoBoxed::from(io);
+
+            if let Some(auth) = self.saslauth.clone() {
+                _connect_sasl(io, auth, self.config.clone()).await
+            } else {
+                _connect_plain(io, self.config.clone()).await
+            }
+        };
+        timeout_checked(self.config.handshake_timeout, fut)
+            .await
+            .map_err(|_| ConnectError::HandshakeTimeout)
+            .and_then(|res| res)
     }
 }
 
@@ -147,67 +170,22 @@ where
     T: Service<Connect<A>, Error = connect::ConnectError>,
     IoBoxed: From<T::Response>,
 {
-    /// Connect to amqp server
-    pub async fn connect(&self, address: A) -> Result<Client, ConnectError> {
-        timeout_checked(self.config.handshake_timeout, self._connect(address))
-            .await
-            .map_err(|_| ConnectError::HandshakeTimeout)
-            .and_then(|res| res)
-    }
-
     /// Negotiate amqp protocol over opened socket
-    pub fn negotiate(&self, io: IoBoxed) -> impl Future<Output = Result<Client, ConnectError>> {
+    pub async fn negotiate(&self, io: IoBoxed) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        io.set_memory_pool(self.pool);
-        _connect_plain(io, self.config.clone())
-    }
-
-    async fn _connect(&self, address: A) -> Result<Client, ConnectError> {
-        let io = self.connector.call(Connect::new(address)).await?;
-        let config = self.config.clone();
-        let pool = self.pool;
-
-        let io = IoBoxed::from(io);
-        io.set_memory_pool(pool);
-
-        _connect_plain(io, config).await
-    }
-
-    /// Connect to amqp server
-    pub async fn connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
-        timeout_checked(
-            self.config.handshake_timeout,
-            self._connect_sasl(addr, auth),
-        )
-        .await
-        .map_err(|_| ConnectError::HandshakeTimeout)
-        .and_then(|res| res)
+        _connect_plain(io, self.config.clone()).await
     }
 
     /// Negotiate amqp sasl protocol over opened socket
-    pub fn negotiate_sasl(
+    pub async fn negotiate_sasl(
         &self,
         io: IoBoxed,
         auth: SaslAuth,
-    ) -> impl Future<Output = Result<Client, ConnectError>> {
+    ) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        let config = self.config.clone();
-        io.set_memory_pool(self.pool);
-
-        _connect_sasl(io, auth, config)
-    }
-
-    async fn _connect_sasl(&self, addr: A, auth: SaslAuth) -> Result<Client, ConnectError> {
-        let io = self.connector.call(Connect::new(addr)).await?;
-        let config = self.config.clone();
-        let pool = self.pool;
-
-        let io = IoBoxed::from(io);
-        io.set_memory_pool(pool);
-
-        _connect_sasl(io, auth, config).await
+        _connect_sasl(io, auth, self.config.clone()).await
     }
 }
 

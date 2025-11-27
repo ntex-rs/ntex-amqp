@@ -67,13 +67,7 @@ where
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::new(
-            self.io,
-            self.codec,
-            dispatcher,
-            &self.remote_config.disp_config,
-        )
-        .await
+        IoDispatcher::new(self.io, self.codec, dispatcher).await
     }
 
     pub async fn start<F, S>(self, service: F) -> Result<(), AmqpDispatcherError>
@@ -91,12 +85,6 @@ where
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::new(
-            self.io,
-            self.codec,
-            dispatcher,
-            &self.remote_config.disp_config,
-        )
-        .await
+        IoDispatcher::new(self.io, self.codec, dispatcher).await
     }
 }

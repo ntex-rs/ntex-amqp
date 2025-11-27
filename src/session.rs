@@ -1,7 +1,7 @@
 use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef, Ready};
+use ntex::util::{ByteString, Bytes, Either, HashMap, Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -315,10 +315,6 @@ impl SessionInner {
 
     pub(crate) fn tag(&self) -> &'static str {
         self.sink.tag()
-    }
-
-    pub(crate) fn memory_pool(&self) -> PoolRef {
-        self.sink.0.memory_pool()
     }
 
     pub(crate) fn unsettled_deliveries(
@@ -1259,7 +1255,12 @@ impl SessionInner {
             let mut body = match body {
                 TransferBody::Data(data) => data,
                 TransferBody::Message(msg) => {
-                    let mut buf = self.memory_pool().buf_with_capacity(msg.encoded_size());
+                    let mut buf = self
+                        .sink
+                        .config()
+                        .write_buf()
+                        .buf_with_capacity(msg.encoded_size())
+                        .into();
                     msg.encode(&mut buf);
                     buf.freeze()
                 }

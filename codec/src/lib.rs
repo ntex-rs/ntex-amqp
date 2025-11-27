@@ -13,11 +13,11 @@ pub mod protocol;
 pub mod types;
 
 pub use self::codec::{
-    format_codes, ArrayEncode, ArrayHeader, Decode, DecodeFormatted, Encode, ListHeader, MapHeader,
+    ArrayEncode, ArrayHeader, Decode, DecodeFormatted, Encode, ListHeader, MapHeader, format_codes,
 };
 pub use self::error::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 pub use self::framing::{AmqpFrame, SaslFrame};
 pub use self::io::{AmqpCodec, ProtocolIdCodec};
 pub use self::message::{Message, MessageBody};
 
-type HashMap<K, V> = std::collections::HashMap<K, V, ahash::RandomState>;
+type HashMap<K, V> = ntex_util::HashMap<K, V>;

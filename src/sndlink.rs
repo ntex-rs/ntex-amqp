@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, future::Future};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{BufMut, ByteString, Bytes, Either, PoolRef, Ready};
+use ntex::util::{BufMut, ByteString, Bytes, Either, Ready};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
@@ -30,7 +30,6 @@ pub(crate) struct SenderLinkInner {
     pub(crate) max_message_size: Option<u32>,
     on_close: condition::Condition,
     on_credit: condition::Condition,
-    pool: PoolRef,
 }
 
 impl std::fmt::Debug for SenderLink {
@@ -184,11 +183,9 @@ impl SenderLinkInner {
         session: Cell<SessionInner>,
         max_message_size: Option<u32>,
     ) -> SenderLinkInner {
-        let pool = session.get_ref().memory_pool();
         SenderLinkInner {
             id,
             name,
-            pool,
             delivery_count,
             max_message_size,
             session: Session::new(session),
@@ -378,7 +375,12 @@ impl SenderLinkInner {
             let delivery_tag = self.delivery_tag;
             self.delivery_tag = delivery_tag.wrapping_add(1);
 
-            let mut buf = self.pool.buf_with_capacity(16);
+            let mut buf = self
+                .session
+                .connection()
+                .config()
+                .read_buf()
+                .buf_with_capacity(16);
             buf.put_u32(delivery_tag);
             buf.freeze()
         })

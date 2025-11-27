@@ -1,8 +1,8 @@
 use std::{fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
-use ntex::io::IoRef;
-use ntex::util::{HashMap, PoolRef, Ready};
+use ntex::io::{IoConfig, IoRef};
+use ntex::util::{HashMap, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{types, AmqpCodec, AmqpFrame};
@@ -103,6 +103,12 @@ impl ConnectionRef {
     /// Get io tag for current connection
     pub fn tag(&self) -> &'static str {
         self.0.get_ref().io.tag()
+    }
+
+    #[inline]
+    /// Get io configuration for current connection
+    pub fn config(&self) -> &IoConfig {
+        self.0.get_ref().io.cfg()
     }
 
     #[inline]
@@ -207,10 +213,6 @@ impl ConnectionRef {
 }
 
 impl ConnectionInner {
-    pub(crate) fn memory_pool(&self) -> PoolRef {
-        self.io.memory_pool()
-    }
-
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("{}: Set connection error: {:?}", self.io.tag(), err);
         for (_, channel) in self.sessions.iter_mut() {
