@@ -5,8 +5,8 @@ use ntex::util::{ByteString, Either};
 
 use crate::codec::protocol::{Accepted, Attach, DeliveryState, Detach, Error, Flow, Rejected};
 use crate::{
-    error::AmqpProtocolError, rcvlink::ReceiverLink, session::Session, sndlink::SenderLink, Handle,
-    State,
+    Handle, State, error::AmqpProtocolError, rcvlink::ReceiverLink, session::Session,
+    sndlink::SenderLink,
 };
 
 pub use crate::codec::protocol::Transfer;

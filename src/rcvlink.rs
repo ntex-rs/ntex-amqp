@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque, future::poll_fn, future::Future, hash, pin::Pin, task::Context,
+    collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context,
     task::Poll,
 };
 
@@ -10,10 +10,10 @@ use ntex_amqp_codec::protocol::{
     SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer,
     TransferBody,
 };
-use ntex_amqp_codec::{types::Symbol, types::Variant, Encode};
+use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 
 use crate::session::{Session, SessionInner};
-use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Delivery};
+use crate::{Delivery, cell::Cell, error::AmqpProtocolError, types::Action};
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
@@ -324,7 +324,7 @@ impl ReceiverLinkInner {
                     if self
                         .queue
                         .back()
-                        .map_or(true, |back| Some(back.0.id()) != transfer.0.delivery_id)
+                        .is_none_or(|back| Some(back.0.id()) != transfer.0.delivery_id)
                     {
                         let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::DetachForced.into(),
@@ -359,7 +359,7 @@ impl ReceiverLinkInner {
                     self.delivery_count += 1;
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
-                        self.queue.back_mut().unwrap().1 .0.body =
+                        self.queue.back_mut().unwrap().1.0.body =
                             Some(TransferBody::Data(partial_body.unwrap().freeze()));
                         if self.queue.len() == 1 {
                             self.wake();

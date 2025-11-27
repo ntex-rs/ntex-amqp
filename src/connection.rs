@@ -5,11 +5,11 @@ use ntex::io::{IoConfig, IoRef};
 use ntex::util::{HashMap, Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
-use crate::codec::{types, AmqpCodec, AmqpFrame};
+use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
-use crate::session::{Session, SessionInner, INITIAL_NEXT_OUTGOING_ID};
+use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Configuration};
+use crate::{Configuration, cell::Cell, error::AmqpProtocolError, types::Action};
 
 pub struct Connection(ConnectionRef);
 
@@ -218,7 +218,7 @@ impl ConnectionInner {
         for (_, channel) in self.sessions.iter_mut() {
             match channel {
                 SessionState::Opening(_, _) | SessionState::Closing(_) => (),
-                SessionState::Established(ref mut ses) => {
+                SessionState::Established(ses) => {
                     ses.get_mut().set_error(err.clone());
                 }
             }
@@ -331,7 +331,12 @@ impl ConnectionInner {
                 }
             } else {
                 // TODO: send error response
-                log::warn!("{}: Begin received for channel not in opening state. local channel: {} (remote channel: {})", self.io.tag(), local_channel_id, remote_channel_id);
+                log::warn!(
+                    "{}: Begin received for channel not in opening state. local channel: {} (remote channel: {})",
+                    self.io.tag(),
+                    local_channel_id,
+                    remote_channel_id
+                );
             }
         } else {
             // TODO: rogue begin right now - do nothing. in future might indicate incoming attach
@@ -415,7 +420,7 @@ impl ConnectionInner {
                 );
                 Err(AmqpProtocolError::UnexpectedOpeningState(frame))
             }
-            SessionState::Established(ref mut session) => match frame {
+            SessionState::Established(session) => match frame {
                 Frame::Attach(attach) => {
                     let cell = session.clone();
                     if session.get_mut().handle_attach(&attach, cell) {
@@ -456,7 +461,7 @@ impl ConnectionInner {
                 }
                 _ => session.get_mut().handle_frame(frame),
             },
-            SessionState::Closing(ref mut session) => match frame {
+            SessionState::Closing(session) => match frame {
                 Frame::End(frm) => {
                     log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
                     let _ = session

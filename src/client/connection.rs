@@ -1,11 +1,11 @@
 use ntex::io::{Dispatcher as IoDispatcher, IoBoxed};
-use ntex::service::{fn_service, IntoService, Pipeline, Service};
+use ntex::service::{IntoService, Pipeline, Service, fn_service};
 use ntex::util::Ready;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
 use crate::error::{AmqpDispatcherError, LinkError};
-use crate::{dispatcher::Dispatcher, Configuration, Connection, ConnectionRef, State};
+use crate::{Configuration, Connection, ConnectionRef, State, dispatcher::Dispatcher};
 
 /// Mqtt client
 pub struct Client<St = ()> {

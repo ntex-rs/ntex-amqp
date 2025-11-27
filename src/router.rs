@@ -2,15 +2,15 @@ use std::{marker, rc::Rc};
 
 use ntex::router::{IntoPattern, Router as PatternRouter};
 use ntex::service::{
-    boxed, fn_factory_with_config, IntoServiceFactory, Pipeline, Service, ServiceCtx,
-    ServiceFactory,
+    IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory, boxed,
+    fn_factory_with_config,
 };
-use ntex::util::{join_all, HashMap, Ready};
+use ntex::util::{HashMap, Ready, join_all};
 
 use crate::codec::protocol::{DeliveryState, Error, Rejected, Transfer};
 use crate::error::LinkError;
 use crate::types::{Link, Message, Outcome};
-use crate::{cell::Cell, rcvlink::ReceiverLink, Delivery, State};
+use crate::{Delivery, State, cell::Cell, rcvlink::ReceiverLink};
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Transfer, Outcome, Error, Error>;
 type HandleService = boxed::BoxService<Transfer, Outcome, Error>;

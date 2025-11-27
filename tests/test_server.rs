@@ -1,14 +1,14 @@
 use std::convert::TryFrom;
-use std::sync::{atomic::AtomicUsize, atomic::Ordering, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::AtomicUsize, atomic::Ordering};
 
 use ntex::server::test_server;
 use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
 use ntex::util::{Bytes, Either, Ready};
-use ntex::{http::Uri, rt, time::sleep, time::Millis, ServiceFactory, SharedCfg};
+use ntex::{ServiceFactory, SharedCfg, http::Uri, rt, time::Millis, time::sleep};
 use ntex_amqp::{
-    client, codec::protocol, error::LinkError, server, types, ControlFrame, ControlFrameKind,
+    ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError, server, types,
 };
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{Rng, distributions::Alphanumeric, thread_rng};
 
 async fn server(
     _link: types::Link<()>,
@@ -319,7 +319,7 @@ async fn test_link_detach() -> std::io::Result<()> {
             }
         })
         .control(move |frm: ControlFrame| {
-            if let ControlFrameKind::AttachSender(_, _, ref link) = frm.kind() {
+            if let ControlFrameKind::AttachSender(_, _, link) = frm.kind() {
                 let link = link.clone();
                 rt::spawn(async move {
                     sleep(Millis(150)).await;

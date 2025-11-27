@@ -2,15 +2,15 @@ use std::marker::PhantomData;
 
 use ntex::connect::{self, Address, Connect};
 use ntex::io::IoBoxed;
-use ntex::service::{cfg::SharedCfg, Service, ServiceCtx, ServiceFactory};
-use ntex::time::{timeout_checked, Seconds};
+use ntex::service::{Service, ServiceCtx, ServiceFactory, cfg::SharedCfg};
+use ntex::time::{Seconds, timeout_checked};
 use ntex::util::ByteString;
 
 use crate::codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
-use crate::codec::{types::Symbol, AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
-use crate::{error::ProtocolIdError, Configuration, Connection};
+use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame, types::Symbol};
+use crate::{Configuration, Connection, error::ProtocolIdError};
 
-use super::{connection::Client, error::ConnectError, SaslAuth};
+use super::{SaslAuth, connection::Client, error::ConnectError};
 
 /// Amqp client connector
 pub struct Connector<A, T = ()> {

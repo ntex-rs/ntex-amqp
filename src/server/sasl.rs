@@ -8,8 +8,8 @@ use crate::codec::protocol::{
 };
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
-use super::{handshake::HandshakeAmqpOpened, HandshakeError};
-use crate::{connection::Connection, Configuration};
+use super::{HandshakeError, handshake::HandshakeAmqpOpened};
+use crate::{Configuration, connection::Connection};
 
 #[derive(Debug)]
 pub struct Sasl {

@@ -9,7 +9,7 @@ use ntex_amqp_codec::protocol::{
 
 use crate::delivery::TransferBuilder;
 use crate::session::{Session, SessionInner};
-use crate::{cell::Cell, error::AmqpProtocolError, Handle};
+use crate::{Handle, cell::Cell, error::AmqpProtocolError};
 
 #[derive(Clone)]
 pub struct SenderLink {
@@ -339,7 +339,8 @@ impl SenderLinkInner {
             loop {
                 if self.link_credit == 0 || !self.pending_transfers.is_empty() {
                     log::trace!(
-                        "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}", self.session.tag(),
+                        "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
+                        self.session.tag(),
                         self.link_credit,
                         self.name,
                         self.id,

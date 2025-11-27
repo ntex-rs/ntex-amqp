@@ -1,12 +1,12 @@
 use std::{fmt, marker, rc::Rc};
 
+use ntex::SharedCfg;
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
-use ntex::time::{timeout_checked, Millis};
-use ntex::SharedCfg;
+use ntex::time::{Millis, timeout_checked};
 
-use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
-use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
+use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, protocol::ProtocolId};
+use crate::{Configuration, Connection, ControlFrame, State, default::DefaultControlService};
 use crate::{dispatcher::Dispatcher, types::Message};
 
 use super::handshake::{Handshake, HandshakeAck};
