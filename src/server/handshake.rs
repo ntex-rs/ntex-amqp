@@ -4,10 +4,11 @@ use ntex::{io::IoBoxed, time::Seconds};
 
 use crate::codec::protocol::{Frame, Open};
 use crate::codec::{AmqpCodec, AmqpFrame};
-use crate::{connection::Connection, Configuration};
+use crate::{Configuration, connection::Connection};
 
 use super::{error::HandshakeError, sasl::Sasl};
 
+#[derive(Debug)]
 /// Connection handshake
 pub enum Handshake {
     Amqp(HandshakeAmqp),
@@ -29,12 +30,13 @@ impl Handshake {
     /// Returns reference to io object
     pub fn io(&self) -> &IoBoxed {
         match self {
-            Handshake::Amqp(ref item) => item.io(),
-            Handshake::Sasl(ref item) => item.io(),
+            Handshake::Amqp(item) => item.io(),
+            Handshake::Sasl(item) => item.io(),
         }
     }
 }
 
+#[derive(Debug)]
 /// Open new connection
 pub struct HandshakeAmqp {
     state: IoBoxed,

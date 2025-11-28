@@ -1,6 +1,6 @@
 use ntex::util::Either;
 
-use crate::codec::{protocol, AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame};
+use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame, protocol};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError};
 
 /// Errors which can occur when attempting to handle amqp connection.

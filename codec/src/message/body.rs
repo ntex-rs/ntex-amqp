@@ -1,6 +1,6 @@
 use ntex_bytes::{BufMut, Bytes, BytesMut};
 
-use crate::codec::{Encode, FORMATCODE_BINARY32, FORMATCODE_BINARY8};
+use crate::codec::{Encode, FORMATCODE_BINARY8, FORMATCODE_BINARY32};
 use crate::protocol::TransferBody;
 use crate::types::{Descriptor, List, Variant};
 

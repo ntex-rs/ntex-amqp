@@ -343,14 +343,7 @@ impl Described {
             provides: parse_provides(d.provides),
             descriptor: Descriptor::from(d.descriptor),
             fields: d.field.into_iter().map(Field::from).collect(),
-            inner: {
-                if boxed {
-                    "0."
-                } else {
-                    ""
-                }
-            }
-            .to_string(),
+            inner: { if boxed { "0." } else { "" } }.to_string(),
             transfer,
             boxed,
             props,

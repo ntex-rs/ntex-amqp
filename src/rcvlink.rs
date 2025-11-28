@@ -1,19 +1,19 @@
 use std::{
-    collections::VecDeque, future::poll_fn, future::Future, hash, pin::Pin, task::Context,
+    collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context,
     task::Poll,
 };
 
-use ntex::util::{ByteString, Bytes, BytesMut, PoolRef, Stream};
+use ntex::util::{ByteString, Bytes, BytesMut, Stream};
 use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer,
     TransferBody,
 };
-use ntex_amqp_codec::{types::Symbol, types::Variant, Encode};
+use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 
 use crate::session::{Session, SessionInner};
-use crate::{cell::Cell, error::AmqpProtocolError, types::Action, Delivery};
+use crate::{Delivery, cell::Cell, error::AmqpProtocolError, types::Action};
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
@@ -34,7 +34,6 @@ pub(crate) struct ReceiverLinkInner {
     error: Option<Error>,
     partial_body: Option<BytesMut>,
     max_message_size: u64,
-    pool: PoolRef,
 }
 
 impl Eq for ReceiverLink {}
@@ -228,7 +227,6 @@ impl ReceiverLinkInner {
         remote_handle: Handle,
         frame: &Attach,
     ) -> ReceiverLinkInner {
-        let pool = session.get_ref().memory_pool();
         let mut name = frame.name().clone();
         name.trimdown();
 
@@ -236,7 +234,6 @@ impl ReceiverLinkInner {
             name,
             handle,
             remote_handle,
-            pool,
             session: Session::new(session),
             closed: false,
             queue: VecDeque::with_capacity(4),
@@ -327,7 +324,7 @@ impl ReceiverLinkInner {
                     if self
                         .queue
                         .back()
-                        .map_or(true, |back| Some(back.0.id()) != transfer.0.delivery_id)
+                        .is_none_or(|back| Some(back.0.id()) != transfer.0.delivery_id)
                     {
                         let err = Error(Box::new(codec::ErrorInner {
                             condition: LinkError::DetachForced.into(),
@@ -362,7 +359,7 @@ impl ReceiverLinkInner {
                     self.delivery_count += 1;
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
-                        self.queue.back_mut().unwrap().1 .0.body =
+                        self.queue.back_mut().unwrap().1.0.body =
                             Some(TransferBody::Data(partial_body.unwrap().freeze()));
                         if self.queue.len() == 1 {
                             self.wake();
@@ -388,13 +385,24 @@ impl ReceiverLinkInner {
                         match body {
                             TransferBody::Data(data) => BytesMut::copy_from_slice(&data),
                             TransferBody::Message(msg) => {
-                                let mut buf = self.pool.buf_with_capacity(msg.encoded_size());
+                                let mut buf = self
+                                    .session
+                                    .connection()
+                                    .config()
+                                    .write_buf()
+                                    .buf_with_capacity(msg.encoded_size())
+                                    .into();
                                 msg.encode(&mut buf);
                                 buf
                             }
                         }
                     } else {
-                        self.pool.buf_with_capacity(16)
+                        self.session
+                            .connection()
+                            .config()
+                            .write_buf()
+                            .buf_with_capacity(16)
+                            .into()
                     };
                     self.partial_body = Some(body);
 

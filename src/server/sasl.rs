@@ -8,21 +8,14 @@ use crate::codec::protocol::{
 };
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
-use super::{handshake::HandshakeAmqpOpened, HandshakeError};
-use crate::{connection::Connection, Configuration};
+use super::{HandshakeError, handshake::HandshakeAmqpOpened};
+use crate::{Configuration, connection::Connection};
 
+#[derive(Debug)]
 pub struct Sasl {
     state: IoBoxed,
     mechanisms: Symbols,
     local_config: Rc<Configuration>,
-}
-
-impl fmt::Debug for Sasl {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("SaslAuth")
-            .field("mechanisms", &self.mechanisms)
-            .finish()
-    }
 }
 
 impl Sasl {

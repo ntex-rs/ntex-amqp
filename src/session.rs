@@ -1,7 +1,7 @@
 use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
 use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap, PoolRef, Ready};
+use ntex::util::{ByteString, Bytes, Either, HashMap, Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -17,7 +17,7 @@ use crate::rcvlink::{
     EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner,
 };
 use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::{cell::Cell, types::Action, ConnectionRef, ControlFrame};
+use crate::{ConnectionRef, ControlFrame, cell::Cell, types::Action};
 
 pub(crate) const INITIAL_NEXT_OUTGOING_ID: TransferNumber = 1;
 
@@ -123,8 +123,7 @@ impl Session {
         let inner = self.inner.get_ref();
 
         if let Some(id) = inner.links_by_name.get(name) {
-            if let Some(Either::Left(SenderLinkState::Established(ref link))) = inner.links.get(*id)
-            {
+            if let Some(Either::Left(SenderLinkState::Established(link))) = inner.links.get(*id) {
                 return Some(link);
             }
         }
@@ -317,10 +316,6 @@ impl SessionInner {
         self.sink.tag()
     }
 
-    pub(crate) fn memory_pool(&self) -> PoolRef {
-        self.sink.0.memory_pool()
-    }
-
     pub(crate) fn unsettled_deliveries(
         &mut self,
         sender: bool,
@@ -357,15 +352,15 @@ impl SessionInner {
         for (_, st) in self.links.iter_mut() {
             match st {
                 Either::Left(SenderLinkState::Opening(_)) => (),
-                Either::Left(SenderLinkState::Established(ref mut link)) => {
+                Either::Left(SenderLinkState::Established(link)) => {
                     link.inner.get_mut().remote_detached(err.clone());
                 }
-                Either::Left(SenderLinkState::Closing(ref mut link)) => {
+                Either::Left(SenderLinkState::Closing(link)) => {
                     if let Some(tx) = link.take() {
                         let _ = tx.send(Err(err.clone()));
                     }
                 }
-                Either::Right(ReceiverLinkState::Established(ref mut link)) => {
+                Either::Right(ReceiverLinkState::Established(link)) => {
                     link.remote_detached(None);
                 }
                 _ => (),
@@ -392,10 +387,10 @@ impl SessionInner {
         self.links
             .iter()
             .filter_map(|(_, st)| match st {
-                Either::Left(SenderLinkState::Established(ref link)) => {
+                Either::Left(SenderLinkState::Established(link)) => {
                     Some(Either::Left((*link).clone()))
                 }
-                Either::Right(ReceiverLinkState::Established(ref link)) => {
+                Either::Right(ReceiverLinkState::Established(link)) => {
                     Some(Either::Right((*link).clone()))
                 }
                 _ => None,
@@ -590,8 +585,7 @@ impl SessionInner {
     }
 
     pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
-        if let Some(Either::Left(SenderLinkState::Established(ref link))) =
-            self.links.get(hnd as usize)
+        if let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(hnd as usize)
         {
             Some(link)
         } else {
@@ -601,8 +595,7 @@ impl SessionInner {
 
     pub(crate) fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
         if let Some(id) = self.remote_handles.get(&hnd) {
-            if let Some(Either::Left(SenderLinkState::Established(ref link))) = self.links.get(*id)
-            {
+            if let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(*id) {
                 return Some(link);
             }
         }
@@ -771,7 +764,7 @@ impl SessionInner {
     }
 
     pub(crate) fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
-        if let Some(Either::Right(ReceiverLinkState::Established(ref link))) =
+        if let Some(Either::Right(ReceiverLinkState::Established(link))) =
             self.links.get(hnd as usize)
         {
             Some(link)
@@ -782,9 +775,7 @@ impl SessionInner {
 
     pub(crate) fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
         if let Some(id) = self.remote_handles.get(&hnd) {
-            if let Some(Either::Right(ReceiverLinkState::Established(ref link))) =
-                self.links.get(*id)
-            {
+            if let Some(Either::Right(ReceiverLinkState::Established(link))) = self.links.get(*id) {
                 return Some(link);
             }
         }
@@ -801,7 +792,7 @@ impl SessionInner {
                         .and_then(|h| self.remote_handles.get(&h).copied())
                         .and_then(|h| self.links.get_mut(h))
                     {
-                        if let SenderLinkState::Established(ref link) = link {
+                        if let SenderLinkState::Established(link) = link {
                             return Ok(Action::Flow((*link).clone(), flow));
                         }
                         log::warn!("{}: Received flow frame", self.tag());
@@ -967,7 +958,7 @@ impl SessionInner {
         let remove = if let Some(link) = self.links.get_mut(idx) {
             match link {
                 Either::Left(link) => match link {
-                    SenderLinkState::Opening(ref mut tx) => {
+                    SenderLinkState::Opening(tx) => {
                         if let Some(tx) = tx.take() {
                             let err = AmqpProtocolError::LinkDetached(frame.0.error.clone());
                             let _ = tx.send(Err(err));
@@ -1033,7 +1024,7 @@ impl SessionInner {
                 },
                 Either::Right(link) => match link {
                     ReceiverLinkState::Opening(_) => false,
-                    ReceiverLinkState::OpeningLocal(ref mut item) => {
+                    ReceiverLinkState::OpeningLocal(item) => {
                         if let Some((inner, tx)) = item.take() {
                             inner.get_mut().detached();
                             if let Some(err) = frame.0.error.clone() {
@@ -1259,7 +1250,12 @@ impl SessionInner {
             let mut body = match body {
                 TransferBody::Data(data) => data,
                 TransferBody::Message(msg) => {
-                    let mut buf = self.memory_pool().buf_with_capacity(msg.encoded_size());
+                    let mut buf = self
+                        .sink
+                        .config()
+                        .write_buf()
+                        .buf_with_capacity(msg.encoded_size())
+                        .into();
                     msg.encode(&mut buf);
                     buf.freeze()
                 }
@@ -1285,7 +1281,8 @@ impl SessionInner {
             }
 
             log::trace!(
-                "{}: Sending transfer over handle {link_handle}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}", self.sink.tag(),
+                "{}: Sending transfer over handle {link_handle}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}",
+                self.sink.tag(),
                 self.remote_incoming_window,
                 transfer.delivery_id(),
                 transfer.delivery_tag(),

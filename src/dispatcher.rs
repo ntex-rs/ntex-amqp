@@ -1,14 +1,14 @@
-use std::task::{Context, Poll};
-use std::{cell, cmp, future::poll_fn, future::Future, marker, pin::Pin};
+use std::task::{Context, Poll, ready};
+use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin};
 
 use ntex::service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
-use ntex::time::{sleep, Millis, Sleep};
-use ntex::util::{ready, Either};
+use ntex::time::{Millis, Sleep, sleep};
+use ntex::util::Either;
 use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
 
-use crate::codec::{protocol::Frame, AmqpCodec, AmqpFrame};
+use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
-use crate::{connection::Connection, types, ControlFrame, ControlFrameKind, ReceiverLink};
+use crate::{ControlFrame, ControlFrameKind, ReceiverLink, connection::Connection, types};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher<Sr: Service<types::Message>, Ctl: Service<ControlFrame>> {
@@ -302,27 +302,27 @@ where
     ) -> Result<(), AmqpDispatcherError> {
         if let Some(err) = err {
             match &frame.0.get_mut().kind {
-                ControlFrameKind::AttachReceiver(_, _, ref link) => {
+                ControlFrameKind::AttachReceiver(_, _, link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::AttachSender(ref frm, _, ref link) => {
+                ControlFrameKind::AttachSender(frm, _, link) => {
                     frame
                         .session_cell()
                         .get_mut()
                         .detach_unconfirmed_sender_link(frm, link.inner.clone(), Some(err));
                 }
-                ControlFrameKind::Flow(_, ref link) => {
+                ControlFrameKind::Flow(_, link) => {
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::LocalDetachSender(..) => {}
                 ControlFrameKind::LocalDetachReceiver(..) => {}
-                ControlFrameKind::RemoteDetachSender(_, ref link) => {
+                ControlFrameKind::RemoteDetachSender(_, link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::RemoteDetachReceiver(_, ref link) => {
+                ControlFrameKind::RemoteDetachReceiver(_, link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::ProtocolError(ref err) => {
+                ControlFrameKind::ProtocolError(err) => {
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
                 }

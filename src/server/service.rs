@@ -1,11 +1,12 @@
 use std::{fmt, marker, rc::Rc};
 
+use ntex::SharedCfg;
 use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
 use ntex::service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
-use ntex::time::{timeout_checked, Millis};
+use ntex::time::{Millis, timeout_checked};
 
-use crate::codec::{protocol::ProtocolId, AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError};
-use crate::{default::DefaultControlService, Configuration, Connection, ControlFrame, State};
+use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, protocol::ProtocolId};
+use crate::{Configuration, Connection, ControlFrame, State, default::DefaultControlService};
 use crate::{dispatcher::Dispatcher, types::Message};
 
 use super::handshake::{Handshake, HandshakeAck};
@@ -39,8 +40,8 @@ where
     /// Start server building process with provided handshake service
     pub fn build<F, H>(handshake: F) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
     where
-        F: IntoServiceFactory<H, Handshake>,
-        H: ServiceFactory<Handshake, Response = HandshakeAck<St>>,
+        F: IntoServiceFactory<H, Handshake, SharedCfg>,
+        H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>>,
     {
         Server::with_config(Configuration::default(), handshake)
     }
@@ -51,8 +52,8 @@ where
         handshake: F,
     ) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
     where
-        F: IntoServiceFactory<H, Handshake>,
-        H: ServiceFactory<Handshake, Response = HandshakeAck<St>>,
+        F: IntoServiceFactory<H, Handshake, SharedCfg>,
+        H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>>,
     {
         ServerBuilder {
             config,
@@ -66,7 +67,7 @@ where
 impl<St, H, Ctl> ServerBuilder<St, H, Ctl>
 where
     St: 'static,
-    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
+    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>> + 'static,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Ctl::InitError: fmt::Debug,
     Error: From<Ctl::Error>,
@@ -116,11 +117,11 @@ where
     }
 }
 
-impl<F, St, H, Ctl, Pb> ServiceFactory<Io<F>> for Server<St, H, Ctl, Pb>
+impl<F, St, H, Ctl, Pb> ServiceFactory<Io<F>, SharedCfg> for Server<St, H, Ctl, Pb>
 where
     F: Filter,
     St: 'static,
-    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
+    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>> + 'static,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
@@ -132,9 +133,9 @@ where
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
 
-    async fn create(&self, _: ()) -> Result<Self::Service, Self::InitError> {
+    async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         self.handshake
-            .pipeline(())
+            .pipeline(cfg)
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
@@ -143,10 +144,10 @@ where
     }
 }
 
-impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed> for Server<St, H, Ctl, Pb>
+impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed, SharedCfg> for Server<St, H, Ctl, Pb>
 where
     St: 'static,
-    H: ServiceFactory<Handshake, Response = HandshakeAck<St>> + 'static,
+    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>> + 'static,
     Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
     Ctl::InitError: fmt::Debug,
     Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
@@ -158,9 +159,9 @@ where
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
 
-    async fn create(&self, _: ()) -> Result<Self::Service, Self::InitError> {
+    async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         self.handshake
-            .pipeline(())
+            .pipeline(cfg)
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
@@ -210,7 +211,6 @@ where
             state,
             codec,
             Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),
-            &inner.config.disp_config,
         )
         .await
         .map_err(ServerError::Dispatcher)

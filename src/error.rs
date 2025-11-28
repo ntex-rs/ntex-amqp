@@ -25,7 +25,7 @@ impl Clone for AmqpDispatcherError {
         match self {
             AmqpDispatcherError::Service => AmqpDispatcherError::Service,
             AmqpDispatcherError::Protocol(err) => AmqpDispatcherError::Protocol(err.clone()),
-            AmqpDispatcherError::Disconnected(Some(ref err)) => AmqpDispatcherError::Disconnected(
+            AmqpDispatcherError::Disconnected(Some(err)) => AmqpDispatcherError::Disconnected(
                 Some(io::Error::new(err.kind(), format!("{err}"))),
             ),
             AmqpDispatcherError::Disconnected(None) => AmqpDispatcherError::Disconnected(None),

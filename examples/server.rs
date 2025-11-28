@@ -10,7 +10,7 @@ async fn server(
 
 #[ntex::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "trace,ntex_io=info");
+    // std::env::set_var("RUST_LOG", "trace,ntex_io=info");
     env_logger::init();
 
     ntex::server::Server::build()

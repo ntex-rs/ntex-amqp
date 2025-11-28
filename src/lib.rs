@@ -4,7 +4,7 @@
 #[macro_use]
 extern crate derive_more;
 
-use ntex::{io::DispatcherConfig, time::Seconds, util::ByteString};
+use ntex::{time::Seconds, util::ByteString};
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner, Symbols};
 use ntex_amqp_codec::types::Symbol;
 use uuid::Uuid;
@@ -48,7 +48,6 @@ pub struct Configuration {
     pub offered_capabilities: Option<Symbols>,
     pub desired_capabilities: Option<Symbols>,
     pub(crate) max_size: usize,
-    pub(crate) disp_config: DispatcherConfig,
     pub(crate) handshake_timeout: Seconds,
 }
 
@@ -61,13 +60,7 @@ impl Default for Configuration {
 impl Configuration {
     /// Create connection configuration.
     pub fn new() -> Self {
-        let disp_config = DispatcherConfig::default();
-        disp_config
-            .set_disconnect_timeout(Seconds(3))
-            .set_keepalive_timeout(Seconds(0));
-
         Configuration {
-            disp_config,
             max_size: 0,
             max_frame_size: u16::MAX as u32,
             channel_max: 1024,
@@ -107,7 +100,6 @@ impl Configuration {
     /// By default idle time-out is set to 120 seconds
     pub fn idle_timeout(&mut self, timeout: u16) -> &mut Self {
         self.idle_time_out = (timeout as Milliseconds) * 1000;
-        self.disp_config.set_keepalive_timeout(Seconds(timeout));
         self
     }
 
@@ -145,47 +137,6 @@ impl Configuration {
     /// By default handshake timeout is 5 seconds.
     pub fn handshake_timeout(&mut self, timeout: Seconds) -> &mut Self {
         self.handshake_timeout = timeout;
-        self
-    }
-
-    /// Set server connection keep-alive timeout.
-    ///
-    /// To disable timeout set value to 0.
-    ///
-    /// By default keep-alive timeout is disabled.
-    pub fn keepalive_timeout(&mut self, val: Seconds) -> &mut Self {
-        self.disp_config.set_keepalive_timeout(val);
-        self
-    }
-
-    /// Set server connection disconnect timeout.
-    ///
-    /// Defines a timeout for disconnect connection. If a disconnect procedure does not complete
-    /// within this time, the connection get dropped.
-    ///
-    /// To disable timeout set value to 0.
-    ///
-    /// By default disconnect timeout is set to 3 seconds.
-    pub fn disconnect_timeout(&mut self, val: Seconds) -> &mut Self {
-        self.disp_config.set_disconnect_timeout(val);
-        self
-    }
-
-    /// Set read rate parameters for single frame.
-    ///
-    /// Set read timeout, max timeout and rate for reading payload. If the client
-    /// sends `rate` amount of data within `timeout` period of time, extend timeout by `timeout` seconds.
-    /// But no more than `max_timeout` timeout.
-    ///
-    /// By default frame read rate is disabled.
-    pub fn frame_read_rate(
-        &mut self,
-        timeout: Seconds,
-        max_timeout: Seconds,
-        rate: u16,
-    ) -> &mut Self {
-        self.disp_config
-            .set_frame_read_rate(timeout, max_timeout, rate);
         self
     }
 
@@ -242,7 +193,6 @@ impl Configuration {
             idle_time_out: open.idle_time_out().unwrap_or(0),
             hostname: open.hostname().cloned(),
             max_size: self.max_size,
-            disp_config: self.disp_config.clone(),
             handshake_timeout: self.handshake_timeout,
             offered_capabilities: open.0.offered_capabilities.clone(),
             desired_capabilities: open.0.desired_capabilities.clone(),

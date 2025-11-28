@@ -7,8 +7,8 @@ use crate::error::AmqpParseError;
 use crate::protocol::{Annotations, Header, MessageFormat, Properties, Section, TransferBody};
 use crate::types::{Descriptor, Str, Symbol, Variant, VecStringMap, VecSymbolMap};
 
-use super::body::MessageBody;
 use super::SECTION_PREFIX_LENGTH;
+use super::body::MessageBody;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Message(pub Box<MessageInner>);
@@ -212,7 +212,7 @@ impl Message {
     where
         F: Fn(Self, &T) -> Self,
     {
-        if let Some(ref val) = value {
+        if let Some(val) = value {
             self.0.size.set(0);
             f(self, val)
         } else {

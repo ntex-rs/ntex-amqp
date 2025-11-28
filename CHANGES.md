@@ -1,5 +1,11 @@
 # Changes
 
+## [5.0.0-pre.0] - 2025-11-28
+
+* Update ntex to 3.0
+
+* Use shared configuration
+
 ## [4.0.0] - 2025-09-10
 
 * Add support for described compound types in Variant #68
