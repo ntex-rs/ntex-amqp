@@ -14,7 +14,7 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     ntex::server::Server::build()
-        .bind("amqp", "127.0.0.1:5671", |_| {
+        .bind("amqp", "127.0.0.1:5671", async |_| {
             server::Server::build(|con: server::Handshake| async move {
                 match con {
                     server::Handshake::Amqp(con) => {
