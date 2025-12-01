@@ -39,7 +39,7 @@ jobs:
           key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Cache cargo tarpaulin
-        if: matrix.version == '1.82.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
+        if: matrix.version == '1.85.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
@@ -50,7 +50,7 @@ jobs:
         timeout-minutes: 40
         with:
           command: test
-          args: --all --no-fail-fast --features=ntex/tokio -- --nocapture
+          args: --all --no-fail-fast --features=ntex/tokio
 
       - name: Run tests (compio)
         uses: actions-rs/cargo@v1
@@ -58,7 +58,7 @@ jobs:
         if: matrix.version != '1.85.0'
         with:
           command: test
-          args: --all --no-fail-fast --features=ntex/compio -- --nocapture
+          args: --all --no-fail-fast --features=ntex/compio
 
       - name: Install tarpaulin
         if: matrix.version == '1.85.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
