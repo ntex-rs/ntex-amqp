@@ -21,11 +21,27 @@ pub struct Connector<A, T = ()> {
 }
 
 impl<A> Connector<A> {
-    #[allow(clippy::new_ret_no_self)]
     /// Create new amqp connector
     pub fn new() -> Connector<A, connect::Connector<A>> {
         Connector {
             connector: connect::Connector::default(),
+            config: Configuration::default(),
+            saslauth: None,
+            _t: PhantomData,
+        }
+    }
+}
+
+impl<A, T> Connector<A, T>
+where
+    A: Address,
+    T: Service<Connect<A>, Error = connect::ConnectError>,
+    IoBoxed: From<T::Response>,
+{
+    /// Create new amqp connector
+    pub fn with(connector: T) -> Connector<A, T> {
+        Connector {
+            connector,
             config: Configuration::default(),
             saslauth: None,
             _t: PhantomData,
