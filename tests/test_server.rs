@@ -33,7 +33,7 @@ async fn test_simple() -> std::io::Result<()> {
     let count = Arc::new(AtomicUsize::new(0));
 
     let count2 = count.clone();
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         let count = count2.clone();
         server::Server::build(|con: server::Handshake| async move {
             match con {
@@ -107,7 +107,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
 
     let count = Arc::new(AtomicUsize::new(0));
     let count2 = count.clone();
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         let count = count2.clone();
         server::Server::build(|con: server::Handshake| async move {
             match con {
@@ -198,7 +198,7 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
 
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
-    let srv = test_server(|| {
+    let srv = test_server(async || {
         server::Server::build(|conn: server::Handshake| async move {
             match conn {
                 server::Handshake::Amqp(conn) => {
@@ -237,7 +237,7 @@ async fn test_session_end() -> std::io::Result<()> {
     let link_names = Arc::new(Mutex::new(Vec::new()));
     let link_names2 = link_names.clone();
 
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         let srv = server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -308,7 +308,7 @@ async fn test_session_end() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach() -> std::io::Result<()> {
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -385,7 +385,7 @@ async fn test_link_detach() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach_on_session_end() -> std::io::Result<()> {
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -444,7 +444,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -503,7 +503,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
-    let srv = test_server(move || {
+    let srv = test_server(async move || {
         server::Server::build(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
