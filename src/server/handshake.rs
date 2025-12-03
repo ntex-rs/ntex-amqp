@@ -1,10 +1,9 @@
-use std::rc::Rc;
-
 use ntex_io::IoBoxed;
+use ntex_service::cfg::Cfg;
 use ntex_util::time::Seconds;
 
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame, protocol::Open};
-use crate::{Configuration, connection::Connection};
+use crate::{AmqpServiceConfig, connection::Connection};
 
 use super::{error::HandshakeError, sasl::Sasl};
 
@@ -16,14 +15,14 @@ pub enum Handshake {
 }
 
 impl Handshake {
-    pub(crate) fn new_plain(state: IoBoxed, local_config: Rc<Configuration>) -> Self {
+    pub(crate) fn new_plain(state: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
         Handshake::Amqp(HandshakeAmqp {
             state,
             local_config,
         })
     }
 
-    pub(crate) fn new_sasl(state: IoBoxed, local_config: Rc<Configuration>) -> Self {
+    pub(crate) fn new_sasl(state: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
         Handshake::Sasl(Sasl::new(state, local_config))
     }
 
@@ -40,7 +39,7 @@ impl Handshake {
 /// Open new connection
 pub struct HandshakeAmqp {
     state: IoBoxed,
-    local_config: Rc<Configuration>,
+    local_config: Cfg<AmqpServiceConfig>,
 }
 
 impl HandshakeAmqp {
@@ -87,8 +86,8 @@ pub struct HandshakeAmqpOpened {
     frame: Open,
     sink: Connection,
     state: IoBoxed,
-    local_config: Rc<Configuration>,
-    remote_config: Configuration,
+    local_config: Cfg<AmqpServiceConfig>,
+    remote_config: AmqpServiceConfig,
 }
 
 impl HandshakeAmqpOpened {
@@ -96,8 +95,8 @@ impl HandshakeAmqpOpened {
         frame: Open,
         sink: Connection,
         state: IoBoxed,
-        local_config: Rc<Configuration>,
-        remote_config: Configuration,
+        local_config: Cfg<AmqpServiceConfig>,
+        remote_config: AmqpServiceConfig,
     ) -> Self {
         Self {
             frame,
@@ -119,12 +118,12 @@ impl HandshakeAmqpOpened {
     }
 
     /// Get local configuration
-    pub fn local_config(&self) -> &Configuration {
-        self.local_config.as_ref()
+    pub fn local_config(&self) -> &Cfg<AmqpServiceConfig> {
+        &self.local_config
     }
 
     /// Get remote configuration
-    pub fn remote_config(&self) -> &Configuration {
+    pub fn remote_config(&self) -> &AmqpServiceConfig {
         &self.remote_config
     }
 

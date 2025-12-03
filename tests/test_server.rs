@@ -1,12 +1,13 @@
 use std::convert::TryFrom;
 use std::sync::{Arc, Mutex, atomic::AtomicUsize, atomic::Ordering};
 
-use ntex::server::test_server;
+use ntex::server::{TestServerBuilder, test_server};
 use ntex::service::{boxed, boxed::BoxService, fn_factory_with_config, fn_service};
 use ntex::util::{Bytes, Either, Ready};
 use ntex::{ServiceFactory, SharedCfg, http::Uri, rt, time::Millis, time::sleep};
 use ntex_amqp::{
-    ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError, server, types,
+    AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
+    server, types,
 };
 use rand::{Rng, distr::Alphanumeric};
 
@@ -60,7 +61,7 @@ async fn test_simple() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
 
@@ -107,7 +108,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
 
     let count = Arc::new(AtomicUsize::new(0));
     let count2 = count.clone();
-    let srv = test_server(async move || {
+    let srv = TestServerBuilder::new(async move || {
         let count = count2.clone();
         server::Server::build(|con: server::Handshake| async move {
             match con {
@@ -117,9 +118,6 @@ async fn test_large_transfer() -> std::io::Result<()> {
                 }
                 server::Handshake::Sasl(_) => Err(()),
             }
-        })
-        .config(|cfg| {
-            cfg.max_frame_size(1024);
         })
         .control(|msg: ControlFrame| async move {
             if let ControlFrameKind::AttachReceiver(_, _, rcv) = msg.kind() {
@@ -135,14 +133,16 @@ async fn test_large_transfer() -> std::io::Result<()> {
                 )
                 .finish(),
         )
-    });
+    })
+    .config(SharedCfg::new("AMQP").add(AmqpServiceConfig::new().set_max_frame_size(1024)))
+    .start();
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
     let sink = client.sink();
@@ -218,15 +218,10 @@ async fn test_sasl() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let _client = client::Connector::new()
-        .sasl_auth(client::SaslAuth {
-            authz_id: "".into(),
-            authn_id: "user1".into(),
-            password: "password1".into(),
-        })
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri).sasl_auth("".into(), "user1".into(), "password1".into()))
         .await;
 
     Ok(())
@@ -277,7 +272,7 @@ async fn test_session_end() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
 
@@ -352,7 +347,7 @@ async fn test_link_detach() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
 
@@ -419,7 +414,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
 
@@ -478,7 +473,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
 
@@ -538,7 +533,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call(uri)
+        .call(client::Connect::new(uri))
         .await
         .unwrap();
 

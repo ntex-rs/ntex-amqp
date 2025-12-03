@@ -5,14 +5,14 @@ use ntex_util::future::Ready;
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
 use crate::error::{AmqpDispatcherError, LinkError};
-use crate::{Configuration, Connection, ConnectionRef, State, dispatcher::Dispatcher};
+use crate::{AmqpServiceConfig, Connection, ConnectionRef, State, dispatcher::Dispatcher};
 
 /// Mqtt client
 pub struct Client<St = ()> {
     io: IoBoxed,
     codec: AmqpCodec<AmqpFrame>,
     connection: Connection,
-    remote_config: Configuration,
+    remote_config: AmqpServiceConfig,
     _st: State<St>,
 }
 
@@ -22,7 +22,7 @@ impl Client {
         io: IoBoxed,
         codec: AmqpCodec<AmqpFrame>,
         connection: Connection,
-        remote_config: Configuration,
+        remote_config: AmqpServiceConfig,
     ) -> Self {
         Client {
             io,

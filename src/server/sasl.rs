@@ -1,7 +1,8 @@
-use std::{fmt, rc::Rc};
+use std::fmt;
 
 use ntex_bytes::{ByteString, Bytes};
 use ntex_io::IoBoxed;
+use ntex_service::cfg::Cfg;
 
 use crate::codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
@@ -9,17 +10,17 @@ use crate::codec::protocol::{
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
 
 use super::{HandshakeError, handshake::HandshakeAmqpOpened};
-use crate::{Configuration, connection::Connection};
+use crate::{AmqpServiceConfig, connection::Connection};
 
 #[derive(Debug)]
 pub struct Sasl {
     state: IoBoxed,
     mechanisms: Symbols,
-    local_config: Rc<Configuration>,
+    local_config: Cfg<AmqpServiceConfig>,
 }
 
 impl Sasl {
-    pub(crate) fn new(state: IoBoxed, local_config: Rc<Configuration>) -> Self {
+    pub(crate) fn new(state: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
         Sasl {
             state,
             local_config,
@@ -81,7 +82,7 @@ pub struct SaslInit {
     frame: protocol::SaslInit,
     state: IoBoxed,
     codec: AmqpCodec<SaslFrame>,
-    local_config: Rc<Configuration>,
+    local_config: Cfg<AmqpServiceConfig>,
 }
 
 impl fmt::Debug for SaslInit {
@@ -172,7 +173,7 @@ pub struct SaslResponse {
     frame: protocol::SaslResponse,
     state: IoBoxed,
     codec: AmqpCodec<SaslFrame>,
-    local_config: Rc<Configuration>,
+    local_config: Cfg<AmqpServiceConfig>,
 }
 
 impl fmt::Debug for SaslResponse {
@@ -223,7 +224,7 @@ impl SaslResponse {
 
 pub struct SaslSuccess {
     state: IoBoxed,
-    local_config: Rc<Configuration>,
+    local_config: Cfg<AmqpServiceConfig>,
 }
 
 impl SaslSuccess {

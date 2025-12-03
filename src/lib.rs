@@ -1,4 +1,4 @@
-//#![deny(rust_2018_idioms, warnings, unreachable_pub)]
+#![deny(rust_2018_idioms, warnings, unreachable_pub)]
 #![allow(clippy::type_complexity, clippy::let_underscore_future)]
 
 #[macro_use]
@@ -7,6 +7,7 @@ extern crate derive_more;
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner, Symbols};
 use ntex_amqp_codec::types::Symbol;
 use ntex_bytes::ByteString;
+use ntex_service::cfg::{CfgContext, Configuration as SvcConfiguration};
 use ntex_util::time::Seconds;
 use uuid::Uuid;
 
@@ -41,7 +42,7 @@ pub mod codec {
 
 /// Amqp1 transport configuration.
 #[derive(Debug, Clone)]
-pub struct Configuration {
+pub struct AmqpServiceConfig {
     pub max_frame_size: u32,
     pub channel_max: u16,
     pub idle_time_out: Milliseconds,
@@ -50,18 +51,31 @@ pub struct Configuration {
     pub desired_capabilities: Option<Symbols>,
     pub(crate) max_size: usize,
     pub(crate) handshake_timeout: Seconds,
+    config: CfgContext,
 }
 
-impl Default for Configuration {
+impl Default for AmqpServiceConfig {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Configuration {
+impl SvcConfiguration for AmqpServiceConfig {
+    const NAME: &str = "AMQP Configuration";
+
+    fn ctx(&self) -> &CfgContext {
+        &self.config
+    }
+
+    fn set_ctx(&mut self, ctx: CfgContext) {
+        self.config = ctx;
+    }
+}
+
+impl AmqpServiceConfig {
     /// Create connection configuration.
     pub fn new() -> Self {
-        Configuration {
+        AmqpServiceConfig {
             max_size: 0,
             max_frame_size: u16::MAX as u32,
             channel_max: 1024,
@@ -70,6 +84,7 @@ impl Configuration {
             handshake_timeout: Seconds(5),
             offered_capabilities: None,
             desired_capabilities: None,
+            config: CfgContext::default(),
         }
     }
 
@@ -78,7 +93,7 @@ impl Configuration {
     /// number of Sessions that can be simultaneously active on the Connection.
     ///
     /// By default channel max value is set to 1024
-    pub fn channel_max(&mut self, num: u16) -> &mut Self {
+    pub fn set_channel_max(mut self, num: u16) -> Self {
         self.channel_max = num;
         self
     }
@@ -86,7 +101,7 @@ impl Configuration {
     /// Set max frame size for the connection.
     ///
     /// By default max size is set to 64kb
-    pub fn max_frame_size(&mut self, size: u32) -> &mut Self {
+    pub fn set_max_frame_size(mut self, size: u32) -> Self {
         self.max_frame_size = size;
         self
     }
@@ -99,7 +114,7 @@ impl Configuration {
     /// Set idle time-out for the connection in seconds.
     ///
     /// By default idle time-out is set to 120 seconds
-    pub fn idle_timeout(&mut self, timeout: u16) -> &mut Self {
+    pub fn set_idle_timeout(mut self, timeout: u16) -> Self {
         self.idle_time_out = (timeout as Milliseconds) * 1000;
         self
     }
@@ -107,19 +122,19 @@ impl Configuration {
     /// Set connection hostname
     ///
     /// Hostname is not set by default
-    pub fn hostname(&mut self, hostname: &str) -> &mut Self {
+    pub fn set_hostname(mut self, hostname: &str) -> Self {
         self.hostname = Some(ByteString::from(hostname));
         self
     }
 
     /// Set offered capabilities
-    pub fn offered_capabilities(&mut self, caps: Symbols) -> &mut Self {
+    pub fn set_offered_capabilities(mut self, caps: Symbols) -> Self {
         self.offered_capabilities = Some(caps);
         self
     }
 
     /// Set desired capabilities
-    pub fn desired_capabilities(&mut self, caps: Symbols) -> &mut Self {
+    pub fn set_desired_capabilities(mut self, caps: Symbols) -> Self {
         self.desired_capabilities = Some(caps);
         self
     }
@@ -128,7 +143,7 @@ impl Configuration {
     ///
     /// If max size is set to `0`, size is unlimited.
     /// By default max size is set to `0`
-    pub fn max_size(&mut self, size: usize) -> &mut Self {
+    pub fn set_max_size(mut self, size: usize) -> Self {
         self.max_size = size;
         self
     }
@@ -136,7 +151,7 @@ impl Configuration {
     /// Set handshake timeout.
     ///
     /// By default handshake timeout is 5 seconds.
-    pub fn handshake_timeout(&mut self, timeout: Seconds) -> &mut Self {
+    pub fn set_handshake_timeout(mut self, timeout: Seconds) -> Self {
         self.handshake_timeout = timeout;
         self
     }
@@ -187,8 +202,8 @@ impl Configuration {
         }
     }
 
-    pub fn from_remote(&self, open: &Open) -> Configuration {
-        Configuration {
+    pub fn from_remote(&self, open: &Open) -> AmqpServiceConfig {
+        AmqpServiceConfig {
             max_frame_size: open.max_frame_size(),
             channel_max: open.channel_max(),
             idle_time_out: open.idle_time_out().unwrap_or(0),
@@ -197,6 +212,7 @@ impl Configuration {
             handshake_timeout: self.handshake_timeout,
             offered_capabilities: open.0.offered_capabilities.clone(),
             desired_capabilities: open.0.desired_capabilities.clone(),
+            config: self.config,
         }
     }
 }
