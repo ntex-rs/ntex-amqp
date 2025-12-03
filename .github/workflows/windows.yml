@@ -45,17 +45,8 @@ jobs:
           path: ~/.cargo/git
           key: ${{ matrix.version }}-x86_64-pc-windows-msvc-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install OpenSSL
-        run: |
-          vcpkg integrate install
-          vcpkg install openssl:x64-windows
-          Copy-Item C:\vcpkg\installed\x64-windows\bin\libcrypto-3-x64.dll C:\vcpkg\installed\x64-windows\bin\libcrypto.dll
-          Copy-Item C:\vcpkg\installed\x64-windows\bin\libssl-3-x64.dll C:\vcpkg\installed\x64-windows\bin\libssl.dll
-          Get-ChildItem C:\vcpkg\installed\x64-windows\bin
-          Get-ChildItem C:\vcpkg\installed\x64-windows\lib
-
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --all --features=ntex/compio -- --nocapture
+          args: --all --features=ntex/tokio -- --nocapture
