@@ -1,5 +1,9 @@
 # Changes
 
+## [5.1.1] - 2025-12-04
+
+* Add missing public exports
+
 ## [5.1.0] - 2025-12-03
 
 * Refactor service configuration

@@ -6,7 +6,7 @@ mod connector;
 mod error;
 
 pub use self::connection::Client;
-pub use self::connector::Connector;
+pub use self::connector::{Connector, ConnectorService};
 pub use self::error::ConnectError;
 
 #[derive(Clone, Debug)]
