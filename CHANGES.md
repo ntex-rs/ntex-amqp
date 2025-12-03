@@ -1,5 +1,11 @@
 # Changes
 
+## [5.1.2] - 2025-12-04
+
+* Allow to set hostname for client connect
+
+* Fix types for client connector
+
 ## [5.1.1] - 2025-12-04
 
 * Add missing public exports
