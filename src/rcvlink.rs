@@ -3,14 +3,14 @@ use std::{
     task::Poll,
 };
 
-use ntex::util::{ByteString, Bytes, BytesMut, Stream};
-use ntex::{channel::oneshot, task::LocalWaker};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer,
     TransferBody,
 };
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
+use ntex_bytes::{ByteString, Bytes, BytesMut};
+use ntex_util::{Stream, channel::oneshot, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
 use crate::{Delivery, cell::Cell, error::AmqpProtocolError, types::Action};

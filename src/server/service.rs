@@ -1,9 +1,9 @@
 use std::{fmt, marker, rc::Rc};
 
-use ntex::SharedCfg;
-use ntex::io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
-use ntex::service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
-use ntex::time::{Millis, timeout_checked};
+use ntex_io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
+use ntex_service::cfg::SharedCfg;
+use ntex_service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
+use ntex_util::time::{Millis, timeout_checked};
 
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, protocol::ProtocolId};
 use crate::{Configuration, Connection, ControlFrame, State, default::DefaultControlService};

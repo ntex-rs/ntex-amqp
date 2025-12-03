@@ -4,9 +4,10 @@
 #[macro_use]
 extern crate derive_more;
 
-use ntex::{time::Seconds, util::ByteString};
 use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner, Symbols};
 use ntex_amqp_codec::types::Symbol;
+use ntex_bytes::ByteString;
+use ntex_util::time::Seconds;
 use uuid::Uuid;
 
 mod cell;

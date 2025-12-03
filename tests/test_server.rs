@@ -8,7 +8,7 @@ use ntex::{ServiceFactory, SharedCfg, http::Uri, rt, time::Millis, time::sleep};
 use ntex_amqp::{
     ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError, server, types,
 };
-use rand::{Rng, distributions::Alphanumeric, thread_rng};
+use rand::{Rng, distr::Alphanumeric};
 
 async fn server(
     _link: types::Link<()>,
@@ -100,7 +100,7 @@ async fn test_simple() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_large_transfer() -> std::io::Result<()> {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let data: String = (0..2048)
         .map(|_| rng.sample(Alphanumeric) as char)
         .collect();

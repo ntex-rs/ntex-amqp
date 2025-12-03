@@ -1,10 +1,11 @@
 use std::task::{Context, Poll, ready};
 use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin};
 
-use ntex::service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
-use ntex::time::{Millis, Sleep, sleep};
-use ntex::util::Either;
-use ntex::{io::DispatchItem, rt::spawn, task::LocalWaker};
+use ntex_io::DispatchItem;
+use ntex_rt::spawn;
+use ntex_service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
+use ntex_util::time::{Millis, Sleep, sleep};
+use ntex_util::{future::Either, task::LocalWaker};
 
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
@@ -341,7 +342,7 @@ where
                         .call(types::Message::Attached(frm.clone(), link.clone()));
                     let response = pfrm.take();
 
-                    let _ = ntex::rt::spawn(async move {
+                    let _ = ntex_rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
                             let _ = link.close_with_error(Error::from(err)).await;

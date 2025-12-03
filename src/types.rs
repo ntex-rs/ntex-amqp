@@ -1,7 +1,8 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use ntex::router::Path;
-use ntex::util::{ByteString, Either};
+use ntex_bytes::ByteString;
+use ntex_router::Path;
+use ntex_util::future::Either;
 
 use crate::codec::protocol::{Accepted, Attach, DeliveryState, Detach, Error, Flow, Rejected};
 use crate::{

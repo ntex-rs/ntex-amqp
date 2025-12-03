@@ -1,4 +1,4 @@
-use ntex::util::Either;
+use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
 
@@ -24,7 +24,7 @@ pub enum ConnectError {
     Disconnected,
     /// Connect error
     #[error("Connect error: {}", _0)]
-    Connect(#[from] ntex::connect::ConnectError),
+    Connect(#[from] ntex_net::connect::ConnectError),
     /// Unexpected io error
     #[error("Io error: {}", _0)]
     Io(#[from] std::io::Error),

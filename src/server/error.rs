@@ -1,4 +1,4 @@
-use ntex::util::Either;
+use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame, protocol};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError};

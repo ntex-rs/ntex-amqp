@@ -1,7 +1,7 @@
 use std::{fmt, rc::Rc};
 
-use ntex::io::IoBoxed;
-use ntex::util::{ByteString, Bytes};
+use ntex_bytes::{ByteString, Bytes};
+use ntex_io::IoBoxed;
 
 use crate::codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,

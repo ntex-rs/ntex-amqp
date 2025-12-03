@@ -1,6 +1,6 @@
-use ntex::io::{Dispatcher as IoDispatcher, IoBoxed};
-use ntex::service::{IntoService, Pipeline, Service, fn_service};
-use ntex::util::Ready;
+use ntex_io::{Dispatcher as IoDispatcher, IoBoxed};
+use ntex_service::{IntoService, Pipeline, Service, fn_service};
+use ntex_util::future::Ready;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;

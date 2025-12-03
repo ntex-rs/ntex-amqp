@@ -1,11 +1,12 @@
 use std::{collections::VecDeque, future::Future};
 
-use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{BufMut, ByteString, Bytes, Either, Ready};
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
+use ntex_bytes::{BufMut, ByteString, Bytes};
+use ntex_util::channel::{condition, oneshot, pool};
+use ntex_util::future::{Either, Ready};
 
 use crate::delivery::TransferBuilder;
 use crate::session::{Session, SessionInner};

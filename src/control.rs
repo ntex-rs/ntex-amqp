@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::VecDeque, fmt, io};
 
-use ntex::{task::LocalWaker, util::Either};
 use ntex_amqp_codec::protocol;
+use ntex_util::{future::Either, task::LocalWaker};
 
 use crate::cell::Cell;
 use crate::error::AmqpProtocolError;

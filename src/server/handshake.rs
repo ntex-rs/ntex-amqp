@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use ntex::{io::IoBoxed, time::Seconds};
+use ntex_io::IoBoxed;
+use ntex_util::time::Seconds;
 
-use crate::codec::protocol::{Frame, Open};
-use crate::codec::{AmqpCodec, AmqpFrame};
+use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame, protocol::Open};
 use crate::{Configuration, connection::Connection};
 
 use super::{error::HandshakeError, sasl::Sasl};

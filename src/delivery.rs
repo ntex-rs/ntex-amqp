@@ -1,14 +1,14 @@
 use std::cell::Cell as StdCell;
 
-use ntex::{channel::pool, util::Bytes};
 use ntex_amqp_codec::protocol::{
     DeliveryNumber, DeliveryState, Disposition, DispositionInner, Error, ErrorCondition, Handle,
     MessageFormat, Rejected, Role, TransferBody,
 };
 use ntex_amqp_codec::types::{Str, Symbol};
+use ntex_bytes::Bytes;
+use ntex_util::channel::pool;
 
-use crate::session::Session;
-use crate::{cell::Cell, error::AmqpProtocolError, sndlink::SenderLinkInner};
+use crate::{cell::Cell, error::AmqpProtocolError, session::Session, sndlink::SenderLinkInner};
 
 bitflags::bitflags! {
     #[derive(Copy, Clone, Debug)]

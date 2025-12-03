@@ -1,6 +1,7 @@
 use std::io;
 
-use ntex::util::{ByteString, Either};
+use ntex_bytes::ByteString;
+use ntex_util::future::Either;
 
 pub use crate::codec::protocol::{Error, ErrorInner};
 pub use crate::codec::{AmqpCodecError, AmqpParseError, ProtocolIdError};
