@@ -23,70 +23,17 @@ jobs:
         with:
           toolchain: ${{ matrix.version }}-x86_64-unknown-linux-gnu
 
-      - name: Generate Cargo.lock
-        run: cargo generate-lockfile
+      - name: Run tests (neon)
+        timeout-minutes: 15
+        run: |
+          cargo test --all --no-default-features --features="ntex/neon"
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-registry-trimmed-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo tarpaulin
-        if: matrix.version == '1.85.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: ${{ matrix.version }}-x86_64-unknown-linux-gnu-tarpaulin
+      - name: Run tests (neon-uring)
+        timeout-minutes: 15
+        run: |
+          cargo test --all --no-default-features --features="ntex/neon-uring"
 
       - name: Run tests (tokio)
-        uses: actions-rs/cargo@v1
-        timeout-minutes: 40
-        with:
-          command: test
-          args: --all --no-fail-fast --features=ntex/tokio
-
-      - name: Run tests (compio)
-        uses: actions-rs/cargo@v1
-        timeout-minutes: 40
-        if: matrix.version != '1.85.0'
-        with:
-          command: test
-          args: --all --no-fail-fast --features=ntex/compio
-
-      - name: Install tarpaulin
-        if: matrix.version == '1.85.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
-        continue-on-error: true
+        timeout-minutes: 15
         run: |
-          cargo install cargo-tarpaulin
-
-      - name: Generate coverage report
-        if: matrix.version == '1.85.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
-        continue-on-error: true
-        run: |
-          cargo tarpaulin --out Xml --all --features=ntex/tokio
-
-      - name: Upload to Codecov
-        if: matrix.version == '1.85.0' && (github.ref == 'refs/heads/master' || github.event_name == 'pull_request')
-        continue-on-error: true
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: cobertura.xml
-          fail_ci_if_error: true
-
-      - name: Install cargo-cache
-        continue-on-error: true
-        run: |
-          cargo install cargo-cache --no-default-features --features ci-autoclean
-
-      - name: Clear the cargo caches
-        continue-on-error: true
-        run: |
-          cargo-cache
+          cargo test --all --no-default-features --features="ntex/tokio"
