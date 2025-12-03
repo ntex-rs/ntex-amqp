@@ -1,5 +1,9 @@
 # Changes
 
+## [5.0.0] - 2025-12-03
+
+* Using individual ntex crates
+
 ## [5.0.0-pre.0] - 2025-11-28
 
 * Update ntex to 3.0

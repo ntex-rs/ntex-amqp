@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
-use ntex::service::{Service, ServiceCtx, ServiceFactory};
+use ntex_service::{Service, ServiceCtx, ServiceFactory};
 
-use crate::error::LinkError;
-use crate::{ControlFrame, State, types::Link};
+use crate::{ControlFrame, State, error::LinkError, types::Link};
 
 #[allow(dead_code)]
 /// Default publish service

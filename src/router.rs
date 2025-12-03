@@ -1,11 +1,11 @@
 use std::{marker, rc::Rc};
 
-use ntex::router::{IntoPattern, Router as PatternRouter};
-use ntex::service::{
+use ntex_router::{IntoPattern, Router as PatternRouter};
+use ntex_service::{
     IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory, boxed,
     fn_factory_with_config,
 };
-use ntex::util::{HashMap, Ready, join_all};
+use ntex_util::{HashMap, future::Ready, future::join_all};
 
 use crate::codec::protocol::{DeliveryState, Error, Rejected, Transfer};
 use crate::error::LinkError;
@@ -139,7 +139,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                 if let Some(Some(srv)) = self.0.get_mut().handlers.remove(&link) {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
-                    let _ = ntex::rt::spawn(async move {
+                    let _ = ntex_rt::spawn(async move {
                         srv.shutdown().await;
                         log::trace!("Handler service for {name} has shutdown");
                     });
@@ -163,7 +163,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     links.len()
                 );
 
-                let _ = ntex::rt::spawn(async move {
+                let _ = ntex_rt::spawn(async move {
                     let futs: Vec<_> = links
                         .iter()
                         .map(|(link, srv)| {
@@ -282,8 +282,8 @@ where
     type Response = Outcome;
     type Error = Error;
 
-    ntex::forward_ready!(service);
-    ntex::forward_shutdown!(service);
+    ntex_service::forward_ready!(service);
+    ntex_service::forward_shutdown!(service);
 
     async fn call(
         &self,

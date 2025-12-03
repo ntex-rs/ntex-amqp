@@ -1,8 +1,8 @@
 use std::{fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll};
 
-use ntex::channel::{condition::Condition, condition::Waiter, oneshot};
-use ntex::io::{IoConfig, IoRef};
-use ntex::util::{HashMap, Ready};
+use ntex_io::{IoConfig, IoRef};
+use ntex_util::channel::{condition::Condition, condition::Waiter, oneshot};
+use ntex_util::{HashMap, future::Ready};
 
 use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
 use crate::codec::{AmqpCodec, AmqpFrame, types};

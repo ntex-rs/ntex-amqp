@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 
-use ntex::connect::{self, Address, Connect};
-use ntex::io::IoBoxed;
-use ntex::service::{Service, ServiceCtx, ServiceFactory, cfg::SharedCfg};
-use ntex::time::{Seconds, timeout_checked};
-use ntex::util::ByteString;
+use ntex_bytes::ByteString;
+use ntex_io::IoBoxed;
+use ntex_net::connect::{self, Address, Connect};
+use ntex_service::{Service, ServiceCtx, ServiceFactory, cfg::SharedCfg};
+use ntex_util::time::{Seconds, timeout_checked};
 
 use crate::codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame, types::Symbol};

@@ -1,0 +1,41 @@
+name: Coverage
+
+on: [pull_request, push]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup update nightly
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Clean coverage results
+        run: cargo llvm-cov clean --workspace
+
+      - name: Code coverage (neon)
+        run: cargo llvm-cov --no-report --all --no-default-features --features="ntex/neon"
+
+      - name: Code coverage (neon-uring)
+        run: cargo llvm-cov --no-report --all --no-default-features --features="ntex/neon-uring"
+
+      - name: Code coverage (tokio)
+        run: cargo llvm-cov --no-report --all --no-default-features --features="ntex/tokio"
+
+      - name: Generate coverage report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          fail_ci_if_error: true

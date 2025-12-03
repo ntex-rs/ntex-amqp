@@ -1,7 +1,8 @@
 use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
-use ntex::channel::{condition, oneshot, pool};
-use ntex::util::{ByteString, Bytes, Either, HashMap, Ready};
+use ntex_bytes::{ByteString, Bytes};
+use ntex_util::channel::{condition, oneshot, pool};
+use ntex_util::{HashMap, future::Either, future::Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
