@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use ntex_io::IoBoxed;
 use ntex_bytes::ByteString;
+use ntex_io::IoBoxed;
 use ntex_net::connect::{self, Address};
 use ntex_service::{Service, ServiceCtx, ServiceFactory, cfg::Cfg, cfg::SharedCfg};
 use ntex_util::time::timeout_checked;
@@ -129,7 +129,11 @@ where
     IoBoxed: From<T::Response>,
 {
     /// Negotiate amqp protocol over opened socket
-    pub async fn negotiate(&self, io: IoBoxed, hostname: Option<ByteString>) -> Result<Client, ConnectError> {
+    pub async fn negotiate(
+        &self,
+        io: IoBoxed,
+        hostname: Option<ByteString>,
+    ) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
         _connect_plain(io, self.config, hostname).await
@@ -140,7 +144,7 @@ where
         &self,
         io: IoBoxed,
         auth: SaslAuth,
-        hostname: Option<ByteString>
+        hostname: Option<ByteString>,
     ) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
