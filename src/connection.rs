@@ -1,6 +1,7 @@
 use std::{fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex_io::{IoConfig, IoRef};
+use ntex_service::cfg::Cfg;
 use ntex_util::channel::{condition::Condition, condition::Waiter, oneshot};
 use ntex_util::{HashMap, future::Ready};
 
@@ -9,7 +10,7 @@ use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::{Configuration, cell::Cell, error::AmqpProtocolError, types::Action};
+use crate::{AmqpServiceConfig, cell::Cell, error::AmqpProtocolError, types::Action};
 
 pub struct Connection(ConnectionRef);
 
@@ -54,8 +55,8 @@ pub(crate) enum ConnectionState {
 impl Connection {
     pub(crate) fn new(
         io: IoRef,
-        local_config: &Configuration,
-        remote_config: &Configuration,
+        local_config: &Cfg<AmqpServiceConfig>,
+        remote_config: &AmqpServiceConfig,
     ) -> Connection {
         Connection(ConnectionRef(Cell::new(ConnectionInner {
             io,

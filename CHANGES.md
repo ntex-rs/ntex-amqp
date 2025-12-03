@@ -1,5 +1,9 @@
 # Changes
 
+## [5.1.0] - 2025-12-03
+
+* Refactor service configuration
+
 ## [5.0.0] - 2025-12-03
 
 * Using individual ntex crates

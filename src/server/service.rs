@@ -1,12 +1,12 @@
 use std::{fmt, marker, rc::Rc};
 
 use ntex_io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
-use ntex_service::cfg::SharedCfg;
+use ntex_service::cfg::{Cfg, SharedCfg};
 use ntex_service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
 use ntex_util::time::{Millis, timeout_checked};
 
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, protocol::ProtocolId};
-use crate::{Configuration, Connection, ControlFrame, State, default::DefaultControlService};
+use crate::{AmqpServiceConfig, Connection, ControlFrame, State, default::DefaultControlService};
 use crate::{dispatcher::Dispatcher, types::Message};
 
 use super::handshake::{Handshake, HandshakeAck};
@@ -22,14 +22,12 @@ pub struct Server<St, H, Ctl, Pb> {
 pub struct ServerBuilder<St, H, Ctl> {
     handshake: H,
     control: Ctl,
-    config: Configuration,
     _t: marker::PhantomData<St>,
 }
 
 pub(super) struct ServerInner<St, Ctl, Pb> {
     control: Ctl,
     publish: Pb,
-    config: Rc<Configuration>,
     _t: marker::PhantomData<St>,
 }
 
@@ -43,20 +41,7 @@ where
         F: IntoServiceFactory<H, Handshake, SharedCfg>,
         H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>>,
     {
-        Server::with_config(Configuration::default(), handshake)
-    }
-
-    /// Start server building process with provided handshake service
-    pub fn with_config<F, H>(
-        config: Configuration,
-        handshake: F,
-    ) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
-    where
-        F: IntoServiceFactory<H, Handshake, SharedCfg>,
-        H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>>,
-    {
         ServerBuilder {
-            config,
             handshake: handshake.into_factory(),
             control: DefaultControlService::default(),
             _t: marker::PhantomData,
@@ -72,15 +57,6 @@ where
     Ctl::InitError: fmt::Debug,
     Error: From<Ctl::Error>,
 {
-    /// Modify server configuration
-    pub fn config<F>(mut self, f: F) -> Self
-    where
-        F: FnOnce(&mut Configuration),
-    {
-        f(&mut self.config);
-        self
-    }
-
     /// Service to call with control frames
     pub fn control<F, S>(self, service: F) -> ServerBuilder<St, H, S>
     where
@@ -90,7 +66,6 @@ where
         Error: From<S::Error>,
     {
         ServerBuilder {
-            config: self.config,
             handshake: self.handshake,
             control: service.into_factory(),
             _t: marker::PhantomData,
@@ -108,7 +83,6 @@ where
         Server {
             handshake: self.handshake,
             inner: Rc::new(ServerInner {
-                config: Rc::new(self.config),
                 publish: service.into_factory(),
                 control: self.control,
                 _t: marker::PhantomData,
@@ -139,6 +113,7 @@ where
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
+                cfg: cfg.get(),
                 inner: self.inner.clone(),
             })
     }
@@ -165,6 +140,7 @@ where
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
+                cfg: cfg.get(),
                 inner: self.inner.clone(),
             })
     }
@@ -172,6 +148,7 @@ where
 
 /// Amqp connections handler
 pub struct ServerHandler<St, H, Ctl, Pb> {
+    cfg: Cfg<AmqpServiceConfig>,
     handshake: Pipeline<H>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
@@ -187,11 +164,11 @@ where
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
     async fn create(&self, req: IoBoxed) -> Result<(), ServerError<H::Error>> {
-        let fut = handshake(req, &self.handshake, &self.inner);
+        let fut = handshake(req, &self.handshake, self.cfg);
         let inner = self.inner.clone();
 
         let (state, codec, sink, st, idle_timeout) =
-            timeout_checked(inner.config.handshake_timeout, fut)
+            timeout_checked(self.cfg.handshake_timeout, fut)
                 .await
                 .map_err(|_| HandshakeError::Timeout)??;
 
@@ -283,16 +260,14 @@ where
     }
 }
 
-async fn handshake<St, H, Ctl, Pb>(
+async fn handshake<St, H>(
     io: IoBoxed,
     handshake: &Pipeline<H>,
-    inner: &ServerInner<St, Ctl, Pb>,
+    cfg: Cfg<AmqpServiceConfig>,
 ) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>>,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
-    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
 {
     let protocol = io
         .recv(&ProtocolIdCodec)
@@ -314,19 +289,19 @@ where
             // handshake protocol
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
-                    Handshake::new_plain(io, inner.config.clone())
+                    Handshake::new_plain(io, cfg)
                 } else {
-                    Handshake::new_sasl(io, inner.config.clone())
+                    Handshake::new_sasl(io, cfg)
                 })
                 .await
                 .map_err(ServerError::Service)?;
 
             let (st, sink, idle_timeout, io) = ack.into_inner();
 
-            let codec = AmqpCodec::new().max_size(inner.config.max_size);
+            let codec = AmqpCodec::new().max_size(cfg.max_size);
 
             // confirm Open
-            let local = inner.config.to_open();
+            let local = cfg.to_open();
             io.send(AmqpFrame::new(0, local.into()), &codec)
                 .await
                 .map_err(HandshakeError::from)?;

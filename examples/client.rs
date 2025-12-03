@@ -10,7 +10,7 @@ async fn main() -> std::io::Result<()> {
         .pipeline(SharedCfg::default())
         .await
         .unwrap()
-        .call("127.0.0.1:5671")
+        .call(client::Connect::new("127.0.0.1:5671"))
         .await
         .unwrap();
     let sink = driver.sink();
