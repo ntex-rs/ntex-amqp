@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ntex_io::IoBoxed;
+use ntex_bytes::ByteString;
 use ntex_net::connect::{self, Address};
 use ntex_service::{Service, ServiceCtx, ServiceFactory, cfg::Cfg, cfg::SharedCfg};
 use ntex_util::time::timeout_checked;
@@ -37,7 +38,7 @@ impl<A> Connector<A> {
 impl<A, T> Connector<A, T>
 where
     A: Address,
-    T: ServiceFactory<Connect<A>, SharedCfg, Error = connect::ConnectError>,
+    T: ServiceFactory<connect::Connect<A>, SharedCfg, Error = connect::ConnectError>,
     IoBoxed: From<T::Response>,
 {
     /// Create new amqp connector
@@ -56,7 +57,7 @@ where
     /// Use custom connector
     pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
-        U: ServiceFactory<Connect<A>, SharedCfg, Error = connect::ConnectError>,
+        U: ServiceFactory<connect::Connect<A>, SharedCfg, Error = connect::ConnectError>,
         IoBoxed: From<U::Response>,
     {
         Connector {
@@ -102,16 +103,16 @@ where
         ctx: ServiceCtx<'_, Self>,
     ) -> Result<Client, ConnectError> {
         let fut = async {
-            let (addr, sasl) = req.into_parts();
+            let (addr, sasl, hostname) = req.into_parts();
             let io = ctx
                 .call(&self.connector, connect::Connect::new(addr))
                 .await?;
             let io = IoBoxed::from(io);
 
             if let Some(auth) = sasl {
-                _connect_sasl(io, auth, self.config).await
+                _connect_sasl(io, auth, self.config, hostname).await
             } else {
-                _connect_plain(io, self.config).await
+                _connect_plain(io, self.config, hostname).await
             }
         };
         timeout_checked(self.config.handshake_timeout, fut)
@@ -128,10 +129,10 @@ where
     IoBoxed: From<T::Response>,
 {
     /// Negotiate amqp protocol over opened socket
-    pub async fn negotiate(&self, io: IoBoxed) -> Result<Client, ConnectError> {
+    pub async fn negotiate(&self, io: IoBoxed, hostname: Option<ByteString>) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        _connect_plain(io, self.config).await
+        _connect_plain(io, self.config, hostname).await
     }
 
     /// Negotiate amqp sasl protocol over opened socket
@@ -139,10 +140,11 @@ where
         &self,
         io: IoBoxed,
         auth: SaslAuth,
+        hostname: Option<ByteString>
     ) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        _connect_sasl(io, auth, self.config).await
+        _connect_sasl(io, auth, self.config, hostname).await
     }
 }
 
@@ -150,6 +152,7 @@ async fn _connect_sasl(
     io: IoBoxed,
     auth: SaslAuth,
     config: Cfg<AmqpServiceConfig>,
+    hostname: Option<ByteString>,
 ) -> Result<Client, ConnectError> {
     log::trace!("{}: Negotiation client protocol id: AmqpSasl", io.tag());
 
@@ -197,12 +200,13 @@ async fn _connect_sasl(
         return Err(ConnectError::Disconnected);
     }
 
-    _connect_plain(io, config).await
+    _connect_plain(io, config, hostname).await
 }
 
 async fn _connect_plain(
     io: IoBoxed,
     config: Cfg<AmqpServiceConfig>,
+    hostname: Option<ByteString>,
 ) -> Result<Client, ConnectError> {
     log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
@@ -224,7 +228,10 @@ async fn _connect_plain(
         }));
     }
 
-    let open = config.to_open();
+    let mut open = config.to_open();
+    if let Some(hostname) = hostname {
+        *open.hostname_mut() = Some(hostname);
+    }
     let codec = AmqpCodec::<AmqpFrame>::new().max_size(config.max_frame_size as usize);
 
     log::trace!("{}: Open client amqp connection: {:?}", io.tag(), open);

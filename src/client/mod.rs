@@ -14,12 +14,17 @@ pub use self::error::ConnectError;
 pub struct Connect<T: Address> {
     addr: T,
     sasl: Option<SaslAuth>,
+    hostname: Option<ByteString>,
 }
 
 impl<T: Address> Connect<T> {
     #[inline]
     pub fn new(addr: T) -> Self {
-        Self { addr, sasl: None }
+        Self {
+            addr,
+            sasl: None,
+            hostname: None,
+        }
     }
 
     #[inline]
@@ -38,8 +43,19 @@ impl<T: Address> Connect<T> {
         self
     }
 
-    fn into_parts(self) -> (T, Option<SaslAuth>) {
-        (self.addr, self.sasl)
+    /// Set connection hostname
+    ///
+    /// Hostname is not set by default
+    pub fn hostname<U>(mut self, hostname: U) -> Self
+    where
+        U: Into<ByteString>,
+    {
+        self.hostname = Some(hostname.into());
+        self
+    }
+
+    fn into_parts(self) -> (T, Option<SaslAuth>, Option<ByteString>) {
+        (self.addr, self.sasl, self.hostname)
     }
 }
 
