@@ -1,5 +1,9 @@
 # Changes
 
+## [5.2.0] - 2025-12-17
+
+* Upgrade to ntex-service v4
+
 ## [5.1.2] - 2025-12-04
 
 * Allow to set hostname for client connect
