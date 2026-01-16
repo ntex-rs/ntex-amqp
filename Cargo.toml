@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "5.2.0"
+version = "5.2.1"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -10,7 +10,7 @@ keywords = ["AMQP", "IoT", "messaging"]
 license = "MIT OR Apache-2.0"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 
 [workspace]
 members = [
@@ -27,11 +27,11 @@ frame-trace = []
 [dependencies]
 ntex-amqp-codec = "2.0.0"
 
-ntex-bytes = "1"
+ntex-bytes = "1.2"
 ntex-router = "1"
-ntex-rt = "3"
+ntex-rt = "3.4"
 ntex-io = "3.3"
-ntex-net = "3.4"
+ntex-net = "3.5"
 ntex-util = "3.4"
 ntex-service = "4"
 
@@ -47,7 +47,7 @@ thiserror = "2"
 env_logger = "0.11"
 rand = "0.9"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
-ntex = "3.0.0-pre.2"
+ntex = "3.0.0-pre.11"
 
 [patch.crates-io]
 ntex-amqp = { path = "." }

@@ -1,5 +1,9 @@
 # Changes
 
+## [5.2.1] - 2026-01-16
+
+* Fix link credit handling
+
 ## [5.2.0] - 2025-12-17
 
 * Upgrade to ntex-service v4

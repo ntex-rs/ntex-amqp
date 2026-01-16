@@ -292,25 +292,24 @@ impl SenderLinkInner {
     pub(crate) fn apply_flow(&mut self, flow: &Flow) {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
-            let delta = flow
+            let new_credit = flow
                 .delivery_count()
                 .unwrap_or(0)
                 .wrapping_add(credit)
                 .wrapping_sub(self.delivery_count);
 
             log::trace!(
-                "{}: Apply sender link {:?} flow, credit: {:?}({:?}) flow count: {:?}, delivery count: {:?} pending: {:?} new credit {:?}",
+                "{}: Apply sender link {:?} flow, credit: {:?}, delivery count: {:?}, local delivery count: {:?}, pending: {:?}, old credit {:?}",
                 self.session.tag(),
                 self.name,
-                credit,
-                delta,
+                new_credit,
                 flow.delivery_count().unwrap_or(0),
                 self.delivery_count,
                 self.pending_transfers.len(),
                 self.link_credit
             );
 
-            self.link_credit += delta;
+            self.link_credit = new_credit;
 
             // credit became available => drain pending_transfers
             while let Some(tx) = self.pending_transfers.pop_front() {
