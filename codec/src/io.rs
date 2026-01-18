@@ -88,7 +88,7 @@ impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
                         return Ok(None);
                     }
 
-                    let mut frame_buf = src.split_to_bytes(size);
+                    let mut frame_buf = src.split_to(size);
                     let frame = T::decode(&mut frame_buf)?;
                     if !frame_buf.is_empty() {
                         // todo: could it really happen?
