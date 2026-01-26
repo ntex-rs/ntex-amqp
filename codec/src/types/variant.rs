@@ -141,7 +141,7 @@ impl DescribedCompound {
     /// ```text
     /// 0xc0 0x02 0x01 0x50 0x03
     /// ```
-    pub fn decode<T: Decode>(self) -> Result<T, AmqpParseError> {
+    pub fn decode<T: Decode>(&self) -> Result<T, AmqpParseError> {
         let mut buf = self.data.clone();
         let result = T::decode(&mut buf)?;
         if buf.is_empty() {
