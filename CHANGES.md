@@ -1,5 +1,9 @@
 # Changes
 
+## [5.3.0] - 2026-01-xx
+
+* Add `Begin` frame to `Session`
+
 ## [5.2.1] - 2026-01-16
 
 * Fix link credit handling

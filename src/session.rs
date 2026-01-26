@@ -6,9 +6,9 @@ use ntex_util::{HashMap, future::Either, future::Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
-    self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, End,
-    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Source,
-    Transfer, TransferBody, TransferNumber,
+    self as codec, Accepted, Attach, Begin, DeliveryNumber, DeliveryState, Detach, Disposition,
+    End, Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode,
+    Source, Transfer, TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::{AmqpFrame, Encode};
 
@@ -33,6 +33,7 @@ pub(crate) struct SessionInner {
     sink: ConnectionRef,
     next_outgoing_id: TransferNumber,
     flags: Flags,
+    begin: Begin,
 
     remote_channel_id: u16,
     next_incoming_id: TransferNumber,
@@ -62,6 +63,12 @@ impl fmt::Debug for Session {
 impl Session {
     pub(crate) fn new(inner: Cell<SessionInner>) -> Session {
         Session { inner }
+    }
+
+    #[inline]
+    /// Get begin frame reference
+    pub fn frame(&self) -> &Begin {
+        &self.inner.get_ref().begin
     }
 
     #[inline]
@@ -282,17 +289,12 @@ impl SessionInner {
         local: bool,
         sink: ConnectionRef,
         remote_channel_id: u16,
-        next_incoming_id: DeliveryNumber,
-        remote_incoming_window: u32,
-        remote_outgoing_window: u32,
+        begin: Begin,
     ) -> SessionInner {
         SessionInner {
-            id,
-            sink,
-            next_incoming_id,
-            remote_channel_id,
-            remote_incoming_window,
-            remote_outgoing_window,
+            next_incoming_id: begin.next_outgoing_id(),
+            remote_incoming_window: begin.incoming_window(),
+            remote_outgoing_window: begin.outgoing_window(),
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
             unsettled_snd_deliveries: HashMap::default(),
@@ -305,6 +307,10 @@ impl SessionInner {
             pool_notify: pool::new(),
             pool_credit: pool::new(),
             closed: condition::Condition::new(),
+            id,
+            sink,
+            begin,
+            remote_channel_id,
         }
     }
 
@@ -1255,8 +1261,7 @@ impl SessionInner {
                         .sink
                         .config()
                         .write_buf()
-                        .buf_with_capacity(msg.encoded_size())
-                        .into();
+                        .buf_with_capacity(msg.encoded_size());
                     msg.encode(&mut buf);
                     buf.freeze()
                 }

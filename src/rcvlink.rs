@@ -390,8 +390,7 @@ impl ReceiverLinkInner {
                                     .connection()
                                     .config()
                                     .write_buf()
-                                    .buf_with_capacity(msg.encoded_size())
-                                    .into();
+                                    .buf_with_capacity(msg.encoded_size());
                                 msg.encode(&mut buf);
                                 buf
                             }
@@ -402,7 +401,6 @@ impl ReceiverLinkInner {
                             .config()
                             .write_buf()
                             .buf_with_capacity(16)
-                            .into()
                     };
                     self.partial_body = Some(body);
 

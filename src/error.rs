@@ -66,6 +66,12 @@ pub enum AmqpProtocolError {
     ConnectionDropped,
 }
 
+impl From<AmqpParseError> for AmqpProtocolError {
+    fn from(err: AmqpParseError) -> Self {
+        Self::Codec(err.into())
+    }
+}
+
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("Amqp error: {:?} {:?} ({:?})", err, description, info)]
 pub struct AmqpError {

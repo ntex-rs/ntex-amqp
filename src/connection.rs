@@ -245,7 +245,7 @@ impl ConnectionInner {
     pub(crate) fn register_remote_session(
         &mut self,
         remote_channel_id: u16,
-        begin: &Begin,
+        begin: Begin,
         cell: &Cell<ConnectionInner>,
     ) -> Result<(), AmqpProtocolError> {
         log::trace!(
@@ -256,24 +256,23 @@ impl ConnectionInner {
 
         let entry = self.sessions.vacant_entry();
         let local_token = entry.key();
+        let outgoing_window = begin.incoming_window();
 
         let session = Cell::new(SessionInner::new(
             local_token,
             false,
             ConnectionRef(cell.clone()),
             remote_channel_id,
-            begin.next_outgoing_id(),
-            begin.incoming_window(),
-            begin.outgoing_window(),
+            begin,
         ));
         entry.insert(SessionState::Established(session));
         self.sessions_map.insert(remote_channel_id, local_token);
 
         let begin = Begin(Box::new(codec::BeginInner {
+            outgoing_window,
             remote_channel: Some(remote_channel_id),
             next_outgoing_id: 1,
             incoming_window: u32::MAX,
-            outgoing_window: begin.incoming_window(),
             handle_max: u32::MAX,
             offered_capabilities: None,
             desired_capabilities: None,
@@ -293,7 +292,7 @@ impl ConnectionInner {
         &mut self,
         local_channel_id: u16,
         remote_channel_id: u16,
-        begin: &Begin,
+        begin: Begin,
     ) {
         log::trace!(
             "{}: Begin response received: local {:?} remote {:?}",
@@ -312,9 +311,7 @@ impl ConnectionInner {
                         true,
                         ConnectionRef(cell.clone()),
                         remote_channel_id,
-                        begin.next_outgoing_id(),
-                        begin.incoming_window(),
-                        begin.outgoing_window(),
+                        begin,
                     ));
                     self.sessions_map.insert(remote_channel_id, local_token);
 
@@ -381,9 +378,9 @@ impl ConnectionInner {
                 // the remote-channel property in the frame is the local channel id
                 // we previously sent to the remote
                 if let Some(local_channel_id) = begin.remote_channel() {
-                    self.complete_session_creation(local_channel_id, channel_id, &begin);
+                    self.complete_session_creation(local_channel_id, channel_id, begin);
                 } else {
-                    self.register_remote_session(channel_id, &begin, inner)?;
+                    self.register_remote_session(channel_id, begin, inner)?;
                 }
                 return Ok(Action::None);
             }
