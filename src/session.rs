@@ -6,9 +6,9 @@ use ntex_util::{HashMap, future::Either, future::Ready};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
-    self as codec, Accepted, Attach, DeliveryNumber, DeliveryState, Detach, Disposition, End,
-    Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Source,
-    Transfer, TransferBody, TransferNumber,
+    self as codec, Accepted, Attach, Begin, DeliveryNumber, DeliveryState, Detach, Disposition,
+    End, Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode,
+    Source, Transfer, TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::{AmqpFrame, Encode};
 
@@ -33,6 +33,7 @@ pub(crate) struct SessionInner {
     sink: ConnectionRef,
     next_outgoing_id: TransferNumber,
     flags: Flags,
+    begin: Begin,
 
     remote_channel_id: u16,
     next_incoming_id: TransferNumber,
@@ -291,9 +292,9 @@ impl SessionInner {
         begin: Begin,
     ) -> SessionInner {
         SessionInner {
-            next_incoming_id: begin.next_incoming_id(),
-            remote_incoming_window: begin.remote_incoming_window(),
-            remote_outgoing_window: begin.remote_outgoing_window(),
+            next_incoming_id: begin.next_outgoing_id(),
+            remote_incoming_window: begin.incoming_window(),
+            remote_outgoing_window: begin.outgoing_window(),
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
             unsettled_snd_deliveries: HashMap::default(),
