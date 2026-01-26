@@ -262,9 +262,7 @@ impl ConnectionInner {
             false,
             ConnectionRef(cell.clone()),
             remote_channel_id,
-            begin.next_outgoing_id(),
-            begin.incoming_window(),
-            begin.outgoing_window(),
+            begin,
         ));
         entry.insert(SessionState::Established(session));
         self.sessions_map.insert(remote_channel_id, local_token);
@@ -312,9 +310,7 @@ impl ConnectionInner {
                         true,
                         ConnectionRef(cell.clone()),
                         remote_channel_id,
-                        begin.next_outgoing_id(),
-                        begin.incoming_window(),
-                        begin.outgoing_window(),
+                        begin,
                     ));
                     self.sessions_map.insert(remote_channel_id, local_token);
 

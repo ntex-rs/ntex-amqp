@@ -65,6 +65,12 @@ impl Session {
     }
 
     #[inline]
+    /// Get begin frame reference
+    pub fn frame(&self) -> &Begin {
+        &self.inner.get_ref().begin
+    }
+
+    #[inline]
     /// Get io tag for current connection
     pub fn tag(&self) -> &'static str {
         self.inner.get_ref().sink.tag()
@@ -282,17 +288,12 @@ impl SessionInner {
         local: bool,
         sink: ConnectionRef,
         remote_channel_id: u16,
-        next_incoming_id: DeliveryNumber,
-        remote_incoming_window: u32,
-        remote_outgoing_window: u32,
+        begin: Begin,
     ) -> SessionInner {
         SessionInner {
-            id,
-            sink,
-            next_incoming_id,
-            remote_channel_id,
-            remote_incoming_window,
-            remote_outgoing_window,
+            next_incoming_id: begin.next_incoming_id(),
+            remote_incoming_window: begin.remote_incoming_window(),
+            remote_outgoing_window: begin.remote_outgoing_window(),
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
             unsettled_snd_deliveries: HashMap::default(),
@@ -305,6 +306,10 @@ impl SessionInner {
             pool_notify: pool::new(),
             pool_credit: pool::new(),
             closed: condition::Condition::new(),
+            id,
+            sink,
+            begin,
+            remote_channel_id,
         }
     }
 
