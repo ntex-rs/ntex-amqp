@@ -179,15 +179,14 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
         .init()
         .await?;
 
-    if init.mechanism() == "PLAIN" {
-        if let Some(resp) = init.initial_response() {
-            if resp == b"\0user1\0password1" {
-                let succ = init
-                    .outcome(ntex_amqp_codec::protocol::SaslCode::Ok)
-                    .await?;
-                return Ok(succ.open().await?.ack(()));
-            }
-        }
+    if init.mechanism() == "PLAIN"
+        && let Some(resp) = init.initial_response()
+        && resp == b"\0user1\0password1"
+    {
+        let succ = init
+            .outcome(ntex_amqp_codec::protocol::SaslCode::Ok)
+            .await?;
+        return Ok(succ.open().await?.ack(()));
     }
 
     let succ = init

@@ -182,10 +182,10 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                 Ok(())
             }
             Message::Transfer(link) => {
-                if let Some(Some(_)) = self.0.get_ref().handlers.get(&link) {
-                    if let Some((delivery, tr)) = link.get_delivery() {
-                        service_call(link, delivery, tr, &self.0).await?;
-                    }
+                if let Some(Some(_)) = self.0.get_ref().handlers.get(&link)
+                    && let Some((delivery, tr)) = link.get_delivery()
+                {
+                    service_call(link, delivery, tr, &self.0).await?;
                 }
                 Ok(())
             }

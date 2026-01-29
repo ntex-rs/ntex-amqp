@@ -1,6 +1,10 @@
 # Changes
 
-## [5.3.0] - 2026-01-xx
+## [5.4.0] - 2026-01-29
+
+* Use ntex_dispatcher::Dispatcher instead of ntex-io
+
+## [5.3.0] - 2026-01-26
 
 * Add `Begin` frame to `Session`
 

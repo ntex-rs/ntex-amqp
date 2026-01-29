@@ -330,10 +330,10 @@ impl TransferBuilder {
         } else if inner.closed {
             Err(AmqpProtocolError::Disconnected)
         } else {
-            if let Some(limit) = inner.max_message_size {
-                if self.data.len() > limit as usize {
-                    return Err(AmqpProtocolError::BodyTooLarge);
-                }
+            if let Some(limit) = inner.max_message_size
+                && self.data.len() > limit as usize
+            {
+                return Err(AmqpProtocolError::BodyTooLarge);
             }
 
             let (id, tag) = self

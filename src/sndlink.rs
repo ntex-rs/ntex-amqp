@@ -203,10 +203,10 @@ impl SenderLinkInner {
 
     pub(crate) fn with(id: usize, frame: &Attach, session: Cell<SessionInner>) -> SenderLinkInner {
         let mut name = None;
-        if let Some(source) = frame.source() {
-            if let Some(ref addr) = source.address {
-                name = Some(addr.clone());
-            }
+        if let Some(source) = frame.source()
+            && let Some(ref addr) = source.address
+        {
+            name = Some(addr.clone());
         }
         let mut name = name.unwrap_or_default();
         name.trimdown();

@@ -1,7 +1,7 @@
 use std::task::{Context, Poll, ready};
 use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin};
 
-use ntex_io::DispatchItem;
+use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
 use ntex_service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
 use ntex_util::time::{Millis, Sleep, sleep};
@@ -261,31 +261,31 @@ where
 
                 Ok(None)
             }
-            DispatchItem::EncoderError(err) | DispatchItem::DecoderError(err) => {
+            DispatchItem::Stop(Reason::Encoder(err)) | DispatchItem::Stop(Reason::Decoder(err)) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     err.into(),
                 )));
                 Ok(None)
             }
-            DispatchItem::KeepAliveTimeout => {
+            DispatchItem::Stop(Reason::KeepAliveTimeout) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     AmqpProtocolError::KeepAliveTimeout,
                 )));
                 Ok(None)
             }
-            DispatchItem::ReadTimeout => {
+            DispatchItem::Stop(Reason::ReadTimeout) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     AmqpProtocolError::ReadTimeout,
                 )));
                 Ok(None)
             }
-            DispatchItem::Disconnect(e) => {
+            DispatchItem::Stop(Reason::Io(e)) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
                     e,
                 )));
                 Ok(None)
             }
-            DispatchItem::WBackPressureEnabled | DispatchItem::WBackPressureDisabled => Ok(None),
+            DispatchItem::Control(_) => Ok(None),
         }
     }
 }

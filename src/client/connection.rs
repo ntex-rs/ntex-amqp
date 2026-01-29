@@ -1,4 +1,5 @@
-use ntex_io::{Dispatcher as IoDispatcher, IoBoxed};
+use ntex_dispatcher::Dispatcher as IoDispatcher;
+use ntex_io::IoBoxed;
 use ntex_service::{IntoService, Pipeline, Service, fn_service};
 use ntex_util::future::Ready;
 
