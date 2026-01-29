@@ -13,7 +13,7 @@ async fn main() -> std::io::Result<()> {
     // std::env::set_var("RUST_LOG", "trace,ntex_io=info");
     env_logger::init();
 
-    ntex::server::Server::build()
+    ntex::server::Server::builder()
         .bind("amqp", "127.0.0.1:5671", async |_| {
             server::Server::build(|con: server::Handshake| async move {
                 match con {

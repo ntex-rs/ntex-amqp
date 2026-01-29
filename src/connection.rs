@@ -182,10 +182,10 @@ impl ConnectionRef {
     }
 
     pub(crate) fn close_session(&self, id: usize) {
-        if let Some(state) = self.0.get_mut().sessions.get_mut(id) {
-            if let SessionState::Established(inner) = state {
-                *state = SessionState::Closing(inner.clone());
-            }
+        if let Some(state) = self.0.get_mut().sessions.get_mut(id)
+            && let SessionState::Established(inner) = state
+        {
+            *state = SessionState::Closing(inner.clone());
         }
     }
 

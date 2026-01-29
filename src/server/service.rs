@@ -1,6 +1,7 @@
 use std::{fmt, marker, rc::Rc};
 
-use ntex_io::{Dispatcher as FramedDispatcher, Filter, Io, IoBoxed};
+use ntex_dispatcher::Dispatcher as IoDispatcher;
+use ntex_io::{Filter, Io, IoBoxed};
 use ntex_service::cfg::{Cfg, SharedCfg};
 use ntex_service::{IntoServiceFactory, Pipeline, Service, ServiceCtx, ServiceFactory};
 use ntex_util::time::{Millis, timeout_checked};
@@ -184,7 +185,7 @@ where
             ServerError::ControlServiceError
         })?;
 
-        FramedDispatcher::new(
+        IoDispatcher::new(
             state,
             codec,
             Dispatcher::new(sink, pb_srv, ctl_srv, idle_timeout),

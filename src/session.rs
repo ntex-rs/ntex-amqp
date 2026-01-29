@@ -130,10 +130,10 @@ impl Session {
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
         let inner = self.inner.get_ref();
 
-        if let Some(id) = inner.links_by_name.get(name) {
-            if let Some(Either::Left(SenderLinkState::Established(link))) = inner.links.get(*id) {
-                return Some(link);
-            }
+        if let Some(id) = inner.links_by_name.get(name)
+            && let Some(Either::Left(SenderLinkState::Established(link))) = inner.links.get(*id)
+        {
+            return Some(link);
         }
         None
     }
@@ -472,10 +472,10 @@ impl SessionInner {
         );
         let token = link.id;
 
-        if let Some(source) = attach.source() {
-            if let Some(ref addr) = source.address {
-                self.links_by_name.insert(addr.clone(), token);
-            }
+        if let Some(source) = attach.source()
+            && let Some(ref addr) = source.address
+        {
+            self.links_by_name.insert(addr.clone(), token);
         }
 
         self.remote_handles.insert(attach.handle(), token);
@@ -601,10 +601,10 @@ impl SessionInner {
     }
 
     pub(crate) fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
-        if let Some(id) = self.remote_handles.get(&hnd) {
-            if let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(*id) {
-                return Some(link);
-            }
+        if let Some(id) = self.remote_handles.get(&hnd)
+            && let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(*id)
+        {
+            return Some(link);
         }
         None
     }
@@ -679,15 +679,14 @@ impl SessionInner {
         mut response: Attach,
         max_message_size: Option<u64>,
     ) {
-        if let Some(Either::Right(link)) = self.links.get_mut(token as usize) {
-            if let ReceiverLinkState::Opening(l) = link {
-                if let Some((l, _)) = l.take() {
-                    *response.max_message_size_mut() = max_message_size;
-                    *link = ReceiverLinkState::Established(EstablishedReceiverLink::new(l));
-                    self.post_frame(response.into());
-                    return;
-                }
-            }
+        if let Some(Either::Right(link)) = self.links.get_mut(token as usize)
+            && let ReceiverLinkState::Opening(l) = link
+            && let Some((l, _)) = l.take()
+        {
+            *response.max_message_size_mut() = max_message_size;
+            *link = ReceiverLinkState::Established(EstablishedReceiverLink::new(l));
+            self.post_frame(response.into());
+            return;
         }
         // TODO: close session
         log::error!("{}: Unexpected receiver link state", self.tag());
@@ -781,10 +780,10 @@ impl SessionInner {
     }
 
     pub(crate) fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
-        if let Some(id) = self.remote_handles.get(&hnd) {
-            if let Some(Either::Right(ReceiverLinkState::Established(link))) = self.links.get(*id) {
-                return Some(link);
-            }
+        if let Some(id) = self.remote_handles.get(&hnd)
+            && let Some(Either::Right(ReceiverLinkState::Established(link))) = self.links.get(*id)
+        {
+            return Some(link);
         }
         None
     }
