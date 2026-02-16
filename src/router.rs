@@ -19,15 +19,17 @@ pub struct Router<S = ()>(Vec<(Vec<String>, Handle<S>)>);
 
 impl<S: 'static> Default for Router<S> {
     fn default() -> Router<S> {
-        Router::new()
+        Router::builder()
     }
 }
 
 impl<S: 'static> Router<S> {
-    pub fn new() -> Router<S> {
+    pub fn builder() -> Router<S> {
         Router(Vec::new())
     }
 
+    #[must_use]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn service<T, F, U>(mut self, address: T, service: F) -> Self
     where
         T: IntoPattern,
@@ -44,7 +46,7 @@ impl<S: 'static> Router<S> {
         self
     }
 
-    pub fn finish(
+    pub fn build(
         self,
     ) -> impl ServiceFactory<
         Message,
@@ -84,9 +86,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
     async fn call(&self, msg: Message, _: ServiceCtx<'_, Self>) -> Result<(), Error> {
         match msg {
             Message::Attached(frm, link) => {
-                let path = frm
-                    .target()
-                    .and_then(|target| target.address.as_ref().cloned());
+                let path = frm.target().and_then(|target| target.address.clone());
 
                 if let Some(path) = path {
                     let inner = self.0.get_mut();
@@ -139,7 +139,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                 if let Some(Some(srv)) = self.0.get_mut().handlers.remove(&link) {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
-                    let _ = ntex_rt::spawn(async move {
+                    ntex_rt::spawn(async move {
                         srv.shutdown().await;
                         log::trace!("Handler service for {name} has shutdown");
                     });
@@ -163,7 +163,7 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                     links.len()
                 );
 
-                let _ = ntex_rt::spawn(async move {
+                ntex_rt::spawn(async move {
                     let futs: Vec<_> = links
                         .iter()
                         .map(|(link, srv)| {

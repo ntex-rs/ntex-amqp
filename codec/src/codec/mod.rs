@@ -59,7 +59,7 @@ impl<T: DecodeFormatted> Decode for T {
     }
 }
 
-pub fn decode_format_code(input: &mut Bytes) -> Result<u8, AmqpParseError> {
+pub(crate) fn decode_format_code(input: &mut Bytes) -> Result<u8, AmqpParseError> {
     decode_check_len!(input, 1);
     let code = input.get_u8();
     Ok(code)
@@ -108,18 +108,21 @@ pub mod format_codes {
     pub const FORMATCODE_ARRAY32: u8 = 0xf0;
 }
 
-pub use self::format_codes::*;
+pub(crate) use self::format_codes::*;
 
+#[derive(Copy, Clone, Debug)]
 pub struct ListHeader {
     pub size: u32,
     pub count: u32,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct MapHeader {
     pub size: u32,
     pub count: u32,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct ArrayHeader {
     pub size: u32,
     pub count: u32,

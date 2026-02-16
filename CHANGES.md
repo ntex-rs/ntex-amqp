@@ -1,5 +1,9 @@
 # Changes
 
+## [5.5.0] - 2026-02-16
+
+* SharedCfg is not Copy anymore
+
 ## [5.4.0] - 2026-01-29
 
 * Use ntex_dispatcher::Dispatcher instead of ntex-io

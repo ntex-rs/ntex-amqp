@@ -1,5 +1,22 @@
-#![deny(rust_2018_idioms, warnings, unreachable_pub)]
-#![allow(clippy::type_complexity, clippy::let_underscore_future)]
+#![deny(
+    rust_2018_idioms,
+    warnings,
+    unreachable_pub,
+    // missing_debug_implementations,
+    clippy::pedantic
+)]
+#![allow(
+    clippy::clone_on_copy,
+    clippy::cast_possible_truncation,
+    clippy::let_underscore_future,
+    clippy::missing_fields_in_debug,
+    clippy::must_use_candidate,
+    clippy::missing_errors_doc,
+    clippy::similar_names,
+    clippy::struct_field_names,
+    clippy::too_many_lines,
+    clippy::type_complexity
+)]
 
 #[macro_use]
 extern crate derive_more;
@@ -77,7 +94,7 @@ impl AmqpServiceConfig {
     pub fn new() -> Self {
         AmqpServiceConfig {
             max_size: 0,
-            max_frame_size: u16::MAX as u32,
+            max_frame_size: u32::from(u16::MAX),
             channel_max: 1024,
             idle_time_out: 120_000,
             hostname: None,
@@ -88,6 +105,7 @@ impl AmqpServiceConfig {
         }
     }
 
+    #[must_use]
     /// The channel-max value is the highest channel number that
     /// may be used on the Connection. This value plus one is the maximum
     /// number of Sessions that can be simultaneously active on the Connection.
@@ -98,6 +116,7 @@ impl AmqpServiceConfig {
         self
     }
 
+    #[must_use]
     /// Set max frame size for the connection.
     ///
     /// By default max size is set to 64kb
@@ -111,14 +130,16 @@ impl AmqpServiceConfig {
         self.max_frame_size
     }
 
+    #[must_use]
     /// Set idle time-out for the connection in seconds.
     ///
     /// By default idle time-out is set to 120 seconds
     pub fn set_idle_timeout(mut self, timeout: u16) -> Self {
-        self.idle_time_out = (timeout as Milliseconds) * 1000;
+        self.idle_time_out = Milliseconds::from(timeout) * 1000;
         self
     }
 
+    #[must_use]
     /// Set connection hostname
     ///
     /// Hostname is not set by default
@@ -127,18 +148,21 @@ impl AmqpServiceConfig {
         self
     }
 
+    #[must_use]
     /// Set offered capabilities
     pub fn set_offered_capabilities(mut self, caps: Symbols) -> Self {
         self.offered_capabilities = Some(caps);
         self
     }
 
+    #[must_use]
     /// Set desired capabilities
     pub fn set_desired_capabilities(mut self, caps: Symbols) -> Self {
         self.desired_capabilities = Some(caps);
         self
     }
 
+    #[must_use]
     /// Set max inbound frame size.
     ///
     /// If max size is set to `0`, size is unlimited.
@@ -148,6 +172,7 @@ impl AmqpServiceConfig {
         self
     }
 
+    #[must_use]
     /// Set handshake timeout.
     ///
     /// By default handshake timeout is 5 seconds.
@@ -174,6 +199,7 @@ impl AmqpServiceConfig {
         }
     }
 
+    #[must_use]
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
         Open(Box::new(OpenInner {
@@ -194,6 +220,7 @@ impl AmqpServiceConfig {
         }))
     }
 
+    #[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
     pub(crate) fn timeout_remote_secs(&self) -> Seconds {
         if self.idle_time_out > 0 {
             Seconds::checked_new(((self.idle_time_out as f32) * 0.75 / 1000.0) as usize)
@@ -202,6 +229,7 @@ impl AmqpServiceConfig {
         }
     }
 
+    #[must_use]
     pub fn from_remote(&self, open: &Open) -> AmqpServiceConfig {
         AmqpServiceConfig {
             max_frame_size: open.max_frame_size(),
@@ -212,7 +240,7 @@ impl AmqpServiceConfig {
             handshake_timeout: self.handshake_timeout,
             offered_capabilities: open.0.offered_capabilities.clone(),
             desired_capabilities: open.0.desired_capabilities.clone(),
-            config: self.config,
+            config: self.config.clone(),
         }
     }
 }

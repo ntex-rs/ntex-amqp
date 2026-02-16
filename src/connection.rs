@@ -55,7 +55,7 @@ pub(crate) enum ConnectionState {
 impl Connection {
     pub(crate) fn new(
         io: IoRef,
-        local_config: &Cfg<AmqpServiceConfig>,
+        local_config: Cfg<AmqpServiceConfig>,
         remote_config: &AmqpServiceConfig,
     ) -> Connection {
         Connection(ConnectionRef(Cell::new(ConnectionInner {
@@ -95,7 +95,7 @@ impl ops::Deref for Connection {
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        self.0.force_close()
+        self.0.force_close();
     }
 }
 
@@ -196,12 +196,12 @@ impl ConnectionRef {
         log::trace!("{}: outgoing: {:#?}", inner.io.tag(), frame);
 
         if let Err(e) = inner.io.encode(frame, &inner.codec) {
-            inner.set_error(e.into())
+            inner.set_error(e.into());
         }
     }
 
     pub(crate) fn set_error(&self, err: AmqpProtocolError) {
-        self.0.get_mut().set_error(err)
+        self.0.get_mut().set_error(err);
     }
 
     pub(crate) fn get_control_queue(&self) -> &Rc<ControlQueue> {
@@ -216,7 +216,7 @@ impl ConnectionRef {
 impl ConnectionInner {
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("{}: Set connection error: {:?}", self.io.tag(), err);
-        for (_, channel) in self.sessions.iter_mut() {
+        for (_, channel) in &mut self.sessions {
             match channel {
                 SessionState::Opening(_, _) | SessionState::Closing(_) => (),
                 SessionState::Established(ses) => {
@@ -238,7 +238,7 @@ impl ConnectionInner {
         log::trace!("{}: outgoing: {:#?}", self.io.tag(), frame);
 
         if let Err(e) = self.io.encode(frame, &self.codec) {
-            self.set_error(e.into())
+            self.set_error(e.into());
         }
     }
 
@@ -284,7 +284,6 @@ impl ConnectionInner {
                 AmqpFrame::new(local_token as u16, begin.into()),
                 &self.codec,
             )
-            .map(|_| ())
             .map_err(AmqpProtocolError::Codec)
     }
 
@@ -355,14 +354,12 @@ impl ConnectionInner {
         let (channel_id, frame) = frame.into_parts();
 
         match frame {
-            Frame::Empty => {
-                return Ok(Action::None);
-            }
+            Frame::Empty => Ok(Action::None),
             Frame::Close(close) => {
                 if self.state == ConnectionState::Closing {
                     log::trace!("{}: Connection closed: {:?}", self.io.tag(), close);
                     self.set_error(AmqpProtocolError::Disconnected);
-                    return Ok(Action::None);
+                    Ok(Action::None)
                 } else {
                     log::trace!("{}: Connection closed remotely: {:?}", self.io.tag(), close);
                     let err = AmqpProtocolError::Closed(close.error);
@@ -370,7 +367,7 @@ impl ConnectionInner {
                     let close = Close { error: None };
                     self.post_frame(AmqpFrame::new(0, close.into()));
                     self.state = ConnectionState::RemoteClose;
-                    return Ok(Action::RemoteClose(err));
+                    Ok(Action::RemoteClose(err))
                 }
             }
             Frame::Begin(begin) => {
@@ -382,103 +379,102 @@ impl ConnectionInner {
                 } else {
                     self.register_remote_session(channel_id, begin, inner)?;
                 }
-                return Ok(Action::None);
+                Ok(Action::None)
             }
-            _ => (),
-        }
+            _ => {
+                if self.error.is_some() {
+                    log::error!(
+                        "{}: Connection closed but new framed is received: {:?}",
+                        self.io.tag(),
+                        frame
+                    );
+                    return Ok(Action::None);
+                }
 
-        if self.error.is_some() {
-            log::error!(
-                "{}: Connection closed but new framed is received: {:?}",
-                self.io.tag(),
-                frame
-            );
-            return Ok(Action::None);
-        }
-
-        // get local session id
-        let state = if let Some(token) = self.sessions_map.get(&channel_id) {
-            if let Some(state) = self.sessions.get_mut(*token) {
-                state
-            } else {
-                log::error!("{}: Inconsistent internal state", self.io.tag());
-                return Err(AmqpProtocolError::UnknownSession(frame));
-            }
-        } else {
-            return Err(AmqpProtocolError::UnknownSession(frame));
-        };
-
-        // handle session frames
-        match state {
-            SessionState::Opening(_, _) => {
-                log::error!(
-                    "{}: Unexpected opening state: {}",
-                    self.io.tag(),
-                    channel_id
-                );
-                Err(AmqpProtocolError::UnexpectedOpeningState(frame))
-            }
-            SessionState::Established(session) => match frame {
-                Frame::Attach(attach) => {
-                    let cell = session.clone();
-                    if session.get_mut().handle_attach(&attach, cell) {
-                        Ok(Action::None)
+                // get local session id
+                let state = if let Some(token) = self.sessions_map.get(&channel_id) {
+                    if let Some(state) = self.sessions.get_mut(*token) {
+                        state
                     } else {
-                        match attach.0.role {
-                            Role::Receiver => {
-                                // remotly opened sender link
-                                let (id, response) = session.get_mut().new_remote_sender(&attach);
-                                let link = SenderLink::new(Cell::new(SenderLinkInner::with(
-                                    id,
-                                    &attach,
-                                    session.clone(),
-                                )));
-                                Ok(Action::AttachSender(link, attach, response))
-                            }
-                            Role::Sender => {
-                                // receiver link
-                                let (response, link) = session
-                                    .get_mut()
-                                    .attach_remote_receiver_link(session.clone(), &attach);
-                                Ok(Action::AttachReceiver(link, attach, response))
+                        log::error!("{}: Inconsistent internal state", self.io.tag());
+                        return Err(AmqpProtocolError::UnknownSession(frame));
+                    }
+                } else {
+                    return Err(AmqpProtocolError::UnknownSession(frame));
+                };
+
+                // handle session frames
+                match state {
+                    SessionState::Opening(_, _) => {
+                        log::error!(
+                            "{}: Unexpected opening state: {}",
+                            self.io.tag(),
+                            channel_id
+                        );
+                        Err(AmqpProtocolError::UnexpectedOpeningState(frame))
+                    }
+                    SessionState::Established(session) => match frame {
+                        Frame::Attach(attach) => {
+                            let cell = session.clone();
+                            if session.get_mut().handle_attach(&attach, cell) {
+                                Ok(Action::None)
+                            } else {
+                                match attach.0.role {
+                                    Role::Receiver => {
+                                        // remotly opened sender link
+                                        let (id, response) =
+                                            session.get_mut().new_remote_sender(&attach);
+                                        let link = SenderLink::new(Cell::new(
+                                            SenderLinkInner::with(id, &attach, session.clone()),
+                                        ));
+                                        Ok(Action::AttachSender(link, attach, response))
+                                    }
+                                    Role::Sender => {
+                                        // receiver link
+                                        let (response, link) = session
+                                            .get_mut()
+                                            .attach_remote_receiver_link(session.clone(), &attach);
+                                        Ok(Action::AttachReceiver(link, attach, response))
+                                    }
+                                }
                             }
                         }
-                    }
+                        Frame::End(remote_end) => {
+                            log::trace!("{}: Remote session end: {}", self.io.tag(), channel_id);
+                            let id = session.get_mut().id();
+                            let action = session
+                                .get_mut()
+                                .end(AmqpProtocolError::SessionEnded(remote_end.error));
+                            if let Some(token) = self.sessions_map.remove(&channel_id) {
+                                self.sessions.remove(token);
+                            }
+                            self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
+                            Ok(action)
+                        }
+                        _ => session.get_mut().handle_frame(frame),
+                    },
+                    SessionState::Closing(session) => match frame {
+                        Frame::End(frm) => {
+                            log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
+                            let _ = session
+                                .get_mut()
+                                .end(AmqpProtocolError::SessionEnded(frm.error));
+                            if let Some(token) = self.sessions_map.remove(&channel_id) {
+                                self.sessions.remove(token);
+                            }
+                            Ok(Action::None)
+                        }
+                        frm => {
+                            log::trace!(
+                                "{}: Got frame after initiated session end: {:?}",
+                                self.io.tag(),
+                                frm
+                            );
+                            Ok(Action::None)
+                        }
+                    },
                 }
-                Frame::End(remote_end) => {
-                    log::trace!("{}: Remote session end: {}", self.io.tag(), channel_id);
-                    let id = session.get_mut().id();
-                    let action = session
-                        .get_mut()
-                        .end(AmqpProtocolError::SessionEnded(remote_end.error));
-                    if let Some(token) = self.sessions_map.remove(&channel_id) {
-                        self.sessions.remove(token);
-                    }
-                    self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
-                    Ok(action)
-                }
-                _ => session.get_mut().handle_frame(frame),
-            },
-            SessionState::Closing(session) => match frame {
-                Frame::End(frm) => {
-                    log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
-                    let _ = session
-                        .get_mut()
-                        .end(AmqpProtocolError::SessionEnded(frm.error));
-                    if let Some(token) = self.sessions_map.remove(&channel_id) {
-                        self.sessions.remove(token);
-                    }
-                    Ok(Action::None)
-                }
-                frm => {
-                    log::trace!(
-                        "{}: Got frame after initiated session end: {:?}",
-                        self.io.tag(),
-                        frm
-                    );
-                    Ok(Action::None)
-                }
-            },
+            }
         }
     }
 }
@@ -509,18 +505,23 @@ impl OpenSession {
         }
     }
 
+    #[must_use]
     /// Set session offered capabilities
     pub fn offered_capabilities(mut self, caps: codec::Symbols) -> Self {
         self.offered_capabilities = Some(caps);
         self
     }
 
+    #[must_use]
     /// Set session desired capabilities
     pub fn desired_capabilities(mut self, caps: codec::Symbols) -> Self {
         self.desired_capabilities = Some(caps);
         self
     }
 
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)]
+    /// Set session property
     pub fn property<K, V>(mut self, key: K, value: V) -> Self
     where
         K: Into<types::Symbol>,
@@ -536,6 +537,7 @@ impl OpenSession {
         self
     }
 
+    /// Attach session
     pub async fn attach(self) -> Result<Session, AmqpProtocolError> {
         open_session(
             self.con,

@@ -36,7 +36,7 @@ pub(crate) struct SenderLinkInner {
 impl std::fmt::Debug for SenderLink {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_tuple("SenderLink")
-            .field(&std::ops::Deref::deref(&self.inner.get_ref().name))
+            .field(&self.inner.get_ref().name)
             .finish()
     }
 }
@@ -44,7 +44,7 @@ impl std::fmt::Debug for SenderLink {
 impl std::fmt::Debug for SenderLinkInner {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_tuple("SenderLinkInner")
-            .field(&std::ops::Deref::deref(&self.name))
+            .field(&&*self.name)
             .finish()
     }
 }
@@ -99,7 +99,7 @@ impl SenderLink {
                 }
                 inner.on_credit.wait()
             };
-            waiter.await
+            waiter.await;
         }
     }
 
@@ -171,7 +171,7 @@ impl SenderLink {
     }
 
     pub fn set_max_message_size(&self, value: u32) {
-        self.inner.get_mut().max_message_size = Some(value)
+        self.inner.get_mut().max_message_size = Some(value);
     }
 }
 
@@ -281,7 +281,7 @@ impl SenderLinkInner {
 
             Either::Right(async move {
                 match rx.await {
-                    Ok(Ok(_)) => Ok(()),
+                    Ok(Ok(())) => Ok(()),
                     Ok(Err(e)) => Err(e),
                     Err(_) => Err(AmqpProtocolError::Disconnected),
                 }
@@ -452,12 +452,14 @@ impl SenderLinkBuilder {
         SenderLinkBuilder { frame, session }
     }
 
+    #[must_use]
     /// Set max message size
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
     }
 
+    #[must_use]
     /// Modify attach frame
     pub fn with_frame<F>(mut self, f: F) -> Self
     where

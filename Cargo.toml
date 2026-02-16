@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "5.4.0"
+version = "5.5.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -18,6 +18,16 @@ members = [
   "codec",
 ]
 
+[workspace.lints.rust]
+async_fn_in_trait =  { level = "allow", priority = -1 }
+rust_2018_idioms = "deny"
+warnings = "deny"
+unreachable_pub = "deny"
+#missing_debug_implementations = "deny"
+
+[lints]
+workspace = true
+
 [features]
 default = []
 
@@ -27,14 +37,14 @@ frame-trace = []
 [dependencies]
 ntex-amqp-codec = "2.0.0"
 
-ntex-bytes = "1.4"
+ntex-bytes = "1.5"
 ntex-dispatcher = "3"
 ntex-router = "1"
-ntex-rt = "3.5"
-ntex-io = "3.5"
-ntex-net = "3.5"
+ntex-rt = "3.7"
+ntex-io = "3.8"
+ntex-net = "3.6"
 ntex-util = "3.4"
-ntex-service = "4"
+ntex-service = "4.4"
 
 bitflags = "2"
 log = "0.4"

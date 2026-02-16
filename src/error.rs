@@ -125,21 +125,18 @@ impl AmqpError {
         Self::new(protocol::AmqpError::NotImplemented)
     }
 
+    #[must_use]
     pub fn text(mut self, text: &'static str) -> Self {
         self.description = Some(ByteString::from_static(text));
         self
     }
 
+    #[must_use]
     pub fn description<T>(mut self, text: T) -> Self
     where
         ByteString: From<T>,
     {
         self.description = Some(ByteString::from(text));
-        self
-    }
-
-    pub fn set_description(mut self, text: ByteString) -> Self {
-        self.description = Some(text);
         self
     }
 }
@@ -199,11 +196,13 @@ impl LinkError {
         }
     }
 
+    #[must_use]
     pub fn text(mut self, text: &'static str) -> Self {
         self.description = Some(ByteString::from_static(text));
         self
     }
 
+    #[must_use]
     pub fn description<T>(mut self, text: T) -> Self
     where
         ByteString: From<T>,
@@ -212,11 +211,7 @@ impl LinkError {
         self
     }
 
-    pub fn set_description(mut self, text: ByteString) -> Self {
-        self.description = Some(text);
-        self
-    }
-
+    #[must_use]
     pub fn fields(mut self, fields: protocol::FieldsVec) -> Self {
         self.info = Some(fields);
         self

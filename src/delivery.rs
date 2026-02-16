@@ -159,7 +159,7 @@ impl Delivery {
             .unsettled_deliveries(self.is_set(Flags::SENDER))
             .get_mut(&self.id)
         {
-            if let Some(st) = self.check_inner(inner) {
+            if let Some(st) = Self::check_inner(inner) {
                 return st;
             }
 
@@ -184,7 +184,7 @@ impl Delivery {
             if inner.settled {
                 self.set_flag(Flags::REMOTE_SETTLED);
             }
-            if let Some(st) = self.check_inner(inner) {
+            if let Some(st) = Self::check_inner(inner) {
                 return st;
             }
         } else {
@@ -195,7 +195,6 @@ impl Delivery {
     }
 
     fn check_inner(
-        &self,
         inner: &mut DeliveryInner,
     ) -> Option<Result<Option<DeliveryState>, AmqpProtocolError>> {
         if let Some(ref st) = inner.state {
@@ -267,7 +266,7 @@ impl DeliveryInner {
         }
     }
 
-    pub(crate) fn handle_disposition(&mut self, disp: Disposition) {
+    pub(crate) fn handle_disposition(&mut self, disp: &Disposition) {
         if disp.settled() {
             self.settled = true;
         }
@@ -307,21 +306,25 @@ impl TransferBuilder {
         }
     }
 
+    #[must_use]
     pub fn tag(mut self, tag: Bytes) -> Self {
         self.tag = Some(tag);
         self
     }
 
+    #[must_use]
     pub fn settled(mut self) -> Self {
         self.settled = true;
         self
     }
 
+    #[must_use]
     pub fn format(mut self, fmt: MessageFormat) -> Self {
         self.format = Some(fmt);
         self
     }
 
+    /// Send delivery to the peer
     pub async fn send(self) -> Result<Delivery, AmqpProtocolError> {
         let inner = self.sender.get_ref();
 

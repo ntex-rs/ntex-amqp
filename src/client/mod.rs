@@ -18,7 +18,6 @@ pub struct Connect<T: Address> {
 }
 
 impl<T: Address> Connect<T> {
-    #[inline]
     pub fn new(addr: T) -> Self {
         Self {
             addr,
@@ -27,7 +26,7 @@ impl<T: Address> Connect<T> {
         }
     }
 
-    #[inline]
+    #[must_use]
     /// Use Sasl auth
     pub fn sasl_auth(
         mut self,
@@ -43,6 +42,7 @@ impl<T: Address> Connect<T> {
         self
     }
 
+    #[must_use]
     /// Set connection hostname
     ///
     /// Hostname is not set by default

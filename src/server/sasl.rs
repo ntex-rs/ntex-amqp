@@ -35,6 +35,7 @@ impl Sasl {
         &self.state
     }
 
+    #[must_use]
     /// Add supported sasl mechanism
     pub fn mechanism<U: Into<String>>(mut self, symbol: U) -> Self {
         self.mechanisms.push(ByteString::from(symbol.into()).into());
@@ -264,7 +265,7 @@ impl SaslSuccess {
 
                         let local_config = self.local_config;
                         let remote_config = local_config.from_remote(&frame);
-                        let sink = Connection::new(state.clone(), &local_config, &remote_config);
+                        let sink = Connection::new(state.clone(), local_config, &remote_config);
 
                         Ok(HandshakeAmqpOpened::new(
                             frame,
