@@ -25,9 +25,9 @@ async fn main() -> std::io::Result<()> {
                 }
             })
             .finish(
-                server::Router::new()
+                server::Router::builder()
                     .service("test", fn_factory_with_config(server))
-                    .finish(),
+                    .build(),
             )
         })?
         .workers(1)
