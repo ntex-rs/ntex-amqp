@@ -144,6 +144,7 @@ impl<T> Wrapper<T> {
         self.inner.borrow_mut().take().unwrap()
     }
 
+    #[allow(clippy::missing_panics_doc)]
     pub fn with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,

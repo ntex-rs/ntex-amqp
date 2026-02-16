@@ -110,14 +110,14 @@ where
             let io = IoBoxed::from(io);
 
             if let Some(auth) = sasl {
-                _connect_sasl(io, auth, self.config, hostname).await
+                connect_sasl_inner(io, auth, self.config.clone(), hostname).await
             } else {
-                _connect_plain(io, self.config, hostname).await
+                connect_plain_inner(io, self.config.clone(), hostname).await
             }
         };
         timeout_checked(self.config.handshake_timeout, fut)
             .await
-            .map_err(|_| ConnectError::HandshakeTimeout)
+            .map_err(|()| ConnectError::HandshakeTimeout)
             .and_then(|res| res)
     }
 }
@@ -136,7 +136,7 @@ where
     ) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        _connect_plain(io, self.config, hostname).await
+        connect_plain_inner(io, self.config.clone(), hostname).await
     }
 
     /// Negotiate amqp sasl protocol over opened socket
@@ -148,11 +148,11 @@ where
     ) -> Result<Client, ConnectError> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        _connect_sasl(io, auth, self.config, hostname).await
+        connect_sasl_inner(io, auth, self.config.clone(), hostname).await
     }
 }
 
-async fn _connect_sasl(
+async fn connect_sasl_inner(
     io: IoBoxed,
     auth: SaslAuth,
     config: Cfg<AmqpServiceConfig>,
@@ -204,10 +204,10 @@ async fn _connect_sasl(
         return Err(ConnectError::Disconnected);
     }
 
-    _connect_plain(io, config, hostname).await
+    connect_plain_inner(io, config, hostname).await
 }
 
-async fn _connect_plain(
+async fn connect_plain_inner(
     io: IoBoxed,
     config: Cfg<AmqpServiceConfig>,
     hostname: Option<ByteString>,
@@ -250,7 +250,7 @@ async fn _connect_plain(
     if let Frame::Open(open) = frame.performative() {
         log::trace!("{}: Open confirmed: {:?}", io.tag(), open);
         let remote_config = config.from_remote(open);
-        let connection = Connection::new(io.get_ref(), &config, &remote_config);
+        let connection = Connection::new(io.get_ref(), config, &remote_config);
         let client = Client::new(io, codec, connection, remote_config);
         Ok(client)
     } else {

@@ -128,7 +128,7 @@ where
             };
             let (frame, _) = futs.swap_remove(idx);
             let result = match res {
-                Ok(_) => self.handle_control_frame(&frame, None),
+                Ok(()) => self.handle_control_frame(&frame, None),
                 Err(e) => self.handle_control_frame(&frame, Some(e.into())),
             };
 
@@ -226,7 +226,7 @@ where
                     types::Action::DetachReceiver(link, frm) => {
                         let lnk = link.clone();
                         let fut = self.service.call(types::Message::Detached(lnk));
-                        let _ = spawn(async move {
+                        spawn(async move {
                             let _ = fut.await;
                         });
                         self.call_control_service(ControlFrame::new(
@@ -244,7 +244,7 @@ where
                             .collect();
 
                         let fut = self.service.call(types::Message::DetachedAll(receivers));
-                        let _ = spawn(async move {
+                        spawn(async move {
                             let _ = fut.await;
                         });
                         self.call_control_service(ControlFrame::new_kind(
@@ -257,11 +257,11 @@ where
                         ));
                     }
                     types::Action::None => (),
-                };
+                }
 
                 Ok(None)
             }
-            DispatchItem::Stop(Reason::Encoder(err)) | DispatchItem::Stop(Reason::Decoder(err)) => {
+            DispatchItem::Stop(Reason::Encoder(err) | Reason::Decoder(err)) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     err.into(),
                 )));
@@ -303,26 +303,21 @@ where
     ) -> Result<(), AmqpDispatcherError> {
         if let Some(err) = err {
             match &frame.0.get_mut().kind {
-                ControlFrameKind::AttachReceiver(_, _, link) => {
+                ControlFrameKind::AttachReceiver(_, _, link)
+                | ControlFrameKind::RemoteDetachReceiver(_, link) => {
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::AttachSender(frm, _, link) => {
                     frame
                         .session_cell()
                         .get_mut()
-                        .detach_unconfirmed_sender_link(frm, link.inner.clone(), Some(err));
+                        .detach_unconfirmed_sender_link(frm, &link.inner, Some(err));
                 }
-                ControlFrameKind::Flow(_, link) => {
+                ControlFrameKind::Flow(_, link) | ControlFrameKind::RemoteDetachSender(_, link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::LocalDetachSender(..) => {}
-                ControlFrameKind::LocalDetachReceiver(..) => {}
-                ControlFrameKind::RemoteDetachSender(_, link) => {
-                    let _ = link.close_with_error(err);
-                }
-                ControlFrameKind::RemoteDetachReceiver(_, link) => {
-                    let _ = link.close_with_error(err);
-                }
+                ControlFrameKind::LocalDetachSender(..)
+                | ControlFrameKind::LocalDetachReceiver(..) => {}
                 ControlFrameKind::ProtocolError(err) => {
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
@@ -342,7 +337,7 @@ where
                         .call(types::Message::Attached(frm.clone(), link.clone()));
                     let response = pfrm.take();
 
-                    let _ = ntex_rt::spawn(async move {
+                    ntex_rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
                             let _ = link.close_with_error(Error::from(err)).await;

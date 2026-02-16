@@ -1,11 +1,11 @@
 use super::protocol;
 
 /// Length in bytes of the fixed frame header
-pub const HEADER_LEN: usize = 8;
+pub(crate) const HEADER_LEN: usize = 8;
 
 /// AMQP Frame type marker (0)
-pub const FRAME_TYPE_AMQP: u8 = 0x00;
-pub const FRAME_TYPE_SASL: u8 = 0x01;
+pub(crate) const FRAME_TYPE_AMQP: u8 = 0x00;
+pub(crate) const FRAME_TYPE_SASL: u8 = 0x01;
 
 /// Represents an AMQP Frame
 #[derive(Clone, Debug, PartialEq, Eq)]

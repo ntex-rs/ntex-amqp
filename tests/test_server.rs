@@ -46,12 +46,12 @@ async fn test_simple() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service(
                     "test",
                     fn_factory_with_config(move |_: types::Link<()>| server_count(count.clone())),
                 )
-                .finish(),
+                .build(),
         )
     });
 
@@ -126,12 +126,12 @@ async fn test_large_transfer() -> std::io::Result<()> {
             Ok::<_, ()>(())
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service(
                     "test",
                     fn_factory_with_config(move |_: types::Link<()>| server_count(count.clone())),
                 )
-                .finish(),
+                .build(),
         )
     })
     .config(SharedCfg::new("AMQP").add(AmqpServiceConfig::new().set_max_frame_size(1024)))
@@ -208,9 +208,9 @@ async fn test_sasl() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service("test", fn_factory_with_config(server))
-                .finish(),
+                .build(),
         )
     });
 
@@ -260,9 +260,9 @@ async fn test_session_end() -> std::io::Result<()> {
             Ready::<_, ()>::Ok(())
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service("test", fn_factory_with_config(server))
-                .finish(),
+                .build(),
         )
     });
 
@@ -323,7 +323,7 @@ async fn test_link_detach() -> std::io::Result<()> {
             Ready::<_, ()>::Ok(())
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service(
                     "test",
                     fn_factory_with_config(|link: types::Link<()>| async move {
@@ -337,7 +337,7 @@ async fn test_link_detach() -> std::io::Result<()> {
                         })))
                     }),
                 )
-                .finish(),
+                .build(),
         )
     });
 
@@ -390,7 +390,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service(
                     "test",
                     fn_factory_with_config(|link: types::Link<()>| async move {
@@ -404,7 +404,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
                         })))
                     }),
                 )
-                .finish(),
+                .build(),
         )
     });
 
@@ -449,7 +449,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service(
                     "test",
                     fn_factory_with_config(|link: types::Link<()>| async move {
@@ -463,7 +463,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
                         })))
                     }),
                 )
-                .finish(),
+                .build(),
         )
     });
 
@@ -508,7 +508,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
             }
         })
         .finish(
-            server::Router::<()>::new()
+            server::Router::<()>::builder()
                 .service(
                     "test",
                     fn_factory_with_config(|link: types::Link<()>| async move {
@@ -523,7 +523,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
                         })))
                     }),
                 )
-                .finish(),
+                .build(),
         )
     });
 

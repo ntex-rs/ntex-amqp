@@ -110,7 +110,7 @@ where
 
     async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         self.handshake
-            .pipeline(cfg)
+            .pipeline(cfg.clone())
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
@@ -137,7 +137,7 @@ where
 
     async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         self.handshake
-            .pipeline(cfg)
+            .pipeline(cfg.clone())
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
@@ -165,13 +165,13 @@ where
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
     async fn create(&self, req: IoBoxed) -> Result<(), ServerError<H::Error>> {
-        let fut = handshake(req, &self.handshake, self.cfg);
+        let fut = handshake(req, &self.handshake, self.cfg.clone());
         let inner = self.inner.clone();
 
         let (state, codec, sink, st, idle_timeout) =
             timeout_checked(self.cfg.handshake_timeout, fut)
                 .await
-                .map_err(|_| HandshakeError::Timeout)??;
+                .map_err(|()| HandshakeError::Timeout)??;
 
         // create publish service
         let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
@@ -216,7 +216,7 @@ where
 
     #[inline]
     async fn shutdown(&self) {
-        self.handshake.shutdown().await
+        self.handshake.shutdown().await;
     }
 
     async fn call(
@@ -248,7 +248,7 @@ where
 
     #[inline]
     async fn shutdown(&self) {
-        self.handshake.shutdown().await
+        self.handshake.shutdown().await;
     }
 
     #[inline]
@@ -290,9 +290,9 @@ where
             // handshake protocol
             let ack = handshake
                 .call(if protocol == ProtocolId::Amqp {
-                    Handshake::new_plain(io, cfg)
+                    Handshake::new_plain(io, cfg.clone())
                 } else {
-                    Handshake::new_sasl(io, cfg)
+                    Handshake::new_sasl(io, cfg.clone())
                 })
                 .await
                 .map_err(ServerError::Service)?;

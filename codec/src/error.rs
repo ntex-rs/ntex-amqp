@@ -1,5 +1,4 @@
-use crate::protocol::{AmqpError, ProtocolId};
-pub use crate::protocol::{Error, ErrorInner};
+use crate::protocol::{AmqpError, Error, ErrorInner, ProtocolId};
 use crate::types::Descriptor;
 
 #[derive(Debug, Clone, thiserror::Error)]

@@ -46,7 +46,7 @@ impl PartialEq<ReceiverLink> for ReceiverLink {
 
 impl hash::Hash for ReceiverLink {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        (self.inner.get_ref() as *const _ as usize).hash(state);
+        (std::ptr::from_ref(self.inner.get_ref()) as usize).hash(state);
     }
 }
 
@@ -282,7 +282,7 @@ impl ReceiverLinkInner {
 
         async move {
             match rx.await {
-                Ok(Ok(_)) => Ok(()),
+                Ok(Ok(())) => Ok(()),
                 Ok(Err(e)) => Err(e),
                 Err(_) => Err(AmqpProtocolError::Disconnected),
             }
@@ -302,7 +302,7 @@ impl ReceiverLinkInner {
         &mut self,
         mut transfer: Transfer,
         inner: &Cell<ReceiverLinkInner>,
-    ) -> Result<Action, AmqpProtocolError> {
+    ) -> Action {
         if self.credit == 0 {
             // check link credit
             let err = Error(Box::new(codec::ErrorInner {
@@ -311,7 +311,7 @@ impl ReceiverLinkInner {
                 info: None,
             }));
             let _ = self.close(Some(err));
-            Ok(Action::None)
+            Action::None
         } else {
             if !transfer.0.more {
                 self.credit -= 1;
@@ -332,7 +332,7 @@ impl ReceiverLinkInner {
                             info: None,
                         }));
                         let _ = self.close(Some(err));
-                        return Ok(Action::None);
+                        return Action::None;
                     }
                 }
 
@@ -345,7 +345,7 @@ impl ReceiverLinkInner {
                             info: None,
                         }));
                         let _ = self.close(Some(err));
-                        return Ok(Action::None);
+                        return Action::None;
                     }
 
                     transfer_body.encode(body);
@@ -353,7 +353,7 @@ impl ReceiverLinkInner {
 
                 if transfer.more() {
                     // dont need to update queue, we use first transfer frame as primary
-                    Ok(Action::None)
+                    Action::None
                 } else {
                     // received last partial transfer
                     self.delivery_count += 1;
@@ -364,9 +364,9 @@ impl ReceiverLinkInner {
                         if self.queue.len() == 1 {
                             self.wake();
                         }
-                        Ok(Action::Transfer(ReceiverLink {
+                        Action::Transfer(ReceiverLink {
                             inner: inner.clone(),
-                        }))
+                        })
                     } else {
                         log::error!("{}: Inconsistent state, bug", self.session.tag());
                         let err = Error(Box::new(codec::ErrorInner {
@@ -375,7 +375,7 @@ impl ReceiverLinkInner {
                             info: None,
                         }));
                         let _ = self.close(Some(err));
-                        Ok(Action::None)
+                        Action::None
                     }
                 }
             } else if transfer.more() {
@@ -412,7 +412,7 @@ impl ReceiverLinkInner {
                         self.session.clone(),
                     );
                     self.queue.push_back((delivery, transfer));
-                    Ok(Action::None)
+                    Action::None
                 } else {
                     let err = Error(Box::new(codec::ErrorInner {
                         condition: LinkError::DetachForced.into(),
@@ -420,7 +420,7 @@ impl ReceiverLinkInner {
                         info: None,
                     }));
                     let _ = self.close(Some(err));
-                    Ok(Action::None)
+                    Action::None
                 }
             } else if let Some(id) = transfer.delivery_id() {
                 self.delivery_count += 1;
@@ -435,9 +435,9 @@ impl ReceiverLinkInner {
                 if self.queue.len() == 1 {
                     self.wake();
                 }
-                Ok(Action::Transfer(ReceiverLink {
+                Action::Transfer(ReceiverLink {
                     inner: inner.clone(),
-                }))
+                })
             } else {
                 let err = Error(Box::new(codec::ErrorInner {
                     condition: LinkError::DetachForced.into(),
@@ -445,7 +445,7 @@ impl ReceiverLinkInner {
                     info: None,
                 }));
                 let _ = self.close(Some(err));
-                Ok(Action::None)
+                Action::None
             }
         }
     }
@@ -514,12 +514,14 @@ impl ReceiverLinkBuilder {
         ReceiverLinkBuilder { frame, session }
     }
 
+    #[must_use]
     /// Set attach frame max message size
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
     }
 
+    #[must_use]
     /// Set or reset a receive link property
     pub fn property<K, V>(mut self, key: K, value: Option<V>) -> Self
     where
@@ -536,12 +538,15 @@ impl ReceiverLinkBuilder {
         self
     }
 
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     /// Set link capabilities
-    pub fn capabilities(&mut self, caps: Symbols) -> &mut Self {
+    pub fn capabilities(mut self, caps: Symbols) -> Self {
         self.frame.source_mut().as_mut().unwrap().capabilities = Some(caps);
         self
     }
 
+    #[must_use]
     /// Modify attach frame
     pub fn with_frame<F>(mut self, f: F) -> Self
     where

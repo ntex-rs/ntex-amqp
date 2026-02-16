@@ -194,7 +194,7 @@ impl Session {
 
         async move {
             match rx.await {
-                Ok(Ok(_)) => Ok(()),
+                Ok(Ok(())) => Ok(()),
                 Ok(Err(e)) => {
                     log::trace!("Cannot complete detach receiver link {e:?}");
                     Err(e)
@@ -221,7 +221,7 @@ impl Session {
 
         async move {
             match rx.await {
-                Ok(Ok(_)) => Ok(()),
+                Ok(Ok(())) => Ok(()),
                 Ok(Err(e)) => {
                     log::trace!("Cannot complete detach sender link {e:?}");
                     Err(e)
@@ -356,9 +356,8 @@ impl SessionInner {
 
         // drop links
         self.links_by_name.clear();
-        for (_, st) in self.links.iter_mut() {
+        for (_, st) in &mut self.links {
             match st {
-                Either::Left(SenderLinkState::Opening(_)) => (),
                 Either::Left(SenderLinkState::Established(link)) => {
                     link.inner.get_mut().remote_detached(err.clone());
                 }
@@ -487,7 +486,7 @@ impl SessionInner {
         );
 
         *response.handle_mut() = token as Handle;
-        *response.max_message_size_mut() = link.max_message_size().map(|v| v as u64);
+        *response.max_message_size_mut() = link.max_message_size().map(u64::from);
 
         self.post_frame(response.into());
         SenderLink::new(link)
@@ -526,7 +525,7 @@ impl SessionInner {
                         .get_control_queue()
                         .enqueue_frame(ControlFrame::new_kind(
                             crate::ControlFrameKind::LocalDetachSender(detach, sender_link),
-                        ))
+                        ));
                 }
                 SenderLinkState::OpeningRemote => {
                     let _ = tx.send(Ok(()));
@@ -556,7 +555,7 @@ impl SessionInner {
     pub(crate) fn detach_unconfirmed_sender_link(
         &mut self,
         attach: &Attach,
-        link: Cell<SenderLinkInner>,
+        link: &Cell<SenderLinkInner>,
         error: Option<Error>,
     ) {
         let token = link.id;
@@ -746,7 +745,7 @@ impl SessionInner {
                         .get_control_queue()
                         .enqueue_frame(ControlFrame::new_kind(
                             crate::ControlFrameKind::LocalDetachReceiver(detach, receiver_link),
-                        ))
+                        ));
                 }
                 ReceiverLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
@@ -807,7 +806,7 @@ impl SessionInner {
                     Ok(Action::None)
                 }
                 Frame::Disposition(disp) => {
-                    self.settle_deliveries(disp);
+                    self.settle_deliveries(&disp);
                     Ok(Action::None)
                 }
                 Frame::Transfer(transfer) => {
@@ -832,17 +831,8 @@ impl SessionInner {
                                 Err(AmqpProtocolError::Unexpected(Frame::Transfer(transfer)))
                             }
                             Either::Right(link) => match link {
-                                ReceiverLinkState::Opening(_) => {
-                                    log::debug!(
-                                        "{}: Got transfer for opening link: {} -> {idx}",
-                                        self.tag(),
-                                        transfer.handle()
-                                    );
-                                    Err(AmqpProtocolError::UnexpectedOpeningState(Frame::Transfer(
-                                        transfer,
-                                    )))
-                                }
-                                ReceiverLinkState::OpeningLocal(_) => {
+                                ReceiverLinkState::Opening(_)
+                                | ReceiverLinkState::OpeningLocal(_) => {
                                     log::debug!(
                                         "{}: Got transfer for opening link: {} -> {idx}",
                                         self.tag(),
@@ -855,7 +845,7 @@ impl SessionInner {
                                 ReceiverLinkState::Established(link) => {
                                     // self.outgoing_window -= 1;
                                     let _ = self.next_incoming_id.wrapping_add(1);
-                                    link.inner.get_mut().handle_transfer(transfer, &link.inner)
+                                    Ok(link.inner.get_mut().handle_transfer(transfer, &link.inner))
                                 }
                                 ReceiverLinkState::Closing(_) => Ok(Action::None),
                             },
@@ -945,6 +935,7 @@ impl SessionInner {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     /// Handle `Detach` frame.
     pub(crate) fn handle_detach(&mut self, mut frame: Detach) -> Action {
         // get local link instance
@@ -1096,7 +1087,7 @@ impl SessionInner {
         action
     }
 
-    fn settle_deliveries(&mut self, disp: Disposition) {
+    fn settle_deliveries(&mut self, disp: &Disposition) {
         let from = disp.first();
         let to = disp.last();
 
@@ -1120,7 +1111,7 @@ impl SessionInner {
         if let Some(to) = to {
             for no in from..=to {
                 if let Some(delivery) = deliveries.get_mut(&no) {
-                    delivery.handle_disposition(disp.clone());
+                    delivery.handle_disposition(disp);
                 } else {
                     log::trace!(
                         "{}: Unknown deliveryid: {no:?} disp: {disp:?}",
@@ -1200,6 +1191,7 @@ impl SessionInner {
         self.post_frame(flow.into());
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) async fn send_transfer(
         &mut self,
         link_handle: Handle,
@@ -1268,7 +1260,7 @@ impl SessionInner {
 
             let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
-            let mut transfer = Transfer(Default::default());
+            let mut transfer = Transfer(Box::default());
             transfer.0.handle = link_handle;
             transfer.0.body = Some(TransferBody::Data(chunk));
             transfer.0.more = true;
@@ -1307,7 +1299,7 @@ impl SessionInner {
                 let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
 
                 log::trace!("{}: Sending chunk tranfer for {tag:?}", self.tag());
-                let mut transfer = Transfer(Default::default());
+                let mut transfer = Transfer(Box::default());
                 transfer.0.handle = link_handle;
                 transfer.0.body = Some(TransferBody::Data(chunk));
                 transfer.0.more = !body.is_empty();
@@ -1316,7 +1308,7 @@ impl SessionInner {
                 self.post_frame(Frame::Transfer(transfer));
             }
         } else {
-            let mut transfer = Transfer(Default::default());
+            let mut transfer = Transfer(Box::default());
             transfer.0.handle = link_handle;
             transfer.0.body = Some(body);
             transfer.0.state = tr_settled;
