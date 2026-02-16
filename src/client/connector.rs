@@ -8,7 +8,7 @@ use ntex_util::time::timeout_checked;
 
 use crate::codec::protocol::{Frame, ProtocolId, SaslCode, SaslFrameBody, SaslInit};
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame, types::Symbol};
-use crate::{AmqpServiceConfig, Connection, error::ProtocolIdError};
+use crate::{AmqpServiceConfig, Connection, RemoteServiceConfig, error::ProtocolIdError};
 
 use super::{Connect, SaslAuth, connection::Client, error::ConnectError};
 
@@ -249,7 +249,7 @@ async fn connect_plain_inner(
 
     if let Frame::Open(open) = frame.performative() {
         log::trace!("{}: Open confirmed: {:?}", io.tag(), open);
-        let remote_config = config.from_remote(open);
+        let remote_config = RemoteServiceConfig::new(open);
         let connection = Connection::new(io.get_ref(), config, &remote_config);
         let client = Client::new(io, codec, connection, remote_config);
         Ok(client)

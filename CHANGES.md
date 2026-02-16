@@ -1,8 +1,12 @@
 # Changes
 
+## [5.6.0] - 2026-02-16
+
+* AmqpServiceConfig is not Clone
+
 ## [5.5.0] - 2026-02-16
 
-* SharedCfg is not Copy anymore
+* SharedCfg is not Copy
 
 ## [5.4.0] - 2026-01-29
 

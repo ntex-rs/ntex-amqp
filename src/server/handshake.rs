@@ -3,7 +3,7 @@ use ntex_service::cfg::Cfg;
 use ntex_util::time::Seconds;
 
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame, protocol::Open};
-use crate::{AmqpServiceConfig, connection::Connection};
+use crate::{AmqpServiceConfig, RemoteServiceConfig, connection::Connection};
 
 use super::{error::HandshakeError, sasl::Sasl};
 
@@ -66,8 +66,8 @@ impl HandshakeAmqp {
         match frame {
             Frame::Open(frame) => {
                 log::trace!("{}: Got open frame: {:?}", state.tag(), frame);
-                let remote_config = local_config.from_remote(&frame);
-                let sink = Connection::new(state.get_ref(), local_config, &remote_config);
+                let remote_config = RemoteServiceConfig::new(&frame);
+                let sink = Connection::new(state.get_ref(), local_config.clone(), &remote_config);
                 Ok(HandshakeAmqpOpened {
                     frame,
                     sink,
@@ -87,7 +87,7 @@ pub struct HandshakeAmqpOpened {
     sink: Connection,
     state: IoBoxed,
     local_config: Cfg<AmqpServiceConfig>,
-    remote_config: AmqpServiceConfig,
+    remote_config: RemoteServiceConfig,
 }
 
 impl HandshakeAmqpOpened {
@@ -96,7 +96,7 @@ impl HandshakeAmqpOpened {
         sink: Connection,
         state: IoBoxed,
         local_config: Cfg<AmqpServiceConfig>,
-        remote_config: AmqpServiceConfig,
+        remote_config: RemoteServiceConfig,
     ) -> Self {
         Self {
             frame,
@@ -123,7 +123,7 @@ impl HandshakeAmqpOpened {
     }
 
     /// Get remote configuration
-    pub fn remote_config(&self) -> &AmqpServiceConfig {
+    pub fn remote_config(&self) -> &RemoteServiceConfig {
         &self.remote_config
     }
 

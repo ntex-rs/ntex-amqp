@@ -10,7 +10,9 @@ use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::{AmqpServiceConfig, cell::Cell, error::AmqpProtocolError, types::Action};
+use crate::{
+    AmqpServiceConfig, RemoteServiceConfig, cell::Cell, error::AmqpProtocolError, types::Action,
+};
 
 pub struct Connection(ConnectionRef);
 
@@ -56,7 +58,7 @@ impl Connection {
     pub(crate) fn new(
         io: IoRef,
         local_config: Cfg<AmqpServiceConfig>,
-        remote_config: &AmqpServiceConfig,
+        remote_config: &RemoteServiceConfig,
     ) -> Connection {
         Connection(ConnectionRef(Cell::new(ConnectionInner {
             io,

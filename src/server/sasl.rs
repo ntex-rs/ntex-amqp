@@ -8,9 +8,9 @@ use crate::codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use crate::{AmqpServiceConfig, RemoteServiceConfig, connection::Connection};
 
 use super::{HandshakeError, handshake::HandshakeAmqpOpened};
-use crate::{AmqpServiceConfig, connection::Connection};
 
 #[derive(Debug)]
 pub struct Sasl {
@@ -264,8 +264,9 @@ impl SaslSuccess {
                         log::trace!("{}: Got open frame: {:?}", state.tag(), frame);
 
                         let local_config = self.local_config;
-                        let remote_config = local_config.from_remote(&frame);
-                        let sink = Connection::new(state.clone(), local_config, &remote_config);
+                        let remote_config = RemoteServiceConfig::new(&frame);
+                        let sink =
+                            Connection::new(state.clone(), local_config.clone(), &remote_config);
 
                         Ok(HandshakeAmqpOpened::new(
                             frame,
