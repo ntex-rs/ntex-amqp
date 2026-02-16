@@ -58,7 +58,7 @@ pub mod codec {
 }
 
 /// Amqp1 transport configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AmqpServiceConfig {
     pub max_frame_size: u32,
     pub channel_max: u16,
@@ -69,6 +69,17 @@ pub struct AmqpServiceConfig {
     pub(crate) max_size: usize,
     pub(crate) handshake_timeout: Seconds,
     config: CfgContext,
+}
+
+/// Amqp1 transport configuration.
+#[derive(Debug)]
+pub struct RemoteServiceConfig {
+    pub max_frame_size: u32,
+    pub channel_max: u16,
+    pub idle_time_out: Milliseconds,
+    pub hostname: Option<ByteString>,
+    pub offered_capabilities: Option<Symbols>,
+    pub desired_capabilities: Option<Symbols>,
 }
 
 impl Default for AmqpServiceConfig {
@@ -219,6 +230,20 @@ impl AmqpServiceConfig {
             properties: None,
         }))
     }
+}
+
+impl RemoteServiceConfig {
+    #[must_use]
+    pub fn new(open: &Open) -> RemoteServiceConfig {
+        RemoteServiceConfig {
+            max_frame_size: open.max_frame_size(),
+            channel_max: open.channel_max(),
+            idle_time_out: open.idle_time_out().unwrap_or(0),
+            hostname: open.hostname().cloned(),
+            offered_capabilities: open.0.offered_capabilities.clone(),
+            desired_capabilities: open.0.desired_capabilities.clone(),
+        }
+    }
 
     #[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
     pub(crate) fn timeout_remote_secs(&self) -> Seconds {
@@ -226,21 +251,6 @@ impl AmqpServiceConfig {
             Seconds::checked_new(((self.idle_time_out as f32) * 0.75 / 1000.0) as usize)
         } else {
             Seconds::ZERO
-        }
-    }
-
-    #[must_use]
-    pub fn from_remote(&self, open: &Open) -> AmqpServiceConfig {
-        AmqpServiceConfig {
-            max_frame_size: open.max_frame_size(),
-            channel_max: open.channel_max(),
-            idle_time_out: open.idle_time_out().unwrap_or(0),
-            hostname: open.hostname().cloned(),
-            max_size: self.max_size,
-            handshake_timeout: self.handshake_timeout,
-            offered_capabilities: open.0.offered_capabilities.clone(),
-            desired_capabilities: open.0.desired_capabilities.clone(),
-            config: self.config.clone(),
         }
     }
 }
