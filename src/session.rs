@@ -926,6 +926,7 @@ impl SessionInner {
                 }
                 _ => {
                     // TODO: error in proto, have to close connection
+                    log::trace!("Protocol error");
                 }
             }
             true
