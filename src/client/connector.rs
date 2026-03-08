@@ -284,7 +284,7 @@ async fn connect_plain_inner(
     if let Frame::Open(open) = frame.performative() {
         log::trace!("{}: Open confirmed: {:?}", io.tag(), open);
         let remote_config = RemoteServiceConfig::new(open);
-        let connection = Connection::new(io.get_ref(), config, &remote_config);
+        let connection = Connection::new(io.get_ref(), &config, &remote_config);
         let client = Client::new(io, codec, connection, remote_config);
         Ok(client)
     } else {

@@ -57,7 +57,7 @@ pub(crate) enum ConnectionState {
 impl Connection {
     pub(crate) fn new(
         io: IoRef,
-        local_config: Cfg<AmqpServiceConfig>,
+        local_config: &Cfg<AmqpServiceConfig>,
         remote_config: &RemoteServiceConfig,
     ) -> Connection {
         Connection(ConnectionRef(Cell::new(ConnectionInner {
