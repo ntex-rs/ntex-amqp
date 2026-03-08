@@ -1,5 +1,9 @@
 # Changes
 
+## [5.7.0] - 2026-03-08
+
+* Use ntex-error::Error for client
+
 ## [5.6.0] - 2026-02-16
 
 * AmqpServiceConfig is not Clone

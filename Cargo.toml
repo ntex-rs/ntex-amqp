@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "5.6.0"
+version = "5.7.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -23,7 +23,6 @@ async_fn_in_trait =  { level = "allow", priority = -1 }
 rust_2018_idioms = "deny"
 warnings = "deny"
 unreachable_pub = "deny"
-#missing_debug_implementations = "deny"
 
 [lints]
 workspace = true
@@ -39,12 +38,13 @@ ntex-amqp-codec = "2.0.0"
 
 ntex-bytes = "1.5"
 ntex-dispatcher = "3"
+ntex-error = "1.0"
 ntex-router = "1"
-ntex-rt = "3.7"
-ntex-io = "3.8"
-ntex-net = "3.6"
+ntex-rt = "3.10"
+ntex-io = "3.9"
+ntex-net = "3.8"
 ntex-util = "3.4"
-ntex-service = "4.4"
+ntex-service = "4.6"
 
 bitflags = "2"
 log = "0.4"
@@ -58,7 +58,7 @@ thiserror = "2"
 env_logger = "0.11"
 rand = "0.9"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
-ntex = "3.3"
+ntex = "3.6"
 
 [patch.crates-io]
 ntex-amqp = { path = "." }

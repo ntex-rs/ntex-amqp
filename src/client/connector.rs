@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ntex_bytes::ByteString;
+use ntex_error::Error;
 use ntex_io::IoBoxed;
 use ntex_net::connect::{self, Address};
 use ntex_service::{Service, ServiceCtx, ServiceFactory, cfg::Cfg, cfg::SharedCfg};
@@ -27,9 +28,9 @@ pub struct ConnectorService<A, T> {
 
 impl<A> Connector<A> {
     /// Create new amqp connector
-    pub fn new() -> Connector<A, connect::Connector<A>> {
+    pub fn new() -> Connector<A, connect::Connector2<A>> {
         Connector {
-            connector: connect::Connector::default(),
+            connector: connect::Connector2::default(),
             _t: PhantomData,
         }
     }
@@ -38,7 +39,7 @@ impl<A> Connector<A> {
 impl<A, T> Connector<A, T>
 where
     A: Address,
-    T: ServiceFactory<connect::Connect<A>, SharedCfg, Error = connect::ConnectError>,
+    T: ServiceFactory<connect::Connect<A>, SharedCfg, Error = Error<connect::ConnectError>>,
     IoBoxed: From<T::Response>,
 {
     /// Create new amqp connector
@@ -57,7 +58,7 @@ where
     /// Use custom connector
     pub fn connector<U>(self, connector: U) -> Connector<A, U>
     where
-        U: ServiceFactory<connect::Connect<A>, SharedCfg, Error = connect::ConnectError>,
+        U: ServiceFactory<connect::Connect<A>, SharedCfg, Error = Error<connect::ConnectError>>,
         IoBoxed: From<U::Response>,
     {
         Connector {
@@ -70,11 +71,11 @@ where
 impl<A, T> ServiceFactory<Connect<A>, SharedCfg> for Connector<A, T>
 where
     A: Address,
-    T: ServiceFactory<connect::Connect<A>, SharedCfg, Error = connect::ConnectError>,
+    T: ServiceFactory<connect::Connect<A>, SharedCfg, Error = Error<connect::ConnectError>>,
     IoBoxed: From<T::Response>,
 {
     type Response = Client;
-    type Error = ConnectError;
+    type Error = Error<ConnectError>;
     type Service = ConnectorService<A, T::Service>;
     type InitError = T::InitError;
 
@@ -90,23 +91,24 @@ where
 impl<A, T> Service<Connect<A>> for ConnectorService<A, T>
 where
     A: Address,
-    T: Service<connect::Connect<A>, Error = connect::ConnectError>,
+    T: Service<connect::Connect<A>, Error = Error<connect::ConnectError>>,
     IoBoxed: From<T::Response>,
 {
     type Response = Client;
-    type Error = ConnectError;
+    type Error = Error<ConnectError>;
 
     /// Connect to amqp server
     async fn call(
         &self,
         req: Connect<A>,
         ctx: ServiceCtx<'_, Self>,
-    ) -> Result<Client, ConnectError> {
+    ) -> Result<Client, Self::Error> {
         let fut = async {
             let (addr, sasl, hostname) = req.into_parts();
             let io = ctx
                 .call(&self.connector, connect::Connect::new(addr))
-                .await?;
+                .await
+                .map_err(|e| e.map(ConnectError::from))?;
             let io = IoBoxed::from(io);
 
             if let Some(auth) = sasl {
@@ -117,15 +119,16 @@ where
         };
         timeout_checked(self.config.handshake_timeout, fut)
             .await
-            .map_err(|()| ConnectError::HandshakeTimeout)
+            .map_err(|()| Error::from(ConnectError::HandshakeTimeout))
             .and_then(|res| res)
+            .map_err(|e| e.set_service(self.config.service()))
     }
 }
 
 impl<A, T> ConnectorService<A, T>
 where
     A: Address,
-    T: Service<connect::Connect<A>, Error = connect::ConnectError>,
+    T: Service<connect::Connect<A>, Error = Error<connect::ConnectError>>,
     IoBoxed: From<T::Response>,
 {
     /// Negotiate amqp protocol over opened socket
@@ -133,10 +136,12 @@ where
         &self,
         io: IoBoxed,
         hostname: Option<ByteString>,
-    ) -> Result<Client, ConnectError> {
+    ) -> Result<Client, Error<ConnectError>> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        connect_plain_inner(io, self.config.clone(), hostname).await
+        connect_plain_inner(io, self.config.clone(), hostname)
+            .await
+            .map_err(|e| e.set_service(self.config.service()))
     }
 
     /// Negotiate amqp sasl protocol over opened socket
@@ -145,10 +150,12 @@ where
         io: IoBoxed,
         auth: SaslAuth,
         hostname: Option<ByteString>,
-    ) -> Result<Client, ConnectError> {
+    ) -> Result<Client, Error<ConnectError>> {
         log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
 
-        connect_sasl_inner(io, auth, self.config.clone(), hostname).await
+        connect_sasl_inner(io, auth, self.config.clone(), hostname)
+            .await
+            .map_err(|e| e.set_service(self.config.service()))
     }
 }
 
@@ -157,64 +164,12 @@ async fn connect_sasl_inner(
     auth: SaslAuth,
     config: Cfg<AmqpServiceConfig>,
     hostname: Option<ByteString>,
-) -> Result<Client, ConnectError> {
+) -> Result<Client, Error<ConnectError>> {
     log::trace!("{}: Negotiation client protocol id: AmqpSasl", io.tag());
 
-    io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec).await?;
-
-    let proto = io.recv(&ProtocolIdCodec).await?.ok_or_else(|| {
-        log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
-        ConnectError::Disconnected
-    })?;
-
-    if proto != ProtocolId::AmqpSasl {
-        return Err(ConnectError::from(ProtocolIdError::Unexpected {
-            exp: ProtocolId::AmqpSasl,
-            got: proto,
-        }));
-    }
-
-    let codec = AmqpCodec::<SaslFrame>::new();
-
-    // processing sasl-mechanisms
-    let _ = io.recv(&codec).await?.ok_or(ConnectError::Disconnected)?;
-
-    let initial_response =
-        SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
-
-    let sasl_init = SaslInit {
-        hostname: config.hostname.clone(),
-        mechanism: Symbol::from("PLAIN"),
-        initial_response: Some(initial_response),
-    };
-
-    io.send(sasl_init.into(), &codec).await?;
-
-    // processing sasl-outcome
-    let sasl_frame = io.recv(&codec).await?.ok_or(ConnectError::Disconnected)?;
-
-    if let SaslFrame {
-        body: SaslFrameBody::SaslOutcome(outcome),
-    } = sasl_frame
-    {
-        if outcome.code() != SaslCode::Ok {
-            return Err(ConnectError::Sasl(outcome.code()));
-        }
-    } else {
-        return Err(ConnectError::Disconnected);
-    }
-
-    connect_plain_inner(io, config, hostname).await
-}
-
-async fn connect_plain_inner(
-    io: IoBoxed,
-    config: Cfg<AmqpServiceConfig>,
-    hostname: Option<ByteString>,
-) -> Result<Client, ConnectError> {
-    log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
-
-    io.send(ProtocolId::Amqp, &ProtocolIdCodec).await?;
+    io.send(ProtocolId::AmqpSasl, &ProtocolIdCodec)
+        .await
+        .map_err(ConnectError::from)?;
 
     let proto = io
         .recv(&ProtocolIdCodec)
@@ -225,11 +180,85 @@ async fn connect_plain_inner(
             ConnectError::Disconnected
         })?;
 
+    if proto != ProtocolId::AmqpSasl {
+        return Err(Error::from(ConnectError::from(
+            ProtocolIdError::Unexpected {
+                exp: ProtocolId::AmqpSasl,
+                got: proto,
+            },
+        )));
+    }
+
+    let codec = AmqpCodec::<SaslFrame>::new();
+
+    // processing sasl-mechanisms
+    let _ = io
+        .recv(&codec)
+        .await
+        .map_err(ConnectError::from)?
+        .ok_or(ConnectError::Disconnected)?;
+
+    let initial_response =
+        SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+
+    let sasl_init = SaslInit {
+        hostname: config.hostname.clone(),
+        mechanism: Symbol::from("PLAIN"),
+        initial_response: Some(initial_response),
+    };
+
+    io.send(sasl_init.into(), &codec)
+        .await
+        .map_err(ConnectError::from)?;
+
+    // processing sasl-outcome
+    let sasl_frame = io
+        .recv(&codec)
+        .await
+        .map_err(ConnectError::from)?
+        .ok_or(ConnectError::Disconnected)?;
+
+    if let SaslFrame {
+        body: SaslFrameBody::SaslOutcome(outcome),
+    } = sasl_frame
+    {
+        if outcome.code() != SaslCode::Ok {
+            return Err(Error::from(ConnectError::Sasl(outcome.code())));
+        }
+    } else {
+        return Err(Error::from(ConnectError::Disconnected));
+    }
+
+    connect_plain_inner(io, config, hostname).await
+}
+
+async fn connect_plain_inner(
+    io: IoBoxed,
+    config: Cfg<AmqpServiceConfig>,
+    hostname: Option<ByteString>,
+) -> Result<Client, Error<ConnectError>> {
+    log::trace!("{}: Negotiation client protocol id: Amqp", io.tag());
+
+    io.send(ProtocolId::Amqp, &ProtocolIdCodec)
+        .await
+        .map_err(ConnectError::from)?;
+
+    let proto = io
+        .recv(&ProtocolIdCodec)
+        .await
+        .map_err(ConnectError::from)?
+        .ok_or_else(|| {
+            log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
+            Error::from(ConnectError::Disconnected)
+        })?;
+
     if proto != ProtocolId::Amqp {
-        return Err(ConnectError::from(ProtocolIdError::Unexpected {
-            exp: ProtocolId::Amqp,
-            got: proto,
-        }));
+        return Err(Error::from(ConnectError::from(
+            ProtocolIdError::Unexpected {
+                exp: ProtocolId::Amqp,
+                got: proto,
+            },
+        )));
     }
 
     let mut open = config.to_open();
@@ -240,12 +269,17 @@ async fn connect_plain_inner(
 
     log::trace!("{}: Open client amqp connection: {:?}", io.tag(), open);
     io.send(AmqpFrame::new(0, Frame::Open(open)), &codec)
-        .await?;
+        .await
+        .map_err(ConnectError::from)?;
 
-    let frame = io.recv(&codec).await?.ok_or_else(|| {
-        log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
-        ConnectError::Disconnected
-    })?;
+    let frame = io
+        .recv(&codec)
+        .await
+        .map_err(ConnectError::from)?
+        .ok_or_else(|| {
+            log::trace!("{}: Amqp server is disconnected during handshake", io.tag());
+            Error::from(ConnectError::Disconnected)
+        })?;
 
     if let Frame::Open(open) = frame.performative() {
         log::trace!("{}: Open confirmed: {:?}", io.tag(), open);
@@ -254,6 +288,6 @@ async fn connect_plain_inner(
         let client = Client::new(io, codec, connection, remote_config);
         Ok(client)
     } else {
-        Err(ConnectError::ExpectOpenFrame(Box::new(frame)))
+        Err(Error::from(ConnectError::ExpectOpenFrame(Box::new(frame))))
     }
 }
