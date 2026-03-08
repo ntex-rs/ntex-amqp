@@ -169,7 +169,7 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.reserve(frame.encoded_size());
         frame.encode(&mut buf);
-        buf.split_to(4);
+        buf.advance_to(4);
         assert_eq!(data, buf.freeze());
 
         Ok(())

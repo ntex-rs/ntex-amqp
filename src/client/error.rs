@@ -1,3 +1,4 @@
+use ntex_error::{ErrorDiagnostic, ErrorType};
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
@@ -45,6 +46,20 @@ impl Clone for ConnectError {
             ConnectError::Io(err) => {
                 ConnectError::Io(std::io::Error::new(err.kind(), format!("{err}")))
             }
+        }
+    }
+}
+
+impl ErrorDiagnostic for ConnectError {
+    type Kind = ErrorType;
+
+    fn kind(&self) -> Self::Kind {
+        if let ConnectError::Sasl(err) = self
+            && matches!(err, protocol::SaslCode::Auth | protocol::SaslCode::SysPerm)
+        {
+            ErrorType::Client
+        } else {
+            ErrorType::Service
         }
     }
 }

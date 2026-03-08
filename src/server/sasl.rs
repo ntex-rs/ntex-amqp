@@ -265,8 +265,7 @@ impl SaslSuccess {
 
                         let local_config = self.local_config;
                         let remote_config = RemoteServiceConfig::new(&frame);
-                        let sink =
-                            Connection::new(state.clone(), local_config.clone(), &remote_config);
+                        let sink = Connection::new(state.clone(), &local_config, &remote_config);
 
                         Ok(HandshakeAmqpOpened::new(
                             frame,
