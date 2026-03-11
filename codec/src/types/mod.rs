@@ -116,6 +116,12 @@ impl From<Vec<Variant>> for List {
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct ListDescribed<T>(pub Vec<T>);
 
+impl<T> Default for ListDescribed<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
 impl<T> ListDescribed<T> {
     pub fn new(items: Vec<T>) -> Self {
         Self(items)
