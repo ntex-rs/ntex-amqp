@@ -6,7 +6,7 @@ mod array;
 mod symbol;
 mod variant;
 
-use crate::{AmqpParseError, codec::Encode};
+use crate::AmqpParseError;
 
 pub use self::array::Array;
 pub use self::symbol::{StaticSymbol, Symbol};
@@ -114,26 +114,29 @@ impl From<Vec<Variant>> for List {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub struct ListDescribed<T> {
-    pub(crate) descriptor: Descriptor,
-    pub items: Vec<T>,
-}
+pub struct ListDescribed<T>(pub Vec<T>);
 
-impl<T: Encode> ListDescribed<T> {
-    pub fn new(descriptor: Descriptor, items: Vec<T>) -> Self {
-        Self { descriptor, items }
+impl<T> ListDescribed<T> {
+    pub fn new(items: Vec<T>) -> Self {
+        Self(items)
     }
 
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.0.is_empty()
     }
 
     pub fn iter(&self) -> ::std::slice::Iter<'_, T> {
-        self.items.iter()
+        self.0.iter()
+    }
+}
+
+impl<T> From<Vec<T>> for ListDescribed<T> {
+    fn from(data: Vec<T>) -> Self {
+        Self(data)
     }
 }
 

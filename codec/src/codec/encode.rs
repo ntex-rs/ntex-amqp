@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
 use uuid::Uuid;
 
-use crate::codec::{self, ArrayEncode, Encode};
+use crate::codec::{self, ArrayEncode, Composite, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
 use crate::types::{
     Constructor, Descriptor, List, ListDescribed, Multiple, StaticSymbol, Str, Symbol, Variant,
@@ -653,11 +653,11 @@ impl Encode for List {
     }
 }
 
-impl<T: Encode> Encode for ListDescribed<T> {
+impl<T: Composite> Encode for ListDescribed<T> {
     fn encoded_size(&self) -> usize {
-        let descr_size = self.descriptor.encoded_size();
+        let descr_size = T::descriptor().encoded_size();
         let content_size = self
-            .items
+            .0
             .iter()
             .fold(0, |r, i| r + i.encoded_size() + descr_size);
 
@@ -670,9 +670,10 @@ impl<T: Encode> Encode for ListDescribed<T> {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        let descr_size = self.descriptor.encoded_size();
+        let descr = T::descriptor();
+        let descr_size = descr.encoded_size();
         let size = self
-            .items
+            .0
             .iter()
             .fold(0, |r, i| r + i.encoded_size() + descr_size);
 
@@ -686,7 +687,7 @@ impl<T: Encode> Encode for ListDescribed<T> {
             buf.put_u8(self.len() as u8);
         }
         for i in self.iter() {
-            self.descriptor.encode(buf);
+            descr.encode(buf);
             i.encode(buf);
         }
     }

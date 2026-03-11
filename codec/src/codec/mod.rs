@@ -1,6 +1,6 @@
 use ntex_bytes::{Buf, Bytes, BytesMut};
 
-use crate::{error::AmqpParseError, types::Constructor};
+use crate::{error::AmqpParseError, types::Constructor, types::Descriptor};
 
 macro_rules! decode_check_len {
     ($buf:ident, $size:expr) => {
@@ -33,6 +33,10 @@ pub trait ArrayEncode {
 
     /// Encodes the type as an element of an AMQP array.
     fn array_encode(&self, buf: &mut BytesMut);
+}
+
+pub trait Composite: Encode + Decode {
+    fn descriptor() -> Descriptor;
 }
 
 /// Defines routines to decode the type from an encoded AMQP value representation. Decoding must handle parsing the type constructor
