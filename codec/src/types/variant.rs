@@ -6,8 +6,7 @@ use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
 use crate::types::{Array, Descriptor, List, Str, Symbol};
-use crate::{AmqpParseError, Decode, Encode};
-use crate::{HashMap, protocol::Annotations};
+use crate::{HashMap, protocol::Annotations, AmqpParseError, Decode, Encode};
 
 /// Represents an AMQP type for use in polymorphic collections
 #[derive(Debug, Eq, PartialEq, Hash, Clone, From)]

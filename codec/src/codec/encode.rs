@@ -7,8 +7,8 @@ use uuid::Uuid;
 use crate::codec::{self, ArrayEncode, Encode};
 use crate::framing::{self, AmqpFrame, SaslFrame};
 use crate::types::{
-    Constructor, Descriptor, List, Multiple, StaticSymbol, Str, Symbol, Variant, VecStringMap,
-    VecSymbolMap,
+    Constructor, Descriptor, List, ListDescribed, Multiple, StaticSymbol, Str, Symbol, Variant,
+    VecStringMap, VecSymbolMap,
 };
 
 fn encode_null(buf: &mut BytesMut) {
@@ -625,13 +625,9 @@ impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
     }
 }
 
-fn list_encoded_size(vec: &List) -> usize {
-    vec.iter().fold(0, |r, i| r + i.encoded_size())
-}
-
 impl Encode for List {
     fn encoded_size(&self) -> usize {
-        let content_size = list_encoded_size(self);
+        let content_size = vec.iter().fold(0, |r, i| r + i.encoded_size());
         // format_code + size + count
         (if content_size + 1 > u8::MAX as usize {
             9
@@ -641,7 +637,7 @@ impl Encode for List {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        let size = list_encoded_size(self);
+        let size = vec.iter().fold(0, |r, i| r + i.encoded_size());
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
             buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
@@ -652,6 +648,39 @@ impl Encode for List {
             buf.put_u8(self.len() as u8);
         }
         for i in self.iter() {
+            i.encode(buf);
+        }
+    }
+}
+
+impl<T: Encode> Encode for ListDescribed<T> {
+    fn encoded_size(&self) -> usize {
+        let descr_size = self.descriptor.encoded_size();
+        let content_size = vec.iter().fold(0, |r, i| r + i.encoded_size() + descr_size);
+
+        // format_code + size + count
+        (if content_size + 1 > u8::MAX as usize {
+            9
+        } else {
+            3
+        }) + content_size
+    }
+
+    fn encode(&self, buf: &mut BytesMut) {
+        let descr_size = self.descriptor.encoded_size();
+        let size = vec.iter().fold(0, |r, i| r + i.encoded_size() + descr_size);
+
+        if size + 1 > u8::MAX as usize {
+            buf.put_u8(codec::FORMATCODE_LIST32);
+            buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
+            buf.put_u32(self.len() as u32);
+        } else {
+            buf.put_u8(codec::FORMATCODE_LIST8);
+            buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follow
+            buf.put_u8(self.len() as u8);
+        }
+        for i in self.iter() {
+            self.descriptor.encode(buf);
             i.encode(buf);
         }
     }
