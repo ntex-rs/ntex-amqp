@@ -113,6 +113,39 @@ impl From<Vec<Variant>> for List {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct ListDescribed<T>(pub Vec<T>);
+
+impl<T> Default for ListDescribed<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<T> ListDescribed<T> {
+    pub fn new(items: Vec<T>) -> Self {
+        Self(items)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> ::std::slice::Iter<'_, T> {
+        self.0.iter()
+    }
+}
+
+impl<T> From<Vec<T>> for ListDescribed<T> {
+    fn from(data: Vec<T>) -> Self {
+        Self(data)
+    }
+}
+
 #[derive(Clone, Eq, Ord, PartialOrd, PartialEq)]
 pub struct Str(ByteString);
 

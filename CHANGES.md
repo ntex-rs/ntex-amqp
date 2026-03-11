@@ -1,5 +1,9 @@
 # Changes
 
+## [codec-2.2.0] - 2026-03-11
+
+* Add ListDescribed<T> type for list of compound types
+
 ## [5.7.0] - 2026-03-08
 
 * Use ntex-error::Error for client

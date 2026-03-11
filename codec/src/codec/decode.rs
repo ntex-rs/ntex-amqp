@@ -6,15 +6,14 @@ use ntex_bytes::{Buf, ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
-use crate::HashMap;
-use crate::codec::{self, ArrayHeader, Decode, DecodeFormatted, ListHeader, MapHeader};
+use crate::codec::{self, ArrayHeader, Composite, Decode, DecodeFormatted, ListHeader, MapHeader};
 use crate::error::AmqpParseError;
 use crate::framing::{self, AmqpFrame, HEADER_LEN, SaslFrame};
-use crate::protocol;
 use crate::types::{
-    Array, Constructor, DescribedCompound, Descriptor, List, Multiple, Str, Symbol, Variant,
-    VariantMap, VecStringMap, VecSymbolMap,
+    Array, Constructor, DescribedCompound, Descriptor, List, ListDescribed, Multiple, Str, Symbol,
+    Variant, VariantMap, VecStringMap, VecSymbolMap,
 };
+use crate::{HashMap, protocol};
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
@@ -345,6 +344,27 @@ impl DecodeFormatted for List {
             result.push(decoded);
         }
         Ok(List(result))
+    }
+}
+
+impl<T: Composite> DecodeFormatted for ListDescribed<T> {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        let header = ListHeader::decode_with_format(input, fmt)?;
+
+        let descr = T::descriptor();
+        let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
+        for _ in 0..header.count {
+            if let Variant::DescribedCompound(decoded) = Variant::decode(input)? {
+                if &descr != decoded.descriptor() {
+                    return Err(AmqpParseError::UnexpectedType("Unexpected descriptor"));
+                }
+                result.push(decoded.decode()?);
+            } else {
+                return Err(AmqpParseError::UnexpectedType("Expected compound type"));
+            }
+        }
+
+        Ok(ListDescribed(result))
     }
 }
 
