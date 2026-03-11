@@ -8,12 +8,12 @@ use uuid::Uuid;
 
 use crate::codec::{self, ArrayHeader, Composite, Decode, DecodeFormatted, ListHeader, MapHeader};
 use crate::error::AmqpParseError;
-use crate::framing::{self, AmqpFrame, SaslFrame, HEADER_LEN};
+use crate::framing::{self, AmqpFrame, HEADER_LEN, SaslFrame};
 use crate::types::{
     Array, Constructor, DescribedCompound, Descriptor, List, ListDescribed, Multiple, Str, Symbol,
     Variant, VariantMap, VecStringMap, VecSymbolMap,
 };
-use crate::{protocol, HashMap};
+use crate::{HashMap, protocol};
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{

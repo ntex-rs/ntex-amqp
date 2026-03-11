@@ -13,8 +13,8 @@ pub mod protocol;
 pub mod types;
 
 pub use self::codec::{
-    format_codes, ArrayEncode, ArrayHeader, Composite, Decode, DecodeFormatted, Encode, ListHeader,
-    MapHeader,
+    ArrayEncode, ArrayHeader, Composite, Decode, DecodeFormatted, Encode, ListHeader, MapHeader,
+    format_codes,
 };
 pub use self::error::{AmqpCodecError, AmqpParseError, ProtocolIdError};
 pub use self::framing::{AmqpFrame, SaslFrame};
