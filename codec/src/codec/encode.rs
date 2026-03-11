@@ -627,7 +627,7 @@ impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
 
 impl Encode for List {
     fn encoded_size(&self) -> usize {
-        let content_size = self.0.iter().fold(0, |r, i| r + i.encoded_size());
+        let content_size = self.iter().fold(0, |r, i| r + i.encoded_size());
         // format_code + size + count
         (if content_size + 1 > u8::MAX as usize {
             9
@@ -637,7 +637,7 @@ impl Encode for List {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        let size = self.0.iter().fold(0, |r, i| r + i.encoded_size());
+        let size = self.iter().fold(0, |r, i| r + i.encoded_size());
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
             buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
@@ -657,7 +657,6 @@ impl<T: Composite> Encode for ListDescribed<T> {
     fn encoded_size(&self) -> usize {
         let descr_size = T::descriptor().encoded_size();
         let content_size = self
-            .0
             .iter()
             .fold(0, |r, i| r + i.encoded_size() + descr_size);
 
@@ -672,18 +671,17 @@ impl<T: Composite> Encode for ListDescribed<T> {
     fn encode(&self, buf: &mut BytesMut) {
         let descr = T::descriptor();
         let descr_size = descr.encoded_size();
-        let size = self
-            .0
+        let content_size = self
             .iter()
             .fold(0, |r, i| r + i.encoded_size() + descr_size);
 
-        if size + 1 > u8::MAX as usize {
+        if content_size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
-            buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
+            buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count that follow
             buf.put_u32(self.len() as u32);
         } else {
             buf.put_u8(codec::FORMATCODE_LIST8);
-            buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follow
+            buf.put_u8((content_size + 1) as u8); // +1 for 1 byte count that follow
             buf.put_u8(self.len() as u8);
         }
         for i in self.iter() {
