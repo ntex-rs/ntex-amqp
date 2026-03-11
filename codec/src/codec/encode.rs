@@ -627,7 +627,7 @@ impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
 
 impl Encode for List {
     fn encoded_size(&self) -> usize {
-        let content_size = vec.iter().fold(0, |r, i| r + i.encoded_size());
+        let content_size = self.0.iter().fold(0, |r, i| r + i.encoded_size());
         // format_code + size + count
         (if content_size + 1 > u8::MAX as usize {
             9
@@ -637,7 +637,7 @@ impl Encode for List {
     }
 
     fn encode(&self, buf: &mut BytesMut) {
-        let size = vec.iter().fold(0, |r, i| r + i.encoded_size());
+        let size = self.0.iter().fold(0, |r, i| r + i.encoded_size());
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
             buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
@@ -656,7 +656,10 @@ impl Encode for List {
 impl<T: Encode> Encode for ListDescribed<T> {
     fn encoded_size(&self) -> usize {
         let descr_size = self.descriptor.encoded_size();
-        let content_size = vec.iter().fold(0, |r, i| r + i.encoded_size() + descr_size);
+        let content_size = self
+            .items
+            .iter()
+            .fold(0, |r, i| r + i.encoded_size() + descr_size);
 
         // format_code + size + count
         (if content_size + 1 > u8::MAX as usize {
@@ -668,7 +671,10 @@ impl<T: Encode> Encode for ListDescribed<T> {
 
     fn encode(&self, buf: &mut BytesMut) {
         let descr_size = self.descriptor.encoded_size();
-        let size = vec.iter().fold(0, |r, i| r + i.encoded_size() + descr_size);
+        let size = self
+            .items
+            .iter()
+            .fold(0, |r, i| r + i.encoded_size() + descr_size);
 
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);

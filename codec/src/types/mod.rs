@@ -6,7 +6,7 @@ mod array;
 mod symbol;
 mod variant;
 
-use crate::AmqpParseError;
+use crate::{AmqpParseError, codec::Encode};
 
 pub use self::array::Array;
 pub use self::symbol::{StaticSymbol, Symbol};
@@ -115,8 +115,8 @@ impl From<Vec<Variant>> for List {
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct ListDescribed<T> {
-    descriptor: Descriptor,
-    items: Vec<T>,
+    pub(crate) descriptor: Descriptor,
+    pub items: Vec<T>,
 }
 
 impl<T: Encode> ListDescribed<T> {
