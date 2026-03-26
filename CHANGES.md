@@ -1,5 +1,9 @@
 # Changes
 
+## [5.7.1] - 2026-03-26
+
+* Update ntex-error::Error
+
 ## [codec-2.2.0] - 2026-03-11
 
 * Add ListDescribed<T> type for list of compound types

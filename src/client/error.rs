@@ -1,4 +1,4 @@
-use ntex_error::{ErrorDiagnostic, ErrorType};
+use ntex_error::{ErrorDiagnostic, ResultType};
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
@@ -51,15 +51,15 @@ impl Clone for ConnectError {
 }
 
 impl ErrorDiagnostic for ConnectError {
-    type Kind = ErrorType;
+    type Kind = ResultType;
 
     fn kind(&self) -> Self::Kind {
         if let ConnectError::Sasl(err) = self
             && matches!(err, protocol::SaslCode::Auth | protocol::SaslCode::SysPerm)
         {
-            ErrorType::Client
+            ResultType::ClientError
         } else {
-            ErrorType::Service
+            ResultType::ServiceError
         }
     }
 }
