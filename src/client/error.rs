@@ -1,4 +1,4 @@
-use ntex_error::{ResultType, ErrorDiagnostic};
+use ntex_error::{ErrorDiagnostic, ResultType};
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
