@@ -1,4 +1,4 @@
-use ntex_error::{ErrorDiagnostic, ErrorType};
+use ntex_error::{ResultType, ErrorDiagnostic};
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
@@ -7,28 +7,40 @@ use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
     /// Amqp codec error
-    #[error("Amqp codec error: {:?}", _0)]
-    Codec(#[from] AmqpCodecError),
+    #[error("Amqp codec")]
+    Codec(
+        #[from]
+        #[source]
+        AmqpCodecError,
+    ),
     /// Handshake timeout
     #[error("Handshake timeout")]
     HandshakeTimeout,
     /// Protocol negotiation error
-    #[error("Peer disconnected")]
+    #[error("Protocol negotiation")]
     ProtocolNegotiation(#[from] ProtocolIdError),
     /// Expected open frame
     #[error("Expect open frame, got: {:?}", _0)]
     ExpectOpenFrame(Box<AmqpFrame>),
     /// Peer disconnected
-    #[error("Sasl error code: {:?}", _0)]
+    #[error("Sasl error code {:?}", _0)]
     Sasl(protocol::SaslCode),
     #[error("Peer disconnected")]
     Disconnected,
     /// Connect error
-    #[error("Connect error: {}", _0)]
-    Connect(#[from] ntex_net::connect::ConnectError),
+    #[error("Connect")]
+    Connect(
+        #[from]
+        #[source]
+        ntex_net::connect::ConnectError,
+    ),
     /// Unexpected io error
-    #[error("Io error: {}", _0)]
-    Io(#[from] std::io::Error),
+    #[error("")]
+    Io(
+        #[from]
+        #[source]
+        std::io::Error,
+    ),
 }
 
 impl Clone for ConnectError {
@@ -51,15 +63,26 @@ impl Clone for ConnectError {
 }
 
 impl ErrorDiagnostic for ConnectError {
-    type Kind = ErrorType;
-
-    fn kind(&self) -> Self::Kind {
+    fn typ(&self) -> ResultType {
         if let ConnectError::Sasl(err) = self
             && matches!(err, protocol::SaslCode::Auth | protocol::SaslCode::SysPerm)
         {
-            ErrorType::Client
+            ResultType::ClientError
         } else {
-            ErrorType::Service
+            ResultType::ServiceError
+        }
+    }
+
+    fn signature(&self) -> &'static str {
+        match self {
+            ConnectError::Codec(_) => "amqp-client-Codec",
+            ConnectError::HandshakeTimeout => "amqp-client-HandshakeTimeout",
+            ConnectError::ProtocolNegotiation(_) => "amqp-client-ProtocolNegotiation",
+            ConnectError::ExpectOpenFrame(_) => "amqp-client-ExpectOpenFrame",
+            ConnectError::Sasl(_) => "amqp-client-Sasl",
+            ConnectError::Disconnected => "amqp-client-Disconnected",
+            ConnectError::Connect(err) => err.signature(),
+            ConnectError::Io(err) => err.signature(),
         }
     }
 }
