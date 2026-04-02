@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "5.7.1"
+version = "5.7.2"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -38,11 +38,11 @@ ntex-amqp-codec = "2.0.0"
 
 ntex-bytes = "1.5"
 ntex-dispatcher = "3"
-ntex-error = "1.6"
+ntex-error = "2.0"
 ntex-router = "1"
 ntex-rt = "3.10"
 ntex-io = "3.9"
-ntex-net = "3.8"
+ntex-net = "3.9"
 ntex-util = "3.4"
 ntex-service = "4.6"
 
