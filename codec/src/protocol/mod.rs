@@ -3,7 +3,7 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 use derive_more::From;
-use ntex_bytes::{Buf, BufMut, ByteString, Bytes, BytesMut};
+use ntex_bytes::{Buf, BufMut, BytePages, ByteString, Bytes};
 use uuid::Uuid;
 
 use crate::codec::{self, Decode, DecodeFormatted, Encode};
@@ -91,7 +91,7 @@ impl Encode for MessageId {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             MessageId::Ulong(v) => v.encode(buf),
             MessageId::Uuid(ref v) => v.encode(buf),
@@ -147,7 +147,7 @@ impl Encode for ErrorCondition {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             ErrorCondition::AmqpError(ref v) => v.encode(buf),
             ErrorCondition::ConnectionError(ref v) => v.encode(buf),
@@ -186,7 +186,7 @@ impl Encode for DistributionMode {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             DistributionMode::Move => Symbol::from("move").encode(buf),
             DistributionMode::Copy => Symbol::from("copy").encode(buf),
@@ -201,9 +201,10 @@ impl SaslInit {
     }
 }
 
-#[derive(Debug, Clone, From, PartialEq, Eq)]
+#[derive(Debug, Clone, From)]
 pub enum TransferBody {
     Data(Bytes),
+    Pages(BytePages),
     Message(Message),
 }
 
@@ -216,7 +217,7 @@ impl TransferBody {
     #[inline]
     pub fn message_format(&self) -> Option<MessageFormat> {
         match self {
-            TransferBody::Data(_) => None,
+            TransferBody::Data(_) | TransferBody::Pages(_) => None,
             TransferBody::Message(data) => data.0.message_format,
         }
     }
@@ -227,14 +228,41 @@ impl Encode for TransferBody {
     fn encoded_size(&self) -> usize {
         match self {
             TransferBody::Data(data) => data.len(),
+            TransferBody::Pages(data) => data.len(),
             TransferBody::Message(data) => data.encoded_size(),
         }
     }
+
     #[inline]
-    fn encode(&self, dst: &mut BytesMut) {
+    fn encode(&self, dst: &mut BytePages) {
         match *self {
-            TransferBody::Data(ref data) => dst.put_slice(data),
+            TransferBody::Data(ref data) => dst.append(data),
+            TransferBody::Pages(ref data) => data.copy_to(dst),
             TransferBody::Message(ref data) => data.encode(dst),
+        }
+    }
+}
+
+impl Eq for TransferBody {}
+
+impl PartialEq for TransferBody {
+    fn eq(&self, other: &TransferBody) -> bool {
+        match self {
+            TransferBody::Data(data) => {
+                if let TransferBody::Data(d) = other {
+                    data == d
+                } else {
+                    false
+                }
+            }
+            TransferBody::Message(msg) => {
+                if let TransferBody::Message(msg2) = other {
+                    msg == msg2
+                } else {
+                    false
+                }
+            }
+            TransferBody::Pages(_) => false,
         }
     }
 }

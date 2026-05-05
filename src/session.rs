@@ -1,6 +1,6 @@
 use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
-use ntex_bytes::{ByteString, Bytes};
+use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
 use ntex_util::{HashMap, future::Either, future::Ready};
 use slab::Slab;
@@ -1249,14 +1249,11 @@ impl SessionInner {
             let mut body = match body {
                 TransferBody::Data(data) => data,
                 TransferBody::Message(msg) => {
-                    let mut buf = self
-                        .sink
-                        .config()
-                        .write_buf()
-                        .buf_with_capacity(msg.encoded_size());
+                    let mut buf = BytePages::default();
                     msg.encode(&mut buf);
                     buf.freeze()
                 }
+                TransferBody::Pages(mut data) => data.freeze(),
             };
 
             let chunk = body.split_to(cmp::min(max_frame_size, body.len()));

@@ -1,4 +1,4 @@
-use ntex_bytes::{BufMut, Bytes, BytesMut};
+use ntex_bytes::{BufMut, BytePages, Bytes};
 
 use crate::codec::{Encode, FORMATCODE_BINARY8, FORMATCODE_BINARY32};
 use crate::protocol::TransferBody;
@@ -56,7 +56,7 @@ impl Encode for MessageBody {
         }
     }
 
-    fn encode(&self, dst: &mut BytesMut) {
+    fn encode(&self, dst: &mut BytePages) {
         self.data.iter().for_each(|d| {
             Descriptor::Ulong(117).encode(dst);
             d.encode(dst);

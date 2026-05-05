@@ -1,7 +1,7 @@
 use std::hash::{Hash, Hasher};
 
 use chrono::{DateTime, Utc};
-use ntex_bytes::{ByteString, Bytes, BytesMut};
+use ntex_bytes::{BytePages, ByteString, Bytes};
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
@@ -113,12 +113,11 @@ impl DescribedCompound {
     /// 0xc0 0x02 0x01 0x50 0x03
     /// ```
     pub fn create<T: Encode>(descriptor: Descriptor, value: T) -> Self {
-        let size = value.encoded_size();
-        let mut buf = BytesMut::with_capacity(size);
-        value.encode(&mut buf);
+        let mut data = BytePages::default();
+        value.encode(&mut data);
         DescribedCompound {
             descriptor,
-            data: buf.freeze(),
+            data: data.freeze(),
         }
     }
 
@@ -156,9 +155,9 @@ impl Encode for DescribedCompound {
         self.descriptor.encoded_size() + self.data.len()
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         self.descriptor.encode(buf);
-        buf.extend_from_slice(&self.data);
+        buf.append(self.data.clone());
     }
 }
 
@@ -421,7 +420,7 @@ mod tests {
             }
         }
 
-        fn encode(&self, buf: &mut BytesMut) {
+        fn encode(&self, buf: &mut BytePages) {
             let count = if self.field3.is_some() { 3u8 } else { 2u8 };
             let data_size = self.encoded_data_size();
             if data_size + 1 > u8::MAX as usize {
@@ -452,7 +451,7 @@ mod tests {
             Descriptor::Symbol("contoso:test".into()),
             custom_list.clone(),
         ));
-        let mut buf = BytesMut::with_capacity(value.encoded_size());
+        let mut buf = BytePages::default();
         value.encode(&mut buf);
         let data = buf.freeze();
         assert_eq!(

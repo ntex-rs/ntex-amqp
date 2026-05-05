@@ -1,3 +1,4 @@
+#![allow(unreachable_pub)]
 use serde::{Deserialize, Deserializer};
 use serde_json::from_str;
 use std::collections::{HashMap, HashSet};

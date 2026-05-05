@@ -114,7 +114,7 @@ impl Encode for Frame {
             Frame::Empty => 0,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             Frame::Open(ref v) => encode_open_inner(v, buf),
             Frame::Begin(ref v) => encode_begin_inner(v, buf),
@@ -163,7 +163,7 @@ impl Encode for {{provide.name}} {
             {{/each}}
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             {{#each provide.options as |option|}}
             {{provide.name}}::{{option.ty}}(ref v) => encode_{{snake option.ty}}_inner(v, buf),
@@ -210,7 +210,7 @@ impl Encode for {{enum.name}} {
             {{/each}}
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             {{#each enum.items as |item|}}
             {{enum.name}}::{{item.name}} => StaticSymbol("{{item.value}}").encode(buf),
@@ -246,7 +246,7 @@ impl Encode for {{enum.name}} {
             {{/each}}
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             {{#each enum.items as |item|}}
             {{enum.name}}::{{item.name}} => {
@@ -269,7 +269,7 @@ fn encoded_size_{{snake dr.name}}_inner(dr: &{{dr.name}}) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_{{snake dr.name}}_inner(dr: &{{dr.name}}, buf: &mut BytesMut) {
+fn encode_{{snake dr.name}}_inner(dr: &{{dr.name}}, buf: &mut BytePages) {
     Descriptor::Ulong({{dr.descriptor.code}}).encode(buf);
     dr.encode(buf);
 }
@@ -505,7 +505,7 @@ fn encoded_size_{{snake list.name}}_inner(list: &{{list.name}}) -> usize {
     + list.{{list.inner}}body.as_ref().map(|b| b.len()).unwrap_or(0)
     {{/if}}
 }
-fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytesMut) {
+fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytePages) {
     Descriptor::Ulong({{list.descriptor.code}}).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 {{#each list.fields as |field|}} + list.{{list.inner}}{{field.name}}.encoded_size(){{/each}};
@@ -548,6 +548,6 @@ impl DecodeFormatted for {{list.name}} {
 impl Encode for {{list.name}} {
     fn encoded_size(&self) -> usize { encoded_size_{{snake list.name}}_inner(self) }
 
-    fn encode(&self, buf: &mut BytesMut) { encode_{{snake list.name}}_inner(self, buf) }
+    fn encode(&self, buf: &mut BytePages) { encode_{{snake list.name}}_inner(self, buf) }
 }
 {{/each}}

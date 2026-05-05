@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use ntex_bytes::{Bytes, BytesMut};
+use ntex_bytes::{BytePages, Bytes};
 
 use crate::codec::{Decode, Encode};
 use crate::error::AmqpParseError;
@@ -343,7 +343,7 @@ impl Encode for Message {
         size
     }
 
-    fn encode(&self, dst: &mut BytesMut) {
+    fn encode(&self, dst: &mut BytePages) {
         if let Some(ref h) = self.0.header {
             h.encode(dst);
         }

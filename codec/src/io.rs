@@ -1,7 +1,7 @@
-use std::{cell::Cell, marker::PhantomData};
+use std::{cell::Cell, fmt, marker::PhantomData};
 
 use byteorder::{BigEndian, ByteOrder};
-use ntex_bytes::{Buf, BufMut, BytesMut};
+use ntex_bytes::{Buf, BufMut, BytePages, BytesMut};
 use ntex_codec::{Decoder, Encoder};
 
 use super::error::{AmqpCodecError, ProtocolIdError};
@@ -55,7 +55,7 @@ impl<T: Decode + Encode> AmqpCodec<T> {
     }
 }
 
-impl<T: Decode + Encode> Decoder for AmqpCodec<T> {
+impl<T: Decode + Encode + fmt::Debug> Decoder for AmqpCodec<T> {
     type Item = T;
     type Error = AmqpCodecError;
 
@@ -106,16 +106,8 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
     type Item = T;
     type Error = AmqpCodecError;
 
-    fn encode(&self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let size = item.encoded_size();
-        if dst.remaining_mut() < size {
-            dst.reserve(size);
-        }
-
-        let len = dst.len();
+    fn encodev(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
         item.encode(dst);
-        debug_assert!(dst.len() - len == size);
-
         Ok(())
     }
 }
@@ -157,8 +149,7 @@ impl Encoder for ProtocolIdCodec {
     type Item = ProtocolId;
     type Error = ProtocolIdError;
 
-    fn encode(&self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        dst.reserve(PROTOCOL_HEADER_LEN);
+    fn encodev(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
         dst.put_slice(PROTOCOL_HEADER_PREFIX);
         dst.put_u8(item as u8);
         dst.put_slice(PROTOCOL_VERSION);

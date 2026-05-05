@@ -96,7 +96,7 @@ impl Encode for Frame {
             Frame::Empty => 0,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             Frame::Open(ref v) => encode_open_inner(v, buf),
             Frame::Begin(ref v) => encode_begin_inner(v, buf),
@@ -108,113 +108,6 @@ impl Encode for Frame {
             Frame::End(ref v) => encode_end_inner(v, buf),
             Frame::Close(ref v) => encode_close_inner(v, buf),
             Frame::Empty => (),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DeliveryState {
-    Received(Received),
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for DeliveryState {
-    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let descriptor = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(35) => decode_received_inner(input).map(DeliveryState::Received),
-            Descriptor::Ulong(36) => decode_accepted_inner(input).map(DeliveryState::Accepted),
-            Descriptor::Ulong(37) => decode_rejected_inner(input).map(DeliveryState::Rejected),
-            Descriptor::Ulong(38) => decode_released_inner(input).map(DeliveryState::Released),
-            Descriptor::Ulong(39) => decode_modified_inner(input).map(DeliveryState::Modified),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
-                decode_received_inner(input).map(DeliveryState::Received)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(DeliveryState::Accepted)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(DeliveryState::Rejected)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(DeliveryState::Released)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(DeliveryState::Modified)
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
-        }
-    }
-}
-impl Encode for DeliveryState {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
-            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
-            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
-            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
-            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
-            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
-            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
-            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
-            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
-        }
-    }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Accepted(Accepted),
-    Rejected(Rejected),
-    Released(Released),
-    Modified(Modified),
-}
-impl DecodeFormatted for Outcome {
-    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
-        let descriptor = Descriptor::decode(input)?;
-        match descriptor {
-            Descriptor::Ulong(36) => decode_accepted_inner(input).map(Outcome::Accepted),
-            Descriptor::Ulong(37) => decode_rejected_inner(input).map(Outcome::Rejected),
-            Descriptor::Ulong(38) => decode_released_inner(input).map(Outcome::Released),
-            Descriptor::Ulong(39) => decode_modified_inner(input).map(Outcome::Modified),
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
-                decode_accepted_inner(input).map(Outcome::Accepted)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
-                decode_rejected_inner(input).map(Outcome::Rejected)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
-                decode_released_inner(input).map(Outcome::Released)
-            }
-            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
-                decode_modified_inner(input).map(Outcome::Modified)
-            }
-            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
-        }
-    }
-}
-impl Encode for Outcome {
-    fn encoded_size(&self) -> usize {
-        match *self {
-            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
-            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
-            Outcome::Released(ref v) => encoded_size_released_inner(v),
-            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
-        }
-    }
-    fn encode(&self, buf: &mut BytesMut) {
-        match *self {
-            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
-            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
-            Outcome::Released(ref v) => encode_released_inner(v, buf),
-            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -295,7 +188,7 @@ impl Encode for Section {
             Section::Properties(ref v) => encoded_size_properties_inner(v),
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             Section::Header(ref v) => encode_header_inner(v, buf),
             Section::DeliveryAnnotations(ref v) => encode_delivery_annotations_inner(v, buf),
@@ -306,6 +199,113 @@ impl Encode for Section {
             Section::AmqpValue(ref v) => encode_amqp_value_inner(v, buf),
             Section::Footer(ref v) => encode_footer_inner(v, buf),
             Section::Properties(ref v) => encode_properties_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeliveryState {
+    Received(Received),
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for DeliveryState {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let descriptor = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(35) => decode_received_inner(input).map(DeliveryState::Received),
+            Descriptor::Ulong(36) => decode_accepted_inner(input).map(DeliveryState::Accepted),
+            Descriptor::Ulong(37) => decode_rejected_inner(input).map(DeliveryState::Rejected),
+            Descriptor::Ulong(38) => decode_released_inner(input).map(DeliveryState::Released),
+            Descriptor::Ulong(39) => decode_modified_inner(input).map(DeliveryState::Modified),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:received:list" => {
+                decode_received_inner(input).map(DeliveryState::Received)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(DeliveryState::Accepted)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(DeliveryState::Rejected)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(DeliveryState::Released)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(DeliveryState::Modified)
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for DeliveryState {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            DeliveryState::Received(ref v) => encoded_size_received_inner(v),
+            DeliveryState::Accepted(ref v) => encoded_size_accepted_inner(v),
+            DeliveryState::Rejected(ref v) => encoded_size_rejected_inner(v),
+            DeliveryState::Released(ref v) => encoded_size_released_inner(v),
+            DeliveryState::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytePages) {
+        match *self {
+            DeliveryState::Received(ref v) => encode_received_inner(v, buf),
+            DeliveryState::Accepted(ref v) => encode_accepted_inner(v, buf),
+            DeliveryState::Rejected(ref v) => encode_rejected_inner(v, buf),
+            DeliveryState::Released(ref v) => encode_released_inner(v, buf),
+            DeliveryState::Modified(ref v) => encode_modified_inner(v, buf),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Accepted(Accepted),
+    Rejected(Rejected),
+    Released(Released),
+    Modified(Modified),
+}
+impl DecodeFormatted for Outcome {
+    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+        validate_code!(fmt, codec::FORMATCODE_DESCRIBED);
+        let descriptor = Descriptor::decode(input)?;
+        match descriptor {
+            Descriptor::Ulong(36) => decode_accepted_inner(input).map(Outcome::Accepted),
+            Descriptor::Ulong(37) => decode_rejected_inner(input).map(Outcome::Rejected),
+            Descriptor::Ulong(38) => decode_released_inner(input).map(Outcome::Released),
+            Descriptor::Ulong(39) => decode_modified_inner(input).map(Outcome::Modified),
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:accepted:list" => {
+                decode_accepted_inner(input).map(Outcome::Accepted)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:rejected:list" => {
+                decode_rejected_inner(input).map(Outcome::Rejected)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:released:list" => {
+                decode_released_inner(input).map(Outcome::Released)
+            }
+            Descriptor::Symbol(ref a) if a.as_str() == "amqp:modified:list" => {
+                decode_modified_inner(input).map(Outcome::Modified)
+            }
+            _ => Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor))),
+        }
+    }
+}
+impl Encode for Outcome {
+    fn encoded_size(&self) -> usize {
+        match *self {
+            Outcome::Accepted(ref v) => encoded_size_accepted_inner(v),
+            Outcome::Rejected(ref v) => encoded_size_rejected_inner(v),
+            Outcome::Released(ref v) => encoded_size_released_inner(v),
+            Outcome::Modified(ref v) => encoded_size_modified_inner(v),
+        }
+    }
+    fn encode(&self, buf: &mut BytePages) {
+        match *self {
+            Outcome::Accepted(ref v) => encode_accepted_inner(v, buf),
+            Outcome::Rejected(ref v) => encode_rejected_inner(v, buf),
+            Outcome::Released(ref v) => encode_released_inner(v, buf),
+            Outcome::Modified(ref v) => encode_modified_inner(v, buf),
         }
     }
 }
@@ -364,7 +364,7 @@ impl Encode for SaslFrameBody {
             SaslFrameBody::SaslOutcome(ref v) => encoded_size_sasl_outcome_inner(v),
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             SaslFrameBody::SaslMechanisms(ref v) => encode_sasl_mechanisms_inner(v, buf),
             SaslFrameBody::SaslInit(ref v) => encode_sasl_init_inner(v, buf),
@@ -422,7 +422,7 @@ impl Encode for Role {
             }
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             Role::Sender => {
                 let v: bool = false;
@@ -474,7 +474,7 @@ impl Encode for SenderSettleMode {
             }
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             SenderSettleMode::Unsettled => {
                 let v: u8 = 0;
@@ -524,7 +524,7 @@ impl Encode for ReceiverSettleMode {
             }
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             ReceiverSettleMode::First => {
                 let v: u8 = 0;
@@ -597,7 +597,7 @@ impl Encode for AmqpError {
             AmqpError::FrameSizeTooSmall => 25 + 2,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             AmqpError::InternalError => StaticSymbol("amqp:internal-error").encode(buf),
             AmqpError::NotFound => StaticSymbol("amqp:not-found").encode(buf),
@@ -647,7 +647,7 @@ impl Encode for ConnectionError {
             ConnectionError::Redirect => 24 + 2,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             ConnectionError::ConnectionForced => StaticSymbol("amqp:connection:forced").encode(buf),
             ConnectionError::FramingError => {
@@ -690,7 +690,7 @@ impl Encode for SessionError {
             SessionError::UnattachedHandle => 30 + 2,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             SessionError::WindowViolation => {
                 StaticSymbol("amqp:session:window-violation").encode(buf)
@@ -739,7 +739,7 @@ impl Encode for LinkError {
             LinkError::Stolen => 16 + 2,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             LinkError::DetachForced => StaticSymbol("amqp:link:detach-forced").encode(buf),
             LinkError::TransferLimitExceeded => {
@@ -804,7 +804,7 @@ impl Encode for SaslCode {
             }
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             SaslCode::Ok => {
                 let v: u8 = 0;
@@ -868,7 +868,7 @@ impl Encode for TerminusDurability {
             }
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             TerminusDurability::None => {
                 let v: u32 = 0;
@@ -918,7 +918,7 @@ impl Encode for TerminusExpiryPolicy {
             TerminusExpiryPolicy::Never => 5 + 2,
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             TerminusExpiryPolicy::LinkDetach => StaticSymbol("link-detach").encode(buf),
             TerminusExpiryPolicy::SessionEnd => StaticSymbol("session-end").encode(buf),
@@ -937,7 +937,7 @@ fn encoded_size_delivery_annotations_inner(dr: &DeliveryAnnotations) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_delivery_annotations_inner(dr: &DeliveryAnnotations, buf: &mut BytesMut) {
+fn encode_delivery_annotations_inner(dr: &DeliveryAnnotations, buf: &mut BytePages) {
     Descriptor::Ulong(113).encode(buf);
     dr.encode(buf);
 }
@@ -951,7 +951,7 @@ fn encoded_size_message_annotations_inner(dr: &MessageAnnotations) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_message_annotations_inner(dr: &MessageAnnotations, buf: &mut BytesMut) {
+fn encode_message_annotations_inner(dr: &MessageAnnotations, buf: &mut BytePages) {
     Descriptor::Ulong(114).encode(buf);
     dr.encode(buf);
 }
@@ -965,7 +965,7 @@ fn encoded_size_application_properties_inner(dr: &ApplicationProperties) -> usiz
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_application_properties_inner(dr: &ApplicationProperties, buf: &mut BytesMut) {
+fn encode_application_properties_inner(dr: &ApplicationProperties, buf: &mut BytePages) {
     Descriptor::Ulong(116).encode(buf);
     dr.encode(buf);
 }
@@ -977,7 +977,7 @@ fn encoded_size_data_inner(dr: &Data) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_data_inner(dr: &Data, buf: &mut BytesMut) {
+fn encode_data_inner(dr: &Data, buf: &mut BytePages) {
     Descriptor::Ulong(117).encode(buf);
     dr.encode(buf);
 }
@@ -989,7 +989,7 @@ fn encoded_size_amqp_sequence_inner(dr: &AmqpSequence) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_amqp_sequence_inner(dr: &AmqpSequence, buf: &mut BytesMut) {
+fn encode_amqp_sequence_inner(dr: &AmqpSequence, buf: &mut BytePages) {
     Descriptor::Ulong(118).encode(buf);
     dr.encode(buf);
 }
@@ -1001,7 +1001,7 @@ fn encoded_size_amqp_value_inner(dr: &AmqpValue) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_amqp_value_inner(dr: &AmqpValue, buf: &mut BytesMut) {
+fn encode_amqp_value_inner(dr: &AmqpValue, buf: &mut BytePages) {
     Descriptor::Ulong(119).encode(buf);
     dr.encode(buf);
 }
@@ -1013,7 +1013,7 @@ fn encoded_size_footer_inner(dr: &Footer) -> usize {
     // descriptor size + actual size
     3 + dr.encoded_size()
 }
-fn encode_footer_inner(dr: &Footer, buf: &mut BytesMut) {
+fn encode_footer_inner(dr: &Footer, buf: &mut BytePages) {
     Descriptor::Ulong(120).encode(buf);
     dr.encode(buf);
 }
@@ -1130,7 +1130,7 @@ fn encoded_size_error_inner(list: &Error) -> usize {
         6
     }) + content_size
 }
-fn encode_error_inner(list: &Error, buf: &mut BytesMut) {
+fn encode_error_inner(list: &Error, buf: &mut BytePages) {
     Descriptor::Ulong(29).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -1169,7 +1169,7 @@ impl Encode for Error {
     fn encoded_size(&self) -> usize {
         encoded_size_error_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_error_inner(self, buf)
     }
 }
@@ -1456,7 +1456,7 @@ fn encoded_size_open_inner(list: &Open) -> usize {
         6
     }) + content_size
 }
-fn encode_open_inner(list: &Open, buf: &mut BytesMut) {
+fn encode_open_inner(list: &Open, buf: &mut BytePages) {
     Descriptor::Ulong(16).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -1509,7 +1509,7 @@ impl Encode for Open {
     fn encoded_size(&self) -> usize {
         encoded_size_open_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_open_inner(self, buf)
     }
 }
@@ -1751,7 +1751,7 @@ fn encoded_size_begin_inner(list: &Begin) -> usize {
         6
     }) + content_size
 }
-fn encode_begin_inner(list: &Begin, buf: &mut BytesMut) {
+fn encode_begin_inner(list: &Begin, buf: &mut BytePages) {
     Descriptor::Ulong(17).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -1800,7 +1800,7 @@ impl Encode for Begin {
     fn encoded_size(&self) -> usize {
         encoded_size_begin_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_begin_inner(self, buf)
     }
 }
@@ -2182,7 +2182,7 @@ fn encoded_size_attach_inner(list: &Attach) -> usize {
         6
     }) + content_size
 }
-fn encode_attach_inner(list: &Attach, buf: &mut BytesMut) {
+fn encode_attach_inner(list: &Attach, buf: &mut BytePages) {
     Descriptor::Ulong(18).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -2243,7 +2243,7 @@ impl Encode for Attach {
     fn encoded_size(&self) -> usize {
         encoded_size_attach_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_attach_inner(self, buf)
     }
 }
@@ -2555,7 +2555,7 @@ fn encoded_size_flow_inner(list: &Flow) -> usize {
         6
     }) + content_size
 }
-fn encode_flow_inner(list: &Flow, buf: &mut BytesMut) {
+fn encode_flow_inner(list: &Flow, buf: &mut BytePages) {
     Descriptor::Ulong(19).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -2610,7 +2610,7 @@ impl Encode for Flow {
     fn encoded_size(&self) -> usize {
         encoded_size_flow_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_flow_inner(self, buf)
     }
 }
@@ -2932,7 +2932,7 @@ fn encoded_size_transfer_inner(list: &Transfer) -> usize {
     }) + content_size
         + list.0.body.as_ref().map(|b| b.len()).unwrap_or(0)
 }
-fn encode_transfer_inner(list: &Transfer, buf: &mut BytesMut) {
+fn encode_transfer_inner(list: &Transfer, buf: &mut BytePages) {
     Descriptor::Ulong(20).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -2990,7 +2990,7 @@ impl Encode for Transfer {
     fn encoded_size(&self) -> usize {
         encoded_size_transfer_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_transfer_inner(self, buf)
     }
 }
@@ -3179,7 +3179,7 @@ fn encoded_size_disposition_inner(list: &Disposition) -> usize {
         6
     }) + content_size
 }
-fn encode_disposition_inner(list: &Disposition, buf: &mut BytesMut) {
+fn encode_disposition_inner(list: &Disposition, buf: &mut BytePages) {
     Descriptor::Ulong(21).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -3224,7 +3224,7 @@ impl Encode for Disposition {
     fn encoded_size(&self) -> usize {
         encoded_size_disposition_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_disposition_inner(self, buf)
     }
 }
@@ -3342,7 +3342,7 @@ fn encoded_size_detach_inner(list: &Detach) -> usize {
         6
     }) + content_size
 }
-fn encode_detach_inner(list: &Detach, buf: &mut BytesMut) {
+fn encode_detach_inner(list: &Detach, buf: &mut BytePages) {
     Descriptor::Ulong(22).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -3381,7 +3381,7 @@ impl Encode for Detach {
     fn encoded_size(&self) -> usize {
         encoded_size_detach_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_detach_inner(self, buf)
     }
 }
@@ -3428,7 +3428,7 @@ fn encoded_size_end_inner(list: &End) -> usize {
         6
     }) + content_size
 }
-fn encode_end_inner(list: &End, buf: &mut BytesMut) {
+fn encode_end_inner(list: &End, buf: &mut BytePages) {
     Descriptor::Ulong(23).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.error.encoded_size();
@@ -3462,7 +3462,7 @@ impl Encode for End {
     fn encoded_size(&self) -> usize {
         encoded_size_end_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_end_inner(self, buf)
     }
 }
@@ -3509,7 +3509,7 @@ fn encoded_size_close_inner(list: &Close) -> usize {
         6
     }) + content_size
 }
-fn encode_close_inner(list: &Close, buf: &mut BytesMut) {
+fn encode_close_inner(list: &Close, buf: &mut BytePages) {
     Descriptor::Ulong(24).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.error.encoded_size();
@@ -3543,7 +3543,7 @@ impl Encode for Close {
     fn encoded_size(&self) -> usize {
         encoded_size_close_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_close_inner(self, buf)
     }
 }
@@ -3595,7 +3595,7 @@ fn encoded_size_sasl_mechanisms_inner(list: &SaslMechanisms) -> usize {
         6
     }) + content_size
 }
-fn encode_sasl_mechanisms_inner(list: &SaslMechanisms, buf: &mut BytesMut) {
+fn encode_sasl_mechanisms_inner(list: &SaslMechanisms, buf: &mut BytePages) {
     Descriptor::Ulong(64).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.sasl_server_mechanisms.encoded_size();
@@ -3629,7 +3629,7 @@ impl Encode for SaslMechanisms {
     fn encoded_size(&self) -> usize {
         encoded_size_sasl_mechanisms_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_sasl_mechanisms_inner(self, buf)
     }
 }
@@ -3716,7 +3716,7 @@ fn encoded_size_sasl_init_inner(list: &SaslInit) -> usize {
         6
     }) + content_size
 }
-fn encode_sasl_init_inner(list: &SaslInit, buf: &mut BytesMut) {
+fn encode_sasl_init_inner(list: &SaslInit, buf: &mut BytePages) {
     Descriptor::Ulong(65).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -3755,7 +3755,7 @@ impl Encode for SaslInit {
     fn encoded_size(&self) -> usize {
         encoded_size_sasl_init_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_sasl_init_inner(self, buf)
     }
 }
@@ -3803,7 +3803,7 @@ fn encoded_size_sasl_challenge_inner(list: &SaslChallenge) -> usize {
         6
     }) + content_size
 }
-fn encode_sasl_challenge_inner(list: &SaslChallenge, buf: &mut BytesMut) {
+fn encode_sasl_challenge_inner(list: &SaslChallenge, buf: &mut BytePages) {
     Descriptor::Ulong(66).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.challenge.encoded_size();
@@ -3837,7 +3837,7 @@ impl Encode for SaslChallenge {
     fn encoded_size(&self) -> usize {
         encoded_size_sasl_challenge_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_sasl_challenge_inner(self, buf)
     }
 }
@@ -3885,7 +3885,7 @@ fn encoded_size_sasl_response_inner(list: &SaslResponse) -> usize {
         6
     }) + content_size
 }
-fn encode_sasl_response_inner(list: &SaslResponse, buf: &mut BytesMut) {
+fn encode_sasl_response_inner(list: &SaslResponse, buf: &mut BytePages) {
     Descriptor::Ulong(67).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.response.encoded_size();
@@ -3919,7 +3919,7 @@ impl Encode for SaslResponse {
     fn encoded_size(&self) -> usize {
         encoded_size_sasl_response_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_sasl_response_inner(self, buf)
     }
 }
@@ -3986,7 +3986,7 @@ fn encoded_size_sasl_outcome_inner(list: &SaslOutcome) -> usize {
         6
     }) + content_size
 }
-fn encode_sasl_outcome_inner(list: &SaslOutcome, buf: &mut BytesMut) {
+fn encode_sasl_outcome_inner(list: &SaslOutcome, buf: &mut BytePages) {
     Descriptor::Ulong(68).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.code.encoded_size() + list.additional_data.encoded_size();
@@ -4021,7 +4021,7 @@ impl Encode for SaslOutcome {
     fn encoded_size(&self) -> usize {
         encoded_size_sasl_outcome_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_sasl_outcome_inner(self, buf)
     }
 }
@@ -4255,7 +4255,7 @@ fn encoded_size_source_inner(list: &Source) -> usize {
         6
     }) + content_size
 }
-fn encode_source_inner(list: &Source, buf: &mut BytesMut) {
+fn encode_source_inner(list: &Source, buf: &mut BytePages) {
     Descriptor::Ulong(40).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -4310,7 +4310,7 @@ impl Encode for Source {
     fn encoded_size(&self) -> usize {
         encoded_size_source_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_source_inner(self, buf)
     }
 }
@@ -4472,7 +4472,7 @@ fn encoded_size_target_inner(list: &Target) -> usize {
         6
     }) + content_size
 }
-fn encode_target_inner(list: &Target, buf: &mut BytesMut) {
+fn encode_target_inner(list: &Target, buf: &mut BytePages) {
     Descriptor::Ulong(41).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -4519,7 +4519,7 @@ impl Encode for Target {
     fn encoded_size(&self) -> usize {
         encoded_size_target_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_target_inner(self, buf)
     }
 }
@@ -4645,7 +4645,7 @@ fn encoded_size_header_inner(list: &Header) -> usize {
         6
     }) + content_size
 }
-fn encode_header_inner(list: &Header, buf: &mut BytesMut) {
+fn encode_header_inner(list: &Header, buf: &mut BytePages) {
     Descriptor::Ulong(112).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -4688,7 +4688,7 @@ impl Encode for Header {
     fn encoded_size(&self) -> usize {
         encoded_size_header_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_header_inner(self, buf)
     }
 }
@@ -4954,7 +4954,7 @@ fn encoded_size_properties_inner(list: &Properties) -> usize {
         6
     }) + content_size
 }
-fn encode_properties_inner(list: &Properties, buf: &mut BytesMut) {
+fn encode_properties_inner(list: &Properties, buf: &mut BytePages) {
     Descriptor::Ulong(115).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -5013,7 +5013,7 @@ impl Encode for Properties {
     fn encoded_size(&self) -> usize {
         encoded_size_properties_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_properties_inner(self, buf)
     }
 }
@@ -5081,7 +5081,7 @@ fn encoded_size_received_inner(list: &Received) -> usize {
         6
     }) + content_size
 }
-fn encode_received_inner(list: &Received, buf: &mut BytesMut) {
+fn encode_received_inner(list: &Received, buf: &mut BytePages) {
     Descriptor::Ulong(35).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.section_number.encoded_size() + list.section_offset.encoded_size();
@@ -5116,7 +5116,7 @@ impl Encode for Received {
     fn encoded_size(&self) -> usize {
         encoded_size_received_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_received_inner(self, buf)
     }
 }
@@ -5145,7 +5145,7 @@ fn encoded_size_accepted_inner(list: &Accepted) -> usize {
         6
     }) + content_size
 }
-fn encode_accepted_inner(list: &Accepted, buf: &mut BytesMut) {
+fn encode_accepted_inner(list: &Accepted, buf: &mut BytePages) {
     Descriptor::Ulong(36).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0;
@@ -5178,7 +5178,7 @@ impl Encode for Accepted {
     fn encoded_size(&self) -> usize {
         encoded_size_accepted_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_accepted_inner(self, buf)
     }
 }
@@ -5225,7 +5225,7 @@ fn encoded_size_rejected_inner(list: &Rejected) -> usize {
         6
     }) + content_size
 }
-fn encode_rejected_inner(list: &Rejected, buf: &mut BytesMut) {
+fn encode_rejected_inner(list: &Rejected, buf: &mut BytePages) {
     Descriptor::Ulong(37).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0 + list.error.encoded_size();
@@ -5259,7 +5259,7 @@ impl Encode for Rejected {
     fn encoded_size(&self) -> usize {
         encoded_size_rejected_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_rejected_inner(self, buf)
     }
 }
@@ -5288,7 +5288,7 @@ fn encoded_size_released_inner(list: &Released) -> usize {
         6
     }) + content_size
 }
-fn encode_released_inner(list: &Released, buf: &mut BytesMut) {
+fn encode_released_inner(list: &Released, buf: &mut BytePages) {
     Descriptor::Ulong(38).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0;
@@ -5321,7 +5321,7 @@ impl Encode for Released {
     fn encoded_size(&self) -> usize {
         encoded_size_released_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_released_inner(self, buf)
     }
 }
@@ -5407,7 +5407,7 @@ fn encoded_size_modified_inner(list: &Modified) -> usize {
         6
     }) + content_size
 }
-fn encode_modified_inner(list: &Modified, buf: &mut BytesMut) {
+fn encode_modified_inner(list: &Modified, buf: &mut BytePages) {
     Descriptor::Ulong(39).encode(buf);
     #[allow(clippy::identity_op)]
     let content_size = 0
@@ -5446,7 +5446,7 @@ impl Encode for Modified {
     fn encoded_size(&self) -> usize {
         encoded_size_modified_inner(self)
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         encode_modified_inner(self, buf)
     }
 }
