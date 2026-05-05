@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "5.7.2"
+version = "5.8.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -34,16 +34,16 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex-amqp-codec = "2.0.0"
+ntex-amqp-codec = "2.3.0"
 
-ntex-bytes = "1.5"
+ntex-bytes = "1.6.4"
 ntex-dispatcher = "3"
-ntex-error = "2.0"
+ntex-error = "2.2"
 ntex-router = "1"
 ntex-rt = "3.10"
-ntex-io = "3.9"
-ntex-net = "3.9"
-ntex-util = "3.4"
+ntex-io = "3.10"
+ntex-net = "3.10"
+ntex-util = "3.5"
 ntex-service = "4.6"
 
 bitflags = "2"
@@ -58,7 +58,7 @@ thiserror = "2"
 env_logger = "0.11"
 rand = "0.9"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
-ntex = "3.6"
+ntex = "3.8"
 
 [patch.crates-io]
 ntex-amqp = { path = "." }

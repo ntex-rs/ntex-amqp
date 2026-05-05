@@ -1,4 +1,4 @@
-use ntex_bytes::{BufMut, Bytes, BytesMut};
+use ntex_bytes::{BufMut, BytePages, Bytes};
 
 use crate::codec::{self, ArrayEncode, ArrayHeader, Decode, DecodeFormatted, Encode};
 use crate::error::AmqpParseError;
@@ -18,7 +18,7 @@ impl Array {
         T: ArrayEncode + 'a,
     {
         let mut len = 0;
-        let mut buf = BytesMut::new();
+        let mut buf = BytePages::default();
         for item in iter {
             len += 1;
             item.array_encode(&mut buf);
@@ -69,7 +69,7 @@ impl Encode for Array {
         header_len + ctor_len + self.payload.len()
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let ctor_len = self.element_constructor.encoded_size();
         if self.payload.len() + ctor_len + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
@@ -81,7 +81,7 @@ impl Encode for Array {
             buf.put_u8(self.count as u8);
         }
         self.element_constructor.encode(buf);
-        buf.extend_from_slice(self.payload.as_ref());
+        buf.append(self.payload.clone());
     }
 }
 

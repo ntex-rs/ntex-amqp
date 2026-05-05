@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use ntex_bytes::{Bytes, BytesMut};
+use ntex_bytes::{BytePages, Bytes};
 
 use crate::codec::{Decode, Encode};
 use crate::error::AmqpParseError;
@@ -343,7 +343,7 @@ impl Encode for Message {
         size
     }
 
-    fn encode(&self, dst: &mut BytesMut) {
+    fn encode(&self, dst: &mut BytePages) {
         if let Some(ref h) = self.0.header {
             h.encode(dst);
         }
@@ -376,7 +376,7 @@ impl Encode for Message {
 
 #[cfg(test)]
 mod tests {
-    use ntex_bytes::{ByteString, Bytes, BytesMut};
+    use ntex_bytes::{BytePages, ByteString, Bytes};
     use uuid::Uuid;
 
     use crate::codec::{Decode, Encode};
@@ -391,7 +391,7 @@ mod tests {
         let mut msg = Message::default();
         msg.set_properties(|props| props.message_id = Some(1.into()));
 
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&mut buf.freeze())?;
@@ -405,7 +405,7 @@ mod tests {
         let mut msg = Message::default();
         msg.set_app_property(ByteString::from("test"), 1);
 
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&mut buf.freeze())?;
@@ -427,7 +427,7 @@ mod tests {
 
         let mut msg = Message::default();
         msg.set_header(hdr.clone());
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&mut buf.freeze())?;
@@ -441,7 +441,7 @@ mod tests {
 
         let mut msg = Message::default();
         msg.set_body(|body| body.set_data(data.clone()));
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&mut buf.freeze())?;
@@ -452,9 +452,9 @@ mod tests {
     #[test]
     fn test_data_empty() -> Result<(), AmqpCodecError> {
         let msg = Message::default();
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
-        assert_eq!(buf, Bytes::from_static(b""));
+        assert_eq!(buf.freeze(), Bytes::from_static(b""));
 
         let msg2 = Message::decode(&mut buf.freeze())?;
         assert!(msg2.body().data().is_none());
@@ -473,7 +473,7 @@ mod tests {
             body.messages.push(msg1.clone().into());
             body.messages.push(msg2.clone().into());
         });
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
 
         let msg3 = Message::decode(&mut buf.freeze())?;
@@ -490,7 +490,7 @@ mod tests {
         let mut msg = Message::default();
         msg.set_properties(|props| props.message_id = Some(Uuid::new_v4().into()));
 
-        let mut buf = BytesMut::with_capacity(msg.encoded_size());
+        let mut buf = BytePages::default();
         msg.encode(&mut buf);
 
         let msg2 = Message::decode(&mut buf.freeze())?;

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, hash::BuildHasher, hash::Hash};
 
 use chrono::{DateTime, Utc};
-use ntex_bytes::{BufMut, ByteString, Bytes, BytesMut};
+use ntex_bytes::{BufMut, BytePages, ByteString, Bytes};
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Composite, Encode};
@@ -11,7 +11,7 @@ use crate::types::{
     VecStringMap, VecSymbolMap,
 };
 
-fn encode_null(buf: &mut BytesMut) {
+fn encode_null(buf: &mut BytePages) {
     buf.put_u8(codec::FORMATCODE_NULL);
 }
 
@@ -21,7 +21,7 @@ impl<T: FixedEncode + ArrayEncode> Encode for T {
     fn encoded_size(&self) -> usize {
         self.array_encoded_size() + 1
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         T::ARRAY_CONSTRUCTOR.encode(buf);
         self.array_encode(buf);
     }
@@ -31,7 +31,7 @@ impl Encode for bool {
     fn encoded_size(&self) -> usize {
         1
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         buf.put_u8(if *self {
             codec::FORMATCODE_BOOLEAN_TRUE
         } else {
@@ -44,7 +44,7 @@ impl ArrayEncode for bool {
     fn array_encoded_size(&self) -> usize {
         1
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u8(u8::from(*self));
     }
 }
@@ -55,7 +55,7 @@ impl ArrayEncode for u8 {
     fn array_encoded_size(&self) -> usize {
         1
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u8(*self);
     }
 }
@@ -66,7 +66,7 @@ impl ArrayEncode for u16 {
     fn array_encoded_size(&self) -> usize {
         2
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u16(*self);
     }
 }
@@ -81,7 +81,7 @@ impl Encode for u32 {
             2
         }
     }
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         if *self == 0 {
             buf.put_u8(codec::FORMATCODE_UINT_0)
         } else if *self > u32::from(u8::MAX) {
@@ -98,7 +98,7 @@ impl ArrayEncode for u32 {
     fn array_encoded_size(&self) -> usize {
         4
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u32(*self);
     }
 }
@@ -114,7 +114,7 @@ impl Encode for u64 {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         if *self == 0 {
             buf.put_u8(codec::FORMATCODE_ULONG_0)
         } else if *self > u64::from(u8::MAX) {
@@ -132,7 +132,7 @@ impl ArrayEncode for u64 {
     fn array_encoded_size(&self) -> usize {
         8
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u64(*self);
     }
 }
@@ -144,7 +144,7 @@ impl ArrayEncode for i8 {
     fn array_encoded_size(&self) -> usize {
         1
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_i8(*self);
     }
 }
@@ -156,7 +156,7 @@ impl ArrayEncode for i16 {
     fn array_encoded_size(&self) -> usize {
         2
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_i16(*self);
     }
 }
@@ -170,7 +170,7 @@ impl Encode for i32 {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         if *self > i32::from(i8::MAX) || *self < i32::from(i8::MIN) {
             buf.put_u8(codec::FORMATCODE_INT);
             buf.put_i32(*self);
@@ -186,7 +186,7 @@ impl ArrayEncode for i32 {
     fn array_encoded_size(&self) -> usize {
         4
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_i32(*self);
     }
 }
@@ -200,7 +200,7 @@ impl Encode for i64 {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         if *self > i64::from(i8::MAX) || *self < i64::from(i8::MIN) {
             buf.put_u8(codec::FORMATCODE_LONG);
             buf.put_i64(*self);
@@ -216,7 +216,7 @@ impl ArrayEncode for i64 {
     fn array_encoded_size(&self) -> usize {
         8
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_i64(*self);
     }
 }
@@ -230,7 +230,7 @@ impl ArrayEncode for f32 {
         4
     }
 
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_f32(*self);
     }
 }
@@ -242,7 +242,7 @@ impl ArrayEncode for f64 {
     fn array_encoded_size(&self) -> usize {
         8
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_f64(*self);
     }
 }
@@ -254,7 +254,7 @@ impl ArrayEncode for char {
     fn array_encoded_size(&self) -> usize {
         4
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u32(*self as u32);
     }
 }
@@ -266,7 +266,7 @@ impl ArrayEncode for DateTime<Utc> {
     fn array_encoded_size(&self) -> usize {
         8
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         let timestamp = self.timestamp() * 1000 + i64::from(self.timestamp_subsec_millis());
         buf.put_i64(timestamp);
     }
@@ -279,7 +279,7 @@ impl ArrayEncode for Uuid {
     fn array_encoded_size(&self) -> usize {
         16
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.extend_from_slice(self.as_bytes());
     }
 }
@@ -291,7 +291,7 @@ impl Encode for Bytes {
         size + length
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_BINARY32);
@@ -300,7 +300,7 @@ impl Encode for Bytes {
             buf.put_u8(codec::FORMATCODE_BINARY8);
             buf.put_u8(length as u8);
         }
-        buf.put_slice(self);
+        buf.append(self.clone());
     }
 }
 
@@ -309,9 +309,9 @@ impl ArrayEncode for Bytes {
     fn array_encoded_size(&self) -> usize {
         4 + self.len()
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u32(self.len() as u32);
-        buf.put_slice(self);
+        buf.append(self.clone());
     }
 }
 
@@ -322,7 +322,7 @@ impl Encode for ByteString {
         size + length
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
@@ -331,7 +331,7 @@ impl Encode for ByteString {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
         }
-        buf.put_slice(self.as_bytes());
+        buf.append(self.as_bytes().clone());
     }
 }
 impl ArrayEncode for ByteString {
@@ -339,9 +339,9 @@ impl ArrayEncode for ByteString {
     fn array_encoded_size(&self) -> usize {
         4 + self.len()
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u32(self.len() as u32);
-        buf.put_slice(self.as_bytes());
+        buf.append(self.as_bytes().clone());
     }
 }
 
@@ -352,7 +352,7 @@ impl Encode for str {
         size + length
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
@@ -370,7 +370,7 @@ impl ArrayEncode for str {
     fn array_encoded_size(&self) -> usize {
         4 + self.len()
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u32(self.len() as u32);
         buf.put_slice(self.as_bytes());
     }
@@ -383,7 +383,7 @@ impl Encode for Str {
         size + length
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let length = self.as_str().len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
@@ -392,7 +392,7 @@ impl Encode for Str {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
         }
-        buf.put_slice(self.as_bytes());
+        buf.append(self.to_bytes_str());
     }
 }
 
@@ -403,7 +403,7 @@ impl Encode for Symbol {
         size + length
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let length = self.as_str().len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_SYMBOL32);
@@ -412,7 +412,7 @@ impl Encode for Symbol {
             buf.put_u8(codec::FORMATCODE_SYMBOL8);
             buf.put_u8(length as u8);
         }
-        buf.put_slice(self.as_bytes());
+        buf.append(self.to_bytes_str());
     }
 }
 
@@ -421,9 +421,9 @@ impl ArrayEncode for Symbol {
     fn array_encoded_size(&self) -> usize {
         4 + self.len()
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         buf.put_u32(self.len() as u32);
-        buf.put_slice(self.as_bytes());
+        buf.append(self.to_bytes_str());
     }
 }
 
@@ -434,7 +434,7 @@ impl Encode for StaticSymbol {
         size + length
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let length = self.0.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_SYMBOL32);
@@ -443,7 +443,7 @@ impl Encode for StaticSymbol {
             buf.put_u8(codec::FORMATCODE_SYMBOL8);
             buf.put_u8(length as u8);
         }
-        buf.put_slice(self.0.as_bytes());
+        buf.append(self.0);
     }
 }
 
@@ -462,7 +462,7 @@ impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, 
         preamble + size
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let count = self.len() * 2; // key-value pair accounts for two items in count
         let size = map_encoded_size(self);
         if size + 1 > u8::MAX as usize {
@@ -487,7 +487,7 @@ impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
     fn array_encoded_size(&self) -> usize {
         8 + map_encoded_size(self)
     }
-    fn array_encode(&self, buf: &mut BytesMut) {
+    fn array_encode(&self, buf: &mut BytePages) {
         let count = self.len() * 2;
         let size = map_encoded_size(self) + 4;
         buf.put_u32(size as u32);
@@ -512,7 +512,7 @@ impl Encode for VecSymbolMap {
         preamble + size
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let count = self.len() * 2; // key-value pair accounts for two items in count
         let size = self
             .0
@@ -548,7 +548,7 @@ impl Encode for VecStringMap {
         preamble + size
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let count = self.len() * 2; // key-value pair accounts for two items in count
         let size = self
             .0
@@ -588,7 +588,7 @@ impl<T: ArrayEncode> Encode for Vec<T> {
             + content_size
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let size = array_encoded_size(self);
         let ctor_size = T::ARRAY_CONSTRUCTOR.encoded_size();
         if size + 1 + ctor_size > u8::MAX as usize {
@@ -616,7 +616,7 @@ impl<T: Encode + ArrayEncode> Encode for Multiple<T> {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let count = self.0.len();
         match count {
             1 => self.0[0].encode(buf),
@@ -636,7 +636,7 @@ impl Encode for List {
         }) + content_size
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let size = self.iter().fold(0, |r, i| r + i.encoded_size());
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
@@ -668,7 +668,7 @@ impl<T: Composite> Encode for ListDescribed<T> {
         }) + content_size
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let descr = T::descriptor();
         let descr_size = descr.encoded_size();
         let content_size = self
@@ -724,7 +724,7 @@ impl Encode for Variant {
     }
 
     /// Encodes `Variant` into provided `BytesMut`
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             Variant::Null => encode_null(buf),
             Variant::Boolean(b) => b.encode(buf),
@@ -773,7 +773,7 @@ impl<T: Encode> Encode for Option<T> {
         self.as_ref().map_or(1, |v| v.encoded_size())
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match *self {
             Some(ref e) => e.encode(buf),
             None => encode_null(buf),
@@ -790,7 +790,7 @@ impl Encode for Descriptor {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         buf.put_u8(codec::FORMATCODE_DESCRIBED);
         match *self {
             Descriptor::Ulong(v) => v.encode(buf),
@@ -810,7 +810,7 @@ impl Encode for Constructor {
         }
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         match self {
             Constructor::FormatCode(format_code) => buf.put_u8(*format_code),
             Constructor::Described {
@@ -831,7 +831,7 @@ impl Encode for AmqpFrame {
         framing::HEADER_LEN + self.performative().encoded_size()
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let doff: u8 = (framing::HEADER_LEN / WORD_LEN) as u8;
         buf.put_u32(self.encoded_size() as u32);
         buf.put_u8(doff);
@@ -846,7 +846,7 @@ impl Encode for SaslFrame {
         framing::HEADER_LEN + self.body.encoded_size()
     }
 
-    fn encode(&self, buf: &mut BytesMut) {
+    fn encode(&self, buf: &mut BytePages) {
         let doff: u8 = (framing::HEADER_LEN / WORD_LEN) as u8;
         buf.put_u32(self.encoded_size() as u32);
         buf.put_u8(doff);

@@ -1,3 +1,4 @@
+#![allow(unused_extern_crates)]
 #[cfg(feature = "from-spec")]
 extern crate handlebars;
 #[cfg(feature = "from-spec")]
@@ -49,10 +50,10 @@ fn generate_from_spec() {
     codegen.register_helper(
         "snake",
         Box::new(
-            |h: &Helper,
-             _: &Handlebars,
+            |h: &Helper<'_>,
+             _: &Handlebars<'_>,
              _: &Context,
-             _rc: &mut RenderContext,
+             _rc: &mut RenderContext<'_, '_>,
              out: &mut dyn Output|
              -> Result<(), RenderError> {
                 let value = h.param(0).ok_or_else(|| {

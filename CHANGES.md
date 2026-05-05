@@ -1,5 +1,13 @@
 # Changes
 
+## [5.8.0] - 2026-05-05
+
+* Use new codec api with BytePages support
+
+## [codec-2.3.0] - 2026-05-05
+
+* Use new codec api with BytePages support
+
 ## [5.7.2] - 2026-04-02
 
 * Update ntex-error 2.0

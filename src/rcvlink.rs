@@ -9,7 +9,7 @@ use ntex_amqp_codec::protocol::{
     TransferBody,
 };
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
-use ntex_bytes::{ByteString, Bytes, BytesMut};
+use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::{Stream, channel::oneshot, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
@@ -32,7 +32,7 @@ pub(crate) struct ReceiverLinkInner {
     credit: u32,
     delivery_count: u32,
     error: Option<Error>,
-    partial_body: Option<BytesMut>,
+    partial_body: Option<BytePages>,
     max_message_size: u64,
 }
 
@@ -383,24 +383,20 @@ impl ReceiverLinkInner {
                 if let Some(id) = transfer.delivery_id() {
                     let body = if let Some(body) = transfer.0.body.take() {
                         match body {
-                            TransferBody::Data(data) => BytesMut::copy_from_slice(&data),
+                            TransferBody::Data(data) => {
+                                let mut buf = BytePages::default();
+                                buf.append(data);
+                                buf
+                            }
                             TransferBody::Message(msg) => {
-                                let mut buf = self
-                                    .session
-                                    .connection()
-                                    .config()
-                                    .write_buf()
-                                    .buf_with_capacity(msg.encoded_size());
+                                let mut buf = BytePages::default();
                                 msg.encode(&mut buf);
                                 buf
                             }
+                            TransferBody::Pages(pages) => pages,
                         }
                     } else {
-                        self.session
-                            .connection()
-                            .config()
-                            .write_buf()
-                            .buf_with_capacity(16)
+                        BytePages::default()
                     };
                     self.partial_body = Some(body);
 

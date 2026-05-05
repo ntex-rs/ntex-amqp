@@ -1,4 +1,4 @@
-use ntex_bytes::{Buf, Bytes, BytesMut};
+use ntex_bytes::{Buf, BytePages, Bytes};
 
 use crate::{error::AmqpParseError, types::Constructor, types::Descriptor};
 
@@ -20,7 +20,7 @@ pub trait Encode {
     fn encoded_size(&self) -> usize;
 
     /// Encodes the type into the provided buffer.
-    fn encode(&self, buf: &mut BytesMut);
+    fn encode(&self, buf: &mut BytePages);
 }
 
 /// Defines routines to encode the type as an element of an AMQP array. It's different from Encode in that it omits the type constructor
@@ -32,7 +32,7 @@ pub trait ArrayEncode {
     fn array_encoded_size(&self) -> usize;
 
     /// Encodes the type as an element of an AMQP array.
-    fn array_encode(&self, buf: &mut BytesMut);
+    fn array_encode(&self, buf: &mut BytePages);
 }
 
 pub trait Composite: Encode + Decode {
@@ -134,7 +134,7 @@ pub struct ArrayHeader {
 
 #[cfg(test)]
 mod tests {
-    use ntex_bytes::{Bytes, BytesMut};
+    use ntex_bytes::{BytePages, Bytes};
 
     use crate::codec::{Decode, Encode};
     use crate::error::AmqpCodecError;
@@ -154,11 +154,11 @@ mod tests {
             _ => panic!("error"),
         }
 
-        let mut buf = BytesMut::new();
-        buf.reserve(frame.encoded_size());
+        let mut buf = BytePages::default();
         frame.encode(&mut buf);
+        let mut buf = buf.freeze();
         buf.advance_to(4);
-        assert_eq!(data2, buf.freeze());
+        assert_eq!(data2, buf);
 
         Ok(())
     }
@@ -170,11 +170,11 @@ mod tests {
         let frame = AmqpFrame::decode(&mut data.clone())?;
         assert_eq!(frame.performative().name(), "Disposition");
 
-        let mut buf = BytesMut::new();
-        buf.reserve(frame.encoded_size());
+        let mut buf = BytePages::default();
         frame.encode(&mut buf);
+        let mut buf = buf.freeze();
         buf.advance_to(4);
-        assert_eq!(data, buf.freeze());
+        assert_eq!(data, buf);
 
         Ok(())
     }
