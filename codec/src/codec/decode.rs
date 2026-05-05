@@ -637,7 +637,7 @@ fn read_fixed_bytes<const N: usize>(input: &mut Bytes) -> Result<[u8; N], AmqpPa
 #[cfg(test)]
 mod tests {
     use chrono::TimeDelta;
-    use ntex_bytes::{BufMut, BytesMut};
+    use ntex_bytes::{BufMut, BytePages};
     use test_case::test_case;
 
     use super::*;
@@ -650,7 +650,7 @@ mod tests {
         $(
             #[test]
             fn $name() {
-                let mut b1 = BytesMut::with_capacity(($test).encoded_size());
+                let mut b1 = BytePages::default();
                 ($test).encode(&mut b1);
                 assert_eq!($expected, <$kind as Decode>::decode(&mut b1.freeze()).unwrap());
             }
@@ -745,11 +745,11 @@ mod tests {
 
     #[test]
     fn test_bool_true() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         b1.put_u8(0x41);
         assert!(unwrap_value(bool::decode(&mut b1.freeze())));
 
-        let mut b2 = BytesMut::with_capacity(0);
+        let mut b2 = BytePages::default();
         b2.put_u8(0x56);
         b2.put_u8(0x01);
         assert!(unwrap_value(bool::decode(&mut b2.freeze())));
@@ -757,11 +757,11 @@ mod tests {
 
     #[test]
     fn test_bool_false() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         b1.put_u8(0x42u8);
         assert!(!unwrap_value(bool::decode(&mut b1.freeze())));
 
-        let mut b2 = BytesMut::with_capacity(0);
+        let mut b2 = BytePages::default();
         b2.put_u8(0x56);
         b2.put_u8(0x00);
         assert!(!unwrap_value(bool::decode(&mut b2.freeze())));
@@ -771,7 +771,7 @@ mod tests {
     /// represents the moment 2011-07-26T18:21:03.521Z.
     #[test]
     fn test_timestamp() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         let datetime =
             Utc.with_ymd_and_hms(2011, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         datetime.encode(&mut b1);
@@ -786,7 +786,7 @@ mod tests {
 
     #[test]
     fn test_timestamp_pre_unix() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         let datetime =
             Utc.with_ymd_and_hms(1968, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         datetime.encode(&mut b1);
@@ -801,7 +801,7 @@ mod tests {
 
     #[test]
     fn variant_null() {
-        let mut b = BytesMut::with_capacity(0);
+        let mut b = BytePages::default();
         Variant::Null.encode(&mut b);
         let t = unwrap_value(Variant::decode(&mut b.freeze()));
         assert_eq!(Variant::Null, t);
@@ -809,14 +809,14 @@ mod tests {
 
     #[test]
     fn variant_bool_true() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         b1.put_u8(0x41);
         assert_eq!(
             Variant::Boolean(true),
             unwrap_value(Variant::decode(&mut b1.freeze()))
         );
 
-        let mut b2 = BytesMut::with_capacity(0);
+        let mut b2 = BytePages::default();
         b2.put_u8(0x56);
         b2.put_u8(0x01);
         assert_eq!(
@@ -827,14 +827,14 @@ mod tests {
 
     #[test]
     fn variant_bool_false() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         b1.put_u8(0x42u8);
         assert_eq!(
             Variant::Boolean(false),
             unwrap_value(Variant::decode(&mut b1.freeze()))
         );
 
-        let mut b2 = BytesMut::with_capacity(0);
+        let mut b2 = BytePages::default();
         b2.put_u8(0x56);
         b2.put_u8(0x00);
         assert_eq!(
@@ -847,7 +847,7 @@ mod tests {
     /// represents the moment 2011-07-26T18:21:03.521Z.
     #[test]
     fn variant_timestamp() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         let datetime =
             Utc.with_ymd_and_hms(2011, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         Variant::Timestamp(datetime).encode(&mut b1);
@@ -862,7 +862,7 @@ mod tests {
 
     #[test]
     fn variant_timestamp_pre_unix() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         let datetime =
             Utc.with_ymd_and_hms(1968, 7, 26, 18, 21, 3).unwrap() + TimeDelta::milliseconds(521);
         Variant::Timestamp(datetime).encode(&mut b1);
@@ -968,7 +968,7 @@ mod tests {
 
     #[test]
     fn option_i8() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         Some(42i8).encode(&mut b1);
 
         assert_eq!(
@@ -976,7 +976,7 @@ mod tests {
             unwrap_value(Option::<i8>::decode(&mut b1.freeze()))
         );
 
-        let mut b2 = BytesMut::with_capacity(0);
+        let mut b2 = BytePages::default();
         let o1: Option<i8> = None;
         o1.encode(&mut b2);
 
@@ -985,7 +985,7 @@ mod tests {
 
     #[test]
     fn option_string() {
-        let mut b1 = BytesMut::with_capacity(0);
+        let mut b1 = BytePages::default();
         Some(ByteString::from("hello")).encode(&mut b1);
 
         assert_eq!(
@@ -993,7 +993,7 @@ mod tests {
             unwrap_value(Option::<ByteString>::decode(&mut b1.freeze()))
         );
 
-        let mut b2 = BytesMut::with_capacity(0);
+        let mut b2 = BytePages::default();
         let o1: Option<ByteString> = None;
         o1.encode(&mut b2);
 

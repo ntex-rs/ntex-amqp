@@ -324,7 +324,6 @@ impl Default for SaslCode {
 
 #[cfg(test)]
 mod tests {
-    use ntex_bytes::BytesMut;
     use uuid::Uuid;
 
     use super::*;
@@ -335,8 +334,7 @@ mod tests {
     fn test_message_id() -> Result<(), AmqpCodecError> {
         let id = MessageId::Uuid(Uuid::new_v4());
 
-        let mut buf = BytesMut::new();
-        buf.reserve(id.encoded_size());
+        let mut buf = BytePages::default();
         id.encode(&mut buf);
 
         let new_id = MessageId::decode(&mut buf.freeze())?;
@@ -352,8 +350,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut buf = BytesMut::new();
-        buf.reserve(id.encoded_size());
+        let mut buf = BytePages::default();
         props.encode(&mut buf);
 
         let props2 = Properties::decode(&mut buf.freeze())?;

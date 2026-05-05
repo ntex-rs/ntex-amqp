@@ -134,7 +134,7 @@ pub struct ArrayHeader {
 
 #[cfg(test)]
 mod tests {
-    use ntex_bytes::{Bytes, BytesMut};
+    use ntex_bytes::{BytePages, Bytes};
 
     use crate::codec::{Decode, Encode};
     use crate::error::AmqpCodecError;
@@ -156,7 +156,7 @@ mod tests {
 
         let mut buf = BytePages::default();
         frame.encode(&mut buf);
-        let buf = buf.freeze();
+        let mut buf = buf.freeze();
         buf.advance_to(4);
         assert_eq!(data2, buf);
 
