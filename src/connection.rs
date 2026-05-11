@@ -119,7 +119,7 @@ impl ConnectionRef {
     pub fn force_close(&self) {
         let inner = self.0.get_mut();
         inner.state = ConnectionState::Drop;
-        inner.io.force_close();
+        inner.io.terminate();
         inner.set_error(AmqpProtocolError::ConnectionDropped);
     }
 
