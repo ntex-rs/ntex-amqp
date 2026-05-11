@@ -36,14 +36,14 @@ frame-trace = []
 [dependencies]
 ntex-amqp-codec = "2.3.0"
 
-ntex-bytes = "1.6.4"
+ntex-bytes = "1.6.7"
 ntex-dispatcher = "3"
 ntex-error = "2.2"
 ntex-router = "1"
 ntex-rt = "3.10"
-ntex-io = "3.10"
-ntex-net = "3.10"
-ntex-util = "3.5"
+ntex-io = "3.11"
+ntex-net = "3.11"
+ntex-util = "3.6"
 ntex-service = "4.6"
 
 bitflags = "2"
@@ -58,7 +58,7 @@ thiserror = "2"
 env_logger = "0.11"
 rand = "0.9"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
-ntex = "3.8"
+ntex = "3.9"
 
 [patch.crates-io]
 ntex-amqp = { path = "." }
