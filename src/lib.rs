@@ -21,7 +21,7 @@
 #[macro_use]
 extern crate derive_more;
 
-use ntex_amqp_codec::protocol::{Handle, Milliseconds, Open, OpenInner, Symbols};
+use ntex_amqp_codec::protocol::{Fields, Handle, Milliseconds, Open, OpenInner, Symbols};
 use ntex_amqp_codec::types::Symbol;
 use ntex_bytes::ByteString;
 use ntex_service::cfg::{CfgContext, Configuration as SvcConfiguration};
@@ -63,9 +63,11 @@ pub struct AmqpServiceConfig {
     pub max_frame_size: u32,
     pub channel_max: u16,
     pub idle_time_out: Milliseconds,
+    pub container_id: Option<ByteString>,
     pub hostname: Option<ByteString>,
     pub offered_capabilities: Option<Symbols>,
     pub desired_capabilities: Option<Symbols>,
+    pub properties: Option<Fields>,
     pub(crate) max_size: usize,
     pub(crate) handshake_timeout: Seconds,
     config: CfgContext,
@@ -108,10 +110,12 @@ impl AmqpServiceConfig {
             max_frame_size: u32::from(u16::MAX),
             channel_max: 1024,
             idle_time_out: 120_000,
+            container_id: None,
             hostname: None,
             handshake_timeout: Seconds(5),
             offered_capabilities: None,
             desired_capabilities: None,
+            properties: None,
             config: CfgContext::default(),
         }
     }
@@ -151,6 +155,15 @@ impl AmqpServiceConfig {
     }
 
     #[must_use]
+    /// Set container-id
+    ///
+    /// Container id is not set by default.
+    pub fn set_container_id(mut self, cid: &str) -> Self {
+        self.container_id = Some(ByteString::from(cid));
+        self
+    }
+
+    #[must_use]
     /// Set connection hostname
     ///
     /// Hostname is not set by default
@@ -170,6 +183,13 @@ impl AmqpServiceConfig {
     /// Set desired capabilities
     pub fn set_desired_capabilities(mut self, caps: Symbols) -> Self {
         self.desired_capabilities = Some(caps);
+        self
+    }
+
+    #[must_use]
+    /// Set open frame properties
+    pub fn set_properties(mut self, props: Fields) -> Self {
+        self.properties = Some(props);
         self
     }
 
@@ -214,7 +234,10 @@ impl AmqpServiceConfig {
     /// Create `Open` performative for this configuration.
     pub fn to_open(&self) -> Open {
         Open(Box::new(OpenInner {
-            container_id: ByteString::from(Uuid::new_v4().simple().to_string()),
+            container_id: self
+                .container_id
+                .clone()
+                .unwrap_or_else(|| ByteString::from(Uuid::new_v4().simple().to_string())),
             hostname: self.hostname.clone(),
             max_frame_size: self.max_frame_size,
             channel_max: self.channel_max,
@@ -227,7 +250,7 @@ impl AmqpServiceConfig {
             incoming_locales: None,
             offered_capabilities: self.offered_capabilities.clone(),
             desired_capabilities: self.desired_capabilities.clone(),
-            properties: None,
+            properties: self.properties.clone(),
         }))
     }
 }

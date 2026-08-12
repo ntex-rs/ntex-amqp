@@ -1,5 +1,9 @@
 # Changes
 
+## [5.9.0] - 2026-08-12
+
+* Allow to set container_id and properties for Open frame
+
 ## [5.8.0] - 2026-05-05
 
 * Use new codec api with BytePages support
