@@ -1,3 +1,4 @@
+#![allow(clippy::unused_async_trait_impl)]
 use std::marker::PhantomData;
 
 use ntex_service::{Service, ServiceCtx, ServiceFactory};
