@@ -64,8 +64,8 @@ where
     pub async fn start_default(self) -> Result<(), AmqpDispatcherError> {
         let dispatcher = Dispatcher::new(
             self.connection,
-            Pipeline::new(fn_service(|_| Ready::<_, LinkError>::Ok(()))),
-            Pipeline::new(fn_service(|_| Ready::<_, LinkError>::Ok(()))),
+            Pipeline::new(fn_service(|_| Ready::<_, LinkError>::Ok(())), ()),
+            Pipeline::new(fn_service(|_| Ready::<_, LinkError>::Ok(())), ()),
             self.remote_config.timeout_remote_secs().into(),
         );
 
@@ -76,14 +76,30 @@ where
     where
         F: IntoService<S, ControlFrame>,
         S: Service<ControlFrame, Response = ()>,
+        S::Data: Default,
         S::Error: std::fmt::Debug + 'static,
         crate::error::Error: From<S::Error>,
         S: 'static,
     {
+        self.start_with_data(service, S::Data::default()).await
+    }
+
+    /// Run client with a control messages handler and explicit execution data.
+    pub async fn start_with_data<F, S>(
+        self,
+        service: F,
+        data: S::Data,
+    ) -> Result<(), AmqpDispatcherError>
+    where
+        F: IntoService<S, ControlFrame>,
+        S: Service<ControlFrame, Response = ()> + 'static,
+        S::Error: std::fmt::Debug + 'static,
+        crate::error::Error: From<S::Error>,
+    {
         let dispatcher = Dispatcher::new(
             self.connection,
-            Pipeline::new(fn_service(|_| Ready::<_, S::Error>::Ok(()))),
-            Pipeline::new(service.into_service()),
+            Pipeline::new(fn_service(|_| Ready::<_, S::Error>::Ok(())), ()),
+            Pipeline::new(service.into_service(), data),
             self.remote_config.timeout_remote_secs().into(),
         );
 

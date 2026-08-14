@@ -78,6 +78,7 @@ where
     type Error = Error<ConnectError>;
     type Service = ConnectorService<A, T::Service>;
     type InitError = T::InitError;
+    type Data = T::Data;
 
     async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         Ok(ConnectorService {
@@ -85,6 +86,14 @@ where
             connector: self.connector.create(cfg).await?,
             _t: PhantomData,
         })
+    }
+
+    async fn map_data(
+        &self,
+        cfg: &SharedCfg,
+        data: &Self::Data,
+    ) -> Result<<Self::Service as Service<Connect<A>>>::Data, Self::InitError> {
+        self.connector.map_data(cfg, data).await
     }
 }
 
@@ -96,17 +105,19 @@ where
 {
     type Response = Client;
     type Error = Error<ConnectError>;
+    type Data = T::Data;
 
     /// Connect to amqp server
     async fn call(
         &self,
         req: Connect<A>,
+        data: &Self::Data,
         ctx: ServiceCtx<'_, Self>,
     ) -> Result<Client, Self::Error> {
         let fut = async {
             let (addr, sasl, hostname) = req.into_parts();
             let io = ctx
-                .call(&self.connector, connect::Connect::new(addr))
+                .call(&self.connector, connect::Connect::new(addr), data)
                 .await
                 .map_err(|e| e.map(ConnectError::from))?;
             let io = IoBoxed::from(io);

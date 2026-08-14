@@ -34,7 +34,8 @@ impl<S: 'static> Router<S> {
     where
         T: IntoPattern,
         F: IntoServiceFactory<U, Transfer, Link<S>>,
-        U: ServiceFactory<Transfer, Link<S>, Response = Outcome> + 'static,
+        U: ServiceFactory<Transfer, Link<S>, Response = Outcome, Data = ()> + 'static,
+        U::Service: Service<Transfer, Data = ()>,
         Error: From<U::Error> + From<U::InitError>,
         Outcome: TryFrom<U::Error, Error = Error>,
     {
@@ -54,6 +55,7 @@ impl<S: 'static> Router<S> {
         Response = (),
         Error = Error,
         InitError = std::convert::Infallible,
+        Data = (),
     > {
         let mut router = PatternRouter::build();
         for (addr, hnd) in self.0 {
@@ -76,14 +78,20 @@ struct RouterService<S>(Cell<RouterServiceInner<S>>);
 struct RouterServiceInner<S> {
     state: State<S>,
     router: Rc<PatternRouter<Handle<S>>>,
-    handlers: HashMap<ReceiverLink, Option<Pipeline<HandleService>>>,
+    handlers: HashMap<ReceiverLink, Option<Pipeline<HandleService, ()>>>,
 }
 
 impl<S: 'static> Service<Message> for RouterService<S> {
     type Response = ();
     type Error = Error;
+    type Data = ();
 
-    async fn call(&self, msg: Message, _: ServiceCtx<'_, Self>) -> Result<(), Error> {
+    async fn call(
+        &self,
+        msg: Message,
+        _: &Self::Data,
+        _: ServiceCtx<'_, Self>,
+    ) -> Result<(), Error> {
         match msg {
             Message::Attached(frm, link) => {
                 let path = frm.target().and_then(|target| target.address.clone());
@@ -96,13 +104,13 @@ impl<S: 'static> Service<Message> for RouterService<S> {
                         let rcv_link = link.link.clone();
                         inner.handlers.insert(link.receiver().clone(), None);
 
-                        match hnd.create(link).await {
+                        match hnd.pipeline(link, &()).await {
                             Ok(srv) => {
                                 log::trace!("Handler service is created for {}", rcv_link.name());
                                 self.0
                                     .get_mut()
                                     .handlers
-                                    .insert(rcv_link.clone(), Some(Pipeline::new(srv)));
+                                    .insert(rcv_link.clone(), Some(srv));
                                 if let Some((delivery, tr)) = rcv_link.get_delivery() {
                                     service_call(rcv_link, delivery, tr, &self.0).await
                                 } else {
@@ -235,7 +243,8 @@ struct ResourceServiceFactory<S, T> {
 impl<S, T> ResourceServiceFactory<S, T>
 where
     S: 'static,
-    T: ServiceFactory<Transfer, Link<S>, Response = Outcome> + 'static,
+    T: ServiceFactory<Transfer, Link<S>, Response = Outcome, Data = ()> + 'static,
+    T::Service: Service<Transfer, Data = ()>,
     Error: From<T::Error> + From<T::InitError>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
@@ -249,7 +258,8 @@ where
 
 impl<S, T> ServiceFactory<Transfer, Link<S>> for ResourceServiceFactory<S, T>
 where
-    T: ServiceFactory<Transfer, Link<S>, Response = Outcome>,
+    T: ServiceFactory<Transfer, Link<S>, Response = Outcome, Data = ()>,
+    T::Service: Service<Transfer, Data = ()>,
     Error: From<T::Error> + From<T::InitError>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
@@ -257,6 +267,7 @@ where
     type Error = Error;
     type InitError = Error;
     type Service = ResourceService<S, T::Service>;
+    type Data = ();
 
     async fn create(&self, cfg: Link<S>) -> Result<Self::Service, Self::InitError> {
         let service = self.factory.create(cfg).await?;
@@ -265,6 +276,10 @@ where
             service,
             _t: marker::PhantomData,
         })
+    }
+
+    async fn map_data(&self, cfg: &Link<S>, data: &Self::Data) -> Result<(), Self::InitError> {
+        self.factory.map_data(cfg, data).await.map_err(Into::into)
     }
 }
 
@@ -275,12 +290,13 @@ struct ResourceService<S, T> {
 
 impl<S, T> Service<Transfer> for ResourceService<S, T>
 where
-    T: Service<Transfer, Response = Outcome>,
+    T: Service<Transfer, Response = Outcome, Data = ()>,
     Error: From<T::Error>,
     Outcome: TryFrom<T::Error, Error = Error>,
 {
     type Response = Outcome;
     type Error = Error;
+    type Data = ();
 
     ntex_service::forward_ready!(service);
     ntex_service::forward_shutdown!(service);
@@ -288,9 +304,10 @@ where
     async fn call(
         &self,
         req: Transfer,
+        data: &Self::Data,
         ctx: ServiceCtx<'_, Self>,
     ) -> Result<Self::Response, Self::Error> {
-        match ctx.call(&self.service, req).await {
+        match ctx.call(&self.service, req, data).await {
             Ok(v) => Ok(v),
             Err(err) => Outcome::try_from(err),
         }

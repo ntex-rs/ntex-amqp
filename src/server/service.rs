@@ -40,7 +40,7 @@ where
     pub fn build<F, H>(handshake: F) -> ServerBuilder<St, H, DefaultControlService<St, H::Error>>
     where
         F: IntoServiceFactory<H, Handshake, SharedCfg>,
-        H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>>,
+        H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>, Data = ()>,
     {
         ServerBuilder {
             handshake: handshake.into_factory(),
@@ -53,8 +53,8 @@ where
 impl<St, H, Ctl> ServerBuilder<St, H, Ctl>
 where
     St: 'static,
-    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>> + 'static,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>, Data = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
     Ctl::InitError: fmt::Debug,
     Error: From<Ctl::Error>,
 {
@@ -62,7 +62,7 @@ where
     pub fn control<F, S>(self, service: F) -> ServerBuilder<St, H, S>
     where
         F: IntoServiceFactory<S, ControlFrame, State<St>>,
-        S: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+        S: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
         S::InitError: fmt::Debug,
         Error: From<S::Error>,
     {
@@ -77,7 +77,7 @@ where
     pub fn finish<S, Pb>(self, service: S) -> Server<St, H, Ctl, Pb>
     where
         S: IntoServiceFactory<Pb, Message, State<St>>,
-        Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+        Pb: ServiceFactory<Message, State<St>, Response = (), Data = ()> + 'static,
         Pb::InitError: fmt::Debug,
         Error: From<Pb::Error> + From<Ctl::Error>,
     {
@@ -96,10 +96,10 @@ impl<F, St, H, Ctl, Pb> ServiceFactory<Io<F>, SharedCfg> for Server<St, H, Ctl, 
 where
     F: Filter,
     St: 'static,
-    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>> + 'static,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>, Data = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = (), Data = ()> + 'static,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -107,26 +107,31 @@ where
     type Error = ServerError<H::Error>;
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
+    type Data = ();
 
     async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         self.handshake
-            .pipeline(cfg.clone())
+            .pipeline(cfg.clone(), &())
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
                 cfg: cfg.get(),
                 inner: self.inner.clone(),
             })
+    }
+
+    async fn map_data(&self, _: &SharedCfg, _: &Self::Data) -> Result<(), Self::InitError> {
+        Ok(())
     }
 }
 
 impl<St, H, Ctl, Pb> ServiceFactory<IoBoxed, SharedCfg> for Server<St, H, Ctl, Pb>
 where
     St: 'static,
-    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>> + 'static,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    H: ServiceFactory<Handshake, SharedCfg, Response = HandshakeAck<St>, Data = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = (), Data = ()> + 'static,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -134,10 +139,11 @@ where
     type Error = ServerError<H::Error>;
     type Service = ServerHandler<St, H::Service, Ctl, Pb>;
     type InitError = H::InitError;
+    type Data = ();
 
     async fn create(&self, cfg: SharedCfg) -> Result<Self::Service, Self::InitError> {
         self.handshake
-            .pipeline(cfg.clone())
+            .pipeline(cfg.clone(), &())
             .await
             .map(move |handshake| ServerHandler {
                 handshake,
@@ -145,12 +151,19 @@ where
                 inner: self.inner.clone(),
             })
     }
+
+    async fn map_data(&self, _: &SharedCfg, _: &Self::Data) -> Result<(), Self::InitError> {
+        Ok(())
+    }
 }
 
 /// Amqp connections handler
-pub struct ServerHandler<St, H, Ctl, Pb> {
+pub struct ServerHandler<St, H, Ctl, Pb>
+where
+    H: Service<Handshake>,
+{
     cfg: Cfg<AmqpServiceConfig>,
-    handshake: Pipeline<H>,
+    handshake: Pipeline<H, H::Data>,
     inner: Rc<ServerInner<St, Ctl, Pb>>,
 }
 
@@ -158,9 +171,9 @@ impl<St, H, Ctl, Pb> ServerHandler<St, H, Ctl, Pb>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = (), Data = ()> + 'static,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
@@ -174,13 +187,13 @@ where
                 .map_err(|()| HandshakeError::Timeout)??;
 
         // create publish service
-        let pb_srv = inner.publish.pipeline(st.clone()).await.map_err(|e| {
+        let pb_srv = inner.publish.pipeline(st.clone(), &()).await.map_err(|e| {
             log::error!("Publish service init error: {e:?}");
             ServerError::PublishServiceError
         })?;
 
         // create control service
-        let ctl_srv = inner.control.pipeline(st.clone()).await.map_err(|e| {
+        let ctl_srv = inner.control.pipeline(st.clone(), &()).await.map_err(|e| {
             log::error!("Control service init error: {e:?}");
             ServerError::ControlServiceError
         })?;
@@ -200,28 +213,30 @@ where
     F: Filter,
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = (), Data = ()> + 'static,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Response = ();
     type Error = ServerError<H::Error>;
+    type Data = ();
 
     #[inline]
-    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
+    async fn ready(&self, _: &Self::Data, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
         self.handshake.ready().await.map_err(ServerError::Service)
     }
 
     #[inline]
-    async fn shutdown(&self) {
+    async fn shutdown(&self, _: &Self::Data) {
         self.handshake.shutdown().await;
     }
 
     async fn call(
         &self,
         req: Io<F>,
+        _: &Self::Data,
         _: ServiceCtx<'_, Self>,
     ) -> Result<Self::Response, Self::Error> {
         self.create(IoBoxed::from(req)).await
@@ -232,22 +247,23 @@ impl<St, H, Ctl, Pb> Service<IoBoxed> for ServerHandler<St, H, Ctl, Pb>
 where
     St: 'static,
     H: Service<Handshake, Response = HandshakeAck<St>> + 'static,
-    Ctl: ServiceFactory<ControlFrame, State<St>, Response = ()> + 'static,
+    Ctl: ServiceFactory<ControlFrame, State<St>, Response = (), Data = ()> + 'static,
     Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<Message, State<St>, Response = ()> + 'static,
+    Pb: ServiceFactory<Message, State<St>, Response = (), Data = ()> + 'static,
     Pb::InitError: fmt::Debug,
     Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Response = ();
     type Error = ServerError<H::Error>;
+    type Data = ();
 
     #[inline]
-    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
+    async fn ready(&self, _: &Self::Data, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
         self.handshake.ready().await.map_err(ServerError::Service)
     }
 
     #[inline]
-    async fn shutdown(&self) {
+    async fn shutdown(&self, _: &Self::Data) {
         self.handshake.shutdown().await;
     }
 
@@ -255,6 +271,7 @@ where
     async fn call(
         &self,
         req: IoBoxed,
+        _: &Self::Data,
         _: ServiceCtx<'_, Self>,
     ) -> Result<Self::Response, Self::Error> {
         self.create(req).await
@@ -263,7 +280,7 @@ where
 
 async fn handshake<St, H>(
     io: IoBoxed,
-    handshake: &Pipeline<H>,
+    handshake: &Pipeline<H, H::Data>,
     cfg: Cfg<AmqpServiceConfig>,
 ) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<H::Error>>
 where

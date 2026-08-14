@@ -31,8 +31,8 @@ where
 {
     pub(crate) fn new(
         sink: Connection,
-        service: Pipeline<Sr>,
-        ctl_service: Pipeline<Ctl>,
+        service: Pipeline<Sr, Sr::Data>,
+        ctl_service: Pipeline<Ctl, Ctl::Data>,
         idle_timeout: Millis,
     ) -> Self {
         let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
@@ -63,8 +63,9 @@ where
 {
     type Response = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
+    type Data = ();
 
-    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
+    async fn ready(&self, _: &Self::Data, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
         poll_fn(|cx| {
             if let Some(err) = self.ctl_error.take() {
                 log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
@@ -104,7 +105,7 @@ where
         .await
     }
 
-    fn poll(&self, cx: &mut Context<'_>) -> Result<(), Self::Error> {
+    fn poll(&self, _: &Self::Data, cx: &mut Context<'_>) -> Result<(), Self::Error> {
         let mut futs = self.ctl_fut.borrow_mut();
         let queue = self.sink.get_control_queue();
         queue.waker.register(cx.waker());
@@ -153,7 +154,7 @@ where
         Ok(())
     }
 
-    async fn shutdown(&self) {
+    async fn shutdown(&self, _: &Self::Data) {
         self.sink
             .0
             .get_mut()
@@ -170,6 +171,7 @@ where
     async fn call(
         &self,
         request: DispatchItem<AmqpCodec<AmqpFrame>>,
+        _: &Self::Data,
         _: ServiceCtx<'_, Self>,
     ) -> Result<Self::Response, Self::Error> {
         match request {

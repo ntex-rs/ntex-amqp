@@ -7,7 +7,7 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let driver = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new("127.0.0.1:5671"))

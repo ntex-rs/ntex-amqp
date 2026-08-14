@@ -58,7 +58,7 @@ async fn test_simple() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
@@ -139,7 +139,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
@@ -217,7 +217,7 @@ async fn test_sasl() -> std::io::Result<()> {
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let _client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri).sasl_auth("".into(), "user1".into(), "password1".into()))
@@ -268,7 +268,7 @@ async fn test_session_end() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
@@ -343,7 +343,7 @@ async fn test_link_detach() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
@@ -410,7 +410,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
@@ -469,7 +469,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
@@ -529,7 +529,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = client::Connector::new()
-        .pipeline(SharedCfg::default())
+        .pipeline(SharedCfg::default(), &())
         .await
         .unwrap()
         .call(client::Connect::new(uri))
