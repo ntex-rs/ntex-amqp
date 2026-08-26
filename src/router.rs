@@ -26,7 +26,8 @@ impl<S: 'static> Router<S> {
     }
 
     #[must_use]
-    pub fn service<T, F, U>(mut self, address: &T, f: F) -> Self
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn service<T, F, U>(mut self, address: T, f: F) -> Self
     where
         T: IntoPattern,
         F: IntoServiceFactory<U, (), Transfer, Link<S>>,
