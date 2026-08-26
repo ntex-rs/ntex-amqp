@@ -1,9 +1,10 @@
+use ntex::SharedCfg;
 use ntex::service::{boxed::BoxService, fn_factory_with_config};
 use ntex_amqp::{error::AmqpError, error::LinkError, server};
 
 async fn server(
-    link: server::Link<()>,
-) -> Result<BoxService<server::Transfer, server::Outcome, AmqpError>, LinkError> {
+    link: &server::Link<()>,
+) -> Result<BoxService<(), server::Transfer, server::Outcome, AmqpError>, LinkError> {
     println!("OPEN LINK: {:?}", link);
     Err(LinkError::force_detach().description("unimplemented"))
 }
@@ -14,15 +15,13 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     ntex::server::Server::builder()
-        .bind("amqp", "127.0.0.1:5671", async |_| {
-            server::Server::build(|con: server::Handshake| async move {
-                match con {
-                    server::Handshake::Amqp(con) => {
-                        let con = con.open().await.unwrap();
-                        Ok(con.ack(()))
-                    }
-                    server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
+        .bind("amqp", "127.0.0.1:5671", SharedCfg::new("SRV"), async |_| {
+            server::Server::build(async move |con: server::Handshake| match con {
+                server::Handshake::Amqp(con) => {
+                    let con = con.open().await.unwrap();
+                    Ok(con.ack(()))
                 }
+                server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
             })
             .finish(
                 server::Router::builder()

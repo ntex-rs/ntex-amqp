@@ -6,7 +6,6 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_bytes::{BufMut, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
-use ntex_util::future::{Either, Ready};
 
 use crate::delivery::TransferBuilder;
 use crate::session::{Session, SessionInner};
@@ -43,9 +42,7 @@ impl std::fmt::Debug for SenderLink {
 
 impl std::fmt::Debug for SenderLinkInner {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.debug_tuple("SenderLinkInner")
-            .field(&&*self.name)
-            .finish()
+        fmt.debug_tuple("SenderLinkInner").field(&&*self.name).finish()
     }
 }
 
@@ -144,10 +141,7 @@ impl SenderLink {
     }
 
     /// Close sender link with error
-    pub fn close_with_error<E>(
-        &self,
-        error: E,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>>
+    pub fn close_with_error<E>(&self, error: E) -> impl Future<Output = Result<(), AmqpProtocolError>>
     where
         Error: From<E>,
     {
@@ -261,12 +255,9 @@ impl SenderLinkInner {
         self.on_credit.notify_and_lock_readiness();
     }
 
-    pub(crate) fn close(
-        &mut self,
-        error: Option<Error>,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
+    pub(crate) async fn close(&mut self, error: Option<Error>) -> Result<(), AmqpProtocolError> {
         if self.closed {
-            Either::Left(Ready::Ok(()))
+            Ok(())
         } else {
             self.closed = true;
             self.on_close.notify_and_lock_readiness();
@@ -279,13 +270,11 @@ impl SenderLinkInner {
                 .get_mut()
                 .detach_sender_link(self.id as Handle, true, error, tx);
 
-            Either::Right(async move {
-                match rx.await {
-                    Ok(Ok(())) => Ok(()),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(AmqpProtocolError::Disconnected),
-                }
-            })
+            match rx.await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(AmqpProtocolError::Disconnected),
+            }
         }
     }
 
@@ -471,11 +460,7 @@ impl SenderLinkBuilder {
 
     /// Initiate attach sender process
     pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
-        let result = self
-            .session
-            .get_mut()
-            .attach_local_sender_link(self.frame)
-            .await;
+        let result = self.session.get_mut().attach_local_sender_link(self.frame).await;
 
         match result {
             Ok(Ok(inner)) => Ok(SenderLink { inner }),

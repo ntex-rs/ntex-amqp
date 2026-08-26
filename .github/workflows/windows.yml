@@ -45,7 +45,13 @@ jobs:
           path: ~/.cargo/git
           key: ${{ matrix.version }}-x86_64-pc-windows-msvc-cargo-index-trimmed-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests
+      - name: Run tests [neon]
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all --features=ntex/neon -- --nocapture
+
+      - name: Run tests [tokio]
         uses: actions-rs/cargo@v1
         with:
           command: test

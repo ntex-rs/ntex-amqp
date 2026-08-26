@@ -57,10 +57,7 @@ impl Sasl {
         .into();
 
         let codec = AmqpCodec::<SaslFrame>::new();
-        state
-            .send(frame, &codec)
-            .await
-            .map_err(HandshakeError::from)?;
+        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
         let frame = state
             .recv(&codec)
             .await?
@@ -88,9 +85,7 @@ pub struct SaslInit {
 
 impl fmt::Debug for SaslInit {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("SaslInit")
-            .field("frame", &self.frame)
-            .finish()
+        fmt.debug_struct("SaslInit").field("frame", &self.frame).finish()
     }
 }
 
@@ -127,10 +122,7 @@ impl SaslInit {
         let local_config = self.local_config;
         let frame = SaslChallenge { challenge }.into();
 
-        state
-            .send(frame, &codec)
-            .await
-            .map_err(HandshakeError::from)?;
+        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
         let frame = state
             .recv(&codec)
             .await?
@@ -158,15 +150,9 @@ impl SaslInit {
             additional_data: None,
         }
         .into();
-        state
-            .send(frame, &codec)
-            .await
-            .map_err(HandshakeError::from)?;
+        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
 
-        Ok(SaslSuccess {
-            state,
-            local_config,
-        })
+        Ok(SaslSuccess { state, local_config })
     }
 }
 
@@ -207,19 +193,13 @@ impl SaslResponse {
             additional_data: None,
         }
         .into();
-        state
-            .send(frame, &codec)
-            .await
-            .map_err(HandshakeError::from)?;
+        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
         state
             .recv(&codec)
             .await?
             .ok_or(HandshakeError::Disconnected(None))?;
 
-        Ok(SaslSuccess {
-            state,
-            local_config,
-        })
+        Ok(SaslSuccess { state, local_config })
     }
 }
 

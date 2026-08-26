@@ -1,21 +1,17 @@
-#![deny(
-    rust_2018_idioms,
-    warnings,
-    unreachable_pub,
-    // missing_debug_implementations,
-    clippy::pedantic
-)]
+#![deny(clippy::pedantic)]
 #![allow(
     clippy::clone_on_copy,
     clippy::cast_possible_truncation,
     clippy::let_underscore_future,
     clippy::missing_fields_in_debug,
-    clippy::must_use_candidate,
     clippy::missing_errors_doc,
+    clippy::must_use_candidate,
     clippy::similar_names,
     clippy::struct_field_names,
     clippy::too_many_lines,
-    clippy::type_complexity
+    clippy::type_complexity,
+    clippy::unused_async,
+    clippy::unused_async_trait_impl
 )]
 
 #[macro_use]
