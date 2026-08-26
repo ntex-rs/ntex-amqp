@@ -1,9 +1,10 @@
 use std::task::{Context, Poll, ready};
-use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin};
+use std::{cell, cmp, future::Future, marker, pin::Pin};
 
 use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
-use ntex_service::{Pipeline, PipelineBinding, PipelineCall, Service, ServiceCtx};
+use ntex_service::pipeline::{Pipeline, PipelineCall};
+use ntex_service::{Ctx, Service};
 use ntex_util::time::{Millis, Sleep, sleep};
 use ntex_util::{future::Either, task::LocalWaker};
 
@@ -11,153 +12,79 @@ use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
 use crate::{ControlFrame, ControlFrameKind, ReceiverLink, connection::Connection, types};
 
+type ControlCall = PipelineCall<ControlFrame, (), Error>;
+
 /// Amqp server dispatcher service.
-pub(crate) struct Dispatcher<Sr: Service<types::Message>, Ctl: Service<ControlFrame>> {
+pub(crate) struct Dispatcher {
     sink: Connection,
-    service: PipelineBinding<Sr, types::Message>,
-    ctl_service: PipelineBinding<Ctl, ControlFrame>,
-    ctl_fut: cell::RefCell<Vec<(ControlFrame, PipelineCall<Ctl, ControlFrame>)>>,
+    service: Pipeline<types::Message, (), Error>,
+    ctl_service: Pipeline<ControlFrame, (), Error>,
+    ctl_fut: cell::RefCell<Vec<(ControlFrame, ControlCall)>>,
     ctl_error: cell::Cell<Option<AmqpDispatcherError>>,
     ctl_error_waker: LocalWaker,
     idle_sleep: Sleep,
     idle_timeout: Millis,
 }
 
-impl<Sr, Ctl> Dispatcher<Sr, Ctl>
-where
-    Sr: Service<types::Message, Response = ()> + 'static,
-    Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Error: From<Sr::Error> + From<Ctl::Error>,
-{
-    pub(crate) fn new(
-        sink: Connection,
-        service: Pipeline<Sr>,
-        ctl_service: Pipeline<Ctl>,
-        idle_timeout: Millis,
-    ) -> Self {
+impl Dispatcher {
+    pub(crate) fn new<Sr, Ctl>(sink: Connection, svc: Sr, ctl: Ctl, idle_timeout: Millis) -> Self
+    where
+        Sr: Service<(), types::Message, Res = ()> + 'static,
+        Ctl: Service<(), ControlFrame, Res = ()> + 'static,
+        Error: From<Sr::Error> + From<Ctl::Error>,
+    {
         let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
         Dispatcher {
             sink,
             idle_timeout,
-            service: service.bind(),
-            ctl_service: ctl_service.bind(),
+            service: Pipeline::new(svc.map_err(Into::into)),
+            ctl_service: Pipeline::new(ctl.map_err(Into::into)),
             ctl_fut: cell::RefCell::new(Vec::new()),
             ctl_error: cell::Cell::new(None),
             ctl_error_waker: LocalWaker::default(),
             idle_sleep: sleep(idle_timeout),
         }
     }
-
-    fn call_control_service(&self, frame: ControlFrame) {
-        let fut = self.ctl_service.call(frame.clone());
-        self.ctl_fut.borrow_mut().push((frame, fut));
-        self.sink.get_control_queue().waker.wake();
-    }
 }
 
-impl<Sr, Ctl> Service<DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher<Sr, Ctl>
-where
-    Sr: Service<types::Message, Response = ()> + 'static,
-    Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Error: From<Sr::Error> + From<Ctl::Error>,
-{
-    type Response = Option<AmqpFrame>;
+impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
+    type Res = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
 
-    async fn ready(&self, _: ServiceCtx<'_, Self>) -> Result<(), Self::Error> {
-        poll_fn(|cx| {
-            if let Some(err) = self.ctl_error.take() {
-                log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
-                let _ = self.sink.close();
-                return Poll::Ready(Err(err));
-            }
-
-            // check readiness
-            let service_poll = self.service.poll_ready(cx).map_err(|err| {
-                let err = Error::from(err);
-                log::error!(
-                    "{}: Publish service readiness check failed: {:?}",
-                    self.sink.tag(),
-                    err
-                );
-                let _ = self.sink.close_with_error(err);
-                AmqpDispatcherError::Service
-            })?;
-
-            let ctl_service_poll = self.ctl_service.poll_ready(cx).map_err(|err| {
-                let err = Error::from(err);
-                log::error!(
-                    "{}: Control service readiness check failed: {:?}",
-                    self.sink.tag(),
-                    err
-                );
-                let _ = self.sink.close_with_error(err);
-                AmqpDispatcherError::Service
-            })?;
-
-            if service_poll.is_pending() || ctl_service_poll.is_pending() {
-                Poll::Pending
-            } else {
-                Poll::Ready(Ok(()))
-            }
-        })
-        .await
-    }
-
-    fn poll(&self, cx: &mut Context<'_>) -> Result<(), Self::Error> {
-        let mut futs = self.ctl_fut.borrow_mut();
-        let queue = self.sink.get_control_queue();
-        queue.waker.register(cx.waker());
-
-        // enqueue pending control frames
-        queue.pending.borrow_mut().drain(..).for_each(|frame| {
-            let fut = self.ctl_service.call(frame.clone());
-            futs.push((frame, fut));
-        });
-
-        // process control frame
-        let mut idx = 0;
-        while futs.len() > idx {
-            let item = &mut futs[idx];
-            let res = match Pin::new(&mut item.1).poll(cx) {
-                Poll::Pending => {
-                    idx += 1;
-                    continue;
-                }
-                Poll::Ready(res) => res,
-            };
-            let (frame, _) = futs.swap_remove(idx);
-            let result = match res {
-                Ok(()) => self.handle_control_frame(&frame, None),
-                Err(e) => self.handle_control_frame(&frame, Some(e.into())),
-            };
-
-            if let Err(err) = result {
-                self.ctl_error.set(Some(err));
-                self.ctl_error_waker.wake();
-                return Ok(());
-            }
+    async fn ready(&self, ctx: Ctx<'_, Self, ()>) -> Result<(), Self::Error> {
+        if let Some(err) = self.ctl_error.take() {
+            log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
+            let _ = self.sink.close();
+            return Err(err);
         }
 
-        // handle idle timeout
-        if self.idle_timeout.non_zero() && self.idle_sleep.poll_elapsed(cx).is_ready() {
-            log::trace!(
-                "{}: Send keep-alive ping, timeout: {:?} secs",
+        // check readiness
+        self.service.ready().await.map_err(|err| {
+            log::error!(
+                "{}: Publish service readiness check failed: {:?}",
                 self.sink.tag(),
-                self.idle_timeout
+                err
             );
-            self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
-            self.idle_sleep.reset(self.idle_timeout);
-        }
+            let _ = self.sink.close_with_error(err);
+            AmqpDispatcherError::Service
+        })?;
 
+        self.ctl_service.ready().await.map_err(|err| {
+            log::error!(
+                "{}: Control service readiness check failed: {:?}",
+                self.sink.tag(),
+                err
+            );
+            let _ = self.sink.close_with_error(err);
+            AmqpDispatcherError::Service
+        })?;
+
+        ctx.poll_once(|cx| self.poll_dispatcher(cx));
         Ok(())
     }
 
-    async fn shutdown(&self) {
-        self.sink
-            .0
-            .get_mut()
-            .set_error(AmqpProtocolError::Disconnected);
+    async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
+        self.sink.0.get_mut().set_error(AmqpProtocolError::Disconnected);
         let _ = self
             .ctl_service
             .call(ControlFrame::new_kind(ControlFrameKind::Closed))
@@ -169,10 +96,10 @@ where
 
     async fn call(
         &self,
-        request: DispatchItem<AmqpCodec<AmqpFrame>>,
-        _: ServiceCtx<'_, Self>,
-    ) -> Result<Self::Response, Self::Error> {
-        match request {
+        req: DispatchItem<AmqpCodec<AmqpFrame>>,
+        _: Ctx<'_, Self, ()>,
+    ) -> Result<Self::Res, Self::Error> {
+        match req {
             DispatchItem::Item(frame) => {
                 #[cfg(feature = "frame-trace")]
                 log::trace!("{}: incoming: {frame:#?}", self.sink.tag());
@@ -190,9 +117,7 @@ where
                     types::Action::Transfer(link) => {
                         if self.sink.is_opened() {
                             let lnk = link.clone();
-                            if let Err(e) = self.service.call(types::Message::Transfer(link)).await
-                            {
-                                let e = Error::from(e);
+                            if let Err(e) = self.service.call(types::Message::Transfer(link)).await {
                                 log::trace!("Service error {e:?}");
                                 let _ = lnk.close_with_error(e);
                             }
@@ -225,7 +150,7 @@ where
                     }
                     types::Action::DetachReceiver(link, frm) => {
                         let lnk = link.clone();
-                        let fut = self.service.call(types::Message::Detached(lnk));
+                        let fut = self.service.call_static(types::Message::Detached(lnk));
                         spawn(async move {
                             let _ = fut.await;
                         });
@@ -243,7 +168,7 @@ where
                             })
                             .collect();
 
-                        let fut = self.service.call(types::Message::DetachedAll(receivers));
+                        let fut = self.service.call_static(types::Message::DetachedAll(receivers));
                         spawn(async move {
                             let _ = fut.await;
                         });
@@ -252,9 +177,9 @@ where
                         ));
                     }
                     types::Action::RemoteClose(err) => {
-                        self.call_control_service(ControlFrame::new_kind(
-                            ControlFrameKind::ProtocolError(err),
-                        ));
+                        self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                            err,
+                        )));
                     }
                     types::Action::None => (),
                 }
@@ -280,9 +205,7 @@ where
                 Ok(None)
             }
             DispatchItem::Stop(Reason::Io(e)) => {
-                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
-                    e,
-                )));
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(e)));
                 Ok(None)
             }
             DispatchItem::Control(_) => Ok(None),
@@ -290,12 +213,60 @@ where
     }
 }
 
-impl<Sr, Ctl> Dispatcher<Sr, Ctl>
-where
-    Sr: Service<types::Message, Response = ()> + 'static,
-    Ctl: Service<ControlFrame, Response = ()> + 'static,
-    Error: From<Sr::Error> + From<Ctl::Error>,
-{
+impl Dispatcher {
+    fn poll_dispatcher(&self, cx: &mut Context<'_>) {
+        let mut futs = self.ctl_fut.borrow_mut();
+        let queue = self.sink.get_control_queue();
+        queue.waker.register(cx.waker());
+
+        // enqueue pending control frames
+        queue.pending.borrow_mut().drain(..).for_each(|frame| {
+            let fut = self.ctl_service.call_static(frame.clone());
+            futs.push((frame, fut));
+        });
+
+        // process control frame
+        let mut idx = 0;
+        while futs.len() > idx {
+            let item = &mut futs[idx];
+            let res = match Pin::new(&mut item.1).poll(cx) {
+                Poll::Pending => {
+                    idx += 1;
+                    continue;
+                }
+                Poll::Ready(res) => res,
+            };
+            let (frame, _) = futs.swap_remove(idx);
+            let result = match res {
+                Ok(()) => self.handle_control_frame(&frame, None),
+                Err(e) => self.handle_control_frame(&frame, Some(e)),
+            };
+
+            if let Err(err) = result {
+                self.ctl_error.set(Some(err));
+                self.ctl_error_waker.wake();
+                return;
+            }
+        }
+
+        // handle idle timeout
+        if self.idle_timeout.non_zero() && self.idle_sleep.poll_elapsed(cx).is_ready() {
+            log::trace!(
+                "{}: Send keep-alive ping, timeout: {:?} secs",
+                self.sink.tag(),
+                self.idle_timeout
+            );
+            self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
+            self.idle_sleep.reset(self.idle_timeout);
+        }
+    }
+
+    fn call_control_service(&self, frame: ControlFrame) {
+        let fut = self.ctl_service.call_static(frame.clone());
+        self.ctl_fut.borrow_mut().push((frame, fut));
+        self.sink.get_control_queue().waker.wake();
+    }
+
     fn handle_control_frame(
         &self,
         frame: &ControlFrame,
@@ -308,16 +279,16 @@ where
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::AttachSender(frm, _, link) => {
-                    frame
-                        .session_cell()
-                        .get_mut()
-                        .detach_unconfirmed_sender_link(frm, &link.inner, Some(err));
+                    frame.session_cell().get_mut().detach_unconfirmed_sender_link(
+                        frm,
+                        &link.inner,
+                        Some(err),
+                    );
                 }
                 ControlFrameKind::Flow(_, link) | ControlFrameKind::RemoteDetachSender(_, link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::LocalDetachSender(..)
-                | ControlFrameKind::LocalDetachReceiver(..) => {}
+                ControlFrameKind::LocalDetachSender(..) | ControlFrameKind::LocalDetachReceiver(..) => {}
                 ControlFrameKind::ProtocolError(err) => {
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
@@ -325,8 +296,7 @@ where
                 ControlFrameKind::Closed | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
-                ControlFrameKind::LocalSessionEnded(_)
-                | ControlFrameKind::RemoteSessionEnded(_) => (),
+                ControlFrameKind::LocalSessionEnded(_) | ControlFrameKind::RemoteSessionEnded(_) => (),
             }
         } else {
             match frame.0.get_mut().kind {
@@ -334,13 +304,13 @@ where
                     let link = link.clone();
                     let fut = self
                         .service
-                        .call(types::Message::Attached(frm.clone(), link.clone()));
+                        .call_static(types::Message::Attached(frm.clone(), link.clone()));
                     let response = pfrm.take();
 
                     ntex_rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
-                            let _ = link.close_with_error(Error::from(err)).await;
+                            let _ = link.close_with_error(err).await;
                         } else {
                             link.confirm_receiver_link(response);
                             link.set_link_credit(50);

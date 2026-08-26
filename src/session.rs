@@ -2,21 +2,19 @@ use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
 
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
-use ntex_util::{HashMap, future::Either, future::Ready};
+use ntex_util::{HashMap, future::Either};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
-    self as codec, Accepted, Attach, Begin, DeliveryNumber, DeliveryState, Detach, Disposition,
-    End, Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode,
-    Source, Transfer, TransferBody, TransferNumber,
+    self as codec, Accepted, Attach, Begin, DeliveryNumber, DeliveryState, Detach, Disposition, End, Error,
+    Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode, Source, Transfer,
+    TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::{AmqpFrame, Encode};
 
 use crate::delivery::DeliveryInner;
 use crate::error::AmqpProtocolError;
-use crate::rcvlink::{
-    EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner,
-};
+use crate::rcvlink::{EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner};
 use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{ConnectionRef, ControlFrame, cell::Cell, types::Action};
 
@@ -98,12 +96,14 @@ impl Session {
         self.inner.get_ref().remote_incoming_window
     }
 
-    pub fn end(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        let inner = self.inner.get_mut();
+    pub async fn end(&self) -> Result<(), AmqpProtocolError> {
+        {
+            let inner = self.inner.get_mut();
 
-        if inner.flags.contains(Flags::ENDED) {
-            Either::Left(Ready::Ok(()))
-        } else {
+            if inner.flags.contains(Flags::ENDED) {
+                return Ok(());
+            }
+
             if !inner.flags.contains(Flags::ENDING) {
                 inner.sink.close_session(inner.remote_channel_id as usize);
                 inner.post_frame(Frame::End(End { error: None }));
@@ -115,15 +115,13 @@ impl Session {
                         crate::ControlFrameKind::LocalSessionEnded(inner.get_all_links()),
                     ));
             }
-            let inner = self.inner.clone();
-            Either::Right(async move {
-                inner.closed.wait().await;
-                if let Some(err @ AmqpProtocolError::SessionEnded(Some(_))) = inner.error.clone() {
-                    Err(err)
-                } else {
-                    Ok(())
-                }
-            })
+
+            self.inner.closed.wait().await;
+            if let Some(err @ AmqpProtocolError::SessionEnded(Some(_))) = self.inner.error.clone() {
+                Err(err)
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -215,9 +213,7 @@ impl Session {
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
 
-        self.inner
-            .get_mut()
-            .detach_sender_link(handle, false, error, tx);
+        self.inner.get_mut().detach_sender_link(handle, false, error, tx);
 
         async move {
             match rx.await {
@@ -336,10 +332,7 @@ impl SessionInner {
 
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
-        log::trace!(
-            "{}: Connection is failed, dropping state: {err:?}",
-            self.tag()
-        );
+        log::trace!("{}: Connection is failed, dropping state: {err:?}", self.tag());
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
@@ -393,12 +386,8 @@ impl SessionInner {
         self.links
             .iter()
             .filter_map(|(_, st)| match st {
-                Either::Left(SenderLinkState::Established(link)) => {
-                    Some(Either::Left((*link).clone()))
-                }
-                Either::Right(ReceiverLinkState::Established(link)) => {
-                    Some(Either::Right((*link).clone()))
-                }
+                Either::Left(SenderLinkState::Established(link)) => Some(Either::Left((*link).clone())),
+                Either::Right(ReceiverLinkState::Established(link)) => Some(Either::Right((*link).clone())),
                 _ => None,
             })
             .collect()
@@ -410,9 +399,7 @@ impl SessionInner {
 
     /// Initialize creation of remote sender link
     pub(crate) fn new_remote_sender(&mut self, attach: &Attach) -> (usize, Attach) {
-        let id = self
-            .links
-            .insert(Either::Left(SenderLinkState::OpeningRemote));
+        let id = self.links.insert(Either::Left(SenderLinkState::OpeningRemote));
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -464,11 +451,7 @@ impl SessionInner {
         mut response: Attach,
         link: Cell<SenderLinkInner>,
     ) -> SenderLink {
-        log::trace!(
-            "{}: Remote sender link attached: {:?}",
-            self.tag(),
-            attach.name()
-        );
+        log::trace!("{}: Remote sender link attached: {:?}", self.tag(), attach.name());
         let token = link.id;
 
         if let Some(source) = attach.source()
@@ -481,9 +464,9 @@ impl SessionInner {
         *self
             .links
             .get_mut(token)
-            .expect("new remote sender entry must exist") = Either::Left(
-            SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
-        );
+            .expect("new remote sender entry must exist") = Either::Left(SenderLinkState::Established(
+            EstablishedSenderLink::new(link.clone()),
+        ));
 
         *response.handle_mut() = token as Handle;
         *response.max_message_size_mut() = link.max_message_size().map(u64::from);
@@ -536,18 +519,12 @@ impl SessionInner {
                 }
                 SenderLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
-                    log::error!(
-                        "{}: Unexpected sender link state: closing - {id}",
-                        self.tag()
-                    );
+                    log::error!("{}: Unexpected sender link state: closing - {id}", self.tag());
                 }
             }
         } else {
             let _ = tx.send(Ok(()));
-            log::debug!(
-                "{}: Sender link does not exist while detaching: {id}",
-                self.tag()
-            );
+            log::debug!("{}: Sender link does not exist while detaching: {id}", self.tag());
         }
     }
 
@@ -591,8 +568,7 @@ impl SessionInner {
     }
 
     pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
-        if let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(hnd as usize)
-        {
+        if let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(hnd as usize) {
             Some(link)
         } else {
             None
@@ -655,15 +631,8 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(
-            cell,
-            token as u32,
-            token as u32,
-            &frame,
-        ));
-        entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
-            inner, tx,
-        )))));
+        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, token as u32, &frame));
+        entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((inner, tx)))));
 
         frame.0.handle = token as Handle;
 
@@ -752,10 +721,7 @@ impl SessionInner {
                     if self.links.contains(id as usize) {
                         let _ = self.links.remove(id as usize);
                     }
-                    log::error!(
-                        "{}: Unexpected receiver link state: closing - {id}",
-                        self.tag()
-                    );
+                    log::error!("{}: Unexpected receiver link state: closing - {id}", self.tag());
                 }
                 ReceiverLinkState::OpeningLocal(_inner) => unimplemented!(),
             }
@@ -769,9 +735,7 @@ impl SessionInner {
     }
 
     pub(crate) fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
-        if let Some(Either::Right(ReceiverLinkState::Established(link))) =
-            self.links.get(hnd as usize)
-        {
+        if let Some(Either::Right(ReceiverLinkState::Established(link))) = self.links.get(hnd as usize) {
             Some(link)
         } else {
             None
@@ -824,15 +788,11 @@ impl SessionInner {
                     if let Some(link) = self.links.get_mut(idx) {
                         match link {
                             Either::Left(_) => {
-                                log::debug!(
-                                    "{}: Got unexpected trasfer from sender link",
-                                    self.tag()
-                                );
+                                log::debug!("{}: Got unexpected trasfer from sender link", self.tag());
                                 Err(AmqpProtocolError::Unexpected(Frame::Transfer(transfer)))
                             }
                             Either::Right(link) => match link {
-                                ReceiverLinkState::Opening(_)
-                                | ReceiverLinkState::OpeningLocal(_) => {
+                                ReceiverLinkState::Opening(_) | ReceiverLinkState::OpeningLocal(_) => {
                                     log::debug!(
                                         "{}: Got transfer for opening link: {} -> {idx}",
                                         self.tag(),
@@ -913,9 +873,9 @@ impl SessionInner {
                             if let Some((link, tx)) = opt_item.take() {
                                 self.remote_handles.insert(attach.handle(), *index);
 
-                                *item = ReceiverLinkState::Established(
-                                    EstablishedReceiverLink::new(link.clone()),
-                                );
+                                *item = ReceiverLinkState::Established(EstablishedReceiverLink::new(
+                                    link.clone(),
+                                ));
                                 let _ = tx.send(Ok(ReceiverLink::new(link)));
                             } else {
                                 // TODO: close session
@@ -1114,10 +1074,7 @@ impl SessionInner {
                 if let Some(delivery) = deliveries.get_mut(&no) {
                     delivery.handle_disposition(disp);
                 } else {
-                    log::trace!(
-                        "{}: Unknown deliveryid: {no:?} disp: {disp:?}",
-                        self.sink.tag()
-                    );
+                    log::trace!("{}: Unknown deliveryid: {no:?} disp: {disp:?}", self.sink.tag());
                 }
             }
         } else if let Some(delivery) = deliveries.get_mut(&from) {

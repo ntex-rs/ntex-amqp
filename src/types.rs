@@ -6,8 +6,7 @@ use ntex_util::future::Either;
 
 use crate::codec::protocol::{Accepted, Attach, DeliveryState, Detach, Error, Flow, Rejected};
 use crate::{
-    Handle, State, error::AmqpProtocolError, rcvlink::ReceiverLink, session::Session,
-    sndlink::SenderLink,
+    Handle, State, error::AmqpProtocolError, rcvlink::ReceiverLink, session::Session, sndlink::SenderLink,
 };
 
 pub use crate::codec::protocol::Transfer;
@@ -41,12 +40,7 @@ pub struct Link<S> {
 }
 
 impl<S> Link<S> {
-    pub(crate) fn new(
-        attach: Attach,
-        link: ReceiverLink,
-        state: State<S>,
-        path: ByteString,
-    ) -> Self {
+    pub(crate) fn new(attach: Attach, link: ReceiverLink, state: State<S>, path: ByteString) -> Self {
         Link {
             state,
             link,
@@ -105,9 +99,7 @@ impl<S> Clone for Link<S> {
 
 impl<S> fmt::Debug for Link<S> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("Link<S>")
-            .field("frame", self.frame())
-            .finish()
+        fmt.debug_struct("Link<S>").field("frame", self.frame()).finish()
     }
 }
 

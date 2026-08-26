@@ -16,10 +16,7 @@ pub enum Handshake {
 
 impl Handshake {
     pub(crate) fn new_plain(state: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
-        Handshake::Amqp(HandshakeAmqp {
-            state,
-            local_config,
-        })
+        Handshake::Amqp(HandshakeAmqp { state, local_config })
     }
 
     pub(crate) fn new_sasl(state: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
@@ -55,10 +52,7 @@ impl HandshakeAmqp {
         let codec = AmqpCodec::<AmqpFrame>::new();
 
         let frame = state.recv(&codec).await?.ok_or_else(|| {
-            log::trace!(
-                "{}: Server amqp is disconnected during open frame",
-                state.tag()
-            );
+            log::trace!("{}: Server amqp is disconnected during open frame", state.tag());
             HandshakeError::Disconnected(None)
         })?;
 

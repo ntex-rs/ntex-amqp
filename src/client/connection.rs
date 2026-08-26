@@ -1,7 +1,6 @@
 use ntex_dispatcher::Dispatcher as IoDispatcher;
 use ntex_io::IoBoxed;
 use ntex_service::{IntoService, Pipeline, Service, fn_service};
-use ntex_util::future::Ready;
 
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
@@ -64,29 +63,29 @@ where
     pub async fn start_default(self) -> Result<(), AmqpDispatcherError> {
         let dispatcher = Dispatcher::new(
             self.connection,
-            Pipeline::new(fn_service(|_| Ready::<_, LinkError>::Ok(()))),
-            Pipeline::new(fn_service(|_| Ready::<_, LinkError>::Ok(()))),
+            fn_service(async |_| Ok::<_, LinkError>(())),
+            fn_service(async |_| Ok::<_, LinkError>(())),
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::new(self.io, self.codec, dispatcher).await
+        IoDispatcher::new(self.io, self.codec, Pipeline::new(dispatcher)).await
     }
 
-    pub async fn start<F, S>(self, service: F) -> Result<(), AmqpDispatcherError>
+    pub async fn start<F, S>(self, f: F) -> Result<(), AmqpDispatcherError>
     where
-        F: IntoService<S, ControlFrame>,
-        S: Service<ControlFrame, Response = ()>,
+        F: IntoService<S, (), ControlFrame>,
+        S: Service<(), ControlFrame, Res = ()>,
         S::Error: std::fmt::Debug + 'static,
         crate::error::Error: From<S::Error>,
         S: 'static,
     {
         let dispatcher = Dispatcher::new(
             self.connection,
-            Pipeline::new(fn_service(|_| Ready::<_, S::Error>::Ok(()))),
-            Pipeline::new(service.into_service()),
+            fn_service(async |_| Ok::<_, S::Error>(())),
+            f.into_service(),
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::new(self.io, self.codec, dispatcher).await
+        IoDispatcher::new(self.io, self.codec, Pipeline::new(dispatcher)).await
     }
 }

@@ -1,5 +1,9 @@
 # Changes
 
+## [6.0.0-beta.0] - 2026-08-26
+
+* Update to ntex-service 5.0
+
 ## [5.9.0] - 2026-08-12
 
 * Allow to set container_id and properties for Open frame

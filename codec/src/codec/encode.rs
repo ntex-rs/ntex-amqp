@@ -2,6 +2,7 @@ use std::{collections::HashMap, hash::BuildHasher, hash::Hash};
 
 use chrono::{DateTime, Utc};
 use ntex_bytes::{BufMut, BytePages, ByteString, Bytes};
+use ntex_util::hash_map::HashMap as HashMapBase;
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayEncode, Composite, Encode};
@@ -447,58 +448,66 @@ impl Encode for StaticSymbol {
     }
 }
 
-fn map_encoded_size<K: Hash + Eq + Encode, V: Encode, S: BuildHasher>(
-    map: &HashMap<K, V, S>,
-) -> usize {
-    map.iter()
-        .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
-}
+macro_rules! hashmap {
+    ($ty:ident) => {
+        impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for $ty<K, V, S> {
+            fn encoded_size(&self) -> usize {
+                let size = self
+                    .iter()
+                    .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
+                // f:1 + s:4 + c:4 vs f:1 + s:1 + c:1
+                let preamble = if size + 1 > u8::MAX as usize { 9 } else { 3 };
+                preamble + size
+            }
 
-impl<K: Eq + Hash + Encode, V: Encode, S: BuildHasher> Encode for HashMap<K, V, S> {
-    fn encoded_size(&self) -> usize {
-        let size = map_encoded_size(self);
-        // f:1 + s:4 + c:4 vs f:1 + s:1 + c:1
-        let preamble = if size + 1 > u8::MAX as usize { 9 } else { 3 };
-        preamble + size
-    }
+            fn encode(&self, buf: &mut BytePages) {
+                let count = self.len() * 2; // key-value pair accounts for two items in count
+                let size = self
+                    .iter()
+                    .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
+                if size + 1 > u8::MAX as usize {
+                    buf.put_u8(codec::FORMATCODE_MAP32);
+                    buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follows
+                    buf.put_u32(count as u32);
+                } else {
+                    buf.put_u8(codec::FORMATCODE_MAP8);
+                    buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
+                    buf.put_u8(count as u8);
+                }
 
-    fn encode(&self, buf: &mut BytePages) {
-        let count = self.len() * 2; // key-value pair accounts for two items in count
-        let size = map_encoded_size(self);
-        if size + 1 > u8::MAX as usize {
-            buf.put_u8(codec::FORMATCODE_MAP32);
-            buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follows
-            buf.put_u32(count as u32);
-        } else {
-            buf.put_u8(codec::FORMATCODE_MAP8);
-            buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
-            buf.put_u8(count as u8);
+                for (k, v) in self {
+                    k.encode(buf);
+                    v.encode(buf);
+                }
+            }
         }
 
-        for (k, v) in self {
-            k.encode(buf);
-            v.encode(buf);
-        }
-    }
-}
+        impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for $ty<K, V> {
+            const ARRAY_CONSTRUCTOR: Constructor = Constructor::FormatCode(codec::FORMATCODE_MAP32);
+            fn array_encoded_size(&self) -> usize {
+                8 + self
+                    .iter()
+                    .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size())
+            }
 
-impl<K: Eq + Hash + Encode, V: Encode> ArrayEncode for HashMap<K, V> {
-    const ARRAY_CONSTRUCTOR: Constructor = Constructor::FormatCode(codec::FORMATCODE_MAP32);
-    fn array_encoded_size(&self) -> usize {
-        8 + map_encoded_size(self)
-    }
-    fn array_encode(&self, buf: &mut BytePages) {
-        let count = self.len() * 2;
-        let size = map_encoded_size(self) + 4;
-        buf.put_u32(size as u32);
-        buf.put_u32(count as u32);
+            fn array_encode(&self, buf: &mut BytePages) {
+                let count = self.len() * 2;
+                let size = 4 + self
+                    .iter()
+                    .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
+                buf.put_u32(size as u32);
+                buf.put_u32(count as u32);
 
-        for (k, v) in self {
-            k.encode(buf);
-            v.encode(buf);
+                for (k, v) in self {
+                    k.encode(buf);
+                    v.encode(buf);
+                }
+            }
         }
-    }
+    };
 }
+hashmap!(HashMap);
+hashmap!(HashMapBase);
 
 impl Encode for VecSymbolMap {
     fn encoded_size(&self) -> usize {

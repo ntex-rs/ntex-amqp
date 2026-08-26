@@ -5,9 +5,7 @@ mod connection;
 mod connector;
 mod error;
 
-pub use self::connection::Client;
-pub use self::connector::{Connector, ConnectorService};
-pub use self::error::ConnectError;
+pub use self::{connection::Client, connector::Connector, error::ConnectError};
 
 #[derive(Clone, Debug)]
 /// Connect message
@@ -28,12 +26,7 @@ impl<T: Address> Connect<T> {
 
     #[must_use]
     /// Use Sasl auth
-    pub fn sasl_auth(
-        mut self,
-        authz_id: ByteString,
-        authn_id: ByteString,
-        password: ByteString,
-    ) -> Self {
+    pub fn sasl_auth(mut self, authz_id: ByteString, authn_id: ByteString, password: ByteString) -> Self {
         self.sasl = Some(SaslAuth {
             authz_id,
             authn_id,

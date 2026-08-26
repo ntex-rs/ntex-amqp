@@ -1,19 +1,21 @@
-use std::{char, collections, convert::TryFrom, hash::BuildHasher, hash::Hash};
+use std::{char, collections::HashMap, convert::TryFrom, hash::BuildHasher, hash::Hash};
 
 use byteorder::{BigEndian, ByteOrder};
 use chrono::{DateTime, TimeZone, Utc};
 use ntex_bytes::{Buf, ByteString, Bytes};
+use ntex_util::HashMap as HashMapUtil;
+use ntex_util::hash_map::HashMap as HashMapBase;
 use ordered_float::OrderedFloat;
 use uuid::Uuid;
 
 use crate::codec::{self, ArrayHeader, Composite, Decode, DecodeFormatted, ListHeader, MapHeader};
 use crate::error::AmqpParseError;
 use crate::framing::{self, AmqpFrame, HEADER_LEN, SaslFrame};
+use crate::protocol;
 use crate::types::{
     Array, Constructor, DescribedCompound, Descriptor, List, ListDescribed, Multiple, Str, Symbol,
     Variant, VariantMap, VecStringMap, VecSymbolMap,
 };
-use crate::{HashMap, protocol};
 
 macro_rules! be_read {
     ($input:ident, $fn:ident, $size:expr) => {{
@@ -239,25 +241,31 @@ impl DecodeFormatted for Symbol {
     }
 }
 
-impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
-    for collections::HashMap<K, V, S>
-{
-    fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = MapHeader::decode_with_format(input, fmt)?;
-        decode_check_len!(input, header.size as usize);
-        let mut map_input = input.split_to(header.size as usize);
-        let count = header.count / 2;
-        let mut map: collections::HashMap<K, V, S> =
-            collections::HashMap::with_capacity_and_hasher(count as usize, Default::default());
-        for _ in 0..count {
-            let key = K::decode(&mut map_input)?;
-            let value = V::decode(&mut map_input)?;
-            map.insert(key, value); // todo: ensure None returned?
+macro_rules! hashmap {
+    ($ty:ident) => {
+        impl<K: Decode + Eq + Hash, V: Decode, S: BuildHasher + Default> DecodeFormatted
+            for $ty<K, V, S>
+        {
+            fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+                let header = MapHeader::decode_with_format(input, fmt)?;
+                decode_check_len!(input, header.size as usize);
+                let mut map_input = input.split_to(header.size as usize);
+                let count = header.count / 2;
+                let mut map: $ty<K, V, S> =
+                    $ty::with_capacity_and_hasher(count as usize, Default::default());
+                for _ in 0..count {
+                    let key = K::decode(&mut map_input)?;
+                    let value = V::decode(&mut map_input)?;
+                    map.insert(key, value); // todo: ensure None returned?
+                }
+                // todo: validate map_input is empty
+                Ok(map)
+            }
         }
-        // todo: validate map_input is empty
-        Ok(map)
-    }
+    };
 }
+hashmap!(HashMap);
+hashmap!(HashMapBase);
 
 impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
@@ -420,7 +428,7 @@ impl DecodeFormatted for Variant {
                 Array::decode_with_format(input, fmt).map(Variant::Array)
             }
             codec::FORMATCODE_MAP8 | codec::FORMATCODE_MAP32 => {
-                HashMap::<Variant, Variant>::decode_with_format(input, fmt)
+                HashMapUtil::<Variant, Variant>::decode_with_format(input, fmt)
                     .map(|o| Variant::Map(VariantMap::new(o)))
             }
             codec::FORMATCODE_DESCRIBED => {
@@ -930,8 +938,9 @@ mod tests {
         };
         assert_eq!(dc.descriptor(), &expected_descriptor);
         println!("{:02x?}", dc.data.as_ref());
-        let decoded_map: HashMap<Variant, Variant> = dc.decode().expect("Failed to decode List");
-        let expected_map: HashMap<Variant, Variant> = expected_map.into_iter().collect();
+        let decoded_map: HashMapUtil<Variant, Variant> =
+            dc.decode().expect("Failed to decode List");
+        let expected_map: HashMapUtil<Variant, Variant> = expected_map.into_iter().collect();
         assert_eq!(decoded_map, expected_map);
     }
 
