@@ -1,9 +1,7 @@
 use std::{marker, rc::Rc};
 
 use ntex_router::{IntoPattern, Router as PatternRouter};
-use ntex_service::{
-    Ctx, IntoServiceFactory, Pipeline, Service, ServiceFactory, boxed, fn_factory_with_config,
-};
+use ntex_service::{Ctx, IntoServiceFactory, Pipeline, Service, ServiceFactory, boxed, factory};
 use ntex_util::{HashMap, future::join_all};
 
 use crate::codec::protocol::{DeliveryState, Error, Rejected, Transfer};
@@ -53,7 +51,7 @@ impl<S: 'static> Router<S> {
         }
         let router = Rc::new(router.finish());
 
-        fn_factory_with_config(async move |state: &State<S>| {
+        factory(async move |state: &State<S>| {
             Ok(RouterService(Cell::new(RouterServiceInner {
                 state: state.clone(),
                 router: router.clone(),
