@@ -1,5 +1,5 @@
 use ntex::SharedCfg;
-use ntex::service::{boxed::BoxService, fn_factory_with_config};
+use ntex::service::boxed::BoxService;
 use ntex_amqp::{error::AmqpError, error::LinkError, server};
 
 async fn server(
@@ -25,7 +25,7 @@ async fn main() -> std::io::Result<()> {
             })
             .finish(
                 server::Router::builder()
-                    .service("test", fn_factory_with_config(server))
+                    .service("test", ntex::factory(server))
                     .build(),
             )
         })?
