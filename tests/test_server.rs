@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 use std::sync::{Arc, Mutex, atomic::AtomicUsize, atomic::Ordering};
 
 use ntex::server::{TestServerBuilder, test_server};
-use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_factory_with_config, fn_service};
+use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
 use ntex::util::{Bytes, Either};
 use ntex::{SharedCfg, http::Uri, rt, time::Millis, time::sleep};
 use ntex_amqp::{
@@ -49,9 +49,7 @@ async fn test_simple() -> std::io::Result<()> {
             server::Router::<()>::builder()
                 .service(
                     "test",
-                    fn_factory_with_config(async move |_: &types::Link<()>| {
-                        server_count(count.clone()).await
-                    }),
+                    ntex::factory(async move |_: &types::Link<()>| server_count(count.clone()).await),
                 )
                 .build(),
         )
@@ -116,12 +114,9 @@ async fn test_large_transfer() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::builder()
-                .service(
-                    "test",
-                    fn_factory_with_config(async move |_: &types::Link<()>| {
-                        server_count(count.clone()).await
-                    }),
-                )
+                .service("test", async move |_: &types::Link<()>| {
+                    server_count(count.clone()).await
+                })
                 .build(),
         )
     })
@@ -181,11 +176,7 @@ async fn test_sasl() -> std::io::Result<()> {
             }
             server::Handshake::Sasl(auth) => sasl_auth(auth).await.map_err(|_| ()),
         })
-        .finish(
-            server::Router::<()>::builder()
-                .service("test", fn_factory_with_config(server))
-                .build(),
-        )
+        .finish(server::Router::<()>::builder().service("test", server).build())
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
@@ -228,11 +219,7 @@ async fn test_session_end() -> std::io::Result<()> {
             }
             Ok::<_, ()>(())
         })
-        .finish(
-            server::Router::builder()
-                .service("test", fn_factory_with_config(server))
-                .build(),
-        )
+        .finish(server::Router::builder().service("test", server).build())
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
@@ -280,21 +267,18 @@ async fn test_link_detach() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::builder()
-                .service(
-                    "test",
-                    fn_factory_with_config(async move |link: &types::Link<()>| {
-                        let link = link.clone();
+                .service("test", async move |link: &types::Link<()>| {
+                    let link = link.clone();
 
-                        rt::spawn(async move {
-                            sleep(Millis(150)).await;
-                            let _ = link.receiver().close().await;
-                        });
+                    rt::spawn(async move {
+                        sleep(Millis(150)).await;
+                        let _ = link.receiver().close().await;
+                    });
 
-                        Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
-                            Ok::<_, LinkError>(types::Outcome::Accept)
-                        })))
-                    }),
-                )
+                    Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
+                        Ok::<_, LinkError>(types::Outcome::Accept)
+                    })))
+                })
                 .build(),
         )
     });
@@ -342,20 +326,17 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::builder()
-                .service(
-                    "test",
-                    fn_factory_with_config(async move |link: &types::Link<()>| {
-                        let link = link.clone();
-                        rt::spawn(async move {
-                            sleep(Millis(150)).await;
-                            let _ = link.session().end().await;
-                        });
+                .service("test", async move |link: &types::Link<()>| {
+                    let link = link.clone();
+                    rt::spawn(async move {
+                        sleep(Millis(150)).await;
+                        let _ = link.session().end().await;
+                    });
 
-                        Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
-                            Ok::<_, LinkError>(types::Outcome::Accept)
-                        })))
-                    }),
-                )
+                    Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
+                        Ok::<_, LinkError>(types::Outcome::Accept)
+                    })))
+                })
                 .build(),
         )
     });
@@ -395,20 +376,17 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::builder()
-                .service(
-                    "test",
-                    fn_factory_with_config(async move |link: &types::Link<()>| {
-                        let link = link.clone();
-                        rt::spawn(async move {
-                            sleep(Millis(150)).await;
-                            let _ = link.session().connection().close().await;
-                        });
+                .service("test", async move |link: &types::Link<()>| {
+                    let link = link.clone();
+                    rt::spawn(async move {
+                        sleep(Millis(150)).await;
+                        let _ = link.session().connection().close().await;
+                    });
 
-                        Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
-                            Ok::<_, LinkError>(types::Outcome::Accept)
-                        })))
-                    }),
-                )
+                    Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
+                        Ok::<_, LinkError>(types::Outcome::Accept)
+                    })))
+                })
                 .build(),
         )
     });
@@ -448,22 +426,19 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::builder()
-                .service(
-                    "test",
-                    fn_factory_with_config(async move |link: &types::Link<()>| {
-                        let link = link.clone();
+                .service("test", async move |link: &types::Link<()>| {
+                    let link = link.clone();
 
-                        rt::spawn(async move {
-                            sleep(Millis(150)).await;
-                            let _ = link.receiver().close().await;
-                        });
+                    rt::spawn(async move {
+                        sleep(Millis(150)).await;
+                        let _ = link.receiver().close().await;
+                    });
 
-                        Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
-                            sleep(Millis(1500000)).await;
-                            Ok::<_, LinkError>(types::Outcome::Accept)
-                        })))
-                    }),
-                )
+                    Ok::<_, LinkError>(boxed::service(fn_service(async move |_| {
+                        sleep(Millis(1500000)).await;
+                        Ok::<_, LinkError>(types::Outcome::Accept)
+                    })))
+                })
                 .build(),
         )
     });
