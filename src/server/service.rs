@@ -52,6 +52,7 @@ where
     AppSt: 'static,
     Err: 'static,
 {
+    #[must_use]
     /// Service to call with control frames
     pub fn control<Sf>(self, f: impl IntoServiceFactory<Sf, State<AppSt>, ControlFrame>) -> Self
     where
