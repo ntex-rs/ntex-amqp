@@ -1,7 +1,7 @@
 #![allow(unused_assignments, unused_variables, unreachable_patterns)]
-use derive_more::From;
 use super::*;
-use crate::codec::{decode_format_code, ListHeader};
+use crate::codec::{ListHeader, decode_format_code};
+use derive_more::From;
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum Frame {
     Open(Open),
