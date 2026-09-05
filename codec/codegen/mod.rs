@@ -54,10 +54,10 @@ pub fn parse(spec: &str) -> Definitions {
         for t in types.iter() {
             match *t {
                 _Type::Described(ref l) if l.source == "list" => {
-                    ref_map.insert(camel_case(&*l.name));
+                    ref_map.insert(camel_case(&l.name));
                 }
                 _Type::Choice(ref e) => {
-                    enum_map.insert(camel_case(&*e.name));
+                    enum_map.insert(camel_case(&e.name));
                 }
                 _ => {}
             }
@@ -279,16 +279,14 @@ impl Definitions {
         provides: &[String],
     ) {
         for p in provides.iter() {
-            map.entry(p.clone())
-                .or_insert_with(Vec::new)
-                .push(ProvidesItem {
-                    ty: name.to_string(),
-                    descriptor: descriptor.clone().unwrap_or_else(|| Descriptor {
-                        name: String::new(),
-                        domain: 0,
-                        code: 0,
-                    }),
-                });
+            map.entry(p.clone()).or_default().push(ProvidesItem {
+                ty: name.to_string(),
+                descriptor: descriptor.clone().unwrap_or_else(|| Descriptor {
+                    name: String::new(),
+                    domain: 0,
+                    code: 0,
+                }),
+            });
         }
     }
 }
@@ -296,8 +294,8 @@ impl Definitions {
 impl Alias {
     fn from(a: _Alias) -> Alias {
         Alias {
-            name: camel_case(&*a.name),
-            source: get_type_name(&*a.source, None),
+            name: camel_case(&a.name),
+            source: get_type_name(&a.source, None),
             provides: parse_provides(a.provides),
         }
     }
@@ -305,18 +303,18 @@ impl Alias {
 
 impl Enum {
     fn from(e: _Enum) -> Enum {
-        let ty = get_type_name(&*e.source, None);
+        let ty = get_type_name(&e.source, None);
         let is_symbol = ty == "Symbol";
         Enum {
             ty,
             is_symbol,
-            name: camel_case(&*e.name),
+            name: camel_case(&e.name),
             provides: parse_provides(e.provides),
             items: e
                 .choice
                 .into_iter()
                 .map(|c| EnumItem {
-                    name: camel_case(&*c.name),
+                    name: camel_case(&c.name),
                     value_len: c.value.len(),
                     value: c.value,
                 })
@@ -384,7 +382,7 @@ impl Descriptor {
 }
 impl Field {
     fn from(field: _Field) -> Field {
-        let mut ty = get_type_name(&*field.ty, field.requires);
+        let mut ty = get_type_name(&field.ty, field.requires);
         if field.multiple {
             ty.push('s');
         }
@@ -395,7 +393,7 @@ impl Field {
             ty,
             is_ref,
             is_str,
-            name: snake_case(&*field.name),
+            name: snake_case(&field.name),
             optional: !field.mandatory && default.is_empty(),
             multiple: field.multiple,
             collection: field.collection.unwrap_or(false),
@@ -408,7 +406,7 @@ impl Field {
             None => String::new(),
             Some(def) => {
                 if ENUM_TYPES.lock().unwrap().contains(ty) {
-                    format!("{}::{}", ty, camel_case(&*def))
+                    format!("{}::{}", ty, camel_case(&def))
                 } else {
                     def
                 }
@@ -419,10 +417,10 @@ impl Field {
 
 fn get_type_name(ty: &str, req: Option<String>) -> String {
     match req {
-        Some(t) => camel_case(&*t),
+        Some(t) => camel_case(&t),
         None => match PRIMITIVE_TYPES.get(ty) {
             Some(p) => p.to_string(),
-            None => camel_case(&*ty),
+            None => camel_case(ty),
         },
     }
 }
@@ -440,7 +438,7 @@ fn parse_provides(p: Option<String>) -> Vec<String> {
             })
             .collect()
     })
-    .unwrap_or_else(Vec::new)
+    .unwrap_or_default()
 }
 
 fn string_as_bool<'de, T, D>(deserializer: D) -> Result<T, D::Error>

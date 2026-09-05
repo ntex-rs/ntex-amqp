@@ -1,9 +1,8 @@
-use std::{fmt, marker, rc::Rc};
-
 use ntex_dispatcher::Dispatcher as IoDispatcher;
+use ntex_error::{self as error, ErrorDiagnostic, ErrorInfo};
 use ntex_io::{Filter, Io, IoBoxed};
 use ntex_service::cfg::{Cfg, Configuration};
-use ntex_service::pipeline::Pipeline;
+use ntex_service::pipeline::{Pipeline, PipelineFactory, PipelineState};
 use ntex_service::{Ctx, IntoService, IntoServiceFactory, Service, ServiceFactory};
 use ntex_util::time::{Millis, timeout_checked};
 
@@ -15,192 +14,170 @@ use super::handshake::{Handshake, HandshakeAck};
 use super::{Error, HandshakeError, ServerError};
 
 /// Amqp server factory
-pub struct Server<St, Err, Ctl, Pb> {
-    handshake: Pipeline<Handshake, HandshakeAck<St>, Err>,
-    inner: Rc<ServerInner<St, Ctl, Pb>>,
+pub struct Server<St, AppSt, Err> {
+    handshake: PipelineState<St, Handshake, HandshakeAck<AppSt>, Err>,
+    control: PipelineFactory<State<AppSt>, ControlFrame, (), Error, ServerError<Err>>,
+    publish: PipelineFactory<State<AppSt>, Message, (), Error, ServerError<Err>>,
 }
 
 /// Amqp server builder
-pub struct ServerBuilder<St, Err, Ctl> {
-    handshake: Pipeline<Handshake, HandshakeAck<St>, Err>,
-    control: Ctl,
-    _t: marker::PhantomData<(St, Err)>,
+pub struct ServerBuilder<St, AppSt, Err> {
+    handshake: PipelineState<St, Handshake, HandshakeAck<AppSt>, Err>,
+    control: PipelineFactory<State<AppSt>, ControlFrame, (), Error, ServerError<Err>>,
 }
 
-pub(super) struct ServerInner<St, Ctl, Pb> {
-    control: Ctl,
-    publish: Pb,
-    _t: marker::PhantomData<St>,
-}
-
-impl<St> Server<St, (), (), ()>
+impl<St, AppSt> Server<St, AppSt, ()>
 where
     St: 'static,
+    AppSt: 'static,
 {
     /// Start server building process with provided handshake service
-    pub fn build<F, H>(handshake: F) -> ServerBuilder<St, H::Error, DefaultControlService<St, H::Error>>
+    pub fn build<F, H>(f: F) -> ServerBuilder<St, AppSt, H::Error>
     where
-        F: IntoService<H, (), Handshake>,
-        H: Service<(), Handshake, Res = HandshakeAck<St>> + 'static,
+        F: IntoService<H, St, Handshake>,
+        H: Service<St, Handshake, Res = HandshakeAck<AppSt>> + 'static,
     {
         ServerBuilder {
-            handshake: Pipeline::new(handshake.into_service()),
-            control: DefaultControlService::default(),
-            _t: marker::PhantomData,
+            handshake: PipelineState::new(f.into_service()),
+            control: PipelineFactory::new(
+                DefaultControlService::default().map_init_err(ServerError::ControlService),
+            ),
         }
     }
 }
 
-impl<St, Err, Ctl> ServerBuilder<St, Err, Ctl>
+impl<St, AppSt, Err> ServerBuilder<St, AppSt, Err>
 where
     St: 'static,
-    Ctl: ServiceFactory<(), ControlFrame, State<St>, Res = ()> + 'static,
-    Ctl::InitError: fmt::Debug,
-    Error: From<Ctl::Error>,
+    AppSt: 'static,
+    Err: 'static,
 {
+    #[must_use]
     /// Service to call with control frames
-    pub fn control<Sf>(
-        self,
-        f: impl IntoServiceFactory<Sf, (), ControlFrame, State<St>>,
-    ) -> ServerBuilder<St, Err, Sf>
+    pub fn control<Sf>(self, f: impl IntoServiceFactory<Sf, State<AppSt>, ControlFrame>) -> Self
     where
-        Sf: ServiceFactory<(), ControlFrame, State<St>, Res = ()> + 'static,
-        Sf::InitError: fmt::Debug,
+        Sf: ServiceFactory<State<AppSt>, ControlFrame, Res = ()> + 'static,
+        Sf::InitError: ErrorDiagnostic,
         Error: From<Sf::Error>,
     {
         ServerBuilder {
-            control: f.into_factory(),
             handshake: self.handshake,
-            _t: marker::PhantomData,
+            control: PipelineFactory::new(
+                f.into_factory()
+                    .map_err(Into::into)
+                    .map_init_err(|e| ServerError::ControlService(ErrorInfo::from(error::Error::from(e)))),
+            ),
         }
     }
 
     /// Set service to execute for incoming links and create service factory
-    pub fn finish<Sf>(
-        self,
-        f: impl IntoServiceFactory<Sf, (), Message, State<St>>,
-    ) -> Server<St, Err, Ctl, Sf>
+    pub fn finish<Sf>(self, f: impl IntoServiceFactory<Sf, State<AppSt>, Message>) -> Server<St, AppSt, Err>
     where
-        Sf: ServiceFactory<(), Message, State<St>, Res = ()> + 'static,
-        Sf::InitError: fmt::Debug,
-        Error: From<Sf::Error> + From<Ctl::Error>,
+        Sf: ServiceFactory<State<AppSt>, Message, Res = ()> + 'static,
+        Sf::InitError: ErrorDiagnostic,
+        Error: From<Sf::Error>,
     {
         Server {
+            control: self.control,
             handshake: self.handshake,
-            inner: Rc::new(ServerInner {
-                publish: f.into_factory(),
-                control: self.control,
-                _t: marker::PhantomData,
-            }),
+            publish: PipelineFactory::new(
+                f.into_factory()
+                    .map_err(Into::into)
+                    .map_init_err(|e| ServerError::PublishService(ErrorInfo::from(error::Error::from(e)))),
+            ),
         }
     }
 }
 
-impl<St, Err, Ctl, Pb> Server<St, Err, Ctl, Pb>
+impl<St, AppSt, Err> Server<St, AppSt, Err>
 where
     St: 'static,
+    AppSt: 'static,
     Err: 'static,
-    Ctl: ServiceFactory<(), ControlFrame, State<St>, Res = ()> + 'static,
-    Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<(), Message, State<St>, Res = ()> + 'static,
-    Pb::InitError: fmt::Debug,
-    Error: From<Pb::Error> + From<Ctl::Error>,
 {
-    async fn create(&self, io: IoBoxed) -> Result<(), ServerError<Err>> {
+    async fn create(&self, st: &St, io: IoBoxed) -> Result<(), ServerError<Err>> {
         let cfg: Cfg<AmqpServiceConfig> = io.cfg().ctx().get();
-        let fut = handshake(io, &self.handshake, cfg.clone());
+        let fut = handshake(st, io, &self.handshake, cfg.clone());
 
         let (state, codec, sink, st, idle_timeout) = timeout_checked(cfg.handshake_timeout, fut)
             .await
             .map_err(|()| HandshakeError::Timeout)??;
 
         // create publish service
-        let pb_svc = self.inner.publish.create(&st).await.map_err(|e| {
-            log::error!("Publish service init error: {e:?}");
-            ServerError::PublishServiceError
-        })?;
+        let pb_svc = self.publish.create(st.clone()).await?;
 
         // create control service
-        let ctl_svc = self.inner.control.create(&st).await.map_err(|e| {
-            log::error!("Control service init error: {e:?}");
-            ServerError::ControlServiceError
-        })?;
+        let ctl_svc = self.control.create(st).await?;
 
         IoDispatcher::new(
             state,
             codec,
-            Pipeline::new(Dispatcher::new(sink, pb_svc, ctl_svc, idle_timeout)),
+            Pipeline::new((), Dispatcher::new(sink, pb_svc, ctl_svc, idle_timeout)),
         )
         .await
         .map_err(ServerError::Dispatcher)
     }
 }
 
-impl<St, Err, Ctl, Pb> Service<(), IoBoxed> for Server<St, Err, Ctl, Pb>
+impl<St, AppSt, Err> Service<St, IoBoxed> for Server<St, AppSt, Err>
 where
     St: 'static,
+    AppSt: 'static,
     Err: 'static,
-    Ctl: ServiceFactory<(), ControlFrame, State<St>, Res = ()> + 'static,
-    Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<(), Message, State<St>, Res = ()> + 'static,
-    Pb::InitError: fmt::Debug,
-    Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Res = ();
     type Error = ServerError<Err>;
 
     #[inline]
-    async fn ready(&self, _: Ctx<'_, Self, ()>) -> Result<(), Self::Error> {
-        self.handshake.ready().await.map_err(ServerError::Service)
+    async fn ready(&self, ctx: Ctx<'_, Self, St>) -> Result<(), Self::Error> {
+        self.handshake.ready(ctx.st()).await.map_err(ServerError::Service)
     }
 
     #[inline]
-    async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
-        self.handshake.shutdown().await;
+    async fn shutdown(&self, ctx: Ctx<'_, Self, St>) {
+        self.handshake.shutdown(ctx.st()).await;
     }
 
-    async fn call(&self, req: IoBoxed, _: Ctx<'_, Self, ()>) -> Result<Self::Res, Self::Error> {
-        self.create(req).await
+    async fn call(&self, req: IoBoxed, ctx: Ctx<'_, Self, St>) -> Result<Self::Res, Self::Error> {
+        self.create(ctx.st(), req).await
     }
 }
 
-impl<F, St, Err, Ctl, Pb> Service<(), Io<F>> for Server<St, Err, Ctl, Pb>
+impl<F, St, AppSt, Err> Service<St, Io<F>> for Server<St, AppSt, Err>
 where
     F: Filter,
     St: 'static,
+    AppSt: 'static,
     Err: 'static,
-    Ctl: ServiceFactory<(), ControlFrame, State<St>, Res = ()> + 'static,
-    Ctl::InitError: fmt::Debug,
-    Pb: ServiceFactory<(), Message, State<St>, Res = ()> + 'static,
-    Pb::InitError: fmt::Debug,
-    Error: From<Pb::Error> + From<Ctl::Error>,
 {
     type Res = ();
     type Error = ServerError<Err>;
 
     #[inline]
-    async fn ready(&self, _: Ctx<'_, Self, ()>) -> Result<(), Self::Error> {
-        self.handshake.ready().await.map_err(ServerError::Service)
+    async fn ready(&self, ctx: Ctx<'_, Self, St>) -> Result<(), Self::Error> {
+        self.handshake.ready(ctx.st()).await.map_err(ServerError::Service)
     }
 
     #[inline]
-    async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
-        self.handshake.shutdown().await;
+    async fn shutdown(&self, ctx: Ctx<'_, Self, St>) {
+        self.handshake.shutdown(ctx.st()).await;
     }
 
     #[inline]
-    async fn call(&self, req: Io<F>, _: Ctx<'_, Self, ()>) -> Result<Self::Res, Self::Error> {
-        self.create(IoBoxed::from(req)).await
+    async fn call(&self, req: Io<F>, ctx: Ctx<'_, Self, St>) -> Result<Self::Res, Self::Error> {
+        self.create(ctx.st(), IoBoxed::from(req)).await
     }
 }
 
-async fn handshake<St, Err>(
+async fn handshake<St, AppSt, Err>(
+    st: &St,
     io: IoBoxed,
-    handshake: &Pipeline<Handshake, HandshakeAck<St>, Err>,
+    handshake: &PipelineState<St, Handshake, HandshakeAck<AppSt>, Err>,
     cfg: Cfg<AmqpServiceConfig>,
-) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<St>, Millis), ServerError<Err>>
+) -> Result<(IoBoxed, AmqpCodec<AmqpFrame>, Connection, State<AppSt>, Millis), ServerError<Err>>
 where
     St: 'static,
+    AppSt: 'static,
     Err: 'static,
 {
     let protocol = io
@@ -222,11 +199,14 @@ where
 
             // handshake protocol
             let ack = handshake
-                .call(if protocol == ProtocolId::Amqp {
-                    Handshake::new_plain(io, cfg.clone())
-                } else {
-                    Handshake::new_sasl(io, cfg.clone())
-                })
+                .call(
+                    if protocol == ProtocolId::Amqp {
+                        Handshake::new_plain(io, cfg.clone())
+                    } else {
+                        Handshake::new_sasl(io, cfg.clone())
+                    },
+                    st,
+                )
                 .await
                 .map_err(ServerError::Service)?;
 

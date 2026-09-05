@@ -5,7 +5,7 @@ use ntex_service::{IntoService, Pipeline, Service, fn_service};
 use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::control::ControlFrame;
 use crate::dispatcher::Dispatcher;
-use crate::error::{AmqpDispatcherError, LinkError};
+use crate::error::{AmqpDispatcherError, Error};
 use crate::{Connection, ConnectionRef, RemoteServiceConfig, State};
 
 /// Mqtt client
@@ -63,29 +63,28 @@ where
     pub async fn start_default(self) -> Result<(), AmqpDispatcherError> {
         let dispatcher = Dispatcher::new(
             self.connection,
-            fn_service(async |_| Ok::<_, LinkError>(())),
-            fn_service(async |_| Ok::<_, LinkError>(())),
+            Pipeline::new((), fn_service(async |_| Ok::<_, Error>(()))),
+            Pipeline::new((), fn_service(async |_| Ok::<_, Error>(()))),
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::new(self.io, self.codec, Pipeline::new(dispatcher)).await
+        IoDispatcher::new(self.io, self.codec, Pipeline::new((), dispatcher)).await
     }
 
     pub async fn start<F, S>(self, f: F) -> Result<(), AmqpDispatcherError>
     where
         F: IntoService<S, (), ControlFrame>,
         S: Service<(), ControlFrame, Res = ()>,
-        S::Error: std::fmt::Debug + 'static,
-        crate::error::Error: From<S::Error>,
+        S::Error: Into<Error> + std::fmt::Debug + 'static,
         S: 'static,
     {
         let dispatcher = Dispatcher::new(
             self.connection,
-            fn_service(async |_| Ok::<_, S::Error>(())),
-            f.into_service(),
+            Pipeline::new((), fn_service(async |_| Ok::<_, Error>(()))),
+            Pipeline::new((), f.into_service().map_err(Into::into)),
             self.remote_config.timeout_remote_secs().into(),
         );
 
-        IoDispatcher::new(self.io, self.codec, Pipeline::new(dispatcher)).await
+        IoDispatcher::new(self.io, self.codec, Pipeline::new((), dispatcher)).await
     }
 }

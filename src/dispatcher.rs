@@ -27,18 +27,18 @@ pub(crate) struct Dispatcher {
 }
 
 impl Dispatcher {
-    pub(crate) fn new<Sr, Ctl>(sink: Connection, svc: Sr, ctl: Ctl, idle_timeout: Millis) -> Self
-    where
-        Sr: Service<(), types::Message, Res = ()> + 'static,
-        Ctl: Service<(), ControlFrame, Res = ()> + 'static,
-        Error: From<Sr::Error> + From<Ctl::Error>,
-    {
+    pub(crate) fn new(
+        sink: Connection,
+        service: Pipeline<types::Message, (), Error>,
+        ctl_service: Pipeline<ControlFrame, (), Error>,
+        idle_timeout: Millis,
+    ) -> Self {
         let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
         Dispatcher {
             sink,
             idle_timeout,
-            service: Pipeline::new(svc.map_err(Into::into)),
-            ctl_service: Pipeline::new(ctl.map_err(Into::into)),
+            service,
+            ctl_service,
             ctl_fut: cell::RefCell::new(Vec::new()),
             ctl_error: cell::Cell::new(None),
             ctl_error_waker: LocalWaker::default(),
