@@ -4,7 +4,7 @@ use ntex_amqp::{error::AmqpError, error::LinkError, server};
 
 async fn server(
     link: &server::Link<()>,
-) -> Result<BoxService<(), server::Transfer, server::Outcome, AmqpError>, LinkError> {
+) -> Result<BoxService<server::Link<()>, server::Transfer, server::Outcome, AmqpError>, LinkError> {
     println!("OPEN LINK: {:?}", link);
     Err(LinkError::force_detach().description("unimplemented"))
 }
@@ -23,11 +23,7 @@ async fn main() -> std::io::Result<()> {
                 }
                 server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
             })
-            .finish(
-                server::Router::builder()
-                    .service("test", ntex::factory(server))
-                    .build(),
-            )
+            .finish(server::Router::builder().service("test", server).build())
         })?
         .workers(1)
         .run()

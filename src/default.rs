@@ -1,9 +1,10 @@
 #![allow(clippy::unused_async_trait_impl)]
 use std::marker::PhantomData;
 
+use ntex_error::ErrorInfo;
 use ntex_service::{Ctx, Service, ServiceFactory};
 
-use crate::{ControlFrame, State, error::LinkError, types::Link};
+use crate::{ControlFrame, State, error::Error, error::LinkError, types::Link};
 
 #[allow(dead_code)]
 /// Default publish service
@@ -15,7 +16,7 @@ impl<S, E> Default for DefaultPublishService<S, E> {
     }
 }
 
-impl<S, E> ServiceFactory<(), Link<S>, State<S>> for DefaultPublishService<S, E> {
+impl<S, E> ServiceFactory<State<S>, Link<S>> for DefaultPublishService<S, E> {
     type Res = ();
     type Error = E;
     type InitError = LinkError;
@@ -26,41 +27,41 @@ impl<S, E> ServiceFactory<(), Link<S>, State<S>> for DefaultPublishService<S, E>
     }
 }
 
-impl<S, E> Service<(), Link<S>> for DefaultPublishService<S, E> {
+impl<S, E> Service<State<S>, Link<S>> for DefaultPublishService<S, E> {
     type Res = ();
     type Error = E;
 
-    async fn call(&self, _: Link<S>, _: Ctx<'_, Self, ()>) -> Result<Self::Res, Self::Error> {
+    async fn call(&self, _: Link<S>, _: Ctx<'_, Self, State<S>>) -> Result<Self::Res, Self::Error> {
         log::warn!("AMQP Publish service is not configured");
         Ok(())
     }
 }
 
 /// Default control service
-pub struct DefaultControlService<S, E>(PhantomData<(S, E)>);
+pub(crate) struct DefaultControlService<S>(PhantomData<S>);
 
-impl<S, E> Default for DefaultControlService<S, E> {
+impl<S> Default for DefaultControlService<S> {
     fn default() -> Self {
         DefaultControlService(PhantomData)
     }
 }
 
-impl<S, E> ServiceFactory<(), ControlFrame, State<S>> for DefaultControlService<S, E> {
+impl<S> ServiceFactory<State<S>, ControlFrame> for DefaultControlService<S> {
     type Res = ();
-    type Error = E;
-    type InitError = E;
-    type Service = DefaultControlService<S, E>;
+    type Error = Error;
+    type InitError = ErrorInfo;
+    type Service = DefaultControlService<S>;
 
     async fn create(&self, _: &State<S>) -> Result<Self::Service, Self::InitError> {
         Ok(DefaultControlService(PhantomData))
     }
 }
 
-impl<S, E> Service<(), ControlFrame> for DefaultControlService<S, E> {
+impl<S> Service<State<S>, ControlFrame> for DefaultControlService<S> {
     type Res = ();
-    type Error = E;
+    type Error = Error;
 
-    async fn call(&self, _: ControlFrame, _: Ctx<'_, Self, ()>) -> Result<Self::Res, Self::Error> {
+    async fn call(&self, _: ControlFrame, _: Ctx<'_, Self, State<S>>) -> Result<Self::Res, Self::Error> {
         Ok(())
     }
 }

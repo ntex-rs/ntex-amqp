@@ -1,3 +1,4 @@
+use ntex_error::ErrorInfo;
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, SaslFrame, protocol};
@@ -23,10 +24,10 @@ pub enum ServerError<E> {
     Dispatcher(AmqpDispatcherError),
     /// Control service init error
     #[error("Control service init error")]
-    ControlServiceError,
+    ControlService(ErrorInfo),
     /// Publish service init error
     #[error("Publish service init error")]
-    PublishServiceError,
+    PublishService(ErrorInfo),
 }
 
 impl<E> From<AmqpCodecError> for ServerError<E> {

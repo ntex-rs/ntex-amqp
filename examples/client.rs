@@ -1,4 +1,4 @@
-use ntex::Pipeline;
+use ntex::{Pipeline, SharedCfg};
 use ntex_amqp::client;
 
 #[ntex::main]
@@ -6,7 +6,7 @@ async fn main() -> std::io::Result<()> {
     // std::env::set_var("RUST_LOG", "ntex=trace,ntex_amqp=trace,basic=trace");
     env_logger::init();
 
-    let driver = Pipeline::new(client::Connector::new())
+    let driver = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new("127.0.0.1:5671"))
         .await
         .unwrap();

@@ -13,7 +13,7 @@ use rand::{Rng, distr::Alphanumeric};
 
 async fn server(
     _link: &types::Link<()>,
-) -> Result<BoxService<(), types::Transfer, types::Outcome, LinkError>, LinkError> {
+) -> Result<BoxService<types::Link<()>, types::Transfer, types::Outcome, LinkError>, LinkError> {
     Ok(boxed::service(fn_service(async |_req| {
         Ok(types::Outcome::Accept)
     })))
@@ -21,7 +21,7 @@ async fn server(
 
 async fn server_count(
     count: Arc<AtomicUsize>,
-) -> Result<BoxService<(), types::Transfer, types::Outcome, LinkError>, LinkError> {
+) -> Result<BoxService<types::Link<()>, types::Transfer, types::Outcome, LinkError>, LinkError> {
     Ok(boxed::service(fn_service(async move |_req| {
         let val = count.load(Ordering::Relaxed);
         count.store(val + 1, Ordering::Release);
@@ -47,17 +47,16 @@ async fn test_simple() -> std::io::Result<()> {
         })
         .finish(
             server::Router::<()>::builder()
-                .service(
-                    "test",
-                    ntex::factory(async move |_: &types::Link<()>| server_count(count.clone()).await),
-                )
+                .service("test", async move |_: &types::Link<()>| {
+                    server_count(count.clone()).await
+                })
                 .build(),
         )
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
@@ -124,7 +123,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
     .start();
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
@@ -181,7 +180,7 @@ async fn test_sasl() -> std::io::Result<()> {
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
-    let _client = Pipeline::new(client::Connector::new())
+    let _client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri).sasl_auth("".into(), "user1".into(), "password1".into()))
         .await;
 
@@ -223,7 +222,7 @@ async fn test_session_end() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
@@ -284,7 +283,7 @@ async fn test_link_detach() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
@@ -342,7 +341,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
@@ -392,7 +391,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
@@ -444,7 +443,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
-    let client = Pipeline::new(client::Connector::new())
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
         .unwrap();
