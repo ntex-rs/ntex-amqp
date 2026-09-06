@@ -1,10 +1,12 @@
 use std::{
-    collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context, task::Poll,
+    collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context,
+    task::Poll,
 };
 
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody,
+    SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer,
+    TransferBody,
 };
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 use ntex_bytes::{BytePages, ByteString, Bytes};
@@ -135,7 +137,10 @@ impl ReceiverLink {
         self.inner.get_mut().close(None)
     }
 
-    pub fn close_with_error<E>(&self, error: E) -> impl Future<Output = Result<(), AmqpProtocolError>>
+    pub fn close_with_error<E>(
+        &self,
+        error: E,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>>
     where
         Error: From<E>,
     {
@@ -359,7 +364,9 @@ impl ReceiverLinkInner {
                         if self.queue.len() == 1 {
                             self.wake();
                         }
-                        Action::Transfer(ReceiverLink { inner: inner.clone() })
+                        Action::Transfer(ReceiverLink {
+                            inner: inner.clone(),
+                        })
                     } else {
                         log::error!("{}: Inconsistent state, bug", self.session.tag());
                         let err = Error(Box::new(codec::ErrorInner {
@@ -424,7 +431,9 @@ impl ReceiverLinkInner {
                 if self.queue.len() == 1 {
                     self.wake();
                 }
-                Action::Transfer(ReceiverLink { inner: inner.clone() })
+                Action::Transfer(ReceiverLink {
+                    inner: inner.clone(),
+                })
             } else {
                 let err = Error(Box::new(codec::ErrorInner {
                     condition: LinkError::DetachForced.into(),

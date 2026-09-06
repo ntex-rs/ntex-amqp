@@ -50,7 +50,10 @@ impl ControlFrame {
     }
 
     pub(crate) fn new_kind(kind: ControlFrameKind) -> Self {
-        ControlFrame(Cell::new(FrameInner { session: None, kind }))
+        ControlFrame(Cell::new(FrameInner {
+            session: None,
+            kind,
+        }))
     }
 
     pub(crate) fn clone(&self) -> Self {

@@ -42,7 +42,9 @@ impl std::fmt::Debug for SenderLink {
 
 impl std::fmt::Debug for SenderLinkInner {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.debug_tuple("SenderLinkInner").field(&&*self.name).finish()
+        fmt.debug_tuple("SenderLinkInner")
+            .field(&&*self.name)
+            .finish()
     }
 }
 
@@ -141,7 +143,10 @@ impl SenderLink {
     }
 
     /// Close sender link with error
-    pub fn close_with_error<E>(&self, error: E) -> impl Future<Output = Result<(), AmqpProtocolError>>
+    pub fn close_with_error<E>(
+        &self,
+        error: E,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>>
     where
         Error: From<E>,
     {
@@ -460,7 +465,11 @@ impl SenderLinkBuilder {
 
     /// Initiate attach sender process
     pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
-        let result = self.session.get_mut().attach_local_sender_link(self.frame).await;
+        let result = self
+            .session
+            .get_mut()
+            .attach_local_sender_link(self.frame)
+            .await;
 
         match result {
             Ok(Ok(inner)) => Ok(SenderLink { inner }),

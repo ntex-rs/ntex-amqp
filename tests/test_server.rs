@@ -6,8 +6,8 @@ use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
 use ntex::util::{Bytes, Either};
 use ntex::{SharedCfg, http::Uri, rt, time::Millis, time::sleep};
 use ntex_amqp::{
-    AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError, server,
-    types,
+    AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
+    server, types,
 };
 use rand::{Rng, distr::Alphanumeric};
 
@@ -68,8 +68,16 @@ async fn test_simple() -> std::io::Result<()> {
 
     let session = sink.open_session().await.unwrap();
 
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
-    let delivery = link.transfer(Bytes::from(b"test".as_ref())).send().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    let delivery = link
+        .transfer(Bytes::from(b"test".as_ref()))
+        .send()
+        .await
+        .unwrap();
     let st = delivery.wait().await.unwrap().unwrap();
     assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
 
@@ -90,7 +98,9 @@ async fn test_simple() -> std::io::Result<()> {
 #[ntex::test]
 async fn test_large_transfer() -> std::io::Result<()> {
     let mut rng = rand::rng();
-    let data: String = (0..2048).map(|_| rng.sample(Alphanumeric) as char).collect();
+    let data: String = (0..2048)
+        .map(|_| rng.sample(Alphanumeric) as char)
+        .collect();
 
     let count = Arc::new(AtomicUsize::new(0));
     let count2 = count.clone();
@@ -133,9 +143,17 @@ async fn test_large_transfer() -> std::io::Result<()> {
     });
 
     let session = sink.open_session().await.unwrap();
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
 
-    let delivery = link.transfer(Bytes::from(data.clone())).send().await.unwrap();
+    let delivery = link
+        .transfer(Bytes::from(data.clone()))
+        .send()
+        .await
+        .unwrap();
     let st = delivery.wait().await.unwrap().unwrap();
     assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
     sleep(Millis(250)).await;
@@ -157,11 +175,15 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
         && let Some(resp) = init.initial_response()
         && resp == b"\0user1\0password1"
     {
-        let succ = init.outcome(ntex_amqp_codec::protocol::SaslCode::Ok).await?;
+        let succ = init
+            .outcome(ntex_amqp_codec::protocol::SaslCode::Ok)
+            .await?;
         return Ok(succ.open().await?.ack(()));
     }
 
-    let succ = init.outcome(ntex_amqp_codec::protocol::SaslCode::Auth).await?;
+    let succ = init
+        .outcome(ntex_amqp_codec::protocol::SaslCode::Auth)
+        .await?;
     Ok(succ.open().await?.ack(()))
 }
 
@@ -175,7 +197,11 @@ async fn test_sasl() -> std::io::Result<()> {
             }
             server::Handshake::Sasl(auth) => sasl_auth(auth).await.map_err(|_| ()),
         })
-        .finish(server::Router::<()>::builder().service("test", server).build())
+        .finish(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
@@ -233,8 +259,16 @@ async fn test_session_end() -> std::io::Result<()> {
     });
 
     let session = sink.open_session().await.unwrap();
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
-    let _delivery = link.transfer(Bytes::from(b"test".as_ref())).send().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    let _delivery = link
+        .transfer(Bytes::from(b"test".as_ref()))
+        .send()
+        .await
+        .unwrap();
     session.end().await.unwrap();
     sleep(Millis(150)).await;
 
@@ -294,7 +328,11 @@ async fn test_link_detach() -> std::io::Result<()> {
     });
 
     let session = sink.open_session().await.unwrap();
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
 
     link.on_close().await;
     assert!(link.is_closed());
@@ -352,7 +390,11 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
     });
 
     let session = sink.open_session().await.unwrap();
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
 
     link.on_close().await;
     assert!(link.is_closed());
@@ -402,7 +444,11 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
     });
 
     let session = sink.open_session().await.unwrap();
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
 
     link.on_close().await;
     assert!(link.is_closed());
@@ -454,7 +500,11 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     });
 
     let session = sink.open_session().await.unwrap();
-    let link = session.build_sender_link("test", "test").attach().await.unwrap();
+    let link = session
+        .build_sender_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
 
     let delivery = link
         .transfer(Bytes::from(b"test".as_ref()))

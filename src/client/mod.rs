@@ -26,7 +26,12 @@ impl<T: Address> Connect<T> {
 
     #[must_use]
     /// Use Sasl auth
-    pub fn sasl_auth(mut self, authz_id: ByteString, authn_id: ByteString, password: ByteString) -> Self {
+    pub fn sasl_auth(
+        mut self,
+        authz_id: ByteString,
+        authn_id: ByteString,
+        password: ByteString,
+    ) -> Self {
         self.sasl = Some(SaslAuth {
             authz_id,
             authn_id,

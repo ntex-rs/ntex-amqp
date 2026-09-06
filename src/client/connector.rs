@@ -49,7 +49,10 @@ where
     A: Address,
 {
     /// Use custom connector
-    pub fn connector<U>(self, f: impl IntoService<U, SharedCfg, connect::Connect<A>>) -> Connector<A, U>
+    pub fn connector<U>(
+        self,
+        f: impl IntoService<U, SharedCfg, connect::Connect<A>>,
+    ) -> Connector<A, U>
     where
         U: Service<SharedCfg, connect::Connect<A>, Error = Error<connect::ConnectError>>,
         IoBoxed: From<U::Res>,
@@ -71,7 +74,11 @@ where
     type Error = Error<ConnectError>;
 
     /// Connect to amqp server
-    async fn call(&self, req: Connect<A>, ctx: Ctx<'_, Self, SharedCfg>) -> Result<Client, Self::Error> {
+    async fn call(
+        &self,
+        req: Connect<A>,
+        ctx: Ctx<'_, Self, SharedCfg>,
+    ) -> Result<Client, Self::Error> {
         let cfg = ctx.st().get::<AmqpServiceConfig>();
         let fut = async {
             let (addr, sasl, hostname) = req.into_parts();
@@ -156,10 +163,12 @@ async fn connect_sasl_inner(
         })?;
 
     if proto != ProtocolId::AmqpSasl {
-        return Err(Error::from(ConnectError::from(ProtocolIdError::Unexpected {
-            exp: ProtocolId::AmqpSasl,
-            got: proto,
-        })));
+        return Err(Error::from(ConnectError::from(
+            ProtocolIdError::Unexpected {
+                exp: ProtocolId::AmqpSasl,
+                got: proto,
+            },
+        )));
     }
 
     let codec = AmqpCodec::<SaslFrame>::new();
@@ -171,7 +180,8 @@ async fn connect_sasl_inner(
         .map_err(ConnectError::from)?
         .ok_or(ConnectError::Disconnected)?;
 
-    let initial_response = SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
+    let initial_response =
+        SaslInit::prepare_response(&auth.authz_id, &auth.authn_id, &auth.password);
 
     let sasl_init = SaslInit {
         hostname: config.hostname.clone(),
@@ -225,10 +235,12 @@ async fn connect_plain_inner(
         })?;
 
     if proto != ProtocolId::Amqp {
-        return Err(Error::from(ConnectError::from(ProtocolIdError::Unexpected {
-            exp: ProtocolId::Amqp,
-            got: proto,
-        })));
+        return Err(Error::from(ConnectError::from(
+            ProtocolIdError::Unexpected {
+                exp: ProtocolId::Amqp,
+                got: proto,
+            },
+        )));
     }
 
     let mut open = config.to_open();

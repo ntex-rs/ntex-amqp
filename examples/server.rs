@@ -15,16 +15,21 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     ntex::server::Server::builder()
-        .bind("amqp", "127.0.0.1:5671", SharedCfg::new("SRV"), async |_| {
-            server::Server::build(async move |con: server::Handshake| match con {
-                server::Handshake::Amqp(con) => {
-                    let con = con.open().await.unwrap();
-                    Ok(con.ack(()))
-                }
-                server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
-            })
-            .finish(server::Router::builder().service("test", server).build())
-        })?
+        .bind(
+            "amqp",
+            "127.0.0.1:5671",
+            SharedCfg::new("SRV"),
+            async |_| {
+                server::Server::build(async move |con: server::Handshake| match con {
+                    server::Handshake::Amqp(con) => {
+                        let con = con.open().await.unwrap();
+                        Ok(con.ack(()))
+                    }
+                    server::Handshake::Sasl(_) => Err(AmqpError::not_implemented()),
+                })
+                .finish(server::Router::builder().service("test", server).build())
+            },
+        )?
         .workers(1)
         .run()
         .await

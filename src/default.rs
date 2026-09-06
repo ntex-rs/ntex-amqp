@@ -61,7 +61,11 @@ impl<S> Service<State<S>, ControlFrame> for DefaultControlService<S> {
     type Res = ();
     type Error = Error;
 
-    async fn call(&self, _: ControlFrame, _: Ctx<'_, Self, State<S>>) -> Result<Self::Res, Self::Error> {
+    async fn call(
+        &self,
+        _: ControlFrame,
+        _: Ctx<'_, Self, State<S>>,
+    ) -> Result<Self::Res, Self::Error> {
         Ok(())
     }
 }
