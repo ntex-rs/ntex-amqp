@@ -50,11 +50,11 @@ impl<S: 'static> Router<S> {
         Error = Error,
         InitError = std::convert::Infallible,
     > {
-        let mut router = PatternRouter::build();
+        let mut router = PatternRouter::builder();
         for (addr, hnd) in self.0 {
             router.path(addr, hnd);
         }
-        let router = Rc::new(router.finish());
+        let router = Rc::new(router.build());
 
         factory(async move |state: &State<S>| {
             Ok(RouterService(Cell::new(RouterServiceInner {

@@ -1,6 +1,7 @@
 use std::io;
 
 use ntex_bytes::ByteString;
+use ntex_error::ErrorDiagnostic;
 use ntex_util::future::Either;
 
 pub use crate::codec::protocol::{Error, ErrorInner};
@@ -69,6 +70,12 @@ pub enum AmqpProtocolError {
 impl From<AmqpParseError> for AmqpProtocolError {
     fn from(err: AmqpParseError) -> Self {
         Self::Codec(err.into())
+    }
+}
+
+impl ErrorDiagnostic for AmqpProtocolError {
+    fn signature(&self) -> &'static str {
+        "ntex-amqp-protocol"
     }
 }
 

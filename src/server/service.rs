@@ -34,7 +34,7 @@ where
     Req::State: Clone,
 {
     /// Start server building process with provided handshake service
-    pub fn build<F, H>(f: F) -> ServerBuilder<St, AppSt, Req, H::Error>
+    pub fn builder<F, H>(f: F) -> ServerBuilder<St, AppSt, Req, H::Error>
     where
         F: IntoService<H, St, Handshake<Req::State>>,
         H: Service<St, Handshake<Req::State>, Res = HandshakeAck<AppSt>> + 'static,
@@ -75,7 +75,7 @@ where
     }
 
     /// Set service to execute for incoming links and create service factory
-    pub fn finish<Sf>(
+    pub fn build<Sf>(
         self,
         f: impl IntoServiceFactory<Sf, State<AppSt>, Message>,
     ) -> Server<St, AppSt, Req, Err>
