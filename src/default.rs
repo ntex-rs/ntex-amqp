@@ -1,7 +1,7 @@
 #![allow(clippy::unused_async_trait_impl)]
 use std::marker::PhantomData;
 
-use ntex_error::ErrorInfo;
+use ntex_error::Failure;
 use ntex_service::{Ctx, Service, ServiceFactory};
 
 use crate::{ControlFrame, State, error::Error, error::LinkError, types::Link};
@@ -49,7 +49,7 @@ impl<S> Default for DefaultControlService<S> {
 impl<S> ServiceFactory<State<S>, ControlFrame> for DefaultControlService<S> {
     type Res = ();
     type Error = Error;
-    type InitError = ErrorInfo;
+    type InitError = Failure;
     type Service = DefaultControlService<S>;
 
     async fn create(&self, _: &State<S>) -> Result<Self::Service, Self::InitError> {

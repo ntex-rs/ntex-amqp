@@ -1,5 +1,5 @@
 use ntex_dispatcher::Dispatcher as IoDispatcher;
-use ntex_error::{self as error, ErrorDiagnostic, ErrorInfo};
+use ntex_error::IntoFailure;
 use ntex_io::IoBoxed;
 use ntex_service::cfg::{Cfg, Configuration};
 use ntex_service::pipeline::{Pipeline, PipelineFactory, PipelineState};
@@ -61,14 +61,16 @@ where
     pub fn control<Sf>(self, f: impl IntoServiceFactory<Sf, State<AppSt>, ControlFrame>) -> Self
     where
         Sf: ServiceFactory<State<AppSt>, ControlFrame, Res = ()> + 'static,
-        Sf::InitError: ErrorDiagnostic,
+        Sf::InitError: IntoFailure,
         Error: From<Sf::Error>,
     {
         ServerBuilder {
             handshake: self.handshake,
-            control: PipelineFactory::new(f.into_factory().map_err(Into::into).map_init_err(|e| {
-                ServerError::ControlService(ErrorInfo::from(error::Error::from(e)))
-            })),
+            control: PipelineFactory::new(
+                f.into_factory()
+                    .map_err(Into::into)
+                    .map_init_err(|e| ServerError::ControlService(e.fail())),
+            ),
         }
     }
 
@@ -79,15 +81,17 @@ where
     ) -> Server<St, AppSt, Req, Err>
     where
         Sf: ServiceFactory<State<AppSt>, Message, Res = ()> + 'static,
-        Sf::InitError: ErrorDiagnostic,
+        Sf::InitError: IntoFailure,
         Error: From<Sf::Error>,
     {
         Server {
             control: self.control,
             handshake: self.handshake,
-            publish: PipelineFactory::new(f.into_factory().map_err(Into::into).map_init_err(|e| {
-                ServerError::PublishService(ErrorInfo::from(error::Error::from(e)))
-            })),
+            publish: PipelineFactory::new(
+                f.into_factory()
+                    .map_err(Into::into)
+                    .map_init_err(|e| ServerError::PublishService(e.fail())),
+            ),
         }
     }
 }

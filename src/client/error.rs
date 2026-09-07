@@ -1,4 +1,4 @@
-use ntex_error::{ErrorDiagnostic, ResultType};
+use ntex_error::ErrorDiagnostic;
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
@@ -63,16 +63,6 @@ impl Clone for ConnectError {
 }
 
 impl ErrorDiagnostic for ConnectError {
-    fn typ(&self) -> ResultType {
-        if let ConnectError::Sasl(err) = self
-            && matches!(err, protocol::SaslCode::Auth | protocol::SaslCode::SysPerm)
-        {
-            ResultType::ClientError
-        } else {
-            ResultType::ServiceError
-        }
-    }
-
     fn signature(&self) -> &'static str {
         match self {
             ConnectError::Codec(_) => "amqp-client-Codec",
