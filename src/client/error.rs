@@ -28,7 +28,7 @@ pub enum ConnectError {
     #[error("Peer disconnected")]
     Disconnected,
     /// Connect error
-    #[error("Connect")]
+    #[error("Amqp connect")]
     Connect(
         #[from]
         #[source]
