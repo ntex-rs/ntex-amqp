@@ -36,7 +36,7 @@ async fn test_simple() -> std::io::Result<()> {
     let count2 = count.clone();
     let srv = test_server(async move || {
         let count = count2.clone();
-        server::Server::build(|con: server::Handshake| async move {
+        server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -45,7 +45,7 @@ async fn test_simple() -> std::io::Result<()> {
                 server::Handshake::Sasl(_) => Err(()),
             }
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", async move |_: &types::Link<()>| {
                     server_count(count.clone()).await
@@ -106,7 +106,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
     let count2 = count.clone();
     let srv = TestServerBuilder::new(async move || {
         let count = count2.clone();
-        server::Server::build(|con: server::Handshake| async move {
+        server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -121,7 +121,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
             }
             Ok::<_, ()>(())
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", async move |_: &types::Link<()>| {
                     server_count(count.clone()).await
@@ -190,14 +190,14 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
     let srv = test_server(async || {
-        server::Server::build(async move |conn: server::Handshake| match conn {
+        server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
                 let conn = conn.open().await.unwrap();
                 Ok(conn.ack(()))
             }
             server::Handshake::Sasl(auth) => sasl_auth(auth).await.map_err(|_| ()),
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", server)
                 .build(),
@@ -219,7 +219,7 @@ async fn test_session_end() -> std::io::Result<()> {
     let link_names2 = link_names.clone();
 
     let srv = test_server(async move || {
-        let srv = server::Server::build(async move |con: server::Handshake| match con {
+        let srv = server::Server::builder(async move |con: server::Handshake| match con {
             server::Handshake::Amqp(con) => {
                 let con = con.open().await.unwrap();
                 Ok(con.ack(()))
@@ -244,7 +244,7 @@ async fn test_session_end() -> std::io::Result<()> {
             }
             Ok::<_, ()>(())
         })
-        .finish(server::Router::builder().service("test", server).build())
+        .build(server::Router::builder().service("test", server).build())
     });
 
     let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
@@ -281,7 +281,7 @@ async fn test_session_end() -> std::io::Result<()> {
 #[ntex::test]
 async fn test_link_detach() -> std::io::Result<()> {
     let srv = test_server(async move || {
-        server::Server::build(async move |con: server::Handshake| match con {
+        server::Server::builder(async move |con: server::Handshake| match con {
             server::Handshake::Amqp(con) => {
                 let con = con.open().await.unwrap();
                 Ok(con.ack(()))
@@ -298,7 +298,7 @@ async fn test_link_detach() -> std::io::Result<()> {
             }
             Ok::<_, ()>(())
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", async move |link: &types::Link<()>| {
                     let link = link.clone();
@@ -352,7 +352,7 @@ async fn test_link_detach() -> std::io::Result<()> {
 #[ntex::test]
 async fn test_link_detach_on_session_end() -> std::io::Result<()> {
     let srv = test_server(async move || {
-        server::Server::build(|con: server::Handshake| async move {
+        server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -361,7 +361,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
                 server::Handshake::Sasl(_) => Err(()),
             }
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", async move |link: &types::Link<()>| {
                     let link = link.clone();
@@ -406,7 +406,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
 #[ntex::test]
 async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
     let srv = test_server(async move || {
-        server::Server::build(|con: server::Handshake| async move {
+        server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -415,7 +415,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
                 server::Handshake::Sasl(_) => Err(()),
             }
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", async move |link: &types::Link<()>| {
                     let link = link.clone();
@@ -460,7 +460,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
 #[ntex::test]
 async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     let srv = test_server(async move || {
-        server::Server::build(|con: server::Handshake| async move {
+        server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
                     let con = con.open().await.unwrap();
@@ -469,7 +469,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
                 server::Handshake::Sasl(_) => Err(()),
             }
         })
-        .finish(
+        .build(
             server::Router::<()>::builder()
                 .service("test", async move |link: &types::Link<()>| {
                     let link = link.clone();
