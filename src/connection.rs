@@ -10,7 +10,9 @@ use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
-use crate::{AmqpServiceConfig, RemoteServiceConfig, cell::Cell, error::AmqpProtocolError, types::Action};
+use crate::{
+    AmqpServiceConfig, RemoteServiceConfig, cell::Cell, error::AmqpProtocolError, types::Action,
+};
 
 pub struct Connection(ConnectionRef);
 
@@ -143,7 +145,9 @@ impl ConnectionRef {
 
     /// Get existing session by local channel id
     pub fn get_session_by_local_id(&self, channel: u16) -> Option<Session> {
-        if let Some(SessionState::Established(inner)) = self.0.get_ref().sessions.get(channel as usize) {
+        if let Some(SessionState::Established(inner)) =
+            self.0.get_ref().sessions.get(channel as usize)
+        {
             Some(Session::new(inner.clone()))
         } else {
             None
@@ -278,7 +282,10 @@ impl ConnectionInner {
         }));
 
         self.io
-            .encode(AmqpFrame::new(local_token as u16, begin.into()), &self.codec)
+            .encode(
+                AmqpFrame::new(local_token as u16, begin.into()),
+                &self.codec,
+            )
             .map_err(AmqpProtocolError::Codec)
     }
 
@@ -401,7 +408,11 @@ impl ConnectionInner {
                 // handle session frames
                 match state {
                     SessionState::Opening(_, _) => {
-                        log::error!("{}: Unexpected opening state: {}", self.io.tag(), channel_id);
+                        log::error!(
+                            "{}: Unexpected opening state: {}",
+                            self.io.tag(),
+                            channel_id
+                        );
                         Err(AmqpProtocolError::UnexpectedOpeningState(frame))
                     }
                     SessionState::Established(session) => match frame {
@@ -413,12 +424,11 @@ impl ConnectionInner {
                                 match attach.0.role {
                                     Role::Receiver => {
                                         // remotly opened sender link
-                                        let (id, response) = session.get_mut().new_remote_sender(&attach);
-                                        let link = SenderLink::new(Cell::new(SenderLinkInner::with(
-                                            id,
-                                            &attach,
-                                            session.clone(),
-                                        )));
+                                        let (id, response) =
+                                            session.get_mut().new_remote_sender(&attach);
+                                        let link = SenderLink::new(Cell::new(
+                                            SenderLinkInner::with(id, &attach, session.clone()),
+                                        ));
                                         Ok(Action::AttachSender(link, attach, response))
                                     }
                                     Role::Sender => {
@@ -448,7 +458,9 @@ impl ConnectionInner {
                     SessionState::Closing(session) => match frame {
                         Frame::End(frm) => {
                             log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
-                            let _ = session.get_mut().end(AmqpProtocolError::SessionEnded(frm.error));
+                            let _ = session
+                                .get_mut()
+                                .end(AmqpProtocolError::SessionEnded(frm.error));
                             if let Some(token) = self.sessions_map.remove(&channel_id) {
                                 self.sessions.remove(token);
                             }
@@ -520,7 +532,10 @@ impl OpenSession {
         if self.props.is_none() {
             self.props = Some(HashMap::default());
         }
-        self.props.as_mut().unwrap().insert(key.into(), value.into());
+        self.props
+            .as_mut()
+            .unwrap()
+            .insert(key.into(), value.into());
         self
     }
 

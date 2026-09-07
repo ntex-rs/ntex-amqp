@@ -1,4 +1,4 @@
-use ntex_error::{ErrorDiagnostic, ResultType};
+use ntex_error::ErrorDiagnostic;
 use ntex_util::future::Either;
 
 use crate::codec::{AmqpCodecError, AmqpFrame, ProtocolIdError, protocol};
@@ -48,27 +48,21 @@ impl Clone for ConnectError {
         match self {
             ConnectError::Codec(err) => ConnectError::Codec(err.clone()),
             ConnectError::HandshakeTimeout => ConnectError::HandshakeTimeout,
-            ConnectError::ProtocolNegotiation(err) => ConnectError::ProtocolNegotiation(err.clone()),
+            ConnectError::ProtocolNegotiation(err) => {
+                ConnectError::ProtocolNegotiation(err.clone())
+            }
             ConnectError::ExpectOpenFrame(frame) => ConnectError::ExpectOpenFrame(frame.clone()),
             ConnectError::Sasl(err) => ConnectError::Sasl(*err),
             ConnectError::Disconnected => ConnectError::Disconnected,
             ConnectError::Connect(err) => ConnectError::Connect(err.clone()),
-            ConnectError::Io(err) => ConnectError::Io(std::io::Error::new(err.kind(), format!("{err}"))),
+            ConnectError::Io(err) => {
+                ConnectError::Io(std::io::Error::new(err.kind(), format!("{err}")))
+            }
         }
     }
 }
 
 impl ErrorDiagnostic for ConnectError {
-    fn typ(&self) -> ResultType {
-        if let ConnectError::Sasl(err) = self
-            && matches!(err, protocol::SaslCode::Auth | protocol::SaslCode::SysPerm)
-        {
-            ResultType::ClientError
-        } else {
-            ResultType::ServiceError
-        }
-    }
-
     fn signature(&self) -> &'static str {
         match self {
             ConnectError::Codec(_) => "amqp-client-Codec",

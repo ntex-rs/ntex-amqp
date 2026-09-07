@@ -31,7 +31,8 @@ pub const UNATTACHED_HANDLE: Symbol = Symbol::from_static("amqp:session:unattach
 
 // link errors
 pub const DETACH_FORCED: Symbol = Symbol::from_static("amqp:link:detach-forced");
-pub const TRANSFER_LIMIT_EXCEEDED: Symbol = Symbol::from_static("amqp:link:transfer-limit-exceeded");
+pub const TRANSFER_LIMIT_EXCEEDED: Symbol =
+    Symbol::from_static("amqp:link:transfer-limit-exceeded");
 pub const MESSAGE_SIZE_EXCEEDED: Symbol = Symbol::from_static("amqp:link:message-size-exceeded");
 pub const LINK_REDIRECT: Symbol = Symbol::from_static("amqp:link:redirect");
 pub const STOLEN: Symbol = Symbol::from_static("amqp:link:stolen");

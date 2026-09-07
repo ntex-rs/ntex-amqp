@@ -13,26 +13,33 @@ use crate::{AmqpServiceConfig, RemoteServiceConfig, connection::Connection};
 use super::{HandshakeError, handshake::HandshakeAmqpOpened};
 
 #[derive(Debug)]
-pub struct Sasl {
-    state: IoBoxed,
+pub struct Sasl<St = ()> {
+    st: St,
+    io: IoBoxed,
     mechanisms: Symbols,
     local_config: Cfg<AmqpServiceConfig>,
 }
 
-impl Sasl {
-    pub(crate) fn new(state: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
+impl<St> Sasl<St> {
+    pub(crate) fn new(st: St, io: IoBoxed, local_config: Cfg<AmqpServiceConfig>) -> Self {
         Sasl {
-            state,
+            st,
+            io,
             local_config,
             mechanisms: Symbols::default(),
         }
     }
 }
 
-impl Sasl {
+impl<St> Sasl<St> {
+    /// Returns reference to state object
+    pub fn st(&self) -> &St {
+        &self.st
+    }
+
     /// Returns reference to io object
     pub fn io(&self) -> &IoBoxed {
-        &self.state
+        &self.io
     }
 
     #[must_use]
@@ -43,9 +50,10 @@ impl Sasl {
     }
 
     /// Initialize sasl auth procedure
-    pub async fn init(self) -> Result<SaslInit, HandshakeError> {
+    pub async fn init(self) -> Result<SaslInit<St>, HandshakeError> {
         let Sasl {
-            state,
+            st,
+            io,
             mechanisms,
             local_config,
             ..
@@ -57,16 +65,17 @@ impl Sasl {
         .into();
 
         let codec = AmqpCodec::<SaslFrame>::new();
-        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
-        let frame = state
+        io.send(frame, &codec).await.map_err(HandshakeError::from)?;
+        let frame = io
             .recv(&codec)
             .await?
             .ok_or(HandshakeError::Disconnected(None))?;
 
         match frame.body {
             SaslFrameBody::SaslInit(frame) => Ok(SaslInit {
+                st,
+                io,
                 frame,
-                state,
                 codec,
                 local_config,
             }),
@@ -76,23 +85,31 @@ impl Sasl {
 }
 
 /// Initialization stage of sasl negotiation
-pub struct SaslInit {
+pub struct SaslInit<St> {
+    st: St,
+    io: IoBoxed,
     frame: protocol::SaslInit,
-    state: IoBoxed,
     codec: AmqpCodec<SaslFrame>,
     local_config: Cfg<AmqpServiceConfig>,
 }
 
-impl fmt::Debug for SaslInit {
+impl<St> fmt::Debug for SaslInit<St> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("SaslInit").field("frame", &self.frame).finish()
+        fmt.debug_struct("SaslInit")
+            .field("frame", &self.frame)
+            .finish()
     }
 }
 
-impl SaslInit {
+impl<St> SaslInit<St> {
+    /// Returns reference to state object
+    pub fn st(&self) -> &St {
+        &self.st
+    }
+
     /// Returns reference to io object
     pub fn io(&self) -> &IoBoxed {
-        &self.state
+        &self.io
     }
 
     /// Sasl mechanism
@@ -111,27 +128,36 @@ impl SaslInit {
     }
 
     /// Initiate sasl challenge
-    pub async fn challenge(self) -> Result<SaslResponse, HandshakeError> {
+    pub async fn challenge(self) -> Result<SaslResponse<St>, HandshakeError> {
         self.challenge_with(Bytes::new()).await
     }
 
     /// Initiate sasl challenge with challenge payload
-    pub async fn challenge_with(self, challenge: Bytes) -> Result<SaslResponse, HandshakeError> {
-        let state = self.state;
-        let codec = self.codec;
-        let local_config = self.local_config;
+    pub async fn challenge_with(
+        self,
+        challenge: Bytes,
+    ) -> Result<SaslResponse<St>, HandshakeError> {
+        let SaslInit {
+            st,
+            io,
+            codec,
+            local_config,
+            frame: _,
+        } = self;
+
         let frame = SaslChallenge { challenge }.into();
 
-        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
-        let frame = state
+        io.send(frame, &codec).await.map_err(HandshakeError::from)?;
+        let frame = io
             .recv(&codec)
             .await?
             .ok_or(HandshakeError::Disconnected(None))?;
 
         match frame.body {
             SaslFrameBody::SaslResponse(frame) => Ok(SaslResponse {
+                st,
+                io,
                 frame,
-                state,
                 codec,
                 local_config,
             }),
@@ -140,30 +166,39 @@ impl SaslInit {
     }
 
     /// Sasl challenge outcome
-    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess, HandshakeError> {
-        let state = self.state;
-        let codec = self.codec;
-        let local_config = self.local_config;
+    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<St>, HandshakeError> {
+        let SaslInit {
+            st,
+            io,
+            codec,
+            local_config,
+            frame: _,
+        } = self;
 
         let frame = SaslOutcome {
             code,
             additional_data: None,
         }
         .into();
-        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
+        io.send(frame, &codec).await.map_err(HandshakeError::from)?;
 
-        Ok(SaslSuccess { state, local_config })
+        Ok(SaslSuccess {
+            st,
+            io,
+            local_config,
+        })
     }
 }
 
-pub struct SaslResponse {
+pub struct SaslResponse<St> {
+    st: St,
+    io: IoBoxed,
     frame: protocol::SaslResponse,
-    state: IoBoxed,
     codec: AmqpCodec<SaslFrame>,
     local_config: Cfg<AmqpServiceConfig>,
 }
 
-impl fmt::Debug for SaslResponse {
+impl<St> fmt::Debug for SaslResponse<St> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("SaslResponse")
             .field("frame", &self.frame)
@@ -171,10 +206,15 @@ impl fmt::Debug for SaslResponse {
     }
 }
 
-impl SaslResponse {
+impl<St> SaslResponse<St> {
+    /// Returns reference to state object
+    pub fn st(&self) -> &St {
+        &self.st
+    }
+
     /// Returns reference to io object
     pub fn io(&self) -> &IoBoxed {
-        &self.state
+        &self.io
     }
 
     /// Client response payload
@@ -183,42 +223,59 @@ impl SaslResponse {
     }
 
     /// Sasl challenge outcome
-    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess, HandshakeError> {
-        let state = self.state;
-        let codec = self.codec;
-        let local_config = self.local_config;
+    pub async fn outcome(self, code: SaslCode) -> Result<SaslSuccess<St>, HandshakeError> {
+        let SaslResponse {
+            st,
+            io,
+            codec,
+            local_config,
+            frame: _,
+        } = self;
 
         let frame = SaslOutcome {
             code,
             additional_data: None,
         }
         .into();
-        state.send(frame, &codec).await.map_err(HandshakeError::from)?;
-        state
-            .recv(&codec)
+        io.send(frame, &codec).await.map_err(HandshakeError::from)?;
+        io.recv(&codec)
             .await?
             .ok_or(HandshakeError::Disconnected(None))?;
 
-        Ok(SaslSuccess { state, local_config })
+        Ok(SaslSuccess {
+            st,
+            io,
+            local_config,
+        })
     }
 }
 
-pub struct SaslSuccess {
-    state: IoBoxed,
+pub struct SaslSuccess<St> {
+    st: St,
+    io: IoBoxed,
     local_config: Cfg<AmqpServiceConfig>,
 }
 
-impl SaslSuccess {
+impl<St> SaslSuccess<St> {
+    /// Returns reference to state object
+    pub fn st(&self) -> &St {
+        &self.st
+    }
+
     /// Returns reference to io object
     pub fn io(&self) -> &IoBoxed {
-        &self.state
+        &self.io
     }
 
     /// Wait for connection open frame
-    pub async fn open(self) -> Result<HandshakeAmqpOpened, HandshakeError> {
-        let state = self.state;
+    pub async fn open(self) -> Result<HandshakeAmqpOpened<St>, HandshakeError> {
+        let SaslSuccess {
+            st,
+            io,
+            local_config: _,
+        } = self;
 
-        let protocol = state
+        let protocol = io
             .recv(&ProtocolIdCodec)
             .await?
             .ok_or(HandshakeError::Disconnected(None))?;
@@ -226,14 +283,13 @@ impl SaslSuccess {
         match protocol {
             ProtocolId::Amqp => {
                 // confirm protocol
-                state
-                    .send(ProtocolId::Amqp, &ProtocolIdCodec)
+                io.send(ProtocolId::Amqp, &ProtocolIdCodec)
                     .await
                     .map_err(HandshakeError::from)?;
 
                 // Wait for connection open frame
                 let codec = AmqpCodec::<AmqpFrame>::new();
-                let frame = state
+                let frame = io
                     .recv(&codec)
                     .await?
                     .ok_or(HandshakeError::Disconnected(None))?;
@@ -241,16 +297,17 @@ impl SaslSuccess {
                 let frame = frame.into_parts().1;
                 match frame {
                     protocol::Frame::Open(frame) => {
-                        log::trace!("{}: Got open frame: {:?}", state.tag(), frame);
+                        log::trace!("{}: Got open frame: {:?}", io.tag(), frame);
 
                         let local_config = self.local_config;
                         let remote_config = RemoteServiceConfig::new(&frame);
-                        let sink = Connection::new(state.clone(), &local_config, &remote_config);
+                        let sink = Connection::new(io.clone(), &local_config, &remote_config);
 
                         Ok(HandshakeAmqpOpened::new(
+                            st,
+                            io,
                             frame,
                             sink,
-                            state,
                             local_config,
                             remote_config,
                         ))

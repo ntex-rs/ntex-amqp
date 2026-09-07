@@ -43,8 +43,13 @@ impl<S: 'static> Router<S> {
 
     pub fn build(
         self,
-    ) -> impl ServiceFactory<State<S>, Message, Res = (), Error = Error, InitError = std::convert::Infallible>
-    {
+    ) -> impl ServiceFactory<
+        State<S>,
+        Message,
+        Res = (),
+        Error = Error,
+        InitError = std::convert::Infallible,
+    > {
         let mut router = PatternRouter::build();
         for (addr, hnd) in self.0 {
             router.path(addr, hnd);
@@ -89,10 +94,10 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                         match hnd.create(&link).await {
                             Ok(srv) => {
                                 log::trace!("Handler service is created for {}", rcv_link.name());
-                                self.0
-                                    .get_mut()
-                                    .handlers
-                                    .insert(rcv_link.clone(), Some(Pipeline::new(link.clone(), srv)));
+                                self.0.get_mut().handlers.insert(
+                                    rcv_link.clone(),
+                                    Some(Pipeline::new(link.clone(), srv)),
+                                );
                                 if let Some((delivery, tr)) = rcv_link.get_delivery() {
                                     service_call(rcv_link, delivery, tr, &self.0).await
                                 } else {
@@ -108,7 +113,10 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                             }
                         }
                     } else {
-                        log::trace!("Target address is not recognized: {}", link.path().get_ref());
+                        log::trace!(
+                            "Target address is not recognized: {}",
+                            link.path().get_ref()
+                        );
                         Err(LinkError::force_detach()
                             .description(format!(
                                 "Target address is not supported: {}",
@@ -145,13 +153,19 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                     })
                     .collect();
 
-                log::trace!("Shutting down {} handler services (session ended)", links.len());
+                log::trace!(
+                    "Shutting down {} handler services (session ended)",
+                    links.len()
+                );
 
                 ntex_rt::spawn(async move {
                     let futs: Vec<_> = links
                         .iter()
                         .map(|(link, srv)| {
-                            log::trace!("Releasing handler service for {} (session ended)", link.name());
+                            log::trace!(
+                                "Releasing handler service for {} (session ended)",
+                                link.name()
+                            );
                             srv.shutdown()
                         })
                         .collect();
@@ -184,7 +198,8 @@ async fn service_call<S>(
         // check readiness
         if let Err(e) = srv.ready().await {
             log::trace!("Service readiness check failed: {e:?}");
-            let _ = link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
+            let _ =
+                link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
             return Ok(());
         }
 
@@ -266,7 +281,11 @@ where
     ntex_service::forward_ready!(Link<S>, service);
     ntex_service::forward_shutdown!(Link<S>, service);
 
-    async fn call(&self, req: Transfer, ctx: Ctx<'_, Self, Link<S>>) -> Result<Self::Res, Self::Error> {
+    async fn call(
+        &self,
+        req: Transfer,
+        ctx: Ctx<'_, Self, Link<S>>,
+    ) -> Result<Self::Res, Self::Error> {
         match ctx.call(&self.service, req).await {
             Ok(v) => Ok(v),
             Err(err) => Outcome::try_from(err),

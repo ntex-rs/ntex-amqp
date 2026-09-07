@@ -84,7 +84,10 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
     }
 
     async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
-        self.sink.0.get_mut().set_error(AmqpProtocolError::Disconnected);
+        self.sink
+            .0
+            .get_mut()
+            .set_error(AmqpProtocolError::Disconnected);
         let _ = self
             .ctl_service
             .call(ControlFrame::new_kind(ControlFrameKind::Closed))
@@ -117,7 +120,8 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                     types::Action::Transfer(link) => {
                         if self.sink.is_opened() {
                             let lnk = link.clone();
-                            if let Err(e) = self.service.call(types::Message::Transfer(link)).await {
+                            if let Err(e) = self.service.call(types::Message::Transfer(link)).await
+                            {
                                 log::trace!("Service error {e:?}");
                                 let _ = lnk.close_with_error(e);
                             }
@@ -168,7 +172,9 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                             })
                             .collect();
 
-                        let fut = self.service.call_static(types::Message::DetachedAll(receivers));
+                        let fut = self
+                            .service
+                            .call_static(types::Message::DetachedAll(receivers));
                         spawn(async move {
                             let _ = fut.await;
                         });
@@ -177,9 +183,9 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                         ));
                     }
                     types::Action::RemoteClose(err) => {
-                        self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
-                            err,
-                        )));
+                        self.call_control_service(ControlFrame::new_kind(
+                            ControlFrameKind::ProtocolError(err),
+                        ));
                     }
                     types::Action::None => (),
                 }
@@ -205,7 +211,9 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                 Ok(None)
             }
             DispatchItem::Stop(Reason::Io(e)) => {
-                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(e)));
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
+                    e,
+                )));
                 Ok(None)
             }
             DispatchItem::Control(_) => Ok(None),
@@ -279,16 +287,16 @@ impl Dispatcher {
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::AttachSender(frm, _, link) => {
-                    frame.session_cell().get_mut().detach_unconfirmed_sender_link(
-                        frm,
-                        &link.inner,
-                        Some(err),
-                    );
+                    frame
+                        .session_cell()
+                        .get_mut()
+                        .detach_unconfirmed_sender_link(frm, &link.inner, Some(err));
                 }
                 ControlFrameKind::Flow(_, link) | ControlFrameKind::RemoteDetachSender(_, link) => {
                     let _ = link.close_with_error(err);
                 }
-                ControlFrameKind::LocalDetachSender(..) | ControlFrameKind::LocalDetachReceiver(..) => {}
+                ControlFrameKind::LocalDetachSender(..)
+                | ControlFrameKind::LocalDetachReceiver(..) => {}
                 ControlFrameKind::ProtocolError(err) => {
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
@@ -296,7 +304,8 @@ impl Dispatcher {
                 ControlFrameKind::Closed | ControlFrameKind::Disconnected(_) => {
                     self.sink.set_error(AmqpProtocolError::Disconnected);
                 }
-                ControlFrameKind::LocalSessionEnded(_) | ControlFrameKind::RemoteSessionEnded(_) => (),
+                ControlFrameKind::LocalSessionEnded(_)
+                | ControlFrameKind::RemoteSessionEnded(_) => (),
             }
         } else {
             match frame.0.get_mut().kind {
