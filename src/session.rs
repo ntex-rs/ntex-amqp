@@ -376,7 +376,7 @@ impl SessionInner {
 
         self.error = Some(err);
         self.flags.insert(Flags::ENDED);
-        self.closed.notify_and_lock_readiness();
+        self.closed.notify_and_lock(());
     }
 
     /// End session.

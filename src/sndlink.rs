@@ -256,8 +256,8 @@ impl SenderLinkInner {
 
         self.closed = true;
         self.error = Some(err);
-        self.on_close.notify_and_lock_readiness();
-        self.on_credit.notify_and_lock_readiness();
+        self.on_close.notify_and_lock(());
+        self.on_credit.notify_and_lock(());
     }
 
     pub(crate) async fn close(&mut self, error: Option<Error>) -> Result<(), AmqpProtocolError> {
@@ -265,8 +265,8 @@ impl SenderLinkInner {
             Ok(())
         } else {
             self.closed = true;
-            self.on_close.notify_and_lock_readiness();
-            self.on_credit.notify_and_lock_readiness();
+            self.on_close.notify_and_lock(());
+            self.on_credit.notify_and_lock(());
 
             let (tx, rx) = oneshot::channel();
 
@@ -312,7 +312,7 @@ impl SenderLinkInner {
 
             // notify available credit waiters
             if self.link_credit > 0 {
-                self.on_credit.notify();
+                self.on_credit.notify(());
             }
         }
     }
@@ -404,8 +404,8 @@ impl Drop for EstablishedSenderLink {
         let inner = self.0.inner.get_mut();
         if !inner.closed {
             inner.closed = true;
-            inner.on_close.notify_and_lock_readiness();
-            inner.on_credit.notify_and_lock_readiness();
+            inner.on_close.notify_and_lock(());
+            inner.on_credit.notify_and_lock(());
         }
     }
 }
