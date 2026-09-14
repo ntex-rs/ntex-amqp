@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "6.0.0-beta.5"
+version = "6.0.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -34,15 +34,15 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex-amqp-codec = "3.0.0-beta.0"
+ntex-amqp-codec = "3.0.0"
 
 ntex-bytes = "1.9.0"
 ntex-error = "2.6"
 ntex-router = "1.1"
-ntex-dispatcher = "4.0.0-beta.0"
-ntex-io = "4.0.0-beta.2"
-ntex-net = "4.0.0-beta.0"
-ntex-util = "4.0.0-beta.8"
+ntex-dispatcher = "4.0.0"
+ntex-io = "4.0.0"
+ntex-net = "4.0.0"
+ntex-util = "4.0.0"
 ntex-service = "5.0.0"
 ntex-rt = "3.17.1"
 
@@ -56,7 +56,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 ntex = "4.0.0-beta.11"
-ntex-server = "4.0.0-beta.6"
+ntex-server = "4.0.0"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
 
 env_logger = "0.11"
