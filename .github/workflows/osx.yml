@@ -27,7 +27,7 @@ jobs:
 
       - name: Run tests (neon)
         timeout-minutes: 40
-        run: cargo test --all --no-default-features --no-fail-fast --features="ntex/neon,ntex/cookie,ntex/url,ntex/compress,ntex/openssl,ntex/rustls,ntex/ws"
+        run: cargo test --all --no-default-features --no-fail-fast --features="ntex/cookie,ntex/url,ntex/compress,ntex/openssl,ntex/rustls,ntex/ws"
 
       - name: Run tests (tokio)
         run: cargo test --all --no-default-features --no-fail-fast --features="ntex/tokio,ntex/cookie,ntex/url,ntex/compress,ntex/openssl,ntex/rustls,ntex/ws"

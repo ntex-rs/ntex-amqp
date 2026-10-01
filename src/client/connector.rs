@@ -98,7 +98,7 @@ where
             .await
             .map_err(|()| Error::from(ConnectError::HandshakeTimeout))
             .and_then(|res| res)
-            .map_err(|e| e.set_service(cfg.service()))
+            .map_err(|e| e.with_service(cfg.service()))
     }
 
     ntex_service::forward_ready!(SharedCfg, connector, Error::map_err);
@@ -122,7 +122,7 @@ where
 
         connect_plain_inner(io, config.clone(), hostname)
             .await
-            .map_err(|e| e.set_service(config.service()))
+            .map_err(|e| e.with_service(config.service()))
     }
 
     /// Negotiate amqp sasl protocol over opened socket
@@ -137,7 +137,7 @@ where
 
         connect_sasl_inner(io, auth, config.clone(), hostname)
             .await
-            .map_err(|e| e.set_service(config.service()))
+            .map_err(|e| e.with_service(config.service()))
     }
 }
 

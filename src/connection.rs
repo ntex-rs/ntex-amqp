@@ -130,7 +130,7 @@ impl ConnectionRef {
         if inner.state != ConnectionState::Normal {
             return false;
         }
-        inner.error.is_none() && !inner.io.is_closed()
+        inner.error.is_none() && inner.io.is_active()
     }
 
     /// Get waiter for `on_close` event

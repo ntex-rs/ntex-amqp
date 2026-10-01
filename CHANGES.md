@@ -1,5 +1,11 @@
 # Changes
 
+## [6.1.0] - Unreleased
+
+* Update to latest ntex apis
+
+* Add `AmqpProtocolError::WriteTimeout`, reported when write backpressure exceeds the write timeout
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0

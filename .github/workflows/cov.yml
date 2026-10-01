@@ -22,7 +22,7 @@ jobs:
         run: cargo llvm-cov clean --workspace
 
       - name: Code coverage (neon)
-        run: cargo llvm-cov --no-report --all --no-default-features --features="ntex/neon"
+        run: cargo llvm-cov --no-report --all --no-default-features --features="ntex/neon-polling"
 
       - name: Code coverage (neon-uring)
         run: cargo llvm-cov --no-report --all --no-default-features --features="ntex/neon-uring"

@@ -106,7 +106,7 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
     type Item = T;
     type Error = AmqpCodecError;
 
-    fn encodev(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
+    fn encode(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
         item.encode(dst);
         Ok(())
     }
@@ -149,7 +149,7 @@ impl Encoder for ProtocolIdCodec {
     type Item = ProtocolId;
     type Error = ProtocolIdError;
 
-    fn encodev(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
+    fn encode(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
         dst.put_slice(PROTOCOL_HEADER_PREFIX);
         dst.put_u8(item as u8);
         dst.put_slice(PROTOCOL_VERSION);
