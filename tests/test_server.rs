@@ -1,10 +1,9 @@
-use std::convert::TryFrom;
 use std::sync::{Arc, Mutex, atomic::AtomicUsize, atomic::Ordering};
 
 use ntex::server::{TestServerBuilder, test_server};
 use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
 use ntex::util::{Bytes, Either};
-use ntex::{SharedCfg, http::Uri, rt, time::Millis, time::sleep};
+use ntex::{SharedCfg, rt, time::Millis, time::sleep, url::Url};
 use ntex_amqp::{
     AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
     server, types,
@@ -54,7 +53,7 @@ async fn test_simple() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
@@ -132,7 +131,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
     .config(SharedCfg::new("AMQP").add(AmqpServiceConfig::new().set_max_frame_size(1024)))
     .start();
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
@@ -204,7 +203,7 @@ async fn test_sasl() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
 
     let _client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri).sasl_auth("".into(), "user1".into(), "password1".into()))
@@ -247,7 +246,7 @@ async fn test_session_end() -> std::io::Result<()> {
         .build(server::Router::builder().service("test", server).build())
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
@@ -316,7 +315,7 @@ async fn test_link_detach() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
@@ -378,7 +377,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
@@ -432,7 +431,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
@@ -488,7 +487,7 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
         )
     });
 
-    let uri = Uri::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
     let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
         .call(client::Connect::new(uri))
         .await
