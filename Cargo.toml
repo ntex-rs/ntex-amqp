@@ -1,6 +1,6 @@
 [package]
 name = "ntex-amqp"
-version = "6.0.0"
+version = "6.1.0"
 authors = ["ntex contributors <team@ntex.rs>"]
 description = "AMQP 1.0 Client/Server framework"
 documentation = "https://docs.rs/ntex-amqp"
@@ -10,7 +10,7 @@ keywords = ["AMQP", "IoT", "messaging"]
 license = "MIT OR Apache-2.0"
 exclude = [".gitignore", ".travis.yml", ".cargo/config"]
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97"
 
 [workspace]
 members = [
@@ -34,17 +34,17 @@ default = []
 frame-trace = []
 
 [dependencies]
-ntex-amqp-codec = "3.0.0"
+ntex-amqp-codec = "3.1.0"
 
-ntex-bytes = "1.9.0"
-ntex-error = "2.6"
-ntex-router = "1.1"
-ntex-dispatcher = "4.0.0"
-ntex-io = "4.0.0"
-ntex-net = "4.0.0"
-ntex-util = "4.0.0"
-ntex-service = "5.0.0"
-ntex-rt = "3.17.1"
+ntex-bytes = "1.10"
+ntex-error = "3.0"
+ntex-router = "2.0"
+ntex-dispatcher = "4.1"
+ntex-io = "4.1"
+ntex-net = "4.1"
+ntex-util = "4.2"
+ntex-service = "5.1"
+ntex-rt = "4.0"
 
 bitflags = "2"
 derive_more = { version = "2", features = ["from"] }
@@ -55,8 +55,8 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-ntex = "4.0.0-beta.11"
-ntex-server = "4.0.0"
+ntex = "4.0.0-beta.14"
+ntex-server = "4.2"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
 
 env_logger = "0.11"
@@ -65,3 +65,9 @@ rand = "0.9"
 [patch.crates-io]
 ntex-amqp = { path = "." }
 ntex-amqp-codec = { path = "codec" }
+
+ntex = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-net = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-server = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-tls = { git = "https://github.com/ntex-rs/ntex.git" }
+ntex-h2 = { git = "https://github.com/ntex-rs/ntex-h2.git" }

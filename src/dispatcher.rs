@@ -198,7 +198,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                 )));
                 Ok(None)
             }
-            DispatchItem::Stop(Reason::KeepAliveTimeout) => {
+            DispatchItem::Stop(Reason::KeepAlive) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
                     AmqpProtocolError::KeepAliveTimeout,
                 )));
@@ -210,13 +210,20 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                 )));
                 Ok(None)
             }
+            DispatchItem::Stop(Reason::WriteTimeout) => {
+                self.call_control_service(ControlFrame::new_kind(ControlFrameKind::ProtocolError(
+                    AmqpProtocolError::WriteTimeout,
+                )));
+                Ok(None)
+            }
             DispatchItem::Stop(Reason::Io(e)) => {
                 self.call_control_service(ControlFrame::new_kind(ControlFrameKind::Disconnected(
                     e,
                 )));
                 Ok(None)
             }
-            DispatchItem::Control(_) => Ok(None),
+            // the service failure was already reported and closed the connection
+            DispatchItem::Control(_) | DispatchItem::Stop(Reason::Service) => Ok(None),
         }
     }
 }

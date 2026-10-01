@@ -47,6 +47,8 @@ pub enum AmqpProtocolError {
     KeepAliveTimeout,
     #[error("Read timeout")]
     ReadTimeout,
+    #[error("Write timeout")]
+    WriteTimeout,
     #[error("Disconnected")]
     Disconnected,
     #[error("Unknown session: {:?}", _0)]
