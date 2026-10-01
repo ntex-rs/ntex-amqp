@@ -8,7 +8,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - 1.95.0 # MSRV
+          - 1.97.0 # MSRV
           - stable
           - nightly
 
@@ -26,7 +26,7 @@ jobs:
       - name: Run tests (neon)
         timeout-minutes: 15
         run: |
-          cargo test --all --no-default-features --features="ntex/neon"
+          cargo test --all --no-default-features
 
       - name: Run tests (neon-uring)
         timeout-minutes: 15
