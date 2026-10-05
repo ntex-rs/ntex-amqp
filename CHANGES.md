@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix CPU exhaustion on remote `Disposition` with a large delivery-id range, the range is walked up to the number of unsettled deliveries. Ranges wrapping past `u32::MAX` are supported
+
 * Add `AmqpServiceConfig::set_handle_max()`, limits remotely attached links per session (default 1024)
 
 * End session on remote `Attach` with a handle already in use or above `handle-max`, orphaned links leaked memory
