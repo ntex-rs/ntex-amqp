@@ -10,6 +10,8 @@
 
 * Limit nesting depth of decoded lists, maps and described values, deep nesting overflowed the stack
 
+* Reject lists and maps whose element count exceeds their size and arrays with more than 65536 zero-width elements, a peer-supplied count could allocate huge buffers
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
