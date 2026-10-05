@@ -26,6 +26,8 @@
 
 * Fix `Multiple<T>` decoding of a described value, the error was `InvalidFormatCode(0x00)` instead of `InvalidDescriptor`
 
+* Fix decoding of negative timestamps, -1..-999 ms decoded as positive and whole-second values failed
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0

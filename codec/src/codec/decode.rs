@@ -690,21 +690,9 @@ fn decode_compound32(input: &mut Bytes) -> Result<(u32, u32), AmqpParseError> {
 }
 
 fn datetime_from_millis(millis: i64) -> Result<DateTime<Utc>, AmqpParseError> {
-    let seconds = millis / 1000;
-    if seconds < 0 {
-        // In order to handle time before 1970 correctly, we need to subtract a second
-        // and use the nanoseconds field to add it back. This is a result of the nanoseconds
-        // parameter being u32
-        let nanoseconds = ((1000 + (millis - (seconds * 1000))) * 1_000_000).unsigned_abs();
-        Utc.timestamp_opt(seconds - 1, nanoseconds as u32)
-            .earliest()
-            .ok_or(AmqpParseError::DatetimeParseError)
-    } else {
-        let nanoseconds = ((millis - (seconds * 1000)) * 1_000_000).unsigned_abs();
-        Utc.timestamp_opt(seconds, nanoseconds as u32)
-            .earliest()
-            .ok_or(AmqpParseError::DatetimeParseError)
-    }
+    Utc.timestamp_millis_opt(millis)
+        .single()
+        .ok_or(AmqpParseError::DatetimeParseError)
 }
 
 fn read_fixed_bytes<const N: usize>(input: &mut Bytes) -> Result<[u8; N], AmqpParseError> {
@@ -939,6 +927,31 @@ mod tests {
             Variant::Timestamp(expected),
             unwrap_value(Variant::decode(&mut b1.freeze()))
         );
+    }
+
+    #[test]
+    fn timestamp_negative_millis() {
+        for millis in [-1, -500, -999, -1000, -1001, -1500, -2000, -86_400_000] {
+            let mut buf = Bytes::from(
+                [
+                    &[codec::FORMATCODE_TIMESTAMP][..],
+                    &i64::to_be_bytes(millis),
+                ]
+                .concat(),
+            );
+            let dt = DateTime::<Utc>::decode(&mut buf).unwrap();
+            assert_eq!(dt.timestamp_millis(), millis);
+
+            let mut b = BytePages::default();
+            dt.encode(&mut b);
+            assert_eq!(&b.freeze()[1..], &millis.to_be_bytes());
+        }
+        let mut buf =
+            Bytes::from([&[codec::FORMATCODE_TIMESTAMP][..], &i64::MIN.to_be_bytes()].concat());
+        assert!(matches!(
+            DateTime::<Utc>::decode(&mut buf),
+            Err(AmqpParseError::DatetimeParseError)
+        ));
     }
 
     #[test]
