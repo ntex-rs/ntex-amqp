@@ -250,10 +250,16 @@ impl VariantMap {
     }
 }
 
-#[allow(clippy::derived_hash_with_manual_eq)]
 impl Hash for VariantMap {
-    fn hash<H: Hasher>(&self, _state: &mut H) {
-        unimplemented!()
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // map iteration order is unspecified, combine entry hashes commutatively
+        let entries = self.map.iter().fold(0u64, |acc, entry| {
+            let mut hasher = std::hash::DefaultHasher::new();
+            entry.hash(&mut hasher);
+            acc.wrapping_add(hasher.finish())
+        });
+        state.write_usize(self.map.len());
+        state.write_u64(entries);
     }
 }
 
@@ -352,6 +358,32 @@ mod tests {
 
         assert_eq!(Variant::String(ByteString::from("hello").into()), a);
         assert!(a != b);
+    }
+
+    #[test]
+    fn map_key_map() {
+        use std::hash::BuildHasher;
+
+        // map8 { map8 {}: null }
+        let mut input = Bytes::from_static(b"\xc1\x05\x02\xc1\x01\x00\x40");
+        let Variant::Map(outer) = Variant::decode(&mut input).unwrap() else {
+            panic!("expected map")
+        };
+        let key = Variant::Map(VariantMap::new(HashMap::default()));
+        assert_eq!(outer.map.get(&key), Some(&Variant::Null));
+
+        let mut m1 = HashMap::default();
+        let mut m2 = HashMap::default();
+        for i in 0..32u32 {
+            m1.insert(Variant::Uint(i), Variant::from("v"));
+            m2.insert(Variant::Uint(31 - i), Variant::from("v"));
+        }
+        let (m1, m2) = (VariantMap::new(m1), VariantMap::new(m2));
+        assert_eq!(m1, m2);
+        let s = std::hash::RandomState::new();
+        assert_eq!(s.hash_one(&m1), s.hash_one(&m2));
+        let m3 = VariantMap::new(HashMap::default());
+        assert_ne!(s.hash_one(&m1), s.hash_one(&m3));
     }
 
     #[test]

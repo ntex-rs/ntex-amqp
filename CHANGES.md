@@ -6,6 +6,8 @@
 
 * Add `AmqpProtocolError::WriteTimeout`, reported when write backpressure exceeds the write timeout
 
+* Fix panic when decoding a map with a map as a key (implement `Hash` for `VariantMap`)
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
