@@ -589,7 +589,7 @@ impl<T: ArrayEncode> Encode for Vec<T> {
     fn encoded_size(&self) -> usize {
         let ctor_size = T::ARRAY_CONSTRUCTOR.encoded_size();
         let content_size = array_encoded_size(self);
-        (if content_size + 1 + ctor_size > u8::MAX as usize {
+        (if content_size + 1 + ctor_size > u8::MAX as usize || self.len() > u8::MAX as usize {
             9 // 1 for format code, 4 for size, 4 for count
         } else {
             3 // 1 for format code, 1 for size, 1 for count
@@ -600,7 +600,7 @@ impl<T: ArrayEncode> Encode for Vec<T> {
     fn encode(&self, buf: &mut BytePages) {
         let size = array_encoded_size(self);
         let ctor_size = T::ARRAY_CONSTRUCTOR.encoded_size();
-        if size + 1 + ctor_size > u8::MAX as usize {
+        if size + 1 + ctor_size > u8::MAX as usize || self.len() > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
             buf.put_u32((size + 4 + ctor_size) as u32); // +4 for count
             buf.put_u32(self.len() as u32);

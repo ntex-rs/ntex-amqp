@@ -57,10 +57,17 @@ where
     }
 }
 
+impl Array {
+    fn is_array32(&self, ctor_len: usize) -> bool {
+        // elements of zero-width types take no bytes, count may exceed size
+        self.payload.len() + ctor_len + 1 > u8::MAX as usize || self.count > u32::from(u8::MAX)
+    }
+}
+
 impl Encode for Array {
     fn encoded_size(&self) -> usize {
         let ctor_len = self.element_constructor.encoded_size();
-        let header_len = if self.payload.len() + ctor_len + 1 > u8::MAX as usize {
+        let header_len = if self.is_array32(ctor_len) {
             9 // 1 for format code, 4 for size, 4 for count
         } else {
             3 // 1 for format code, 1 for size, 1 for count
@@ -71,7 +78,7 @@ impl Encode for Array {
 
     fn encode(&self, buf: &mut BytePages) {
         let ctor_len = self.element_constructor.encoded_size();
-        if self.payload.len() + ctor_len + 1 > u8::MAX as usize {
+        if self.is_array32(ctor_len) {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
             buf.put_u32((4 + ctor_len + self.payload.len()) as u32); // size. 4 for count
             buf.put_u32(self.count);
@@ -98,5 +105,60 @@ impl DecodeFormatted for Array {
             payload,
             count: header.count,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ntex_bytes::{BytePages, Bytes};
+
+    use super::*;
+    use crate::codec::Encode;
+    use crate::types::Variant;
+
+    fn zero_width_array(count: u32) -> Bytes {
+        let mut buf = vec![codec::FORMATCODE_ARRAY32, 0, 0, 0, 5];
+        buf.extend_from_slice(&count.to_be_bytes());
+        buf.push(codec::FORMATCODE_BOOLEAN_TRUE);
+        Bytes::from(buf)
+    }
+
+    #[test]
+    fn encode_count_above_u8() {
+        for count in [255, 256, 300] {
+            let arr = <Array as Decode>::decode(&mut zero_width_array(count)).unwrap();
+            let mut buf = BytePages::default();
+            arr.encode(&mut buf);
+            let mut buf = buf.freeze();
+            assert_eq!(arr.encoded_size(), buf.len());
+            let arr = <Array as Decode>::decode(&mut buf).unwrap();
+            assert_eq!(arr.decode::<bool>().unwrap(), vec![true; count as usize]);
+        }
+    }
+
+    struct Null;
+
+    impl ArrayEncode for Null {
+        const ARRAY_CONSTRUCTOR: Constructor = Constructor::FormatCode(codec::FORMATCODE_NULL);
+        fn array_encoded_size(&self) -> usize {
+            0
+        }
+        fn array_encode(&self, _: &mut BytePages) {}
+    }
+
+    #[test]
+    fn encode_vec_count_above_u8() {
+        for count in [255, 256, 300] {
+            let data: Vec<Null> = (0..count).map(|_| Null).collect();
+            let mut buf = BytePages::default();
+            data.encode(&mut buf);
+            let mut buf = buf.freeze();
+            assert_eq!(data.encoded_size(), buf.len());
+            let Variant::Array(arr) = Variant::decode(&mut buf).unwrap() else {
+                panic!("expected array");
+            };
+            assert_eq!(arr.count, count);
+            assert!(buf.is_empty());
+        }
     }
 }

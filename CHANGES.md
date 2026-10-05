@@ -22,6 +22,8 @@
 
 * Ignore cached encoded size when comparing `Message`s
 
+* Use ARRAY32 encoding for arrays with more than 255 elements, element count was truncated to u8
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
