@@ -258,6 +258,13 @@ impl ConnectionInner {
 
         let entry = self.sessions.vacant_entry();
         let local_token = entry.key();
+        if remote_channel_id > self.channel_max || local_token > self.channel_max as usize {
+            log::trace!(
+                "{}: Too many channels: {remote_channel_id} {local_token}",
+                self.io.tag()
+            );
+            return Err(AmqpProtocolError::TooManyChannels);
+        }
         let outgoing_window = begin.incoming_window();
 
         let session = Cell::new(SessionInner::new(
@@ -373,6 +380,11 @@ impl ConnectionInner {
                 }
             }
             Frame::Begin(begin) => {
+                if self.sessions_map.contains_key(&channel_id) {
+                    log::trace!("{}: Channel {channel_id} is in use", self.io.tag());
+                    return Err(AmqpProtocolError::Unexpected(Frame::Begin(begin)));
+                }
+
                 // response Begin for open session
                 // the remote-channel property in the frame is the local channel id
                 // we previously sent to the remote
@@ -587,7 +599,7 @@ async fn open_session(
         let entry = inner.sessions.vacant_entry();
         let token = entry.key();
 
-        if token >= inner.channel_max as usize {
+        if token > inner.channel_max as usize {
             log::trace!("{}: Too many channels: {:?}", inner.io.tag(), token);
             Err(AmqpProtocolError::TooManyChannels)
         } else {

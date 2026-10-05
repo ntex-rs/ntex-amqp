@@ -4,6 +4,7 @@ use ntex::server::{TestServerBuilder, test_server};
 use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
 use ntex::util::{Bytes, Either};
 use ntex::{SharedCfg, rt, time::Millis, time::sleep, url::Url};
+use ntex_amqp::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, protocol::ProtocolId};
 use ntex_amqp::{
     AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
     server, types,
@@ -262,6 +263,111 @@ async fn test_handshake_max_frame_size() -> std::io::Result<()> {
         .call(client::Connect::new(uri).sasl_auth("".into(), "user1".into(), large.as_str().into()))
         .await;
     assert!(res.is_err());
+
+    Ok(())
+}
+
+async fn raw_connect(addr: std::net::SocketAddr) -> ntex::io::Io {
+    let io = ntex::connect::connect(addr).await.unwrap();
+    io.send(ProtocolId::Amqp, &ProtocolIdCodec).await.unwrap();
+    assert_eq!(
+        io.recv(&ProtocolIdCodec).await.unwrap(),
+        Some(ProtocolId::Amqp)
+    );
+    let open = AmqpServiceConfig::new().to_open();
+    io.send(AmqpFrame::new(0, open.into()), &AmqpCodec::new())
+        .await
+        .unwrap();
+    let frame = io.recv(&AmqpCodec::<AmqpFrame>::new()).await.unwrap();
+    assert!(matches!(
+        frame.unwrap().performative(),
+        protocol::Frame::Open(_)
+    ));
+    io
+}
+
+/// Send begin frames, return number of begin responses until connection is closed
+async fn raw_begin(io: &ntex::io::Io, channels: &[u16]) -> usize {
+    let codec = AmqpCodec::<AmqpFrame>::new();
+    for ch in channels {
+        let begin = protocol::Begin(Box::new(protocol::BeginInner {
+            remote_channel: None,
+            next_outgoing_id: 1,
+            incoming_window: 100,
+            outgoing_window: 100,
+            handle_max: 10,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        }));
+        io.send(AmqpFrame::new(*ch, begin.into()), &codec)
+            .await
+            .unwrap();
+    }
+
+    let mut count = 0;
+    ntex::time::timeout(Millis(2000), async {
+        while let Ok(Some(frame)) = io.recv(&codec).await {
+            match frame.performative() {
+                protocol::Frame::Begin(_) => count += 1,
+                protocol::Frame::Close(_) => break,
+                _ => (),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    count
+}
+
+#[ntex::test]
+async fn test_remote_begin_channels() -> std::io::Result<()> {
+    let srv = TestServerBuilder::new(async || {
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    })
+    .config(SharedCfg::new("AMQP").add(AmqpServiceConfig::new().set_channel_max(2)))
+    .start();
+
+    // channel in use
+    let io = raw_connect(srv.addr()).await;
+    assert_eq!(raw_begin(&io, &[0, 0]).await, 1);
+
+    // channel number above channel-max
+    let io = raw_connect(srv.addr()).await;
+    assert_eq!(raw_begin(&io, &[3]).await, 0);
+
+    // all channels up to channel-max
+    let io = raw_connect(srv.addr()).await;
+    assert_eq!(raw_begin(&io, &[0, 1, 2, 1]).await, 3);
+
+    // local sessions up to channel-max
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let cfg = SharedCfg::new("CLIENT").add(AmqpServiceConfig::new().set_channel_max(1));
+    let client = Pipeline::new(cfg.build(), client::Connector::new())
+        .call(client::Connect::new(uri))
+        .await
+        .unwrap();
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+    let _s0 = sink.open_session().await.unwrap();
+    let _s1 = sink.open_session().await.unwrap();
+    assert!(matches!(
+        sink.open_session().await,
+        Err(ntex_amqp::error::AmqpProtocolError::TooManyChannels)
+    ));
 
     Ok(())
 }

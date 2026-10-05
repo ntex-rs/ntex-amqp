@@ -2,35 +2,37 @@
 
 ## [6.2.0] - Unreleased
 
-* Update to latest ntex apis
+* Fix off-by-one in local session open, channel number equal to `channel-max` was rejected
 
-* Add `AmqpProtocolError::WriteTimeout`, reported when write backpressure exceeds the write timeout
-
-* Fix panic when decoding a map with a map as a key (implement `Hash` for `VariantMap`)
-
-* Limit nesting depth of decoded lists, maps and described values, deep nesting overflowed the stack
-
-* Reject lists and maps whose element count exceeds their size and arrays with more than 65536 zero-width elements, a peer-supplied count could allocate huge buffers
-
-* Fix overflow when decoding a list, map or array with a declared size smaller than its count field
-
-* Decode list and array elements within the declared size, malformed lists desynced decoding of following fields
-
-* Fix stale `Message` encoded size after `set_value()`, `body_mut()` and `*_mut()` accessors
-
-* Make `Message` fields private, direct field changes left the cached encoded size stale. Add `Message::message_format()`, `delivery_annotation()`, `add_delivery_annotation()`, `footer()`, `footer_mut()` and `set_footer()`
-
-* Ignore cached encoded size when comparing `Message`s
-
-* Use ARRAY32 encoding for arrays with more than 255 elements, element count was truncated to u8
-
-* Fix `Multiple<T>` decoding of a described value, the error was `InvalidFormatCode(0x00)` instead of `InvalidDescriptor`
-
-* Fix decoding of negative timestamps, -1..-999 ms decoded as positive and whole-second values failed
+* Reject remote `Begin` on a channel already in use or above `channel-max`, orphaned sessions leaked memory
 
 * Remove `AmqpServiceConfig::set_max_size()`, inbound frames, including handshake frames (open, SASL), are limited by `max_frame_size`. Change default `max_frame_size` from 64kb to 16kb
 
-* Fix split transfer frames exceeding remote `max-frame-size`, frame header and transfer performative were not accounted for
+* Add `AmqpProtocolError::WriteTimeout`, reported when write backpressure exceeds the write timeout
+
+* codec: Fix panic when decoding a map with a map as a key (implement `Hash` for `VariantMap`)
+
+* codec: Limit nesting depth of decoded lists, maps and described values, deep nesting overflowed the stack
+
+* codec: Reject lists and maps whose element count exceeds their size and arrays with more than 65536 zero-width elements, a peer-supplied count could allocate huge buffers
+
+* codec: Fix overflow when decoding a list, map or array with a declared size smaller than its count field
+
+* codec: Decode list and array elements within the declared size, malformed lists desynced decoding of following fields
+
+* codec: Fix stale `Message` encoded size after `set_value()`, `body_mut()` and `*_mut()` accessors
+
+* codec: Make `Message` fields private, direct field changes left the cached encoded size stale. Add `Message::message_format()`, `delivery_annotation()`, `add_delivery_annotation()`, `footer()`, `footer_mut()` and `set_footer()`
+
+* codec: Ignore cached encoded size when comparing `Message`s
+
+* codec: Use ARRAY32 encoding for arrays with more than 255 elements, element count was truncated to u8
+
+* codec: Fix `Multiple<T>` decoding of a described value, the error was `InvalidFormatCode(0x00)` instead of `InvalidDescriptor`
+
+* codec: Fix decoding of negative timestamps, -1..-999 ms decoded as positive and whole-second values failed
+
+* codec: Fix split transfer frames exceeding remote `max-frame-size`, frame header and transfer performative were not accounted for
 
 ## [6.0.0] - 2026-09-14
 
