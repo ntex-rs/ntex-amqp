@@ -334,7 +334,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
                 Ok(Multiple(items))
             }
             codec::FORMATCODE_DESCRIBED => {
-                let descriptor = Descriptor::decode_with_format(input, fmt)?;
+                let descriptor = Descriptor::decode(input)?;
                 // todo: mg: described types are not supported OOTB at this point
                 Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)))
             }
@@ -1143,6 +1143,17 @@ mod tests {
         assert!(Variant::decode(&mut Bytes::copy_from_slice(&data)).is_err());
         let data = [codec::FORMATCODE_ARRAY8, 2, 1, 0x56, 1];
         assert!(Vec::<bool>::decode(&mut Bytes::copy_from_slice(&data)).is_err());
+    }
+
+    #[test]
+    fn multiple_described() {
+        // described symbol with descriptor ulong 0x10
+        let data = [codec::FORMATCODE_DESCRIBED, 0x53, 0x10, 0xa3, 1, b'a'];
+        let res = Multiple::<Symbol>::decode(&mut Bytes::copy_from_slice(&data));
+        assert!(matches!(
+            res,
+            Err(AmqpParseError::InvalidDescriptor(d)) if *d == Descriptor::Ulong(0x10)
+        ));
     }
 
     #[test]

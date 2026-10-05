@@ -24,6 +24,8 @@
 
 * Use ARRAY32 encoding for arrays with more than 255 elements, element count was truncated to u8
 
+* Fix `Multiple<T>` decoding of a described value, the error was `InvalidFormatCode(0x00)` instead of `InvalidDescriptor`
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
