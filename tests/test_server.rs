@@ -213,6 +213,60 @@ async fn test_sasl() -> std::io::Result<()> {
 }
 
 #[ntex::test]
+async fn test_handshake_max_frame_size() -> std::io::Result<()> {
+    let srv = TestServerBuilder::new(async || {
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(auth) => {
+                let init = auth.mechanism("PLAIN").init().await.map_err(|_| ())?;
+                let succ = init.outcome(protocol::SaslCode::Ok).await.map_err(|_| ())?;
+                Ok(succ.open().await.map_err(|_| ())?.ack(()))
+            }
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    })
+    .config(SharedCfg::new("AMQP").add(AmqpServiceConfig::new().set_max_frame_size(512)))
+    .start();
+
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let large = "x".repeat(1024);
+    let large_cfg = SharedCfg::new("CLIENT").add(AmqpServiceConfig::new().set_container_id(&large));
+
+    // open frame
+    let res = Pipeline::new(SharedCfg::default(), client::Connector::new())
+        .call(client::Connect::new(uri.clone()))
+        .await;
+    assert!(res.is_ok());
+    let res = Pipeline::new(large_cfg.build(), client::Connector::new())
+        .call(client::Connect::new(uri.clone()))
+        .await;
+    assert!(res.is_err());
+
+    // sasl init frame
+    let res = Pipeline::new(SharedCfg::default(), client::Connector::new())
+        .call(client::Connect::new(uri.clone()).sasl_auth(
+            "".into(),
+            "user1".into(),
+            "password1".into(),
+        ))
+        .await;
+    assert!(res.is_ok());
+    let res = Pipeline::new(SharedCfg::default(), client::Connector::new())
+        .call(client::Connect::new(uri).sasl_auth("".into(), "user1".into(), large.as_str().into()))
+        .await;
+    assert!(res.is_err());
+
+    Ok(())
+}
+
+#[ntex::test]
 async fn test_session_end() -> std::io::Result<()> {
     let link_names = Arc::new(Mutex::new(Vec::new()));
     let link_names2 = link_names.clone();

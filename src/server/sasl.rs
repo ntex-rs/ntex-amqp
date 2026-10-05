@@ -64,7 +64,7 @@ impl<St> Sasl<St> {
         }
         .into();
 
-        let codec = AmqpCodec::<SaslFrame>::new();
+        let codec = AmqpCodec::<SaslFrame>::new().max_size(local_config.max_frame_size as usize);
         io.send(frame, &codec).await.map_err(HandshakeError::from)?;
         let frame = io
             .recv(&codec)
@@ -288,7 +288,8 @@ impl<St> SaslSuccess<St> {
                     .map_err(HandshakeError::from)?;
 
                 // Wait for connection open frame
-                let codec = AmqpCodec::<AmqpFrame>::new();
+                let codec = AmqpCodec::<AmqpFrame>::new()
+                    .max_size(self.local_config.max_frame_size as usize);
                 let frame = io
                     .recv(&codec)
                     .await?

@@ -212,7 +212,7 @@ where
 
             let (st, sink, idle_timeout, io) = ack.into_inner();
 
-            let codec = AmqpCodec::new().max_size(cfg.max_size);
+            let codec = AmqpCodec::new().max_size(cfg.max_frame_size as usize);
 
             // confirm Open
             let local = cfg.to_open();

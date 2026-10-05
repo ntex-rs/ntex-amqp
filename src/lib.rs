@@ -64,7 +64,6 @@ pub struct AmqpServiceConfig {
     pub offered_capabilities: Option<Symbols>,
     pub desired_capabilities: Option<Symbols>,
     pub properties: Option<Fields>,
-    pub(crate) max_size: usize,
     pub(crate) handshake_timeout: Seconds,
     config: CfgContext,
 }
@@ -102,8 +101,7 @@ impl AmqpServiceConfig {
     /// Create connection configuration.
     pub fn new() -> Self {
         AmqpServiceConfig {
-            max_size: 0,
-            max_frame_size: u32::from(u16::MAX),
+            max_frame_size: 16 * 1024,
             channel_max: 1024,
             idle_time_out: 120_000,
             container_id: None,
@@ -130,7 +128,9 @@ impl AmqpServiceConfig {
     #[must_use]
     /// Set max frame size for the connection.
     ///
-    /// By default max size is set to 64kb
+    /// Also limits inbound frames, including handshake frames.
+    ///
+    /// By default max frame size is set to 16kb
     pub fn set_max_frame_size(mut self, size: u32) -> Self {
         self.max_frame_size = size;
         self
@@ -186,16 +186,6 @@ impl AmqpServiceConfig {
     /// Set open frame properties
     pub fn set_properties(mut self, props: Fields) -> Self {
         self.properties = Some(props);
-        self
-    }
-
-    #[must_use]
-    /// Set max inbound frame size.
-    ///
-    /// If max size is set to `0`, size is unlimited.
-    /// By default max size is set to `0`
-    pub fn set_max_size(mut self, size: usize) -> Self {
-        self.max_size = size;
         self
     }
 

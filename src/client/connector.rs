@@ -171,7 +171,7 @@ async fn connect_sasl_inner(
         )));
     }
 
-    let codec = AmqpCodec::<SaslFrame>::new();
+    let codec = AmqpCodec::<SaslFrame>::new().max_size(config.max_frame_size as usize);
 
     // processing sasl-mechanisms
     let _ = io

@@ -20,6 +20,8 @@ use crate::rcvlink::{
 use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
 use crate::{ConnectionRef, ControlFrame, cell::Cell, types::Action};
 
+const FRAME_HEADER_LEN: usize = 8;
+
 pub(crate) const INITIAL_NEXT_OUTGOING_ID: TransferNumber = 1;
 
 #[derive(Clone)]
@@ -1235,17 +1237,30 @@ impl SessionInner {
             format
         };
 
-        let max_frame_size = self.max_frame_size();
-        let max_frame_size = if max_frame_size > 2048 {
-            max_frame_size - 2048
-        } else if max_frame_size == 0 {
-            u32::MAX
+        let mut transfer = Transfer(Box::default());
+        transfer.0.handle = link_handle;
+        transfer.0.state = tr_settled;
+        transfer.0.delivery_id = Some(delivery_id);
+        transfer.0.delivery_tag = Some(tag.clone());
+        transfer.0.message_format = message_format;
+
+        if settled {
+            transfer.0.settled = Some(true);
         } else {
-            max_frame_size
-        } as usize;
+            self.unsettled_snd_deliveries
+                .insert(delivery_id, DeliveryInner::new(link_handle));
+        }
+
+        // frame header and transfer performative must fit into remote max frame size
+        let max_chunk = match self.max_frame_size() {
+            0 => usize::MAX,
+            size => (size as usize)
+                .saturating_sub(FRAME_HEADER_LEN + transfer.encoded_size())
+                .max(1),
+        };
 
         // body is larger than allowed frame size, send body as a set of transfers
-        if body.len() > max_frame_size {
+        if body.len() > max_chunk {
             let mut body = match body {
                 TransferBody::Data(data) => data,
                 TransferBody::Message(msg) => {
@@ -1256,24 +1271,10 @@ impl SessionInner {
                 TransferBody::Pages(mut data) => data.freeze(),
             };
 
-            let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
-
-            let mut transfer = Transfer(Box::default());
-            transfer.0.handle = link_handle;
+            let chunk = body.split_to(cmp::min(max_chunk, body.len()));
             transfer.0.body = Some(TransferBody::Data(chunk));
             transfer.0.more = true;
-            transfer.0.state = tr_settled;
             transfer.0.batchable = true;
-            transfer.0.delivery_id = Some(delivery_id);
-            transfer.0.delivery_tag = Some(tag.clone());
-            transfer.0.message_format = message_format;
-
-            if settled {
-                transfer.0.settled = Some(true);
-            } else {
-                self.unsettled_snd_deliveries
-                    .insert(delivery_id, DeliveryInner::new(link_handle));
-            }
 
             log::trace!(
                 "{}: Sending transfer over handle {link_handle}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}",
@@ -1294,7 +1295,7 @@ impl SessionInner {
                     break;
                 }
 
-                let chunk = body.split_to(cmp::min(max_frame_size, body.len()));
+                let chunk = body.split_to(cmp::min(max_chunk, body.len()));
 
                 log::trace!("{}: Sending chunk tranfer for {tag:?}", self.tag());
                 let mut transfer = Transfer(Box::default());
@@ -1306,20 +1307,7 @@ impl SessionInner {
                 self.post_frame(Frame::Transfer(transfer));
             }
         } else {
-            let mut transfer = Transfer(Box::default());
-            transfer.0.handle = link_handle;
             transfer.0.body = Some(body);
-            transfer.0.state = tr_settled;
-            transfer.0.delivery_id = Some(delivery_id);
-            transfer.0.delivery_tag = Some(tag);
-            transfer.0.message_format = message_format;
-
-            if settled {
-                transfer.0.settled = Some(true);
-            } else {
-                self.unsettled_snd_deliveries
-                    .insert(delivery_id, DeliveryInner::new(link_handle));
-            }
             self.post_frame(Frame::Transfer(transfer));
         }
 

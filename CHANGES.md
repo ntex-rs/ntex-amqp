@@ -1,6 +1,6 @@
 # Changes
 
-## [6.1.0] - Unreleased
+## [6.2.0] - Unreleased
 
 * Update to latest ntex apis
 
@@ -27,6 +27,10 @@
 * Fix `Multiple<T>` decoding of a described value, the error was `InvalidFormatCode(0x00)` instead of `InvalidDescriptor`
 
 * Fix decoding of negative timestamps, -1..-999 ms decoded as positive and whole-second values failed
+
+* Remove `AmqpServiceConfig::set_max_size()`, inbound frames, including handshake frames (open, SASL), are limited by `max_frame_size`. Change default `max_frame_size` from 64kb to 16kb
+
+* Fix split transfer frames exceeding remote `max-frame-size`, frame header and transfer performative were not accounted for
 
 ## [6.0.0] - 2026-09-14
 
