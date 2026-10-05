@@ -372,6 +372,137 @@ async fn test_remote_begin_channels() -> std::io::Result<()> {
     Ok(())
 }
 
+async fn raw_send(io: &ntex::io::Io, channel: u16, frame: protocol::Frame) {
+    io.send(AmqpFrame::new(channel, frame), &AmqpCodec::new())
+        .await
+        .unwrap();
+}
+
+async fn raw_recv(io: &ntex::io::Io) -> protocol::Frame {
+    ntex::time::timeout(Millis(2000), io.recv(&AmqpCodec::<AmqpFrame>::new()))
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+        .into_parts()
+        .1
+}
+
+fn raw_attach(handle: u32, role: protocol::Role) -> protocol::Frame {
+    let target = protocol::Target {
+        address: Some("test".into()),
+        durable: protocol::TerminusDurability::None,
+        expiry_policy: protocol::TerminusExpiryPolicy::SessionEnd,
+        timeout: 0,
+        dynamic: false,
+        dynamic_node_properties: None,
+        capabilities: None,
+    };
+    protocol::Attach(Box::new(protocol::AttachInner {
+        name: format!("link-{handle}").into(),
+        handle,
+        role,
+        snd_settle_mode: protocol::SenderSettleMode::Mixed,
+        rcv_settle_mode: protocol::ReceiverSettleMode::First,
+        source: None,
+        target: Some(target),
+        unsettled: None,
+        incomplete_unsettled: false,
+        initial_delivery_count: Some(0),
+        max_message_size: None,
+        offered_capabilities: None,
+        desired_capabilities: None,
+        properties: None,
+    }))
+    .into()
+}
+
+/// Begin session on channel 0, returns advertised handle-max
+async fn raw_begin_session(io: &ntex::io::Io) -> u32 {
+    let begin = protocol::Begin(Box::new(protocol::BeginInner {
+        remote_channel: None,
+        next_outgoing_id: 1,
+        incoming_window: 100,
+        outgoing_window: 100,
+        handle_max: 10,
+        offered_capabilities: None,
+        desired_capabilities: None,
+        properties: None,
+    }));
+    raw_send(io, 0, begin.into()).await;
+    match raw_recv(io).await {
+        protocol::Frame::Begin(begin) => begin.handle_max(),
+        frm => panic!("Unexpected frame: {frm:?}"),
+    }
+}
+
+/// Wait for End frame, returns error condition
+async fn raw_end(io: &ntex::io::Io) -> protocol::ErrorCondition {
+    loop {
+        if let protocol::Frame::End(end) = raw_recv(io).await {
+            raw_send(io, 0, protocol::End { error: None }.into()).await;
+            return end.error.unwrap().0.condition.clone();
+        }
+    }
+}
+
+#[ntex::test]
+async fn test_remote_attach_handles() -> std::io::Result<()> {
+    let srv = TestServerBuilder::new(async || {
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .control(async |msg: ControlFrame| {
+            // keep remote sender link unconfirmed
+            if let ControlFrameKind::AttachSender(..) = msg.kind() {
+                sleep(Millis(50)).await;
+            }
+            Ok::<_, ()>(())
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    })
+    .config(SharedCfg::new("AMQP").add(AmqpServiceConfig::new().set_handle_max(2)))
+    .start();
+    let handle_in_use = protocol::ErrorCondition::SessionError(protocol::SessionError::HandleInUse);
+
+    let io = raw_connect(srv.addr()).await;
+    assert_eq!(raw_begin_session(&io).await, 2);
+
+    // handle in use
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+    assert!(matches!(raw_recv(&io).await, protocol::Frame::Attach(_)));
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+    assert_eq!(raw_end(&io).await, handle_in_use);
+
+    // handle above handle-max, connection is still alive
+    assert_eq!(raw_begin_session(&io).await, 2);
+    raw_send(&io, 0, raw_attach(2, protocol::Role::Sender)).await;
+    assert!(matches!(raw_recv(&io).await, protocol::Frame::Attach(_)));
+    raw_send(&io, 0, raw_attach(3, protocol::Role::Sender)).await;
+    assert_eq!(
+        raw_end(&io).await,
+        protocol::ErrorCondition::AmqpError(protocol::AmqpError::ResourceLimitExceeded)
+    );
+
+    // handle in use, remote sender link is not confirmed yet
+    assert_eq!(raw_begin_session(&io).await, 2);
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Receiver)).await;
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Receiver)).await;
+    assert_eq!(raw_end(&io).await, handle_in_use);
+    sleep(Millis(100)).await;
+    assert_eq!(raw_begin_session(&io).await, 2);
+
+    Ok(())
+}
+
 #[ntex::test]
 async fn test_session_end() -> std::io::Result<()> {
     let link_names = Arc::new(Mutex::new(Vec::new()));

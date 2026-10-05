@@ -5,7 +5,9 @@ use ntex_service::cfg::Cfg;
 use ntex_util::HashMap;
 use ntex_util::channel::{condition::Condition, condition::Waiter, oneshot};
 
-use crate::codec::protocol::{self as codec, Begin, Close, End, Error, Frame, Role};
+use crate::codec::protocol::{
+    self as codec, AmqpError, Begin, Close, End, Error, ErrorCondition, Frame, Role, SessionError,
+};
 use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
@@ -30,6 +32,7 @@ pub(crate) struct ConnectionInner {
     pub(crate) on_close: Condition,
     pub(crate) error: Option<AmqpProtocolError>,
     channel_max: u16,
+    handle_max: u32,
     pub(crate) max_frame_size: u32,
 }
 
@@ -70,6 +73,7 @@ impl Connection {
             error: None,
             on_close: Condition::new(),
             channel_max: local_config.channel_max,
+            handle_max: local_config.handle_max,
             max_frame_size: remote_config.max_frame_size,
         })))
     }
@@ -282,7 +286,7 @@ impl ConnectionInner {
             remote_channel: Some(remote_channel_id),
             next_outgoing_id: 1,
             incoming_window: u32::MAX,
-            handle_max: u32::MAX,
+            handle_max: self.handle_max,
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
@@ -429,6 +433,37 @@ impl ConnectionInner {
                     }
                     SessionState::Established(session) => match frame {
                         Frame::Attach(attach) => {
+                            let handle = attach.handle();
+                            let condition = if handle > self.handle_max {
+                                Some(ErrorCondition::AmqpError(AmqpError::ResourceLimitExceeded))
+                            } else if session.get_ref().is_remote_handle_used(handle) {
+                                Some(ErrorCondition::SessionError(SessionError::HandleInUse))
+                            } else {
+                                None
+                            };
+
+                            if let Some(condition) = condition {
+                                log::trace!(
+                                    "{}: Cannot attach link with handle {handle}: {condition:?}",
+                                    self.io.tag()
+                                );
+                                let err = Error(Box::new(codec::ErrorInner {
+                                    condition,
+                                    description: None,
+                                    info: None,
+                                }));
+                                let id = session.get_ref().id();
+                                let action = session
+                                    .get_mut()
+                                    .end(AmqpProtocolError::SessionEnded(Some(err.clone())));
+                                *state = SessionState::Closing(session.clone());
+                                self.post_frame(AmqpFrame::new(
+                                    id,
+                                    End { error: Some(err) }.into(),
+                                ));
+                                return Ok(action);
+                            }
+
                             let cell = session.clone();
                             if session.get_mut().handle_attach(&attach, cell) {
                                 Ok(Action::None)
@@ -613,7 +648,7 @@ async fn open_session(
                 next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
                 incoming_window: u32::MAX,
                 outgoing_window: u32::MAX,
-                handle_max: u32::MAX,
+                handle_max: inner.handle_max,
             }));
             inner.post_frame(AmqpFrame::new(token as u16, begin.into()));
             let _ = inner;
