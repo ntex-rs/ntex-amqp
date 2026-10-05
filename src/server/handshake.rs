@@ -63,7 +63,7 @@ impl<St> HandshakeAmqp<St> {
             local_config,
         } = self;
 
-        let codec = AmqpCodec::<AmqpFrame>::new();
+        let codec = AmqpCodec::<AmqpFrame>::new().max_size(local_config.max_frame_size as usize);
         let frame = io.recv(&codec).await?.ok_or_else(|| {
             log::trace!(
                 "{}: Server amqp is disconnected during open frame",
