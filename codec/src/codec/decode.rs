@@ -668,7 +668,8 @@ fn decode_frame_header(input: &mut Bytes, expected_frame_type: u8) -> Result<u16
 
 fn decode_compound8(input: &mut Bytes) -> Result<(u32, u32), AmqpParseError> {
     decode_check_len!(input, 2);
-    let size = input[0] - 1; // -1 for 1 byte count
+    // -1 for 1 byte count
+    let size = input[0].checked_sub(1).ok_or(AmqpParseError::InvalidSize)?;
     let count = input[1];
     input.advance(2);
     Ok((u32::from(size), u32::from(count)))
@@ -676,7 +677,10 @@ fn decode_compound8(input: &mut Bytes) -> Result<(u32, u32), AmqpParseError> {
 
 fn decode_compound32(input: &mut Bytes) -> Result<(u32, u32), AmqpParseError> {
     decode_check_len!(input, 8);
-    let size = BigEndian::read_u32(input) - 4; // -4 for 4 byte count
+    // -4 for 4 byte count
+    let size = BigEndian::read_u32(input)
+        .checked_sub(4)
+        .ok_or(AmqpParseError::InvalidSize)?;
     let count = BigEndian::read_u32(&input[4..]);
     input.advance(8);
     Ok((size, count))
@@ -1141,6 +1145,17 @@ mod tests {
             let res = Variant::decode(&mut array(count));
             assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
         }
+    }
+
+    #[test_case(&[codec::FORMATCODE_LIST8, 0, 0] ; "list8")]
+    #[test_case(&[codec::FORMATCODE_MAP8, 0, 0] ; "map8")]
+    #[test_case(&[codec::FORMATCODE_ARRAY8, 0, 0, 0x40] ; "array8")]
+    #[test_case(&[codec::FORMATCODE_LIST32, 0, 0, 0, 3, 0, 0, 0, 0] ; "list32")]
+    #[test_case(&[codec::FORMATCODE_MAP32, 0, 0, 0, 3, 0, 0, 0, 0] ; "map32")]
+    #[test_case(&[codec::FORMATCODE_ARRAY32, 0, 0, 0, 0, 0, 0, 0, 0, 0x40] ; "array32")]
+    fn compound_size_too_small(data: &[u8]) {
+        let res = Variant::decode(&mut Bytes::copy_from_slice(data));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
     }
 
     #[test]

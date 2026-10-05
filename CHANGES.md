@@ -12,6 +12,8 @@
 
 * Reject lists and maps whose element count exceeds their size and arrays with more than 65536 zero-width elements, a peer-supplied count could allocate huge buffers
 
+* Fix overflow when decoding a list, map or array with a declared size smaller than its count field
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
