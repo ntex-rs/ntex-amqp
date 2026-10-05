@@ -272,7 +272,8 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = ArrayHeader::decode_with_format(input, fmt)?;
         decode_check_len!(input, header.size as usize);
-        let elem_ctor = Constructor::decode(input)?;
+        let mut input = input.split_to(header.size as usize);
+        let elem_ctor = Constructor::decode(&mut input)?;
         let elem_fmt = match elem_ctor {
             Constructor::FormatCode(code) => code,
             Constructor::Described { descriptor, .. } => {
@@ -282,10 +283,9 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
         };
         let mut result: Vec<T> = Vec::with_capacity(array_capacity(header.count));
         for _ in 0..header.count {
-            let decoded = T::decode_with_format(input, elem_fmt)?;
+            let decoded = T::decode_with_format(&mut input, elem_fmt)?;
             result.push(decoded);
         }
-        // todo: ensure header.size bytes were read out from input
         Ok(result)
     }
 }
@@ -390,10 +390,12 @@ fn decode_nested_variant(input: &mut Bytes, depth: u32) -> Result<Variant, AmqpP
 fn decode_list(input: &mut Bytes, fmt: u8, depth: u32) -> Result<List, AmqpParseError> {
     let depth = nested(depth)?;
     let header = ListHeader::decode_with_format(input, fmt)?;
+    decode_check_len!(input, header.size as usize);
+    let mut input = input.split_to(header.size as usize);
     check_count(header.count, input.len())?;
     let mut result: Vec<Variant> = Vec::with_capacity(header.count as usize);
     for _ in 0..header.count {
-        result.push(decode_nested_variant(input, depth)?);
+        result.push(decode_nested_variant(&mut input, depth)?);
     }
     Ok(List(result))
 }
@@ -421,12 +423,13 @@ fn decode_map(
 impl<T: Composite> DecodeFormatted for ListDescribed<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = ListHeader::decode_with_format(input, fmt)?;
-
+        decode_check_len!(input, header.size as usize);
+        let mut input = input.split_to(header.size as usize);
         check_count(header.count, input.len())?;
         let descr = T::descriptor();
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
-            if let Variant::DescribedCompound(decoded) = Variant::decode(input)? {
+            if let Variant::DescribedCompound(decoded) = Variant::decode(&mut input)? {
                 if &descr != decoded.descriptor() {
                     return Err(AmqpParseError::UnexpectedType("Unexpected descriptor"));
                 }
@@ -1045,26 +1048,50 @@ mod tests {
         assert_eq!(array_items, expected_array);
     }
 
-    fn nested(prefix: &[u8], levels: usize) -> Bytes {
-        let mut buf = prefix.repeat(levels);
+    fn nested(fmt: u8, levels: usize) -> Bytes {
+        let hdr_len = match fmt {
+            codec::FORMATCODE_LIST8 => 3,
+            codec::FORMATCODE_LIST32 => 9,
+            _ => 3,
+        };
+        let mut buf = Vec::with_capacity(levels * hdr_len + 1);
+        let mut size8 = 255;
+        for level in 0..levels {
+            // inner value size, incl. trailing null
+            let inner = (levels - level - 1) * hdr_len + 1;
+            match fmt {
+                codec::FORMATCODE_LIST8 => {
+                    // list8 can't hold deep nesting, keep each level within its parent
+                    size8 = (inner + 1).min(size8);
+                    buf.extend_from_slice(&[fmt, size8 as u8, 1]);
+                    size8 = size8.saturating_sub(hdr_len);
+                }
+                codec::FORMATCODE_LIST32 => {
+                    buf.push(fmt);
+                    buf.extend_from_slice(&(inner as u32 + 4).to_be_bytes());
+                    buf.extend_from_slice(&1u32.to_be_bytes());
+                }
+                _ => buf.extend_from_slice(&[codec::FORMATCODE_DESCRIBED, 0x53, 0x01]),
+            }
+        }
         buf.push(codec::FORMATCODE_NULL);
         Bytes::from(buf)
     }
 
-    #[test_case(b"\xc0\x01\x01"; "list8")]
-    #[test_case(b"\xd0\x00\x00\x00\x04\x00\x00\x00\x01"; "list32")]
-    #[test_case(b"\x00\x53\x01"; "described")]
-    fn max_depth(prefix: &[u8]) {
-        let mut buf = nested(prefix, MAX_DEPTH as usize);
+    #[test_case(codec::FORMATCODE_LIST8; "list8")]
+    #[test_case(codec::FORMATCODE_LIST32; "list32")]
+    #[test_case(codec::FORMATCODE_DESCRIBED; "described")]
+    fn max_depth(fmt: u8) {
+        let mut buf = nested(fmt, MAX_DEPTH as usize);
         assert!(Variant::decode(&mut buf).is_ok());
         assert!(buf.is_empty());
 
         for levels in [MAX_DEPTH as usize + 1, 100_000] {
-            let res = Variant::decode(&mut nested(prefix, levels));
+            let res = Variant::decode(&mut nested(fmt, levels));
             assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
         }
-        if prefix[0] != codec::FORMATCODE_DESCRIBED {
-            let res = List::decode(&mut nested(prefix, 100_000));
+        if fmt != codec::FORMATCODE_DESCRIBED {
+            let res = List::decode(&mut nested(fmt, 100_000));
             assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
         }
     }
@@ -1091,6 +1118,31 @@ mod tests {
 
         let res = Variant::decode(&mut nested_map(MAX_DEPTH as usize + 1));
         assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
+    }
+
+    #[test]
+    fn compound_bounded_by_size() {
+        // list8 [null] with an extra byte inside, followed by `false`
+        let data = [codec::FORMATCODE_LIST8, 3, 1, 0x40, 0x41, 0x42];
+        let mut buf = Bytes::copy_from_slice(&data);
+        let res = Variant::decode(&mut buf).unwrap();
+        assert_eq!(res, Variant::List(List(vec![Variant::Null])));
+        assert_eq!(buf, Bytes::from_static(&[0x42]));
+        let mut buf = Bytes::copy_from_slice(&data);
+        assert_eq!(List::decode(&mut buf).unwrap(), List(vec![Variant::Null]));
+        assert_eq!(buf, Bytes::from_static(&[0x42]));
+
+        // array8 [true] with an extra byte inside, followed by `false`
+        let data = [codec::FORMATCODE_ARRAY8, 4, 1, 0x56, 1, 0, 0x42];
+        let mut buf = Bytes::copy_from_slice(&data);
+        assert_eq!(Vec::<bool>::decode(&mut buf).unwrap(), vec![true]);
+        assert_eq!(buf, Bytes::from_static(&[0x42]));
+
+        // elements must not be read past the declared size
+        let data = [codec::FORMATCODE_LIST8, 1, 1, 0x40];
+        assert!(Variant::decode(&mut Bytes::copy_from_slice(&data)).is_err());
+        let data = [codec::FORMATCODE_ARRAY8, 2, 1, 0x56, 1];
+        assert!(Vec::<bool>::decode(&mut Bytes::copy_from_slice(&data)).is_err());
     }
 
     #[test]
