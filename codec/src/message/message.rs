@@ -13,7 +13,7 @@ use super::body::MessageBody;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Message(Box<MessageInner>);
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Eq)]
 struct MessageInner {
     message_format: Option<MessageFormat>,
     header: Option<Header>,
@@ -24,6 +24,31 @@ struct MessageInner {
     footer: Option<Annotations>,
     body: MessageBody,
     size: Cell<usize>,
+}
+
+impl PartialEq for MessageInner {
+    fn eq(&self, other: &Self) -> bool {
+        // cached size is not part of the message
+        let Self {
+            message_format,
+            header,
+            delivery_annotations,
+            message_annotations,
+            properties,
+            application_properties,
+            footer,
+            body,
+            size: _,
+        } = self;
+        *message_format == other.message_format
+            && *header == other.header
+            && *delivery_annotations == other.delivery_annotations
+            && *message_annotations == other.message_annotations
+            && *properties == other.properties
+            && *application_properties == other.application_properties
+            && *footer == other.footer
+            && *body == other.body
+    }
 }
 
 impl Message {
@@ -592,6 +617,8 @@ mod tests {
         let mut buf = BytePages::default();
         msg.encode(&mut buf);
         let msg2 = Message::decode(&mut buf.freeze()).unwrap();
+        assert_ne!(msg.0.size.get(), msg2.0.size.get());
+        assert_eq!(msg, msg2);
         assert_eq!(msg2.delivery_annotation("c"), Some(&Variant::from(1)));
         assert_eq!(msg2.footer(), msg.footer());
     }

@@ -20,6 +20,8 @@
 
 * Make `Message` fields private, direct field changes left the cached encoded size stale. Add `Message::message_format()`, `delivery_annotation()`, `add_delivery_annotation()`, `footer()`, `footer_mut()` and `set_footer()`
 
+* Ignore cached encoded size when comparing `Message`s
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
