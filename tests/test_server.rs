@@ -504,6 +504,45 @@ async fn test_remote_attach_handles() -> std::io::Result<()> {
 }
 
 #[ntex::test]
+async fn test_remote_disposition_range() -> std::io::Result<()> {
+    let srv = TestServerBuilder::new(async || {
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    })
+    .start();
+
+    let io = raw_connect(srv.addr()).await;
+    raw_begin_session(&io).await;
+
+    // disposition for every delivery id must not stall the connection
+    for role in [protocol::Role::Sender, protocol::Role::Receiver] {
+        let disp = protocol::Disposition(Box::new(protocol::DispositionInner {
+            role,
+            first: 0,
+            last: Some(u32::MAX),
+            settled: true,
+            state: None,
+            batchable: false,
+        }));
+        raw_send(&io, 0, disp.into()).await;
+    }
+    raw_send(&io, 0, protocol::End { error: None }.into()).await;
+    assert!(matches!(raw_recv(&io).await, protocol::Frame::End(_)));
+
+    Ok(())
+}
+
+#[ntex::test]
 async fn test_session_end() -> std::io::Result<()> {
     let link_names = Arc::new(Mutex::new(Vec::new()));
     let link_names2 = link_names.clone();

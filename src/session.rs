@@ -1122,20 +1122,9 @@ impl SessionInner {
             &mut self.unsettled_rcv_deliveries
         };
 
-        if let Some(to) = to {
-            for no in from..=to {
-                if let Some(delivery) = deliveries.get_mut(&no) {
-                    delivery.handle_disposition(disp);
-                } else {
-                    log::trace!(
-                        "{}: Unknown deliveryid: {no:?} disp: {disp:?}",
-                        self.sink.tag()
-                    );
-                }
-            }
-        } else if let Some(delivery) = deliveries.get_mut(&from) {
+        for_each_in_range(deliveries, from, to.unwrap_or(from), |delivery| {
             delivery.handle_disposition(disp);
-        }
+        });
     }
 
     pub(crate) fn handle_flow(&mut self, flow: &Flow, link: Option<&SenderLink>) {
@@ -1327,5 +1316,66 @@ impl SessionInner {
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {
         self.sink.post_frame(AmqpFrame::new(self.id(), frame));
+    }
+}
+
+/// Call `f` for each entry with key in `from..=to` range (RFC-1982 serial numbers).
+///
+/// Cost is bounded by the smaller of the range length and the map size.
+fn for_each_in_range<T>(
+    map: &mut HashMap<DeliveryNumber, T>,
+    from: DeliveryNumber,
+    to: DeliveryNumber,
+    mut f: impl FnMut(&mut T),
+) {
+    let len = to.wrapping_sub(from);
+    if (len as usize) < map.len() {
+        for idx in 0..=len {
+            if let Some(item) = map.get_mut(&from.wrapping_add(idx)) {
+                f(item);
+            }
+        }
+    } else {
+        for (no, item) in map.iter_mut() {
+            if no.wrapping_sub(from) <= len {
+                f(item);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn collect(map: &mut HashMap<DeliveryNumber, DeliveryNumber>, from: u32, to: u32) -> Vec<u32> {
+        let mut res = Vec::new();
+        for_each_in_range(map, from, to, |v| res.push(*v));
+        res.sort_unstable();
+        res
+    }
+
+    #[test]
+    fn range() {
+        let mut map = HashMap::default();
+        for no in [0, 1, 2, 5, u32::MAX - 1, u32::MAX] {
+            map.insert(no, no);
+        }
+
+        // range smaller than map
+        assert_eq!(collect(&mut map, 1, 2), vec![1, 2]);
+        assert_eq!(collect(&mut map, 5, 5), vec![5]);
+        assert_eq!(collect(&mut map, 3, 4), Vec::<u32>::new());
+        assert_eq!(collect(&mut map, u32::MAX, 1), vec![0, 1, u32::MAX]);
+        assert_eq!(
+            collect(&mut map, u32::MAX - 1, 2),
+            vec![0, 1, 2, u32::MAX - 1, u32::MAX]
+        );
+
+        // range larger than map
+        assert_eq!(collect(&mut map, 1, 100), vec![1, 2, 5]);
+        assert_eq!(collect(&mut map, u32::MAX, 10), vec![0, 1, 2, 5, u32::MAX]);
+        assert_eq!(collect(&mut map, 0, u32::MAX).len(), 6);
+        assert_eq!(collect(&mut map, 6, 100), Vec::<u32>::new());
     }
 }
