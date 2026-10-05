@@ -2,6 +2,12 @@
 
 ## [6.2.0] - Unreleased
 
+* Add `AmqpServiceConfig::set_handle_max()`, limits remotely attached links per session (default 1024)
+
+* End session on remote `Attach` with a handle already in use or above `handle-max`, orphaned links leaked memory
+
+* Fix panic when a session ends while a remote sender link is waiting for confirmation
+
 * Fix off-by-one in local session open, channel number equal to `channel-max` was rejected
 
 * Reject remote `Begin` on a channel already in use or above `channel-max`, orphaned sessions leaked memory

@@ -415,6 +415,7 @@ impl SessionInner {
         let id = self
             .links
             .insert(Either::Left(SenderLinkState::OpeningRemote));
+        self.remote_handles.insert(attach.handle(), id);
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -473,19 +474,23 @@ impl SessionInner {
         );
         let token = link.id;
 
+        // session could be ended while link was waiting for confirmation
+        let Some(Either::Left(state @ SenderLinkState::OpeningRemote)) = self.links.get_mut(token)
+        else {
+            log::debug!(
+                "{}: Remote sender link is not opening: {:?}",
+                self.tag(),
+                attach.name()
+            );
+            return SenderLink::new(link);
+        };
+        *state = SenderLinkState::Established(EstablishedSenderLink::new(link.clone()));
+
         if let Some(source) = attach.source()
             && let Some(ref addr) = source.address
         {
             self.links_by_name.insert(addr.clone(), token);
         }
-
-        self.remote_handles.insert(attach.handle(), token);
-        *self
-            .links
-            .get_mut(token)
-            .expect("new remote sender entry must exist") = Either::Left(
-            SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
-        );
 
         *response.handle_mut() = token as Handle;
         *response.max_message_size_mut() = link.max_message_size().map(u64::from);
@@ -561,6 +566,7 @@ impl SessionInner {
         error: Option<Error>,
     ) {
         let token = link.id;
+        self.remote_handles.remove(&attach.handle());
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -590,6 +596,10 @@ impl SessionInner {
         if self.links.contains(token) {
             self.links.remove(token);
         }
+    }
+
+    pub(crate) fn is_remote_handle_used(&self, hnd: Handle) -> bool {
+        self.remote_handles.contains_key(&hnd)
     }
 
     pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
@@ -1005,11 +1015,12 @@ impl SessionInner {
                         true
                     }
                     SenderLinkState::OpeningRemote => {
+                        // link is removed after confirmation
                         log::warn!(
                             "{}: Detach frame received for unconfirmed sender link: {frame:?}",
                             self.tag()
                         );
-                        true
+                        false
                     }
                     SenderLinkState::Closing(tx) => {
                         if let Some(tx) = tx.take() {

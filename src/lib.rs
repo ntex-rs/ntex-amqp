@@ -58,6 +58,7 @@ pub mod codec {
 pub struct AmqpServiceConfig {
     pub max_frame_size: u32,
     pub channel_max: u16,
+    pub handle_max: u32,
     pub idle_time_out: Milliseconds,
     pub container_id: Option<ByteString>,
     pub hostname: Option<ByteString>,
@@ -103,6 +104,7 @@ impl AmqpServiceConfig {
         AmqpServiceConfig {
             max_frame_size: 16 * 1024,
             channel_max: 1024,
+            handle_max: 1024,
             idle_time_out: 120_000,
             container_id: None,
             hostname: None,
@@ -122,6 +124,17 @@ impl AmqpServiceConfig {
     /// By default channel max value is set to 1024
     pub fn set_channel_max(mut self, num: u16) -> Self {
         self.channel_max = num;
+        self
+    }
+
+    #[must_use]
+    /// The handle-max value is the highest link handle that the remote peer
+    /// may use in a session. This value plus one is the maximum number of
+    /// remotely attached links per session.
+    ///
+    /// By default handle max value is set to 1024
+    pub fn set_handle_max(mut self, num: u32) -> Self {
+        self.handle_max = num;
         self
     }
 
