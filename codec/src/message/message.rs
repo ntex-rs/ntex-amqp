@@ -109,6 +109,7 @@ impl Message {
     #[inline]
     /// Mut ref tp application property
     pub fn app_properties_mut(&mut self) -> Option<&mut VecStringMap> {
+        self.0.size.set(0);
         self.0.application_properties.as_mut()
     }
 
@@ -181,6 +182,7 @@ impl Message {
     #[inline]
     /// Mut reference to message annotations
     pub fn message_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
+        self.0.size.set(0);
         self.0.message_annotations.as_mut()
     }
 
@@ -193,6 +195,7 @@ impl Message {
     #[inline]
     /// Mut reference to delivery annotations
     pub fn delivery_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
+        self.0.size.set(0);
         self.0.delivery_annotations.as_mut()
     }
 
@@ -229,6 +232,7 @@ impl Message {
     #[inline]
     /// Mutable message body
     pub fn body_mut(&mut self) -> &mut MessageBody {
+        self.0.size.set(0);
         &mut self.0.body
     }
 
@@ -242,6 +246,7 @@ impl Message {
     /// Set message body value
     pub fn set_value<V: Into<Variant>>(&mut self, v: V) -> &mut Self {
         self.0.body.value = Some(v.into());
+        self.0.size.set(0);
         self
     }
 
@@ -483,6 +488,42 @@ mod tests {
         let msg5 = Message::decode(&mut msg3.body().data[1].clone())?;
         assert_eq!(msg2.properties(), msg5.properties());
         Ok(())
+    }
+
+    #[test]
+    fn test_size_reset() {
+        fn check(msg: &mut Message, f: impl FnOnce(&mut Message)) {
+            let _ = msg.encoded_size();
+            f(msg);
+            let mut buf = BytePages::default();
+            msg.encode(&mut buf);
+            assert_eq!(msg.encoded_size(), buf.len());
+        }
+
+        let mut msg = Message::default();
+        msg.set_app_property(ByteString::from("a"), 1)
+            .add_message_annotation("b", 1);
+        msg.0.delivery_annotations = Some(Default::default());
+
+        check(&mut msg, |m| {
+            m.set_value("value");
+        });
+        check(&mut msg, |m| {
+            m.body_mut().set_data(Bytes::from_static(b"data"))
+        });
+        check(&mut msg, |m| {
+            let p = m.app_properties_mut().unwrap();
+            p.push(("c".into(), "app property".into()));
+        });
+        check(&mut msg, |m| {
+            let a = m.message_annotations_mut().unwrap();
+            a.push(("d".into(), "message annotation".into()));
+        });
+        check(&mut msg, |m| {
+            let a = m.delivery_annotations_mut().unwrap();
+            a.push(("e".into(), "delivery annotation".into()));
+        });
+        check(&mut msg, |m| m.properties_mut().message_id = Some(1.into()));
     }
 
     #[test]
