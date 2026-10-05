@@ -13,7 +13,8 @@ use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
 use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{
-    AmqpServiceConfig, RemoteServiceConfig, cell::Cell, error::AmqpProtocolError, types::Action,
+    AmqpServiceConfig, RemoteServiceConfig, cell::Cell, detach, error::AmqpProtocolError,
+    types::Action,
 };
 
 pub struct Connection(ConnectionRef);
@@ -388,6 +389,8 @@ impl ConnectionInner {
                     log::trace!("{}: Channel {channel_id} is in use", self.io.tag());
                     return Err(AmqpProtocolError::Unexpected(Frame::Begin(begin)));
                 }
+                // begin frame is stored for session lifetime
+                let begin = detach(&begin);
 
                 // response Begin for open session
                 // the remote-channel property in the frame is the local channel id
@@ -464,6 +467,8 @@ impl ConnectionInner {
                                 return Ok(action);
                             }
 
+                            // attach frame is stored for link lifetime
+                            let attach = detach(&attach);
                             let cell = session.clone();
                             if session.get_mut().handle_attach(&attach, cell) {
                                 Ok(Action::None)
@@ -655,5 +660,183 @@ async fn open_session(
 
             rx.await.map_err(|_| AmqpProtocolError::Disconnected)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ntex::codec::{Decoder, Encoder};
+    use ntex_amqp_codec::protocol::{
+        Attach, AttachInner, Begin, BeginInner, DeliveryState, Disposition, DispositionInner, Open,
+        OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode, Source, TerminusDurability,
+        TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
+    };
+    use ntex_amqp_codec::types::{Multiple, Symbol};
+    use ntex_bytes::{BytePages, Bytes, BytesMut};
+    use ntex_io::{Io, testing::IoTest};
+    use ntex_service::cfg::SharedCfg;
+
+    use super::*;
+    use crate::delivery::DeliveryInner;
+
+    const LONG: &str = "value-that-does-not-fit-into-inline-storage";
+
+    /// Decode frame from a read buffer, returns frame and the buffer
+    fn read(frame: Frame) -> (Frame, BytesMut) {
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut pages = BytePages::default();
+        codec.encode(AmqpFrame::new(0, frame), &mut pages).unwrap();
+        let mut buf = BytesMut::with_capacity(16 * 1024);
+        buf.extend_from_slice(&pages.freeze());
+        let frame = codec.decode(&mut buf).unwrap().unwrap();
+        assert!(buf.is_empty() && !buf.is_unique());
+        (frame.into_parts().1, buf)
+    }
+
+    fn symbols() -> Multiple<Symbol> {
+        Multiple(vec![Symbol::from(LONG)])
+    }
+
+    fn rejected() -> DeliveryState {
+        DeliveryState::Rejected(Rejected {
+            error: Some(Error(Box::new(codec::ErrorInner {
+                condition: AmqpError::InternalError.into(),
+                description: Some(LONG.into()),
+                info: None,
+            }))),
+        })
+    }
+
+    #[ntex::test]
+    async fn frames_detached_from_read_buffer() {
+        // remote open
+        let open = Open(Box::new(OpenInner {
+            container_id: LONG.into(),
+            hostname: Some(LONG.into()),
+            max_frame_size: 1024,
+            channel_max: 10,
+            idle_time_out: None,
+            outgoing_locales: None,
+            incoming_locales: None,
+            offered_capabilities: Some(symbols()),
+            desired_capabilities: Some(symbols()),
+            properties: None,
+        }));
+        let (Frame::Open(open), buf) = read(open.into()) else {
+            panic!()
+        };
+        let remote = RemoteServiceConfig::new(&open);
+        drop(open);
+        assert!(buf.is_unique(), "open");
+
+        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let io = Io::new(IoTest::create().0, cfg.clone());
+        let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+
+        // remote begin
+        let begin = Begin(Box::new(BeginInner {
+            remote_channel: None,
+            next_outgoing_id: 1,
+            incoming_window: 100,
+            outgoing_window: 100,
+            handle_max: 10,
+            offered_capabilities: Some(symbols()),
+            desired_capabilities: None,
+            properties: None,
+        }));
+        let (frame, buf) = read(begin.into());
+        handle(frame).unwrap();
+        assert!(buf.is_unique(), "begin");
+
+        // remote attach
+        let attach = Attach(Box::new(AttachInner {
+            name: LONG.into(),
+            handle: 0,
+            role: Role::Sender,
+            snd_settle_mode: SenderSettleMode::Mixed,
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: Some(Source {
+                address: Some(LONG.into()),
+                durable: TerminusDurability::None,
+                expiry_policy: TerminusExpiryPolicy::SessionEnd,
+                timeout: 0,
+                dynamic: false,
+                dynamic_node_properties: None,
+                distribution_mode: None,
+                filter: None,
+                default_outcome: None,
+                outcomes: None,
+                capabilities: Some(symbols()),
+            }),
+            target: None,
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: Some(0),
+            max_message_size: None,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        }));
+        let (frame, buf) = read(attach.into());
+        let Ok(Action::AttachReceiver(link, _, response)) = handle(frame) else {
+            panic!()
+        };
+        assert!(buf.is_unique(), "attach");
+        link.confirm_receiver_link(response);
+        link.set_link_credit(10);
+
+        // partial transfers
+        for (idx, more) in [true, true, false].into_iter().enumerate() {
+            let transfer = Transfer(Box::new(TransferInner {
+                handle: 0,
+                delivery_id: Some(0),
+                delivery_tag: Some(Bytes::from(LONG)),
+                message_format: None,
+                settled: Some(false),
+                more,
+                rcv_settle_mode: None,
+                state: (idx == 0).then(rejected),
+                resume: false,
+                aborted: false,
+                batchable: false,
+                body: Some(TransferBody::Data(Bytes::from(vec![idx as u8; 10]))),
+            }));
+            let (frame, buf) = read(transfer.into());
+            handle(frame).unwrap();
+            assert!(buf.is_unique(), "transfer {idx}");
+        }
+        let (delivery, transfer) = link.get_delivery().unwrap();
+        assert_eq!(delivery.tag(), LONG.as_bytes());
+        let Some(TransferBody::Data(body)) = transfer.body() else {
+            panic!()
+        };
+        assert_eq!(body, &[[0; 10], [1; 10], [2; 10]].concat());
+
+        // disposition with state
+        let session = inner.get_ref().sessions_map[&0];
+        let SessionState::Established(session) = &inner.get_ref().sessions[session] else {
+            panic!()
+        };
+        session
+            .get_mut()
+            .unsettled_snd_deliveries
+            .insert(0, DeliveryInner::new(0));
+        let disp = Disposition(Box::new(DispositionInner {
+            role: Role::Receiver,
+            first: 0,
+            last: None,
+            settled: false,
+            state: Some(rejected()),
+            batchable: false,
+        }));
+        let (frame, buf) = read(disp.into());
+        handle(frame).unwrap();
+        assert!(buf.is_unique(), "disposition");
     }
 }

@@ -19,7 +19,8 @@ extern crate derive_more;
 
 use ntex_amqp_codec::protocol::{Fields, Handle, Milliseconds, Open, OpenInner, Symbols};
 use ntex_amqp_codec::types::Symbol;
-use ntex_bytes::ByteString;
+use ntex_amqp_codec::{Decode, Encode};
+use ntex_bytes::{BytePages, ByteString};
 use ntex_service::cfg::{CfgContext, Configuration as SvcConfiguration};
 use ntex_util::time::Seconds;
 use uuid::Uuid;
@@ -261,9 +262,13 @@ impl RemoteServiceConfig {
             max_frame_size: open.max_frame_size(),
             channel_max: open.channel_max(),
             idle_time_out: open.idle_time_out().unwrap_or(0),
-            hostname: open.hostname().cloned(),
-            offered_capabilities: open.0.offered_capabilities.clone(),
-            desired_capabilities: open.0.desired_capabilities.clone(),
+            hostname: open.hostname().map(|h| {
+                let mut h = h.clone();
+                h.trimdown();
+                h
+            }),
+            offered_capabilities: open.0.offered_capabilities.as_ref().map(detach),
+            desired_capabilities: open.0.desired_capabilities.as_ref().map(detach),
         }
     }
 
@@ -275,4 +280,15 @@ impl RemoteServiceConfig {
             Seconds::ZERO
         }
     }
+}
+
+/// Copy decoded value into a buffer of its own
+///
+/// Slices of a decoded frame keep the whole read buffer alive.
+pub(crate) fn detach<T: Encode + Decode + Clone>(val: &T) -> T {
+    let mut buf = BytePages::default();
+    val.encode(&mut buf);
+    let mut buf = buf.freeze();
+    buf.trimdown();
+    T::decode(&mut buf).unwrap_or_else(|_| val.clone())
 }

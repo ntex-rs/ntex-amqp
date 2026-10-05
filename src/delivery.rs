@@ -266,11 +266,11 @@ impl DeliveryInner {
         }
     }
 
-    pub(crate) fn handle_disposition(&mut self, disp: &Disposition) {
-        if disp.settled() {
+    pub(crate) fn handle_disposition(&mut self, settled: bool, state: Option<&DeliveryState>) {
+        if settled {
             self.settled = true;
         }
-        if let Some(state) = disp.state() {
+        if let Some(state) = state {
             self.state = Some(state.clone());
         }
         if let Some(tx) = self.tx.take() {
