@@ -8,6 +8,8 @@
 
 * Fix panic when decoding a map with a map as a key (implement `Hash` for `VariantMap`)
 
+* Limit nesting depth of decoded lists, maps and described values, deep nesting overflowed the stack
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0

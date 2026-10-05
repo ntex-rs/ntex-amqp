@@ -27,6 +27,8 @@ pub enum AmqpParseError {
     UnexpectedType(&'static str),
     #[error("Value is not valid utf8 string")]
     Utf8Error,
+    #[error("Max nesting depth of compound values exceeded")]
+    MaxDepthExceeded,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

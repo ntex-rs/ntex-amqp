@@ -345,14 +345,53 @@ impl<T: DecodeFormatted> DecodeFormatted for Multiple<T> {
 
 impl DecodeFormatted for List {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        let header = ListHeader::decode_with_format(input, fmt)?;
-        let mut result: Vec<Variant> = Vec::with_capacity(header.count as usize);
-        for _ in 0..header.count {
-            let decoded = Variant::decode(input)?;
-            result.push(decoded);
-        }
-        Ok(List(result))
+        decode_list(input, fmt, 0)
     }
+}
+
+/// Max nesting depth of lists, maps and described values within a `Variant`
+const MAX_DEPTH: u32 = 32;
+
+fn nested(depth: u32) -> Result<u32, AmqpParseError> {
+    if depth < MAX_DEPTH {
+        Ok(depth + 1)
+    } else {
+        Err(AmqpParseError::MaxDepthExceeded)
+    }
+}
+
+fn decode_nested_variant(input: &mut Bytes, depth: u32) -> Result<Variant, AmqpParseError> {
+    let fmt = codec::decode_format_code(input)?;
+    decode_variant(input, fmt, depth)
+}
+
+fn decode_list(input: &mut Bytes, fmt: u8, depth: u32) -> Result<List, AmqpParseError> {
+    let depth = nested(depth)?;
+    let header = ListHeader::decode_with_format(input, fmt)?;
+    let mut result: Vec<Variant> = Vec::with_capacity(header.count as usize);
+    for _ in 0..header.count {
+        result.push(decode_nested_variant(input, depth)?);
+    }
+    Ok(List(result))
+}
+
+fn decode_map(
+    input: &mut Bytes,
+    fmt: u8,
+    depth: u32,
+) -> Result<HashMapUtil<Variant, Variant>, AmqpParseError> {
+    let depth = nested(depth)?;
+    let header = MapHeader::decode_with_format(input, fmt)?;
+    decode_check_len!(input, header.size as usize);
+    let mut map_input = input.split_to(header.size as usize);
+    let count = header.count / 2;
+    let mut map = HashMapUtil::with_capacity_and_hasher(count as usize, Default::default());
+    for _ in 0..count {
+        let key = decode_nested_variant(&mut map_input, depth)?;
+        let value = decode_nested_variant(&mut map_input, depth)?;
+        map.insert(key, value);
+    }
+    Ok(map)
 }
 
 impl<T: Composite> DecodeFormatted for ListDescribed<T> {
@@ -378,103 +417,104 @@ impl<T: Composite> DecodeFormatted for ListDescribed<T> {
 
 impl DecodeFormatted for Variant {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        match fmt {
-            codec::FORMATCODE_NULL => Ok(Variant::Null),
-            codec::FORMATCODE_BOOLEAN => bool::decode_with_format(input, fmt).map(Variant::Boolean),
-            codec::FORMATCODE_BOOLEAN_FALSE => Ok(Variant::Boolean(false)),
-            codec::FORMATCODE_BOOLEAN_TRUE => Ok(Variant::Boolean(true)),
-            codec::FORMATCODE_UINT_0 => Ok(Variant::Uint(0)),
-            codec::FORMATCODE_ULONG_0 => Ok(Variant::Ulong(0)),
-            codec::FORMATCODE_UBYTE => u8::decode_with_format(input, fmt).map(Variant::Ubyte),
-            codec::FORMATCODE_USHORT => u16::decode_with_format(input, fmt).map(Variant::Ushort),
-            codec::FORMATCODE_UINT => u32::decode_with_format(input, fmt).map(Variant::Uint),
-            codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(Variant::Ulong),
-            codec::FORMATCODE_BYTE => i8::decode_with_format(input, fmt).map(Variant::Byte),
-            codec::FORMATCODE_SHORT => i16::decode_with_format(input, fmt).map(Variant::Short),
-            codec::FORMATCODE_INT => i32::decode_with_format(input, fmt).map(Variant::Int),
-            codec::FORMATCODE_LONG => i64::decode_with_format(input, fmt).map(Variant::Long),
-            codec::FORMATCODE_SMALLUINT => u32::decode_with_format(input, fmt).map(Variant::Uint),
-            codec::FORMATCODE_SMALLULONG => u64::decode_with_format(input, fmt).map(Variant::Ulong),
-            codec::FORMATCODE_SMALLINT => i32::decode_with_format(input, fmt).map(Variant::Int),
-            codec::FORMATCODE_SMALLLONG => i64::decode_with_format(input, fmt).map(Variant::Long),
-            codec::FORMATCODE_FLOAT => {
-                f32::decode_with_format(input, fmt).map(|o| Variant::Float(OrderedFloat(o)))
-            }
-            codec::FORMATCODE_DOUBLE => {
-                f64::decode_with_format(input, fmt).map(|o| Variant::Double(OrderedFloat(o)))
-            }
-            codec::FORMATCODE_DECIMAL32 => read_fixed_bytes(input).map(Variant::Decimal32),
-            codec::FORMATCODE_DECIMAL64 => read_fixed_bytes(input).map(Variant::Decimal64),
-            codec::FORMATCODE_DECIMAL128 => read_fixed_bytes(input).map(Variant::Decimal128),
-            codec::FORMATCODE_CHAR => char::decode_with_format(input, fmt).map(Variant::Char),
-            codec::FORMATCODE_TIMESTAMP => {
-                DateTime::<Utc>::decode_with_format(input, fmt).map(Variant::Timestamp)
-            }
-            codec::FORMATCODE_UUID => Uuid::decode_with_format(input, fmt).map(Variant::Uuid),
-            codec::FORMATCODE_BINARY8 | codec::FORMATCODE_BINARY32 => {
-                Bytes::decode_with_format(input, fmt).map(Variant::Binary)
-            }
-            codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
-                ByteString::decode_with_format(input, fmt).map(|o| Variant::String(o.into()))
-            }
-            codec::FORMATCODE_SYMBOL8 | codec::FORMATCODE_SYMBOL32 => {
-                Symbol::decode_with_format(input, fmt).map(Variant::Symbol)
-            }
-            codec::FORMATCODE_LIST0 => Ok(Variant::List(List(vec![]))),
-            codec::FORMATCODE_LIST8 | codec::FORMATCODE_LIST32 => {
-                List::decode_with_format(input, fmt).map(Variant::List)
-            }
-            codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
-                Array::decode_with_format(input, fmt).map(Variant::Array)
-            }
-            codec::FORMATCODE_MAP8 | codec::FORMATCODE_MAP32 => {
-                HashMapUtil::<Variant, Variant>::decode_with_format(input, fmt)
-                    .map(|o| Variant::Map(VariantMap::new(o)))
-            }
-            codec::FORMATCODE_DESCRIBED => {
-                let descriptor = Descriptor::decode(input)?;
-                let format_code = {
-                    decode_check_len!(input, 1);
-                    let code = input[0];
-                    Ok(code)
-                }?;
-                match format_code {
-                    codec::FORMATCODE_LIST0 => {
-                        input.advance(1); // advance past format code
-                        Ok(Variant::DescribedCompound(DescribedCompound::new(
-                            descriptor,
-                            Bytes::from_static(&[codec::FORMATCODE_LIST0]),
-                        )))
-                    }
-                    codec::FORMATCODE_LIST8 | codec::FORMATCODE_MAP8 | codec::FORMATCODE_ARRAY8 => {
-                        decode_check_len!(input, 2);
-                        let size = input[1] as usize;
-                        decode_check_len!(input, 2 + size);
-                        let data = input.split_to(2 + size);
-                        Ok(Variant::DescribedCompound(DescribedCompound::new(
-                            descriptor, data,
-                        )))
-                    }
-                    codec::FORMATCODE_LIST32
-                    | codec::FORMATCODE_MAP32
-                    | codec::FORMATCODE_ARRAY32 => {
-                        decode_check_len!(input, 5);
-                        let size = u32::from_be_bytes(input[1..5].try_into().unwrap()) as usize;
-                        decode_check_len!(input, 5 + size);
-                        let data = input.split_to(5 + size);
-                        Ok(Variant::DescribedCompound(DescribedCompound::new(
-                            descriptor, data,
-                        )))
-                    }
-                    _ => {
-                        input.advance(1); // advance past format code
-                        let value = Variant::decode_with_format(input, format_code)?;
-                        Ok(Variant::Described((descriptor, Box::new(value))))
-                    }
+        decode_variant(input, fmt, 0)
+    }
+}
+
+fn decode_variant(input: &mut Bytes, fmt: u8, depth: u32) -> Result<Variant, AmqpParseError> {
+    match fmt {
+        codec::FORMATCODE_NULL => Ok(Variant::Null),
+        codec::FORMATCODE_BOOLEAN => bool::decode_with_format(input, fmt).map(Variant::Boolean),
+        codec::FORMATCODE_BOOLEAN_FALSE => Ok(Variant::Boolean(false)),
+        codec::FORMATCODE_BOOLEAN_TRUE => Ok(Variant::Boolean(true)),
+        codec::FORMATCODE_UINT_0 => Ok(Variant::Uint(0)),
+        codec::FORMATCODE_ULONG_0 => Ok(Variant::Ulong(0)),
+        codec::FORMATCODE_UBYTE => u8::decode_with_format(input, fmt).map(Variant::Ubyte),
+        codec::FORMATCODE_USHORT => u16::decode_with_format(input, fmt).map(Variant::Ushort),
+        codec::FORMATCODE_UINT => u32::decode_with_format(input, fmt).map(Variant::Uint),
+        codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(Variant::Ulong),
+        codec::FORMATCODE_BYTE => i8::decode_with_format(input, fmt).map(Variant::Byte),
+        codec::FORMATCODE_SHORT => i16::decode_with_format(input, fmt).map(Variant::Short),
+        codec::FORMATCODE_INT => i32::decode_with_format(input, fmt).map(Variant::Int),
+        codec::FORMATCODE_LONG => i64::decode_with_format(input, fmt).map(Variant::Long),
+        codec::FORMATCODE_SMALLUINT => u32::decode_with_format(input, fmt).map(Variant::Uint),
+        codec::FORMATCODE_SMALLULONG => u64::decode_with_format(input, fmt).map(Variant::Ulong),
+        codec::FORMATCODE_SMALLINT => i32::decode_with_format(input, fmt).map(Variant::Int),
+        codec::FORMATCODE_SMALLLONG => i64::decode_with_format(input, fmt).map(Variant::Long),
+        codec::FORMATCODE_FLOAT => {
+            f32::decode_with_format(input, fmt).map(|o| Variant::Float(OrderedFloat(o)))
+        }
+        codec::FORMATCODE_DOUBLE => {
+            f64::decode_with_format(input, fmt).map(|o| Variant::Double(OrderedFloat(o)))
+        }
+        codec::FORMATCODE_DECIMAL32 => read_fixed_bytes(input).map(Variant::Decimal32),
+        codec::FORMATCODE_DECIMAL64 => read_fixed_bytes(input).map(Variant::Decimal64),
+        codec::FORMATCODE_DECIMAL128 => read_fixed_bytes(input).map(Variant::Decimal128),
+        codec::FORMATCODE_CHAR => char::decode_with_format(input, fmt).map(Variant::Char),
+        codec::FORMATCODE_TIMESTAMP => {
+            DateTime::<Utc>::decode_with_format(input, fmt).map(Variant::Timestamp)
+        }
+        codec::FORMATCODE_UUID => Uuid::decode_with_format(input, fmt).map(Variant::Uuid),
+        codec::FORMATCODE_BINARY8 | codec::FORMATCODE_BINARY32 => {
+            Bytes::decode_with_format(input, fmt).map(Variant::Binary)
+        }
+        codec::FORMATCODE_STRING8 | codec::FORMATCODE_STRING32 => {
+            ByteString::decode_with_format(input, fmt).map(|o| Variant::String(o.into()))
+        }
+        codec::FORMATCODE_SYMBOL8 | codec::FORMATCODE_SYMBOL32 => {
+            Symbol::decode_with_format(input, fmt).map(Variant::Symbol)
+        }
+        codec::FORMATCODE_LIST0 => Ok(Variant::List(List(vec![]))),
+        codec::FORMATCODE_LIST8 | codec::FORMATCODE_LIST32 => {
+            decode_list(input, fmt, depth).map(Variant::List)
+        }
+        codec::FORMATCODE_ARRAY8 | codec::FORMATCODE_ARRAY32 => {
+            Array::decode_with_format(input, fmt).map(Variant::Array)
+        }
+        codec::FORMATCODE_MAP8 | codec::FORMATCODE_MAP32 => {
+            decode_map(input, fmt, depth).map(|o| Variant::Map(VariantMap::new(o)))
+        }
+        codec::FORMATCODE_DESCRIBED => {
+            let descriptor = Descriptor::decode(input)?;
+            let format_code = {
+                decode_check_len!(input, 1);
+                let code = input[0];
+                Ok(code)
+            }?;
+            match format_code {
+                codec::FORMATCODE_LIST0 => {
+                    input.advance(1); // advance past format code
+                    Ok(Variant::DescribedCompound(DescribedCompound::new(
+                        descriptor,
+                        Bytes::from_static(&[codec::FORMATCODE_LIST0]),
+                    )))
+                }
+                codec::FORMATCODE_LIST8 | codec::FORMATCODE_MAP8 | codec::FORMATCODE_ARRAY8 => {
+                    decode_check_len!(input, 2);
+                    let size = input[1] as usize;
+                    decode_check_len!(input, 2 + size);
+                    let data = input.split_to(2 + size);
+                    Ok(Variant::DescribedCompound(DescribedCompound::new(
+                        descriptor, data,
+                    )))
+                }
+                codec::FORMATCODE_LIST32 | codec::FORMATCODE_MAP32 | codec::FORMATCODE_ARRAY32 => {
+                    decode_check_len!(input, 5);
+                    let size = u32::from_be_bytes(input[1..5].try_into().unwrap()) as usize;
+                    decode_check_len!(input, 5 + size);
+                    let data = input.split_to(5 + size);
+                    Ok(Variant::DescribedCompound(DescribedCompound::new(
+                        descriptor, data,
+                    )))
+                }
+                _ => {
+                    input.advance(1); // advance past format code
+                    let value = decode_variant(input, format_code, nested(depth)?)?;
+                    Ok(Variant::Described((descriptor, Box::new(value))))
                 }
             }
-            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
         }
+        _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
     }
 }
 
@@ -973,6 +1013,54 @@ mod tests {
             .decode()
             .expect("Failed to decode Array items using Variant type");
         assert_eq!(array_items, expected_array);
+    }
+
+    fn nested(prefix: &[u8], levels: usize) -> Bytes {
+        let mut buf = prefix.repeat(levels);
+        buf.push(codec::FORMATCODE_NULL);
+        Bytes::from(buf)
+    }
+
+    #[test_case(b"\xc0\x01\x01"; "list8")]
+    #[test_case(b"\xd0\x00\x00\x00\x04\x00\x00\x00\x01"; "list32")]
+    #[test_case(b"\x00\x53\x01"; "described")]
+    fn max_depth(prefix: &[u8]) {
+        let mut buf = nested(prefix, MAX_DEPTH as usize);
+        assert!(Variant::decode(&mut buf).is_ok());
+        assert!(buf.is_empty());
+
+        for levels in [MAX_DEPTH as usize + 1, 100_000] {
+            let res = Variant::decode(&mut nested(prefix, levels));
+            assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
+        }
+        if prefix[0] != codec::FORMATCODE_DESCRIBED {
+            let res = List::decode(&mut nested(prefix, 100_000));
+            assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
+        }
+    }
+
+    fn nested_map(levels: usize) -> Bytes {
+        // map32 { null: <nested> }
+        let mut buf = vec![codec::FORMATCODE_NULL];
+        for _ in 0..levels {
+            let mut map = vec![codec::FORMATCODE_MAP32];
+            map.extend_from_slice(&(buf.len() as u32 + 5).to_be_bytes());
+            map.extend_from_slice(&2u32.to_be_bytes());
+            map.push(codec::FORMATCODE_NULL);
+            map.extend_from_slice(&buf);
+            buf = map;
+        }
+        Bytes::from(buf)
+    }
+
+    #[test]
+    fn max_depth_map() {
+        let mut buf = nested_map(MAX_DEPTH as usize);
+        assert!(Variant::decode(&mut buf).is_ok());
+        assert!(buf.is_empty());
+
+        let res = Variant::decode(&mut nested_map(MAX_DEPTH as usize + 1));
+        assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
     }
 
     #[test]
