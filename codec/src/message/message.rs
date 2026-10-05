@@ -11,18 +11,18 @@ use super::SECTION_PREFIX_LENGTH;
 use super::body::MessageBody;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Message(pub Box<MessageInner>);
+pub struct Message(Box<MessageInner>);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MessageInner {
-    pub message_format: Option<MessageFormat>,
-    pub header: Option<Header>,
-    pub delivery_annotations: Option<VecSymbolMap>,
-    pub message_annotations: Option<VecSymbolMap>,
-    pub properties: Option<Properties>,
-    pub application_properties: Option<VecStringMap>,
-    pub footer: Option<Annotations>,
-    pub body: MessageBody,
+struct MessageInner {
+    message_format: Option<MessageFormat>,
+    header: Option<Header>,
+    delivery_annotations: Option<VecSymbolMap>,
+    message_annotations: Option<VecSymbolMap>,
+    properties: Option<Properties>,
+    application_properties: Option<VecStringMap>,
+    footer: Option<Annotations>,
+    body: MessageBody,
     size: Cell<usize>,
 }
 
@@ -57,6 +57,12 @@ impl Message {
         self.0.header = Some(header);
         self.0.size.set(0);
         self
+    }
+
+    #[inline]
+    /// Message format
+    pub fn message_format(&self) -> Option<MessageFormat> {
+        self.0.message_format
     }
 
     #[inline]
@@ -197,6 +203,57 @@ impl Message {
     pub fn delivery_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
         self.0.size.set(0);
         self.0.delivery_annotations.as_mut()
+    }
+
+    #[inline]
+    /// Get delivery annotation
+    pub fn delivery_annotation(&self, key: &str) -> Option<&Variant> {
+        if let Some(ref props) = self.0.delivery_annotations {
+            props
+                .iter()
+                .find_map(|item| if &item.0 == key { Some(&item.1) } else { None })
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    /// Add delivery annotation
+    pub fn add_delivery_annotation<K, V>(&mut self, key: K, value: V) -> &mut Self
+    where
+        K: Into<Symbol>,
+        V: Into<Variant>,
+    {
+        if let Some(ref mut props) = self.0.delivery_annotations {
+            props.push((key.into(), value.into()));
+        } else {
+            let mut props = VecSymbolMap::default();
+            props.push((key.into(), value.into()));
+            self.0.delivery_annotations = Some(props);
+        }
+        self.0.size.set(0);
+        self
+    }
+
+    #[inline]
+    /// Message footer
+    pub fn footer(&self) -> Option<&Annotations> {
+        self.0.footer.as_ref()
+    }
+
+    #[inline]
+    /// Mut reference to message footer
+    pub fn footer_mut(&mut self) -> Option<&mut Annotations> {
+        self.0.size.set(0);
+        self.0.footer.as_mut()
+    }
+
+    #[inline]
+    /// Set message footer
+    pub fn set_footer(&mut self, footer: Annotations) -> &mut Self {
+        self.0.footer = Some(footer);
+        self.0.size.set(0);
+        self
     }
 
     #[inline]
@@ -503,7 +560,7 @@ mod tests {
         let mut msg = Message::default();
         msg.set_app_property(ByteString::from("a"), 1)
             .add_message_annotation("b", 1);
-        msg.0.delivery_annotations = Some(Default::default());
+        msg.add_delivery_annotation("c", 1);
 
         check(&mut msg, |m| {
             m.set_value("value");
@@ -524,6 +581,19 @@ mod tests {
             a.push(("e".into(), "delivery annotation".into()));
         });
         check(&mut msg, |m| m.properties_mut().message_id = Some(1.into()));
+        check(&mut msg, |m| {
+            m.set_footer(Default::default());
+        });
+        check(&mut msg, |m| {
+            let f = m.footer_mut().unwrap();
+            f.insert("f".into(), "footer".into());
+        });
+
+        let mut buf = BytePages::default();
+        msg.encode(&mut buf);
+        let msg2 = Message::decode(&mut buf.freeze()).unwrap();
+        assert_eq!(msg2.delivery_annotation("c"), Some(&Variant::from(1)));
+        assert_eq!(msg2.footer(), msg.footer());
     }
 
     #[test]

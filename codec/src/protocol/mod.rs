@@ -218,7 +218,7 @@ impl TransferBody {
     pub fn message_format(&self) -> Option<MessageFormat> {
         match self {
             TransferBody::Data(_) | TransferBody::Pages(_) => None,
-            TransferBody::Message(data) => data.0.message_format,
+            TransferBody::Message(data) => data.message_format(),
         }
     }
 }
