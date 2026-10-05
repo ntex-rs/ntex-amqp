@@ -39,12 +39,12 @@ ntex-amqp-codec = "3.1.0"
 ntex-bytes = "1.10"
 ntex-error = "3.0"
 ntex-router = "2.0"
-ntex-dispatcher = "4.1"
-ntex-io = "4.1"
-ntex-net = "4.1"
+ntex-dispatcher = "4.2"
+ntex-io = "4.2"
+ntex-net = "4.2"
 ntex-util = "4.2"
 ntex-service = "5.1"
-ntex-rt = "4.0"
+ntex-rt = "4.1"
 
 bitflags = "2"
 derive_more = { version = "2", features = ["from"] }
@@ -55,7 +55,7 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-ntex = "4.0.0-beta.14"
+ntex = "4.0.0-beta.16"
 ntex-server = "4.2"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
 
@@ -65,9 +65,3 @@ rand = "0.9"
 [patch.crates-io]
 ntex-amqp = { path = "." }
 ntex-amqp-codec = { path = "codec" }
-
-ntex = { git = "https://github.com/ntex-rs/ntex.git" }
-ntex-net = { git = "https://github.com/ntex-rs/ntex.git" }
-ntex-server = { git = "https://github.com/ntex-rs/ntex.git" }
-ntex-tls = { git = "https://github.com/ntex-rs/ntex.git" }
-ntex-h2 = { git = "https://github.com/ntex-rs/ntex-h2.git" }
