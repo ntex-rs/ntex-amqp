@@ -355,14 +355,11 @@ impl DecodeFormatted for List {
 /// Max number of array elements to preallocate, elements of some types take no bytes
 const MAX_ARRAY_PREALLOC: u32 = 256;
 
-/// Max number of elements in an array with more elements than bytes
-const MAX_ZERO_WIDTH_ELEMENTS: u32 = 65536;
-
 pub(crate) fn array_capacity(count: u32) -> usize {
     count.min(MAX_ARRAY_PREALLOC) as usize
 }
 
-/// Every list or map element takes at least one byte
+/// Every list, map or array element takes at least one byte
 fn check_count(count: u32, len: usize) -> Result<(), AmqpParseError> {
     if count as usize > len {
         Err(AmqpParseError::InvalidSize)
@@ -641,10 +638,9 @@ impl DecodeFormatted for ArrayHeader {
             codec::FORMATCODE_ARRAY32 => decode_compound32(input)?,
             _ => return Err(AmqpParseError::InvalidFormatCode(fmt)),
         };
-        // elements of zero-width types (null, true, uint0, ...) take no bytes
-        if count > size.max(MAX_ZERO_WIDTH_ELEMENTS) {
-            return Err(AmqpParseError::InvalidSize);
-        }
+        // arrays of zero-width elements (null, true, uint0, ...) are rejected,
+        // otherwise few bytes could decode into an arbitrary number of elements
+        check_count(count, size as usize)?;
         Ok(ArrayHeader { count, size })
     }
 }
@@ -1203,19 +1199,16 @@ mod tests {
             Bytes::from(buf)
         };
 
-        let res = Vec::<bool>::decode(&mut array(1000)).unwrap();
-        assert_eq!(res, vec![true; 1000]);
+        // element constructor is the only byte
+        let res = Vec::<bool>::decode(&mut array(1)).unwrap();
+        assert_eq!(res, vec![true]);
 
-        let Variant::Array(arr) = Variant::decode(&mut array(MAX_ZERO_WIDTH_ELEMENTS)).unwrap()
-        else {
+        let Variant::Array(arr) = Variant::decode(&mut array(1)).unwrap() else {
             panic!("expected array");
         };
-        assert_eq!(
-            arr.decode::<bool>().unwrap().len(),
-            MAX_ZERO_WIDTH_ELEMENTS as usize
-        );
+        assert_eq!(arr.decode::<bool>().unwrap(), vec![true]);
 
-        for count in [MAX_ZERO_WIDTH_ELEMENTS + 1, u32::MAX] {
+        for count in [2, 1000, u32::MAX] {
             let res = Vec::<bool>::decode(&mut array(count));
             assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
             let res = Variant::decode(&mut array(count));

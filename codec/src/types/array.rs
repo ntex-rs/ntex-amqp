@@ -114,25 +114,34 @@ mod tests {
 
     use super::*;
     use crate::codec::Encode;
-    use crate::types::Variant;
 
-    fn zero_width_array(count: u32) -> Bytes {
-        let mut buf = vec![codec::FORMATCODE_ARRAY32, 0, 0, 0, 5];
-        buf.extend_from_slice(&count.to_be_bytes());
-        buf.push(codec::FORMATCODE_BOOLEAN_TRUE);
-        Bytes::from(buf)
+    // zero-width elements, count exceeds size
+    fn check_header(mut buf: Bytes, count: u32) {
+        if count > u32::from(u8::MAX) {
+            assert_eq!(buf[0], codec::FORMATCODE_ARRAY32);
+            assert_eq!(buf[5..9], count.to_be_bytes());
+        } else {
+            assert_eq!(buf[0], codec::FORMATCODE_ARRAY8);
+            assert_eq!(u32::from(buf[2]), count);
+        }
+        // decoder rejects arrays with more elements than bytes
+        let res = <Array as Decode>::decode(&mut buf);
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
     }
 
     #[test]
     fn encode_count_above_u8() {
         for count in [255, 256, 300] {
-            let arr = <Array as Decode>::decode(&mut zero_width_array(count)).unwrap();
+            let arr = Array {
+                count,
+                element_constructor: Constructor::FormatCode(codec::FORMATCODE_BOOLEAN_TRUE),
+                payload: Bytes::new(),
+            };
             let mut buf = BytePages::default();
             arr.encode(&mut buf);
-            let mut buf = buf.freeze();
+            let buf = buf.freeze();
             assert_eq!(arr.encoded_size(), buf.len());
-            let arr = <Array as Decode>::decode(&mut buf).unwrap();
-            assert_eq!(arr.decode::<bool>().unwrap(), vec![true; count as usize]);
+            check_header(buf, count);
         }
     }
 
@@ -152,13 +161,9 @@ mod tests {
             let data: Vec<Null> = (0..count).map(|_| Null).collect();
             let mut buf = BytePages::default();
             data.encode(&mut buf);
-            let mut buf = buf.freeze();
+            let buf = buf.freeze();
             assert_eq!(data.encoded_size(), buf.len());
-            let Variant::Array(arr) = Variant::decode(&mut buf).unwrap() else {
-                panic!("expected array");
-            };
-            assert_eq!(arr.count, count);
-            assert!(buf.is_empty());
+            check_header(buf, count);
         }
     }
 }

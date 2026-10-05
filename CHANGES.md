@@ -22,7 +22,7 @@
 
 * codec: Limit nesting depth of decoded lists, maps and described values, deep nesting overflowed the stack
 
-* codec: Reject lists and maps whose element count exceeds their size and arrays with more than 65536 zero-width elements, a peer-supplied count could allocate huge buffers
+* codec: Reject arrays with more elements than bytes, arrays of zero-width elements (`null`, `true`, `uint0`, ...) decoded to megabytes from a few bytes
 
 * codec: Fix overflow when decoding a list, map or array with a declared size smaller than its count field
 
