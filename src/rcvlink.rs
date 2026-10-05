@@ -13,7 +13,7 @@ use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::{Stream, channel::oneshot, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
-use crate::{Delivery, cell::Cell, error::AmqpProtocolError, types::Action};
+use crate::{Delivery, cell::Cell, detach, error::AmqpProtocolError, types::Action};
 
 #[derive(Clone, Debug)]
 pub struct ReceiverLink {
@@ -94,6 +94,10 @@ impl ReceiverLink {
             .confirm_receiver_link(inner.handle, response, size);
     }
 
+    /// Set link credit.
+    ///
+    /// Each queued, not yet received delivery may keep its read buffer
+    /// alive, credit bounds the memory retained by the link.
     pub fn set_link_credit(&self, credit: u32) {
         self.inner.get_mut().set_link_credit(credit);
     }
@@ -348,7 +352,7 @@ impl ReceiverLinkInner {
                         return Action::None;
                     }
 
-                    transfer_body.encode(body);
+                    append_body(body, transfer_body);
                 }
 
                 if transfer.more() {
@@ -381,24 +385,19 @@ impl ReceiverLinkInner {
             } else if transfer.more() {
                 // handle first transfer in batch
                 if let Some(id) = transfer.delivery_id() {
-                    let body = if let Some(body) = transfer.0.body.take() {
-                        match body {
-                            TransferBody::Data(data) => {
-                                let mut buf = BytePages::default();
-                                buf.append(data);
-                                buf
-                            }
-                            TransferBody::Message(msg) => {
-                                let mut buf = BytePages::default();
-                                msg.encode(&mut buf);
-                                buf
-                            }
-                            TransferBody::Pages(pages) => pages,
-                        }
-                    } else {
-                        BytePages::default()
-                    };
+                    let mut body = BytePages::default();
+                    if let Some(data) = transfer.0.body.take() {
+                        append_body(&mut body, data);
+                    }
                     self.partial_body = Some(body);
+
+                    // transfer is stored until the last partial transfer
+                    if let Some(tag) = transfer.0.delivery_tag.as_mut() {
+                        tag.trimdown();
+                    }
+                    if let Some(state) = transfer.0.state.as_ref() {
+                        transfer.0.state = Some(detach(state));
+                    }
 
                     let delivery = Delivery::new_rcv(
                         id,
@@ -566,5 +565,19 @@ impl ReceiverLinkBuilder {
             Ok(Err(err)) => Err(err),
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
+    }
+}
+
+/// Max size of transfer data copied into the message body
+const BODY_COPY_LIMIT: usize = 4096;
+
+/// Append partial transfer data to the message body
+///
+/// Data is a slice of the read buffer and keeps the whole buffer alive, small
+/// data is copied, so a message cannot retain many read buffers.
+fn append_body(body: &mut BytePages, data: TransferBody) {
+    match data {
+        TransferBody::Data(data) if data.len() <= BODY_COPY_LIMIT => body.extend_from_slice(&data),
+        data => data.encode(body),
     }
 }

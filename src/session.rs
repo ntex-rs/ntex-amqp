@@ -18,7 +18,7 @@ use crate::rcvlink::{
     EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner,
 };
 use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
-use crate::{ConnectionRef, ControlFrame, cell::Cell, types::Action};
+use crate::{ConnectionRef, ControlFrame, cell::Cell, detach, types::Action};
 
 const FRAME_HEADER_LEN: usize = 8;
 
@@ -1122,8 +1122,16 @@ impl SessionInner {
             &mut self.unsettled_rcv_deliveries
         };
 
+        // state is stored with deliveries, error and annotations are detached from read buffer
+        let state = match disp.state() {
+            Some(st @ (DeliveryState::Rejected(_) | DeliveryState::Modified(_))) => {
+                Some(detach(st))
+            }
+            st => st.cloned(),
+        };
+        let settled = disp.settled();
         for_each_in_range(deliveries, from, to.unwrap_or(from), |delivery| {
-            delivery.handle_disposition(disp);
+            delivery.handle_disposition(settled, state.as_ref());
         });
     }
 
