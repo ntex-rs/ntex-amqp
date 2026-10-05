@@ -250,6 +250,7 @@ macro_rules! hashmap {
                 let header = MapHeader::decode_with_format(input, fmt)?;
                 decode_check_len!(input, header.size as usize);
                 let mut map_input = input.split_to(header.size as usize);
+                check_count(header.count, map_input.len())?;
                 let count = header.count / 2;
                 let mut map: $ty<K, V, S> =
                     $ty::with_capacity_and_hasher(count as usize, Default::default());
@@ -279,7 +280,7 @@ impl<T: DecodeFormatted> DecodeFormatted for Vec<T> {
                 return Err(AmqpParseError::InvalidDescriptor(Box::new(descriptor)));
             }
         };
-        let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
+        let mut result: Vec<T> = Vec::with_capacity(array_capacity(header.count));
         for _ in 0..header.count {
             let decoded = T::decode_with_format(input, elem_fmt)?;
             result.push(decoded);
@@ -294,6 +295,7 @@ impl DecodeFormatted for VecSymbolMap {
         let header = MapHeader::decode_with_format(input, fmt)?;
         decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
+        check_count(header.count, map_input.len())?;
         let count = header.count / 2;
         let mut map = Vec::with_capacity(count as usize);
         for _ in 0..count {
@@ -311,6 +313,7 @@ impl DecodeFormatted for VecStringMap {
         let header = MapHeader::decode_with_format(input, fmt)?;
         decode_check_len!(input, header.size as usize);
         let mut map_input = input.split_to(header.size as usize);
+        check_count(header.count, map_input.len())?;
         let count = header.count / 2;
         let mut map = Vec::with_capacity(count as usize);
         for _ in 0..count {
@@ -349,6 +352,25 @@ impl DecodeFormatted for List {
     }
 }
 
+/// Max number of array elements to preallocate, elements of some types take no bytes
+const MAX_ARRAY_PREALLOC: u32 = 256;
+
+/// Max number of elements in an array with more elements than bytes
+const MAX_ZERO_WIDTH_ELEMENTS: u32 = 65536;
+
+pub(crate) fn array_capacity(count: u32) -> usize {
+    count.min(MAX_ARRAY_PREALLOC) as usize
+}
+
+/// Every list or map element takes at least one byte
+fn check_count(count: u32, len: usize) -> Result<(), AmqpParseError> {
+    if count as usize > len {
+        Err(AmqpParseError::InvalidSize)
+    } else {
+        Ok(())
+    }
+}
+
 /// Max nesting depth of lists, maps and described values within a `Variant`
 const MAX_DEPTH: u32 = 32;
 
@@ -368,6 +390,7 @@ fn decode_nested_variant(input: &mut Bytes, depth: u32) -> Result<Variant, AmqpP
 fn decode_list(input: &mut Bytes, fmt: u8, depth: u32) -> Result<List, AmqpParseError> {
     let depth = nested(depth)?;
     let header = ListHeader::decode_with_format(input, fmt)?;
+    check_count(header.count, input.len())?;
     let mut result: Vec<Variant> = Vec::with_capacity(header.count as usize);
     for _ in 0..header.count {
         result.push(decode_nested_variant(input, depth)?);
@@ -384,6 +407,7 @@ fn decode_map(
     let header = MapHeader::decode_with_format(input, fmt)?;
     decode_check_len!(input, header.size as usize);
     let mut map_input = input.split_to(header.size as usize);
+    check_count(header.count, map_input.len())?;
     let count = header.count / 2;
     let mut map = HashMapUtil::with_capacity_and_hasher(count as usize, Default::default());
     for _ in 0..count {
@@ -398,6 +422,7 @@ impl<T: Composite> DecodeFormatted for ListDescribed<T> {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
         let header = ListHeader::decode_with_format(input, fmt)?;
 
+        check_count(header.count, input.len())?;
         let descr = T::descriptor();
         let mut result: Vec<T> = Vec::with_capacity(header.count as usize);
         for _ in 0..header.count {
@@ -608,15 +633,16 @@ impl DecodeFormatted for MapHeader {
 
 impl DecodeFormatted for ArrayHeader {
     fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
-        match fmt {
-            codec::FORMATCODE_ARRAY8 => {
-                decode_compound8(input).map(|(size, count)| ArrayHeader { count, size })
-            }
-            codec::FORMATCODE_ARRAY32 => {
-                decode_compound32(input).map(|(size, count)| ArrayHeader { count, size })
-            }
-            _ => Err(AmqpParseError::InvalidFormatCode(fmt)),
+        let (size, count) = match fmt {
+            codec::FORMATCODE_ARRAY8 => decode_compound8(input)?,
+            codec::FORMATCODE_ARRAY32 => decode_compound32(input)?,
+            _ => return Err(AmqpParseError::InvalidFormatCode(fmt)),
+        };
+        // elements of zero-width types (null, true, uint0, ...) take no bytes
+        if count > size.max(MAX_ZERO_WIDTH_ELEMENTS) {
+            return Err(AmqpParseError::InvalidSize);
         }
+        Ok(ArrayHeader { count, size })
     }
 }
 
@@ -1061,6 +1087,60 @@ mod tests {
 
         let res = Variant::decode(&mut nested_map(MAX_DEPTH as usize + 1));
         assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
+    }
+
+    #[test]
+    fn count_exceeds_size() {
+        const HDR: [u8; 8] = [0, 0, 0, 8, 0xff, 0xff, 0xff, 0xff];
+        let input = |fmt: u8| {
+            let mut buf = vec![fmt];
+            buf.extend_from_slice(&HDR);
+            buf.extend_from_slice(&[0x40; 4]);
+            Bytes::from(buf)
+        };
+
+        let res = Variant::decode(&mut input(codec::FORMATCODE_LIST32));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+        let res = List::decode(&mut input(codec::FORMATCODE_LIST32));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+        let res = Variant::decode(&mut input(codec::FORMATCODE_MAP32));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+        let res = HashMap::<Variant, Variant>::decode(&mut input(codec::FORMATCODE_MAP32));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+        let res = VecSymbolMap::decode(&mut input(codec::FORMATCODE_MAP32));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+        let res = VecStringMap::decode(&mut input(codec::FORMATCODE_MAP32));
+        assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+    }
+
+    #[test]
+    fn zero_width_array() {
+        // array32 of `true` values, elements take no bytes
+        let array = |count: u32| {
+            let mut buf = vec![codec::FORMATCODE_ARRAY32, 0, 0, 0, 5];
+            buf.extend_from_slice(&count.to_be_bytes());
+            buf.push(codec::FORMATCODE_BOOLEAN_TRUE);
+            Bytes::from(buf)
+        };
+
+        let res = Vec::<bool>::decode(&mut array(1000)).unwrap();
+        assert_eq!(res, vec![true; 1000]);
+
+        let Variant::Array(arr) = Variant::decode(&mut array(MAX_ZERO_WIDTH_ELEMENTS)).unwrap()
+        else {
+            panic!("expected array");
+        };
+        assert_eq!(
+            arr.decode::<bool>().unwrap().len(),
+            MAX_ZERO_WIDTH_ELEMENTS as usize
+        );
+
+        for count in [MAX_ZERO_WIDTH_ELEMENTS + 1, u32::MAX] {
+            let res = Vec::<bool>::decode(&mut array(count));
+            assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+            let res = Variant::decode(&mut array(count));
+            assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
+        }
     }
 
     #[test]

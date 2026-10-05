@@ -39,7 +39,7 @@ impl Array {
     /// AMQP type of array's element constructor. Use `Array::element_constructor` to access full constructor if needed.
     pub fn decode<T: DecodeFormatted>(&self) -> Result<Vec<T>, AmqpParseError> {
         let mut buf = self.payload.clone();
-        let mut result: Vec<T> = Vec::with_capacity(self.count as usize);
+        let mut result: Vec<T> = Vec::with_capacity(codec::decode::array_capacity(self.count));
         for _ in 0..self.count {
             let decoded = T::decode_with_format(&mut buf, self.element_constructor.format_code())?;
             result.push(decoded);
