@@ -14,6 +14,8 @@
 
 * Fix overflow when decoding a list, map or array with a declared size smaller than its count field
 
+* Decode list and array elements within the declared size, malformed lists desynced decoding of following fields
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
