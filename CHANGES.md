@@ -16,6 +16,8 @@
 
 * Decode list and array elements within the declared size, malformed lists desynced decoding of following fields
 
+* Fix stale `Message` encoded size after `set_value()`, `body_mut()` and `*_mut()` accessors
+
 ## [6.0.0] - 2026-09-14
 
 * Update to ntex-service 5.0
