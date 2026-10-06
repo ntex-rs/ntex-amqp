@@ -75,6 +75,10 @@ pub enum HandshakeError {
     /// Sasl error code
     #[error("Sasl error code: {:?}", 0)]
     Sasl(protocol::SaslCode),
+    /// Remote max frame size is below `MIN_MAX_FRAME_SIZE`
+    #[from(ignore)]
+    #[error("Invalid remote max frame size: {0}")]
+    InvalidMaxFrameSize(u32),
     /// Unexpected io error, peer disconnected
     #[error("Peer disconnected, with error {:?}", 0)]
     Disconnected(Option<std::io::Error>),

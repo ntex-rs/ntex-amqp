@@ -2,7 +2,9 @@ use ntex_io::IoBoxed;
 use ntex_service::cfg::Cfg;
 use ntex_util::time::Seconds;
 
-use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame, protocol::Open};
+use crate::codec::{
+    AmqpCodec, AmqpFrame, protocol::Frame, protocol::MIN_MAX_FRAME_SIZE, protocol::Open,
+};
 use crate::{AmqpServiceConfig, RemoteServiceConfig, connection::Connection};
 
 use super::{error::HandshakeError, sasl::Sasl};
@@ -76,6 +78,14 @@ impl<St> HandshakeAmqp<St> {
         match frame {
             Frame::Open(frame) => {
                 log::trace!("{}: Got open frame: {:?}", io.tag(), frame);
+                if frame.max_frame_size() < MIN_MAX_FRAME_SIZE {
+                    log::trace!(
+                        "{}: Invalid max frame size: {}",
+                        io.tag(),
+                        frame.max_frame_size()
+                    );
+                    return Err(HandshakeError::InvalidMaxFrameSize(frame.max_frame_size()));
+                }
                 let remote_config = RemoteServiceConfig::new(&frame);
                 let sink = Connection::new(io.get_ref(), &local_config, &remote_config);
                 Ok(HandshakeAmqpOpened::new(

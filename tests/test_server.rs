@@ -267,6 +267,98 @@ async fn test_handshake_max_frame_size() -> std::io::Result<()> {
     Ok(())
 }
 
+fn max_frame_size_server(
+    cfg: AmqpServiceConfig,
+    errors: Arc<Mutex<Vec<bool>>>,
+) -> ntex::server::TestServer {
+    TestServerBuilder::new(async move || {
+        let errors = errors.clone();
+        server::Server::builder(async move |conn: server::Handshake| {
+            let res = match conn {
+                server::Handshake::Amqp(conn) => conn.open().await,
+                server::Handshake::Sasl(auth) => {
+                    let init = auth.mechanism("PLAIN").init().await.map_err(|_| ())?;
+                    let succ = init.outcome(protocol::SaslCode::Ok).await.map_err(|_| ())?;
+                    succ.open().await
+                }
+            };
+            match res {
+                Ok(conn) => Ok(conn.ack(())),
+                Err(err) => {
+                    errors.lock().unwrap().push(matches!(
+                        err,
+                        server::HandshakeError::InvalidMaxFrameSize(511)
+                    ));
+                    Err(())
+                }
+            }
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    })
+    .config(SharedCfg::new("AMQP").add(cfg))
+    .start()
+}
+
+#[ntex::test]
+async fn test_remote_max_frame_size() -> std::io::Result<()> {
+    for size in [0, 511] {
+        let res = std::panic::catch_unwind(|| AmqpServiceConfig::new().set_max_frame_size(size));
+        assert!(res.is_err(), "{size}");
+    }
+
+    let connect = async |srv: &ntex::server::TestServer, cfg: AmqpServiceConfig, sasl: bool| {
+        let uri =
+            Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+        let mut req = client::Connect::new(uri);
+        if sasl {
+            req = req.sasl_auth("".into(), "user1".into(), "password1".into());
+        }
+        Pipeline::new(
+            SharedCfg::new("CLIENT").add(cfg).build(),
+            client::Connector::new(),
+        )
+        .call(req)
+        .await
+    };
+    // server rejects remote open
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let srv = max_frame_size_server(AmqpServiceConfig::new(), errors.clone());
+    for sasl in [false, true] {
+        let mut cfg = AmqpServiceConfig::new();
+        cfg.max_frame_size = 511;
+        assert!(connect(&srv, cfg, sasl).await.is_err());
+        let cfg = AmqpServiceConfig::new().set_max_frame_size(512);
+        assert!(connect(&srv, cfg, sasl).await.is_ok());
+    }
+    sleep(Millis(50)).await;
+    assert_eq!(*errors.lock().unwrap(), [true, true]);
+
+    // client rejects remote open
+    let mut small = AmqpServiceConfig::new();
+    small.max_frame_size = 511;
+    let srv = max_frame_size_server(small, errors.clone());
+    let err = connect(&srv, AmqpServiceConfig::new(), false)
+        .await
+        .err()
+        .unwrap();
+    assert!(
+        matches!(*err, client::ConnectError::InvalidMaxFrameSize(511)),
+        "{err:?}"
+    );
+
+    // local `0` is advertised as unlimited
+    let mut unlimited = AmqpServiceConfig::new();
+    unlimited.max_frame_size = 0;
+    let srv = max_frame_size_server(unlimited, errors);
+    assert!(connect(&srv, AmqpServiceConfig::new(), false).await.is_ok());
+
+    Ok(())
+}
+
 async fn raw_connect(addr: std::net::SocketAddr) -> ntex::io::Io {
     let io = ntex::connect::connect(addr).await.unwrap();
     io.send(ProtocolId::Amqp, &ProtocolIdCodec).await.unwrap();

@@ -7,7 +7,9 @@ use ntex_service::cfg::Cfg;
 use crate::codec::protocol::{
     self, ProtocolId, SaslChallenge, SaslCode, SaslFrameBody, SaslMechanisms, SaslOutcome, Symbols,
 };
-use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame};
+use crate::codec::{
+    AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, SaslFrame, protocol::MIN_MAX_FRAME_SIZE,
+};
 use crate::{AmqpServiceConfig, RemoteServiceConfig, connection::Connection};
 
 use super::{HandshakeError, handshake::HandshakeAmqpOpened};
@@ -299,6 +301,16 @@ impl<St> SaslSuccess<St> {
                 match frame {
                     protocol::Frame::Open(frame) => {
                         log::trace!("{}: Got open frame: {:?}", io.tag(), frame);
+                        if frame.max_frame_size() < MIN_MAX_FRAME_SIZE {
+                            log::trace!(
+                                "{}: Invalid max frame size: {}",
+                                io.tag(),
+                                frame.max_frame_size()
+                            );
+                            return Err(HandshakeError::InvalidMaxFrameSize(
+                                frame.max_frame_size(),
+                            ));
+                        }
 
                         let local_config = self.local_config;
                         let remote_config = RemoteServiceConfig::new(&frame);
