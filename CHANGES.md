@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Enforce remote max-frame-size for all outgoing frames, oversized frames fail the connection with new `AmqpCodecError::MaxOutboundSizeExceeded` error instead of being sent. Add `AmqpCodec::max_encode_size()` and `AmqpCodec::set_max_encode_size()`
+
 * Fix encoded sizes larger than `u32::MAX` were silently truncated, producing corrupted frames. Encoding now panics on 32-bit size overflow, transfers with unlimited remote max-frame-size are split into frames up to `u32::MAX`
 
 * Reject remote `Open` with max-frame-size below 512 (`MIN_MAX_FRAME_SIZE`), new `HandshakeError::InvalidMaxFrameSize` and `ConnectError::InvalidMaxFrameSize` errors. `AmqpServiceConfig::set_max_frame_size()` panics on values below 512, `max_frame_size` field set to `0` is advertised as unlimited

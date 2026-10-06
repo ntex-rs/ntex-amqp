@@ -13,6 +13,7 @@ use crate::protocol::ProtocolId;
 pub struct AmqpCodec<T: Decode + Encode> {
     state: Cell<DecodeState>,
     max_size: usize,
+    max_encode_size: usize,
     phantom: PhantomData<T>,
 }
 
@@ -33,6 +34,7 @@ impl<T: Decode + Encode> AmqpCodec<T> {
         AmqpCodec {
             state: Cell::new(DecodeState::FrameHeader),
             max_size: 0,
+            max_encode_size: 0,
             phantom: PhantomData,
         }
     }
@@ -52,6 +54,25 @@ impl<T: Decode + Encode> AmqpCodec<T> {
     /// By default max size is set to `0`
     pub fn set_max_size(&mut self, size: usize) {
         self.max_size = size;
+    }
+
+    /// Set max outbound frame size.
+    ///
+    /// Encoding of larger frame fails with `AmqpCodecError::MaxOutboundSizeExceeded`.
+    /// If max size is set to `0`, size is unlimited.
+    /// By default max size is set to `0`
+    pub fn max_encode_size(mut self, size: usize) -> Self {
+        self.max_encode_size = size;
+        self
+    }
+
+    /// Set max outbound frame size.
+    ///
+    /// Encoding of larger frame fails with `AmqpCodecError::MaxOutboundSizeExceeded`.
+    /// If max size is set to `0`, size is unlimited.
+    /// By default max size is set to `0`
+    pub fn set_max_encode_size(&mut self, size: usize) {
+        self.max_encode_size = size;
     }
 }
 
@@ -107,6 +128,9 @@ impl<T: Decode + Encode + ::std::fmt::Debug> Encoder for AmqpCodec<T> {
     type Error = AmqpCodecError;
 
     fn encode(&self, item: Self::Item, dst: &mut BytePages) -> Result<(), Self::Error> {
+        if self.max_encode_size != 0 && item.encoded_size() > self.max_encode_size {
+            return Err(AmqpCodecError::MaxOutboundSizeExceeded);
+        }
         item.encode(dst);
         Ok(())
     }
@@ -172,5 +196,37 @@ mod tests {
         assert!(matches!(res, Err(AmqpCodecError::InvalidFrameSize)));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_max_encode_size() {
+        use crate::protocol::{Frame, Open, OpenInner};
+
+        let frame = || {
+            let open = Open(Box::new(OpenInner {
+                container_id: "a".repeat(100).into(),
+                ..Default::default()
+            }));
+            AmqpFrame::new(0, Frame::Open(open))
+        };
+        let size = frame().encoded_size();
+
+        let mut buf = BytePages::default();
+        let codec = AmqpCodec::<AmqpFrame>::new().max_encode_size(size - 1);
+        let res = codec.encode(frame(), &mut buf);
+        assert!(matches!(res, Err(AmqpCodecError::MaxOutboundSizeExceeded)));
+        assert_eq!(buf.len(), 0);
+
+        let mut codec = AmqpCodec::<AmqpFrame>::new();
+        codec.set_max_encode_size(size);
+        codec.encode(frame(), &mut buf).unwrap();
+        assert_eq!(buf.len(), size);
+
+        // unlimited
+        let mut buf = BytePages::default();
+        AmqpCodec::<AmqpFrame>::new()
+            .encode(frame(), &mut buf)
+            .unwrap();
+        assert_eq!(buf.len(), size);
     }
 }

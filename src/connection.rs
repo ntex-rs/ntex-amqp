@@ -66,7 +66,7 @@ impl Connection {
     ) -> Connection {
         Connection(ConnectionRef(Cell::new(ConnectionInner {
             io,
-            codec: AmqpCodec::new(),
+            codec: AmqpCodec::new().max_encode_size(remote_config.max_frame_size as usize),
             state: ConnectionState::Normal,
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::default(),
@@ -666,12 +666,13 @@ async fn open_session(
 #[cfg(test)]
 mod tests {
     use ntex::codec::{Decoder, Encoder};
+    use ntex_amqp_codec::AmqpCodecError;
     use ntex_amqp_codec::protocol::{
         Attach, AttachInner, Begin, BeginInner, DeliveryState, Disposition, DispositionInner, Flow,
         FlowInner, Open, OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode, Source,
         TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
     };
-    use ntex_amqp_codec::types::{Multiple, Symbol};
+    use ntex_amqp_codec::types::{Multiple, Symbol, Variant};
     use ntex_bytes::{BytePages, Bytes, BytesMut};
     use ntex_io::{Io, testing::IoTest};
     use ntex_service::cfg::SharedCfg;
@@ -904,5 +905,47 @@ mod tests {
             flows,
             [(Some(1), Some(10)), (Some(5), Some(12)), (Some(5), None)]
         );
+    }
+    #[ntex::test]
+    async fn outbound_frames_limited_by_remote_max_frame_size() {
+        let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
+            max_frame_size: 512,
+            ..Default::default()
+        })));
+        let (server, client) = IoTest::create();
+        client.remote_buffer_cap(64 * 1024);
+        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let io = Io::new(server, cfg.clone());
+        let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+
+        // fits
+        conn.get_ref().post_frame(AmqpFrame::new(0, attach()));
+        assert!(conn.get_error().is_none());
+
+        // properties do not fit into remote max frame size
+        let Frame::Attach(mut attach) = attach() else {
+            panic!()
+        };
+        attach.0.properties = Some(
+            [(Symbol::from("key"), Variant::from("a".repeat(512)))]
+                .into_iter()
+                .collect(),
+        );
+        conn.get_ref().post_frame(AmqpFrame::new(0, attach.into()));
+        assert!(matches!(
+            conn.get_error(),
+            Some(AmqpProtocolError::Codec(
+                AmqpCodecError::MaxOutboundSizeExceeded
+            ))
+        ));
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        assert!(matches!(
+            codec.decode(&mut buf).unwrap().unwrap().performative(),
+            Frame::Attach(_)
+        ));
+        assert!(buf.is_empty());
     }
 }
