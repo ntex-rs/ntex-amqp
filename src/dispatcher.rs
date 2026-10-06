@@ -335,14 +335,17 @@ impl ControlState {
                         .service
                         .call_static(types::Message::Attached(frm.clone(), link.clone()));
                     let response = pfrm.take();
+                    let service = self.service.clone();
 
                     ntex_rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
                             let _ = link.close_with_error(err);
-                        } else {
-                            link.confirm_receiver_link(response);
+                        } else if link.confirm_receiver_link(response) {
                             link.set_link_credit(50);
+                        } else {
+                            // link is detached, release publish service resources
+                            let _ = service.call(types::Message::Detached(link)).await;
                         }
                     });
                 }

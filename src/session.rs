@@ -277,7 +277,12 @@ enum SenderLinkState {
 
 #[derive(Debug)]
 enum ReceiverLinkState {
-    Opening(Box<Option<(Cell<ReceiverLinkInner>, Option<Source>)>>),
+    /// Remote link waits for confirmation, keeps remote detach
+    /// received before confirmation
+    Opening(
+        Box<Option<(Cell<ReceiverLinkInner>, Option<Source>)>>,
+        Option<Detach>,
+    ),
     OpeningLocal(
         Option<(
             Cell<ReceiverLinkInner>,
@@ -798,10 +803,10 @@ impl SessionInner {
             attach,
             DEFAULT_MAX_MESSAGE_SIZE,
         ));
-        entry.insert(Either::Right(ReceiverLinkState::Opening(Box::new(Some((
-            inner.clone(),
-            attach.source().cloned(),
-        ))))));
+        entry.insert(Either::Right(ReceiverLinkState::Opening(
+            Box::new(Some((inner.clone(), attach.source().cloned()))),
+            None,
+        )));
         self.remote_handles.insert(handle, token);
 
         let response = Attach(Box::new(codec::AttachInner {
@@ -856,23 +861,60 @@ impl SessionInner {
         rx
     }
 
+    /// Confirm remote receiver link, returns `false` if link is not established
     pub(crate) fn confirm_receiver_link(
         &mut self,
         token: Handle,
         mut response: Attach,
         max_message_size: Option<u64>,
-    ) {
-        if let Some(Either::Right(link)) = self.links.get_mut(token as usize)
-            && let ReceiverLinkState::Opening(l) = link
-            && let Some((l, _)) = l.take()
-        {
-            *response.max_message_size_mut() = max_message_size;
-            *link = ReceiverLinkState::Established(EstablishedReceiverLink::new(l));
-            self.post_frame(response.into());
-            return;
+    ) -> bool {
+        let (link, detach) = match self.links.get_mut(token as usize) {
+            Some(Either::Right(ReceiverLinkState::Opening(link, detach))) => {
+                (link.take(), detach.take())
+            }
+            _ => (None, None),
+        };
+        let Some((link, _)) = link else {
+            log::debug!("{}: Receiver link is not opening: {token}", self.tag());
+            return false;
+        };
+
+        *response.max_message_size_mut() = max_message_size;
+        self.post_frame(response.into());
+
+        // remote detached link before confirmation
+        if let Some(detach) = detach {
+            log::trace!(
+                "{}: Remote receiver link detached before confirmation: {:?}",
+                self.tag(),
+                link.get_ref().name()
+            );
+            self.remove_link(token as usize);
+            self.remote_handles.remove(&detach.handle());
+            self.post_frame(
+                Detach(Box::new(codec::DetachInner {
+                    handle: token,
+                    closed: true,
+                    error: None,
+                }))
+                .into(),
+            );
+
+            let link = ReceiverLink::new(link);
+            link.remote_detached(detach.0.error.clone());
+            self.sink
+                .get_control_queue()
+                .enqueue_frame(ControlFrame::new(
+                    link.session().inner.clone(),
+                    crate::ControlFrameKind::RemoteDetachReceiver(detach, link),
+                ));
+            return false;
         }
-        // TODO: close session
-        log::error!("{}: Unexpected receiver link state", self.tag());
+
+        self.links[token as usize] = Either::Right(ReceiverLinkState::Established(
+            EstablishedReceiverLink::new(link),
+        ));
+        true
     }
 
     /// Detach receiver link
@@ -885,10 +927,15 @@ impl SessionInner {
     ) {
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
-                ReceiverLinkState::Opening(inner) => {
+                ReceiverLinkState::Opening(inner, remote_detach) => {
                     let inner = inner.take();
-                    // handles are in use until remote detach
-                    *link = ReceiverLinkState::Closing(Some(tx));
+                    let remote_detach = remote_detach.take();
+                    if remote_detach.is_some() {
+                        let _ = tx.send(Ok(()));
+                    } else {
+                        // handles are in use until remote detach
+                        *link = ReceiverLinkState::Closing(Some(tx));
+                    }
                     if let Some((inner, source)) = inner {
                         let attach = Attach(Box::new(codec::AttachInner {
                             source,
@@ -914,6 +961,12 @@ impl SessionInner {
                         handle: id,
                     }));
                     self.post_frame(detach.into());
+
+                    // remote detached link before rejection
+                    if let Some(detach) = remote_detach {
+                        self.remove_link(id as usize);
+                        self.remote_handles.remove(&detach.handle());
+                    }
                 }
                 ReceiverLinkState::Established(receiver_link) => {
                     let receiver_link = receiver_link.clone();
@@ -1028,7 +1081,7 @@ impl SessionInner {
                                 Err(AmqpProtocolError::Unexpected(Frame::Transfer(transfer)))
                             }
                             Either::Right(link) => match link {
-                                ReceiverLinkState::Opening(_)
+                                ReceiverLinkState::Opening(..)
                                 | ReceiverLinkState::OpeningLocal(_) => {
                                     log::debug!(
                                         "{}: Got transfer for opening link: {} -> {idx}",
@@ -1220,7 +1273,22 @@ impl SessionInner {
                     }
                 },
                 Either::Right(link) => match link {
-                    ReceiverLinkState::Opening(_) => false,
+                    ReceiverLinkState::Opening(_, detach) => {
+                        // detach is confirmed and link is removed after link confirmation
+                        if detach.is_some() {
+                            log::warn!(
+                                "{}: Duplicate detach frame for unconfirmed receiver link: {frame:?}",
+                                self.sink.tag()
+                            );
+                        } else {
+                            log::trace!(
+                                "{}: Detach frame received for unconfirmed receiver link: {frame:?}",
+                                self.sink.tag()
+                            );
+                            *detach = Some(frame);
+                        }
+                        false
+                    }
                     ReceiverLinkState::OpeningLocal(item) => {
                         if let Some((inner, tx)) = item.take() {
                             inner.get_mut().detached();
