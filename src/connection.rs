@@ -907,6 +907,58 @@ mod tests {
         );
     }
     #[ntex::test]
+    async fn receiver_delivery_count_wraps() {
+        // overflow on single and on multi-frame transfer
+        receiver_delivery_count(false).await;
+        receiver_delivery_count(true).await;
+    }
+
+    async fn receiver_delivery_count(multi_first: bool) {
+        let remote = RemoteServiceConfig::new(&Open(Box::default()));
+        let (server, client) = IoTest::create();
+        client.remote_buffer_cap(64 * 1024);
+        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let io = Io::new(server, cfg.clone());
+        let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+
+        handle(begin()).unwrap();
+        let Frame::Attach(mut attach) = attach() else {
+            panic!()
+        };
+        attach.0.initial_delivery_count = Some(u32::MAX);
+        let Ok(Action::AttachReceiver(link, _, response)) = handle(attach.into()) else {
+            panic!()
+        };
+        link.confirm_receiver_link(response);
+        link.set_link_credit(10);
+
+        for id in 0..2 {
+            if (id == 0) == multi_first {
+                handle(transfer(id, true, None, 0)).unwrap();
+            }
+            handle(transfer(id, false, None, 0)).unwrap();
+            link.set_link_credit(1);
+        }
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut counts = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Flow(flow) = frame.into_parts().1 {
+                counts.push(flow.delivery_count());
+            }
+        }
+        assert_eq!(counts, [Some(u32::MAX), Some(0), Some(1)]);
+    }
+
+    #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,
