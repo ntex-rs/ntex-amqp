@@ -30,6 +30,10 @@ pub(crate) struct SenderLinkInner {
     pending_transfers: VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>,
     // woken credit waiters and in-flight transfers
     active: u32,
+    // delivery is partially sent, frames of deliveries must not interleave
+    partial: bool,
+    // cancelled delivery, must be aborted before next delivery
+    abort: Option<DeliveryNumber>,
     // receiver drain mode
     drain: bool,
     pub(crate) error: Option<AmqpProtocolError>,
@@ -214,6 +218,8 @@ impl SenderLinkInner {
             link_credit: 0,
             pending_transfers: VecDeque::new(),
             active: 0,
+            partial: false,
+            abort: None,
             drain: false,
             error: None,
             closed: false,
@@ -343,11 +349,7 @@ impl SenderLinkInner {
             self.drain = flow.drain();
 
             // credit became available => wake up pending transfers
-            while let Some(tx) = self.pending_transfers.pop_front() {
-                if tx.send(Ok(())).is_ok() {
-                    self.active += 1;
-                }
-            }
+            self.wake_pending();
 
             // notify available credit waiters
             if self.link_credit > 0 {
@@ -356,6 +358,15 @@ impl SenderLinkInner {
             self.drain_credit()
         } else {
             false
+        }
+    }
+
+    /// Wake up transfers waiting for link credit
+    fn wake_pending(&mut self) {
+        while let Some(tx) = self.pending_transfers.pop_front() {
+            if tx.send(Ok(())).is_ok() {
+                self.active += 1;
+            }
         }
     }
 
@@ -412,7 +423,7 @@ impl SenderLinkInner {
             } else if inner.closed {
                 return Err(AmqpProtocolError::Disconnected);
             }
-            if inner.link_credit == 0 || !inner.pending_transfers.is_empty() {
+            if inner.link_credit == 0 || inner.partial || !inner.pending_transfers.is_empty() {
                 log::trace!(
                     "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
                     inner.session.tag(),
@@ -435,36 +446,72 @@ impl SenderLinkInner {
 
             // link credit is not reserved while transfer waits for session window,
             // waiting transfer prevents credit drain
-            inner.active += 1;
-            let guard = ActiveTransfer(Some(link.clone()));
-            if inner
-                .session
-                .inner
-                .get_mut()
-                .wait_window(inner.id as Handle)
-                .await?
-            {
+            let handle = inner.id as Handle;
+            if let Some(rx) = inner.session.inner.get_mut().window_waiter(handle)? {
+                inner.active += 1;
+                let guard = ActiveTransfer(Some(link.clone()));
+                wait_window(rx).await?;
                 guard.resume();
                 continue;
             }
-            guard.resume();
+
+            // cancelled delivery is aborted before next delivery
+            if let Some(id) = inner.abort.take() {
+                inner.session.inner.get_mut().abort_transfer(handle, id);
+                continue;
+            }
             break;
         }
 
         // transfer is sent and link credit is consumed together
         let inner = link.get_mut();
-        let id = inner.session.inner.get_mut().send_transfer(
-            inner.id as Handle,
-            &tag,
-            body,
-            settled,
-            format,
-        )?;
+        let handle = inner.id as Handle;
+        let (id, chunks) = inner
+            .session
+            .inner
+            .get_mut()
+            .send_transfer(handle, &tag, body, settled, format)?;
         inner.link_credit -= 1;
         inner.delivery_count = inner.delivery_count.wrapping_add(1);
         inner.drain_and_post();
 
+        // body does not fit into one frame, each frame consumes session window
+        if let Some(mut chunks) = chunks {
+            inner.partial = true;
+            let guard = PartialDelivery(Some((link.clone(), id)));
+            loop {
+                let inner = link.get_mut();
+                if let Some(ref err) = inner.error {
+                    return Err(err.clone());
+                } else if inner.closed {
+                    return Err(AmqpProtocolError::Disconnected);
+                }
+                let session = inner.session.inner.get_mut();
+                if let Some(rx) = session.window_waiter(handle)? {
+                    wait_window(rx).await?;
+                } else if session.send_transfer_chunk(handle, &mut chunks) {
+                    break;
+                }
+            }
+            guard.complete();
+        }
+
         Ok((id, tag))
+    }
+
+    /// Delivery is sent or cancelled
+    fn end_delivery(&mut self, aborted: Option<DeliveryNumber>) {
+        self.partial = false;
+        if let Some(id) = aborted {
+            let handle = self.id as Handle;
+            let session = self.session.inner.get_mut();
+            session.unsettled_snd_deliveries.remove(&id);
+            if !self.closed && !session.abort_transfer(handle, id) {
+                self.abort = Some(id);
+            }
+        }
+        self.wake_pending();
+        self.drain_and_post();
     }
 
     fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {
@@ -544,6 +591,33 @@ impl Drop for ActiveTransfer {
             link.drain_and_post();
         }
     }
+}
+
+/// Partially sent delivery, cancelled delivery gets aborted
+struct PartialDelivery(Option<(Cell<SenderLinkInner>, DeliveryNumber)>);
+
+impl PartialDelivery {
+    fn complete(mut self) {
+        if let Some((link, _)) = self.0.take() {
+            link.get_mut().end_delivery(None);
+        }
+    }
+}
+
+impl Drop for PartialDelivery {
+    fn drop(&mut self) {
+        if let Some((link, id)) = self.0.take() {
+            link.get_mut().end_delivery(Some(id));
+        }
+    }
+}
+
+async fn wait_window(
+    rx: pool::Receiver<Result<(), AmqpProtocolError>>,
+) -> Result<(), AmqpProtocolError> {
+    rx.await
+        .map_err(|_| AmqpProtocolError::ConnectionDropped)
+        .and_then(|v| v)
 }
 
 /// Max message size of remote link endpoint, `0` or unset means unlimited
