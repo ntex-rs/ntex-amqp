@@ -10,7 +10,7 @@ use ntex_util::channel::{condition, oneshot, pool};
 use ntex_util::time::{Seconds, timeout_checked};
 
 use crate::delivery::TransferBuilder;
-use crate::session::{Session, SessionInner};
+use crate::session::{Session, SessionInner, WindowClaim, WindowWaiter};
 use crate::{Handle, cell::Cell, error::AmqpProtocolError};
 
 #[derive(Clone)]
@@ -450,6 +450,8 @@ impl SenderLinkInner {
 
         // woken transfer claims credit ahead of queued transfers
         let mut woken = false;
+        // woken transfer claims session window ahead of queued transfers
+        let mut claim: Option<WindowClaim> = None;
         loop {
             let inner = link.get_mut();
             if let Some(ref err) = inner.error {
@@ -457,10 +459,13 @@ impl SenderLinkInner {
             } else if inner.closed {
                 return Err(AmqpProtocolError::Disconnected);
             }
-            if inner.link_credit == 0
+            // credit claimed by woken transfers is not available
+            if inner.link_credit <= inner.active
                 || inner.partial
                 || (!woken && !inner.pending_transfers.is_empty())
             {
+                // claimed window is released for other transfers
+                drop(claim.take());
                 log::trace!(
                     "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
                     inner.session.tag(),
@@ -484,13 +489,15 @@ impl SenderLinkInner {
 
             // waiting transfer claims link credit, but it does not delay credit drain
             let handle = inner.id as Handle;
-            if let Some(rx) = inner.session.inner.get_mut().window_waiter(handle)? {
+            let session = inner.session.inner.get_mut();
+            if let Some(rx) = session.window_waiter(handle, claim.is_some())? {
+                drop(claim.take());
                 inner.active += 1;
                 inner.window_waiters += 1;
                 // woken transfer could delay drain, it is blocked now
                 inner.drain_and_post();
                 let guard = ActiveTransfer(Some(link.clone()));
-                wait_window(rx).await?;
+                claim = Some(WindowWaiter::new(rx, inner.session.inner.clone()).await?);
                 guard.resume();
                 woken = true;
                 continue;
@@ -498,6 +505,10 @@ impl SenderLinkInner {
 
             // cancelled delivery is aborted before next delivery
             if let Some(id) = inner.abort.take() {
+                // abort frame takes claimed window
+                if let Some(claim) = claim.take() {
+                    claim.consume();
+                }
                 inner.session.inner.get_mut().abort_transfer(handle, id);
                 continue;
             }
@@ -512,6 +523,9 @@ impl SenderLinkInner {
             .inner
             .get_mut()
             .send_transfer(handle, &tag, body, settled, format)?;
+        if let Some(claim) = claim.take() {
+            claim.consume();
+        }
         inner.link_credit -= 1;
         inner.delivery_count = inner.delivery_count.wrapping_add(1);
         inner.drain_and_post();
@@ -528,10 +542,17 @@ impl SenderLinkInner {
                     return Err(AmqpProtocolError::Disconnected);
                 }
                 let session = inner.session.inner.get_mut();
-                if let Some(rx) = session.window_waiter(handle)? {
-                    wait_window(rx).await?;
-                } else if session.send_transfer_chunk(handle, &mut chunks) {
-                    break;
+                if let Some(rx) = session.window_waiter(handle, claim.is_some())? {
+                    drop(claim.take());
+                    claim = Some(WindowWaiter::new(rx, inner.session.inner.clone()).await?);
+                } else {
+                    let last = session.send_transfer_chunk(handle, &mut chunks);
+                    if let Some(claim) = claim.take() {
+                        claim.consume();
+                    }
+                    if last {
+                        break;
+                    }
                 }
             }
             guard.complete();
@@ -656,14 +677,6 @@ impl Drop for PartialDelivery {
             link.get_mut().end_delivery(Some(id));
         }
     }
-}
-
-async fn wait_window(
-    rx: pool::Receiver<Result<(), AmqpProtocolError>>,
-) -> Result<(), AmqpProtocolError> {
-    rx.await
-        .map_err(|_| AmqpProtocolError::ConnectionDropped)
-        .and_then(|v| v)
 }
 
 /// Max message size of remote link endpoint, `0` or unset means unlimited
