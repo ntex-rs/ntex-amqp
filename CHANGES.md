@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix receiver link ignored aborted transfers; aborted deliveries are discarded, implicitly settled and their credit is returned to the sender
+
 * Fix sender link flow woke all transfers waiting for credit or session window; waiters are woken up to available credit
 
 * Fix router link service leaked until disconnect after local receiver link detach or local session end

@@ -346,6 +346,19 @@ impl ReceiverLinkInner {
         Action::None
     }
 
+    /// Aborted delivery is implicitly settled and its payload is ignored.
+    ///
+    /// Application never sees aborted delivery, so its credit is returned
+    /// to the sender, otherwise the link could stall without credit.
+    fn delivery_aborted(&mut self) -> Action {
+        self.delivery_count = self.delivery_count.wrapping_add(1);
+        self.session
+            .inner
+            .get_mut()
+            .rcv_link_flow(self.handle, self.delivery_count, self.credit);
+        Action::None
+    }
+
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
         // link handle could be reused by another link
         if self.closed {
@@ -389,7 +402,10 @@ impl ReceiverLinkInner {
             let _ = self.close(Some(err));
             Action::None
         } else {
-            if !transfer.0.more {
+            // aborted transfer ends the delivery regardless of `more`,
+            // credit used by aborted delivery is returned to the sender
+            let aborted = transfer.0.aborted;
+            if !transfer.0.more && !aborted {
                 self.credit -= 1;
             }
 
@@ -410,6 +426,14 @@ impl ReceiverLinkInner {
                         let _ = self.close(Some(err));
                         return Action::None;
                     }
+                }
+
+                if aborted {
+                    self.partial_body = None;
+                    if let Some((delivery, _)) = self.queue.pop_back() {
+                        delivery.discard();
+                    }
+                    return self.delivery_aborted();
                 }
 
                 // merge transfer data and check size
@@ -448,6 +472,8 @@ impl ReceiverLinkInner {
                         Action::None
                     }
                 }
+            } else if aborted {
+                self.delivery_aborted()
             } else if transfer.more() {
                 // handle first transfer in batch
                 if let Some(id) = transfer.delivery_id() {
