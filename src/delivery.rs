@@ -109,6 +109,9 @@ impl Delivery {
 
         if !self.is_set(Flags::LOCAL_SETTLED) {
             self.set_flag(Flags::LOCAL_SETTLED);
+            if self.is_detached() {
+                return;
+            }
 
             let disp = Disposition(Box::new(DispositionInner {
                 role: if self.is_set(Flags::SENDER) {
@@ -128,7 +131,7 @@ impl Delivery {
 
     pub fn update_state(&mut self, state: DeliveryState) {
         // remote side is settled, not need to send disposition
-        if self.is_set(Flags::LOCAL_SETTLED) || self.remote_settled() {
+        if self.is_set(Flags::LOCAL_SETTLED) || self.remote_settled() || self.is_detached() {
             return;
         }
 
@@ -155,6 +158,16 @@ impl Delivery {
         let mut flags = self.flags.get();
         flags.insert(flag);
         self.flags.set(flags);
+    }
+
+    /// Link is detached or session is ended, delivery cannot be settled
+    fn is_detached(&self) -> bool {
+        self.session
+            .inner
+            .get_mut()
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .get(&self.id)
+            .is_none_or(|inner| inner.error.is_some())
     }
 
     /// Check if remote side settled delivery, disposition could arrive before `wait()` call
@@ -225,6 +238,7 @@ impl Drop for Delivery {
 
         if let Some(delivery) = deliveries.remove(&self.id)
             && !delivery.settled
+            && delivery.error.is_none()
             && !self.is_set(Flags::REMOTE_SETTLED)
             && !self.is_set(Flags::LOCAL_SETTLED)
         {
