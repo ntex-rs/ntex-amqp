@@ -2819,6 +2819,130 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn sender_link_flow_wakes_by_credit() {
+        use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
+        use std::task::{Wake, Waker};
+
+        struct Counter(AtomicUsize);
+        impl Wake for Counter {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        type Fut = Pin<Box<dyn Future<Output = Result<crate::Delivery, AmqpProtocolError>>>>;
+        struct Tr(Fut, Arc<Counter>);
+        impl Tr {
+            fn poll(&mut self) -> Poll<Result<crate::Delivery, AmqpProtocolError>> {
+                let waker = Waker::from(self.1.clone());
+                self.0.as_mut().poll(&mut Context::from_waker(&waker))
+            }
+            fn woken(&self) -> usize {
+                self.1.0.load(Ordering::SeqCst)
+            }
+        }
+
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        // link flow, `sent` transfers are received by remote
+        let flow = |sent: u32, credit: u32, window: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(4);
+            flow.0.delivery_count = Some(sent);
+            flow.0.next_incoming_id = Some(1 + sent);
+            flow.0.incoming_window = window;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        let Ok(Action::AttachSender(snd, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
+        else {
+            panic!()
+        };
+        let snd =
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone());
+        let transfer = || {
+            let mut tr = Tr(
+                Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send()),
+                Arc::new(Counter(AtomicUsize::new(0))),
+            );
+            assert!(tr.poll().is_pending());
+            tr
+        };
+
+        // waiters are woken up to available credit
+        let (mut t1, mut t2, mut t3) = (transfer(), transfer(), transfer());
+        flow(0, 1, 10);
+        assert_eq!((t1.woken(), t2.woken(), t3.woken()), (1, 0, 0));
+        assert!(t1.poll().is_ready());
+        flow(1, 2, 10);
+        assert_eq!((t2.woken(), t3.woken()), (1, 1));
+        assert!(t2.poll().is_ready());
+        assert!(t3.poll().is_ready());
+
+        // credit of dropped woken waiter is passed to next waiter
+        let (t4, t5) = (transfer(), transfer());
+        flow(3, 1, 10);
+        assert_eq!((t4.woken(), t5.woken()), (1, 0));
+        drop(t4);
+        assert_eq!(t5.woken(), 1);
+        drop(t5);
+        assert_eq!(snd.credit(), 1);
+
+        // credit is claimed by transfer waiting for session window
+        flow(3, 1, 0);
+        let mut t6 = transfer();
+        flow(3, 0, 0);
+        let mut t7 = transfer();
+        flow(3, 1, 0);
+        assert_eq!((t6.woken(), t7.woken()), (0, 0));
+
+        // woken transfer is not queued behind credit waiters
+        flow(3, 1, 10);
+        assert_eq!((t6.woken(), t7.woken()), (1, 0));
+        assert!(t6.poll().is_ready());
+        flow(4, 1, 10);
+        assert_eq!(t7.woken(), 1);
+        assert!(t7.poll().is_ready());
+
+        // credit of dropped window waiter is passed to next waiter
+        flow(5, 0, 0);
+        let (mut t8, t9) = (transfer(), transfer());
+        flow(5, 1, 0);
+        assert!(t8.poll().is_pending());
+        assert_eq!(t9.woken(), 0);
+        drop(t8);
+        assert_eq!(t9.woken(), 1);
+
+        // waiters are not woken while delivery is partially sent
+        let (_io, conn, _client, snd) = small_frames_sender();
+        let transfer = |body: Bytes| {
+            let mut tr = Tr(
+                Box::pin(snd.transfer(body).send()),
+                Arc::new(Counter(AtomicUsize::new(0))),
+            );
+            assert!(tr.poll().is_pending());
+            tr
+        };
+        let mut t1 = transfer(Bytes::from(vec![b'a'; 1200]));
+        let t2 = transfer(Bytes::from_static(b"2"));
+        let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
+            panic!()
+        };
+        flow.0.handle = Some(4);
+        flow.0.incoming_window = 2;
+        handle_frame(&conn, flow.into()).unwrap();
+        assert_eq!((t1.woken(), t2.woken()), (0, 0));
+        session_window(&conn, 3, 1);
+        assert!(t1.poll().is_ready());
+        assert_eq!(t2.woken(), 1);
+    }
+
+    #[ntex::test]
     async fn sender_link_close_fails_waiting_transfers() {
         use ntex::time::{Millis, sleep, timeout};
         use std::{future::poll_fn, task::Poll};
