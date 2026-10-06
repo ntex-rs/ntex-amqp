@@ -46,7 +46,10 @@ pub(crate) struct SessionInner {
     remote_incoming_window: u32,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
-    links_by_name: HashMap<ByteString, usize>,
+    // link names by direction, and names of links by index
+    pub(crate) sender_names: HashMap<ByteString, usize>,
+    receiver_names: HashMap<ByteString, usize>,
+    pub(crate) link_names: HashMap<usize, ByteString>,
     remote_handles: HashMap<Handle, usize>,
     error: Option<AmqpProtocolError>,
     closed: condition::Condition,
@@ -135,12 +138,30 @@ impl Session {
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
         let inner = self.inner.get_ref();
 
-        if let Some(id) = inner.links_by_name.get(name)
+        if let Some(id) = inner.sender_names.get(name)
             && let Some(Either::Left(SenderLinkState::Established(link))) = inner.links.get(*id)
         {
             return Some(link);
         }
         None
+    }
+
+    /// Find established sender link by address
+    ///
+    /// Multiple links could be attached to the same address, first found link is returned.
+    pub fn get_sender_link_by_address(&self, address: &str) -> Option<&SenderLink> {
+        self.inner
+            .get_ref()
+            .links
+            .iter()
+            .find_map(|(_, st)| match st {
+                Either::Left(SenderLinkState::Established(link))
+                    if link.address().is_some_and(|addr| addr == address) =>
+                {
+                    Some(&**link)
+                }
+                _ => None,
+            })
     }
 
     #[inline]
@@ -311,7 +332,9 @@ impl SessionInner {
             unsettled_snd_deliveries: HashMap::default(),
             unsettled_rcv_deliveries: HashMap::default(),
             links: Slab::new(),
-            links_by_name: HashMap::default(),
+            sender_names: HashMap::default(),
+            receiver_names: HashMap::default(),
+            link_names: HashMap::default(),
             remote_handles: HashMap::default(),
             pending_transfers: VecDeque::new(),
             error: None,
@@ -366,7 +389,9 @@ impl SessionInner {
         }
 
         // drop links
-        self.links_by_name.clear();
+        self.sender_names.clear();
+        self.receiver_names.clear();
+        self.link_names.clear();
         for (_, st) in &mut self.links {
             match st {
                 Either::Left(SenderLinkState::Established(link)) => {
@@ -466,6 +491,35 @@ impl SessionInner {
         (SenderLink::new(link), attach)
     }
 
+    fn set_link_name(&mut self, idx: usize, name: ByteString, sender: bool) {
+        let names = if sender {
+            &mut self.sender_names
+        } else {
+            &mut self.receiver_names
+        };
+        names.insert(name.clone(), idx);
+        self.link_names.insert(idx, name);
+    }
+
+    /// Remove link and its name
+    fn remove_link(&mut self, idx: usize) {
+        if !self.links.contains(idx) {
+            return;
+        }
+        let sender = matches!(self.links.remove(idx), Either::Left(_));
+        if let Some(name) = self.link_names.remove(&idx) {
+            let names = if sender {
+                &mut self.sender_names
+            } else {
+                &mut self.receiver_names
+            };
+            // name could be taken by newer link
+            if names.get(&name) == Some(&idx) {
+                names.remove(&name);
+            }
+        }
+    }
+
     /// Check if remote sender link waits for confirmation and session is not ending
     fn is_opening_remote(&self, token: usize) -> bool {
         !self.flags.intersects(Flags::ENDING | Flags::ENDED)
@@ -497,7 +551,7 @@ impl SessionInner {
 
         frame.0.handle = token as Handle;
 
-        self.links_by_name.insert(frame.0.name.clone(), token);
+        self.set_link_name(token, frame.0.name.clone(), true);
         self.post_frame(Frame::Attach(frame));
         rx
     }
@@ -544,7 +598,7 @@ impl SessionInner {
                 self.tag(),
                 attach.name()
             );
-            self.links.remove(token);
+            self.remove_link(token);
             self.remote_handles.remove(&attach.handle());
             self.post_frame(
                 Detach(Box::new(codec::DetachInner {
@@ -572,11 +626,7 @@ impl SessionInner {
             link.clone(),
         )));
 
-        if let Some(source) = attach.source()
-            && let Some(ref addr) = source.address
-        {
-            self.links_by_name.insert(addr.clone(), token);
-        }
+        self.set_link_name(token, attach.name().clone(), true);
 
         // link flow received before confirmation
         if let Some(flow) = flow {
@@ -693,9 +743,7 @@ impl SessionInner {
         }));
         self.post_frame(detach.into());
 
-        if self.links.contains(token) {
-            self.links.remove(token);
-        }
+        self.remove_link(token);
     }
 
     pub(crate) fn is_remote_handle_used(&self, hnd: Handle) -> bool {
@@ -790,7 +838,7 @@ impl SessionInner {
 
         frame.0.handle = token as Handle;
 
-        self.links_by_name.insert(frame.0.name.clone(), token);
+        self.set_link_name(token, frame.0.name.clone(), false);
         self.post_frame(Frame::Attach(frame));
         rx
     }
@@ -851,9 +899,7 @@ impl SessionInner {
                     }));
                     self.post_frame(detach.into());
                     let _ = tx.send(Ok(()));
-                    if self.links.contains(id as usize) {
-                        let _ = self.links.remove(id as usize);
-                    }
+                    self.remove_link(id as usize);
                 }
                 ReceiverLinkState::Established(receiver_link) => {
                     let receiver_link = receiver_link.clone();
@@ -872,9 +918,7 @@ impl SessionInner {
                 }
                 ReceiverLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
-                    if self.links.contains(id as usize) {
-                        let _ = self.links.remove(id as usize);
-                    }
+                    self.remove_link(id as usize);
                     log::error!(
                         "{}: Unexpected receiver link state: closing - {id}",
                         self.tag()
@@ -1009,68 +1053,70 @@ impl SessionInner {
     pub(crate) fn handle_attach(&mut self, attach: &Attach, cell: Cell<SessionInner>) -> bool {
         let name = attach.name();
 
-        if let Some(index) = self.links_by_name.get(name) {
-            match self.links.get_mut(*index) {
-                Some(Either::Left(item)) => {
-                    if item.is_opening() {
-                        log::trace!(
-                            "{}: Local sender link attached: {name:?} {index} -> {}, {:?}",
-                            self.sink.tag(),
-                            attach.handle(),
-                            self.remote_handles.contains_key(&attach.handle())
-                        );
-
-                        self.remote_handles.insert(attach.handle(), *index);
-                        let delivery_count = attach.initial_delivery_count().unwrap_or(0);
-                        let link = Cell::new(SenderLinkInner::new(
-                            *index,
-                            name.clone(),
-                            attach.handle(),
-                            delivery_count,
-                            cell,
-                            remote_max_message_size(attach),
-                        ));
-                        let local_sender = mem::replace(
-                            item,
-                            SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
-                        );
-
-                        if let SenderLinkState::Opening(Some(tx)) = local_sender {
-                            let _ = tx.send(Ok(link));
-                        }
-                    }
-                }
-                Some(Either::Right(item)) => {
-                    if item.is_opening() {
-                        log::trace!(
-                            "{}: Local receiver link attached: {name:?} {index} -> {}",
-                            self.sink.tag(),
-                            attach.handle()
-                        );
-                        if let ReceiverLinkState::OpeningLocal(opt_item) = item {
-                            if let Some((link, tx)) = opt_item.take() {
-                                self.remote_handles.insert(attach.handle(), *index);
-
-                                *item = ReceiverLinkState::Established(
-                                    EstablishedReceiverLink::new(link.clone()),
-                                );
-                                let _ = tx.send(Ok(ReceiverLink::new(link)));
-                            } else {
-                                // TODO: close session
-                                log::error!("{}: Inconsistent session state, bug", self.tag());
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    // TODO: error in proto, have to close connection
-                    log::trace!("Protocol error");
-                }
-            }
-            true
+        // response to locally opened link has opposite role
+        let index = if attach.role() == Role::Receiver {
+            self.sender_names.get(name)
         } else {
+            self.receiver_names.get(name)
+        };
+        let Some(index) = index.copied() else {
             // cannot handle remote attach
-            false
+            return false;
+        };
+
+        match self.links.get_mut(index) {
+            Some(Either::Left(item)) if item.is_opening() => {
+                log::trace!(
+                    "{}: Local sender link attached: {name:?} {index} -> {}, {:?}",
+                    self.sink.tag(),
+                    attach.handle(),
+                    self.remote_handles.contains_key(&attach.handle())
+                );
+
+                self.remote_handles.insert(attach.handle(), index);
+                let delivery_count = attach.initial_delivery_count().unwrap_or(0);
+                let link = Cell::new(SenderLinkInner::new(
+                    index,
+                    name.clone(),
+                    attach.target().and_then(|t| t.address.clone()),
+                    attach.handle(),
+                    delivery_count,
+                    cell,
+                    remote_max_message_size(attach),
+                ));
+                let local_sender = mem::replace(
+                    item,
+                    SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
+                );
+
+                if let SenderLinkState::Opening(Some(tx)) = local_sender {
+                    let _ = tx.send(Ok(link));
+                }
+                true
+            }
+            Some(Either::Right(item)) if item.is_opening() => {
+                log::trace!(
+                    "{}: Local receiver link attached: {name:?} {index} -> {}",
+                    self.sink.tag(),
+                    attach.handle()
+                );
+                if let ReceiverLinkState::OpeningLocal(opt_item) = item {
+                    if let Some((link, tx)) = opt_item.take() {
+                        self.remote_handles.insert(attach.handle(), index);
+
+                        *item = ReceiverLinkState::Established(EstablishedReceiverLink::new(
+                            link.clone(),
+                        ));
+                        let _ = tx.send(Ok(ReceiverLink::new(link)));
+                    } else {
+                        // TODO: close session
+                        log::error!("{}: Inconsistent session state, bug", self.tag());
+                    }
+                }
+                true
+            }
+            // link with the same name is not opening, handle as remote attach
+            _ => false,
         }
     }
 
@@ -1109,9 +1155,6 @@ impl SessionInner {
                             error: frame.error().cloned(),
                         }));
                         let err = AmqpProtocolError::LinkDetached(detach.0.error.clone());
-
-                        // remove name
-                        self.links_by_name.remove(link.inner.name());
 
                         // drop pending transfers
                         let mut idx = 0;
@@ -1227,9 +1270,7 @@ impl SessionInner {
         };
 
         if remove {
-            if self.links.contains(idx) {
-                self.links.remove(idx);
-            }
+            self.remove_link(idx);
             self.remote_handles.remove(&handle);
         }
         action

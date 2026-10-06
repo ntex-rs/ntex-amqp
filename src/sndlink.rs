@@ -19,6 +19,7 @@ pub struct SenderLink {
 pub(crate) struct SenderLinkInner {
     pub(crate) id: usize,
     name: ByteString,
+    address: Option<ByteString>,
     pub(crate) session: Session,
     remote_handle: Handle,
     delivery_count: SequenceNo,
@@ -63,6 +64,14 @@ impl SenderLink {
     /// Name of the sender link
     pub fn name(&self) -> &ByteString {
         &self.inner.name
+    }
+
+    #[inline]
+    /// Address of the node the link is attached to
+    ///
+    /// Source address for remotely opened links, target address for locally opened links.
+    pub fn address(&self) -> Option<&ByteString> {
+        self.inner.address.as_ref()
     }
 
     #[inline]
@@ -182,6 +191,7 @@ impl SenderLinkInner {
     pub(crate) fn new(
         id: usize,
         name: ByteString,
+        address: Option<ByteString>,
         handle: Handle,
         delivery_count: SequenceNo,
         session: Cell<SessionInner>,
@@ -190,6 +200,7 @@ impl SenderLinkInner {
         SenderLinkInner {
             id,
             name,
+            address,
             delivery_count,
             max_message_size,
             session: Session::new(session),
@@ -205,19 +216,21 @@ impl SenderLinkInner {
     }
 
     pub(crate) fn with(id: usize, frame: &Attach, session: Cell<SessionInner>) -> SenderLinkInner {
-        let mut name = None;
-        if let Some(source) = frame.source()
-            && let Some(ref addr) = source.address
-        {
-            name = Some(addr.clone());
-        }
-        let mut name = name.unwrap_or_default();
+        let mut name = frame.name().clone();
         name.trimdown();
+        let address = frame
+            .source()
+            .and_then(|s| s.address.clone())
+            .map(|mut addr| {
+                addr.trimdown();
+                addr
+            });
 
         let delivery_count = frame.initial_delivery_count().unwrap_or(0);
         SenderLinkInner::new(
             id,
             name,
+            address,
             frame.handle(),
             delivery_count,
             session,
@@ -231,10 +244,6 @@ impl SenderLinkInner {
 
     pub(crate) fn remote_handle(&self) -> Handle {
         self.remote_handle
-    }
-
-    pub(crate) fn name(&self) -> &ByteString {
-        &self.name
     }
 
     pub(crate) fn max_message_size(&self) -> Option<u32> {
