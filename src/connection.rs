@@ -2865,29 +2865,39 @@ pub(crate) mod tests {
         drop(t1);
         assert_eq!(snd.credit(), 2);
 
-        // waiting transfer delays drain until it is dropped
+        // transfer blocked by session window does not delay drain
         let mut t2 = Box::pin(snd.transfer(Bytes::from_static(b"2")).settled().send());
         assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
         flow(0, 2, true, 0);
-        assert_eq!(snd.credit(), 2);
-        sleep(Millis(50)).await;
-        assert!(frames().is_empty());
-        drop(t2);
         assert_eq!(snd.credit(), 0);
         sleep(Millis(50)).await;
         assert_eq!(frames(), ["Flow Some(0) Some(2) Some(0) true"]);
+        drop(t2);
+        sleep(Millis(50)).await;
+        assert!(frames().is_empty());
 
-        // waiting transfer is sent before drain
+        // woken transfer delays drain until it gets blocked by session window,
+        // then it waits for new credit
         let t3 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"3")).settled().send());
         sleep(Millis(50)).await;
         flow(2, 2, true, 0);
-        sleep(Millis(50)).await;
-        assert!(frames().is_empty());
         assert_eq!(snd.credit(), 2);
-        flow(2, 2, true, 10);
-        assert!(timeout(Millis(500), t3).await.unwrap().unwrap().is_ok());
         sleep(Millis(50)).await;
-        assert_eq!(frames(), ["Transfer", "Flow Some(0) Some(4) Some(0) true"]);
+        assert_eq!(snd.credit(), 0);
+        flow(4, 0, false, 10);
+        sleep(Millis(50)).await;
+        assert!(!t3.is_finished());
+        flow(4, 1, false, 10);
+        assert!(timeout(Millis(500), t3).await.unwrap().unwrap().is_ok());
+        assert_eq!(snd.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Flow Some(0) Some(4) Some(0) true", "Transfer"]);
+
+        // resumed transfer does not delay later drain
+        flow(5, 2, true, 10);
+        assert_eq!(snd.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Flow Some(0) Some(7) Some(0) true"]);
 
         // link is detached while transfer waits for session window
         let session_flow = |handle: Option<u32>, window: u32| {
@@ -2895,7 +2905,7 @@ pub(crate) mod tests {
                 panic!()
             };
             flow.0.handle = handle;
-            flow.0.delivery_count = Some(4);
+            flow.0.delivery_count = Some(7);
             flow.0.next_incoming_id = Some(2);
             flow.0.incoming_window = window;
             handle_frame(&conn, flow.into()).unwrap();
@@ -3374,6 +3384,68 @@ pub(crate) mod tests {
         // remote next-incoming-id is ahead, window is used as is
         session_window(&conn, 10, 3);
         assert_eq!(session.remote_window_size(), 3);
+    }
+
+    #[ntex::test]
+    async fn sender_drain_with_partial_delivery() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client, snd) = small_frames_sender();
+        let flow = |delivery_count: u32, credit: u32, drain: bool, window: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(4);
+            flow.0.delivery_count = Some(delivery_count);
+            flow.0.drain = drain;
+            flow.0.next_incoming_id = Some(2);
+            flow.0.incoming_window = window;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        let link_flows = || {
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                frames.push(match frame.into_parts().1 {
+                    Frame::Flow(flow) => format!(
+                        "Flow {:?} {:?} {}",
+                        flow.delivery_count(),
+                        flow.link_credit(),
+                        flow.drain()
+                    ),
+                    frame => frame.name().to_string(),
+                });
+            }
+            frames
+        };
+        sleep(Millis(50)).await;
+        link_flows();
+
+        // partial delivery waits for session window, next transfer is queued
+        let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).settled().send());
+        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        let t2 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"2")).settled().send());
+        sleep(Millis(50)).await;
+        assert_eq!(snd.credit(), 9);
+        assert_eq!(link_flows(), ["Transfer", "Transfer"]);
+
+        // drain is not delayed by transfers blocked by session window
+        flow(0, 10, true, 0);
+        assert_eq!(snd.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(link_flows(), ["Flow Some(10) Some(0) true"]);
+
+        // queued transfer waits for new credit
+        session_window(&conn, 2, 10);
+        assert!(timeout(Millis(500), t1).await.unwrap().is_ok());
+        sleep(Millis(50)).await;
+        assert!(!t2.is_finished());
+        assert_eq!(link_flows(), ["Transfer"]);
+        flow(10, 1, false, 10);
+        assert!(timeout(Millis(500), t2).await.unwrap().unwrap().is_ok());
+        assert_eq!(snd.credit(), 0);
     }
 
     #[ntex::test]

@@ -32,6 +32,8 @@ pub(crate) struct SenderLinkInner {
     pending_transfers: VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>,
     // woken credit waiters and in-flight transfers
     active: u32,
+    // active transfers waiting for session window
+    window_waiters: u32,
     // delivery is partially sent, frames of deliveries must not interleave
     partial: bool,
     // cancelled delivery, must be aborted before next delivery
@@ -221,6 +223,7 @@ impl SenderLinkInner {
             link_credit: 0,
             pending_transfers: VecDeque::new(),
             active: 0,
+            window_waiters: 0,
             partial: false,
             abort: None,
             drain: false,
@@ -398,15 +401,16 @@ impl SenderLinkInner {
         }
     }
 
-    /// Consume remaining credit if receiver requested drain and link is idle
+    /// Consume remaining credit if receiver requested drain and no transfer
+    /// can be sent right away
+    ///
+    /// Transfers blocked by remote session window do not delay drain, they wait
+    /// for new credit afterwards. Queued transfers are blocked either by such
+    /// transfers or by partial delivery, which waits for session window as well.
     ///
     /// AMQP 1.0 2.6.7, returns `true` if link credit is drained
     fn drain_credit(&mut self) -> bool {
-        if self.drain
-            && self.link_credit > 0
-            && self.active == 0
-            && self.pending_transfers.is_empty()
-            && !self.closed
+        if self.drain && self.link_credit > 0 && self.active == self.window_waiters && !self.closed
         {
             log::trace!(
                 "{}: Drain sender link {:?} credit {:?}",
@@ -478,11 +482,13 @@ impl SenderLinkInner {
                 continue;
             }
 
-            // link credit is not reserved while transfer waits for session window,
-            // waiting transfer prevents credit drain
+            // waiting transfer claims link credit, but it does not delay credit drain
             let handle = inner.id as Handle;
             if let Some(rx) = inner.session.inner.get_mut().window_waiter(handle)? {
                 inner.active += 1;
+                inner.window_waiters += 1;
+                // woken transfer could delay drain, it is blocked now
+                inner.drain_and_post();
                 let guard = ActiveTransfer(Some(link.clone()));
                 wait_window(rx).await?;
                 guard.resume();
@@ -607,14 +613,16 @@ impl Drop for CreditWaiter {
     }
 }
 
-/// Transfer waits for session window, link credit could be drained after it is gone
+/// Transfer waits for session window, claimed credit is released after it is gone
 struct ActiveTransfer(Option<Cell<SenderLinkInner>>);
 
 impl ActiveTransfer {
     /// Transfer continues without awaiting
     fn resume(mut self) {
         if let Some(link) = self.0.take() {
-            link.get_mut().active -= 1;
+            let link = link.get_mut();
+            link.active -= 1;
+            link.window_waiters -= 1;
         }
     }
 }
@@ -624,6 +632,7 @@ impl Drop for ActiveTransfer {
         if let Some(link) = self.0.take() {
             let link = link.get_mut();
             link.active -= 1;
+            link.window_waiters -= 1;
             link.wake_pending();
             link.drain_and_post();
         }
