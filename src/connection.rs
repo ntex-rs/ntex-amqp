@@ -4739,4 +4739,170 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(format!("{:?}", delivery.wait().await.unwrap_err()), ended);
     }
+
+    fn remote_state(conn: &Connection, id: u32, settled: bool, state: Option<DeliveryState>) {
+        let disp = Disposition(Box::new(DispositionInner {
+            role: Role::Receiver,
+            first: id,
+            last: None,
+            settled,
+            state,
+            batchable: false,
+        }));
+        handle_frame(conn, disp.into()).unwrap();
+    }
+
+    #[ntex::test]
+    async fn delivery_wait_outcome() {
+        use ntex::time::{Millis, sleep, timeout};
+        use ntex_amqp_codec::protocol::Modified;
+        use std::future::poll_fn;
+        use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
+        use std::task::{Context, Poll, Wake, Waker};
+
+        struct Wakes(AtomicUsize);
+        impl Wake for Wakes {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let received = || {
+            Some(DeliveryState::Received(Received {
+                section_number: 0,
+                section_offset: 0,
+            }))
+        };
+        let modified = || {
+            Some(DeliveryState::Modified(Modified {
+                delivery_failed: Some(true),
+                undeliverable_here: None,
+                message_annotations: None,
+            }))
+        };
+
+        // non-terminal dispositions do not resolve `wait()`
+        for settled in [false, true] {
+            let (_io, conn, _client, snd) = small_frames_sender();
+            let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+            let mut wait = Box::pin(d.wait());
+            assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+            remote_state(&conn, d.id(), false, None);
+            assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+            remote_state(&conn, d.id(), false, received());
+            assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+
+            if settled {
+                // settled without outcome
+                remote_state(&conn, d.id(), true, None);
+                assert!(timeout(Millis(500), wait).await.unwrap().unwrap().is_none());
+                assert!(d.is_remote_settled());
+            } else {
+                remote_state(
+                    &conn,
+                    d.id(),
+                    false,
+                    Some(DeliveryState::Accepted(Accepted {})),
+                );
+                assert!(matches!(
+                    timeout(Millis(500), wait).await.unwrap(),
+                    Ok(Some(DeliveryState::Accepted(_)))
+                ));
+                assert!(!d.is_remote_settled());
+            }
+        }
+
+        // `Modified` outcome is not consumed by `wait()`
+        let (_io, conn, client, snd) = small_frames_sender();
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        remote_state(&conn, d.id(), false, modified());
+        for _ in 0..2 {
+            assert!(matches!(
+                d.wait().await,
+                Ok(Some(DeliveryState::Modified(_)))
+            ));
+        }
+        drop(d);
+        sleep(Millis(50)).await;
+        let disp = dispositions(&client);
+        assert_eq!(disp.len(), 1);
+        assert!(
+            disp[0].starts_with("Sender 0 true Some(Modified("),
+            "{disp:?}"
+        );
+
+        // concurrent `wait()` calls receive outcome, and do not wake each other
+        let (_io, conn, _client, snd) = small_frames_sender();
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        let woken = Arc::new(Wakes(AtomicUsize::new(0)));
+        let waker = Waker::from(woken.clone());
+        let mut w1 = Box::pin(d.wait());
+        let mut w2 = Box::pin(d.wait());
+        let mut cx = Context::from_waker(&waker);
+        assert!(w1.as_mut().poll(&mut cx).is_pending());
+        assert!(poll_fn(|cx| Poll::Ready(w2.as_mut().poll(cx).is_pending())).await);
+        assert_eq!(woken.0.load(Ordering::Relaxed), 0);
+        remote_state(
+            &conn,
+            d.id(),
+            true,
+            Some(DeliveryState::Accepted(Accepted {})),
+        );
+        assert_eq!(woken.0.load(Ordering::Relaxed), 1);
+        for w in [w1, w2] {
+            assert!(matches!(
+                timeout(Millis(500), w).await.unwrap(),
+                Ok(Some(DeliveryState::Accepted(_)))
+            ));
+        }
+
+        // dropped waiters are not accumulated
+        let (_io, conn, _client, snd) = small_frames_sender();
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        for _ in 0..3 {
+            let mut w = Box::pin(d.wait());
+            assert!(poll_fn(|cx| Poll::Ready(w.as_mut().poll(cx).is_pending())).await);
+        }
+        let inner = session(&conn).inner;
+        assert_eq!(
+            inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
+            0
+        );
+        let mut live = Box::pin(d.wait());
+        assert!(poll_fn(|cx| Poll::Ready(live.as_mut().poll(cx).is_pending())).await);
+        for _ in 0..3 {
+            let mut w = Box::pin(d.wait());
+            assert!(poll_fn(|cx| Poll::Ready(w.as_mut().poll(cx).is_pending())).await);
+        }
+        assert_eq!(
+            inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
+            1
+        );
+        drop(live);
+
+        // dropped waiter does not block notification of active waiter
+        let (_io, conn, _client, snd) = small_frames_sender();
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        let mut w1 = Box::pin(d.wait());
+        let mut w2 = Box::pin(d.wait());
+        assert!(poll_fn(|cx| Poll::Ready(w1.as_mut().poll(cx).is_pending())).await);
+        assert!(poll_fn(|cx| Poll::Ready(w2.as_mut().poll(cx).is_pending())).await);
+        drop(w1);
+        let mut w3 = Box::pin(d.wait());
+        assert!(poll_fn(|cx| Poll::Ready(w3.as_mut().poll(cx).is_pending())).await);
+        remote_state(
+            &conn,
+            d.id(),
+            false,
+            Some(DeliveryState::Accepted(Accepted {})),
+        );
+        for w in [w2, w3] {
+            assert!(matches!(
+                timeout(Millis(500), w).await.unwrap(),
+                Ok(Some(DeliveryState::Accepted(_)))
+            ));
+        }
+    }
 }

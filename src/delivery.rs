@@ -34,6 +34,8 @@ pub(crate) struct DeliveryInner {
     state: Option<DeliveryState>,
     error: Option<AmqpProtocolError>,
     tx: Option<pool::Sender<()>>,
+    // concurrent `wait()` calls
+    waiters: Vec<pool::Sender<()>>,
 }
 
 impl Delivery {
@@ -171,53 +173,38 @@ impl Delivery {
         self.is_set(Flags::REMOTE_SETTLED)
     }
 
+    /// Wait for delivery outcome
+    ///
+    /// Resolves when remote side settles delivery or sends terminal outcome,
+    /// non-terminal `Received` state is not returned. Returns `Ok(None)` if delivery
+    /// is settled locally or remote side settled it without outcome.
     pub async fn wait(&self) -> Result<Option<DeliveryState>, AmqpProtocolError> {
         if self.flags.get().contains(Flags::LOCAL_SETTLED) {
             log::debug!("Delivery {:?} is settled locally", self.id);
             return Ok(None);
         }
 
-        let rx = if let Some(inner) = self
-            .session
-            .inner
-            .get_mut()
-            .unsettled_deliveries(self.is_set(Flags::SENDER))
-            .get_mut(&self.id)
-        {
+        loop {
+            let Some(inner) = self
+                .session
+                .inner
+                .get_mut()
+                .unsettled_deliveries(self.is_set(Flags::SENDER))
+                .get_mut(&self.id)
+            else {
+                return Err(self.session_error());
+            };
             if inner.settled {
                 self.set_flag(Flags::REMOTE_SETTLED);
             }
-            if let Some(st) = Self::check_inner(inner) {
-                return st;
+            if let Some(res) = inner.outcome() {
+                return res;
             }
 
             let (tx, rx) = self.session.inner.get_ref().pool_notify.channel();
-            inner.tx = Some(tx);
-            rx
-        } else {
-            return Err(self.session_error());
-        };
-        if rx.await.is_err() {
-            return Err(AmqpProtocolError::ConnectionDropped);
+            inner.add_waiter(tx);
+            let _ = rx.await;
         }
-
-        if let Some(inner) = self
-            .session
-            .inner
-            .get_mut()
-            .unsettled_deliveries(self.is_set(Flags::SENDER))
-            .get_mut(&self.id)
-        {
-            if inner.settled {
-                self.set_flag(Flags::REMOTE_SETTLED);
-            }
-            if let Some(st) = Self::check_inner(inner) {
-                return st;
-            }
-        } else {
-            return Err(self.session_error());
-        }
-        Ok(None)
     }
 
     /// Unsettled deliveries are dropped on session end, return session error
@@ -228,22 +215,6 @@ impl Delivery {
             .error()
             .cloned()
             .unwrap_or(AmqpProtocolError::LinkDetached(None))
-    }
-
-    fn check_inner(
-        inner: &mut DeliveryInner,
-    ) -> Option<Result<Option<DeliveryState>, AmqpProtocolError>> {
-        if let Some(ref st) = inner.state {
-            if matches!(st, DeliveryState::Modified(..)) {
-                // non terminal state
-                Some(Ok(Some(inner.state.take().unwrap())))
-            } else {
-                // return clone of terminal state
-                Some(Ok(Some(st.clone())))
-            }
-        } else {
-            inner.error.as_ref().map(|err| Err(err.clone()))
-        }
     }
 }
 
@@ -294,9 +265,42 @@ impl DeliveryInner {
         Self {
             handle,
             tx: None,
+            waiters: Vec::new(),
             state: None,
             error: None,
             settled: false,
+        }
+    }
+
+    /// Delivery result, `None` if remote outcome is not received yet
+    fn outcome(&self) -> Option<Result<Option<DeliveryState>, AmqpProtocolError>> {
+        match self.state {
+            None | Some(DeliveryState::Received(_)) if self.settled => Some(Ok(None)),
+            None | Some(DeliveryState::Received(_)) => self.error.clone().map(Err),
+            _ => Some(Ok(self.state.clone())),
+        }
+    }
+
+    fn add_waiter(&mut self, tx: pool::Sender<()>) {
+        if self.tx.as_ref().is_none_or(pool::Sender::is_canceled) {
+            self.tx = Some(tx);
+        } else {
+            self.waiters.retain(|tx| !tx.is_canceled());
+            self.waiters.push(tx);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn waiters(&self) -> usize {
+        self.waiters.len()
+    }
+
+    fn notify(&mut self) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(());
+        }
+        for tx in self.waiters.drain(..) {
+            let _ = tx.send(());
         }
     }
 
@@ -306,9 +310,7 @@ impl DeliveryInner {
 
     pub(crate) fn set_error(&mut self, error: AmqpProtocolError) {
         self.error = Some(error);
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(());
-        }
+        self.notify();
     }
 
     pub(crate) fn handle_disposition(&mut self, settled: bool, state: Option<&DeliveryState>) {
@@ -318,17 +320,13 @@ impl DeliveryInner {
         if let Some(state) = state {
             self.state = Some(state.clone());
         }
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(());
-        }
+        self.notify();
     }
 }
 
 impl Drop for DeliveryInner {
     fn drop(&mut self) {
-        if let Some(tx) = self.tx.take() {
-            let _ = tx.send(());
-        }
+        self.notify();
     }
 }
 
