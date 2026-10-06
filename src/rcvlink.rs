@@ -83,7 +83,8 @@ impl ReceiverLink {
         self.inner.get_ref().error.as_ref()
     }
 
-    pub(crate) fn confirm_receiver_link(&self, response: Attach) {
+    /// Confirm remote link, returns `false` if link is not established
+    pub(crate) fn confirm_receiver_link(&self, response: Attach) -> bool {
         let inner = self.inner.get_mut();
         let size = self.inner.get_ref().max_message_size;
         let size = if size != 0 { Some(size) } else { None };
@@ -91,7 +92,7 @@ impl ReceiverLink {
             .session
             .inner
             .get_mut()
-            .confirm_receiver_link(inner.handle, response, size);
+            .confirm_receiver_link(inner.handle, response, size)
     }
 
     /// Add credit to the link.

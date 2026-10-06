@@ -597,6 +597,90 @@ async fn test_remote_attach_handles() -> std::io::Result<()> {
 }
 
 #[ntex::test]
+async fn test_remote_receiver_detach_before_confirm() -> std::io::Result<()> {
+    let released = Arc::new(AtomicUsize::new(0));
+    let detached = Arc::new(AtomicUsize::new(0));
+    let released2 = released.clone();
+    let detached2 = detached.clone();
+
+    let srv = test_server(async move || {
+        let released = released2.clone();
+        let detached = detached2.clone();
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .control(async move |msg: ControlFrame| {
+            if let ControlFrameKind::RemoteDetachReceiver(..) = msg.kind() {
+                detached.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok::<_, ()>(())
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", move |_: &types::Link<()>| {
+                    let released = released.clone();
+                    async move {
+                        // keep link unconfirmed
+                        sleep(Millis(50)).await;
+                        let guard = CountGuard(released);
+                        Ok::<_, LinkError>(boxed::service(fn_service(move |_req| {
+                            let _ = &guard;
+                            async { Ok::<_, LinkError>(types::Outcome::Accept) }
+                        })))
+                    }
+                })
+                .build(),
+        )
+    });
+
+    let io = raw_connect(srv.addr()).await;
+    raw_begin_session(&io).await;
+
+    // remote detach before confirmation
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+    raw_send(&io, 0, raw_detach(0)).await;
+    assert!(matches!(raw_recv(&io).await, protocol::Frame::Attach(_)));
+    let protocol::Frame::Detach(detach) = raw_recv(&io).await else {
+        panic!()
+    };
+    assert!(detach.closed());
+    sleep(Millis(100)).await;
+    assert_eq!(released.load(Ordering::SeqCst), 1);
+    assert_eq!(detached.load(Ordering::SeqCst), 1);
+
+    // remote handle is released, link credit is sent for confirmed link only
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+    assert!(matches!(raw_recv(&io).await, protocol::Frame::Attach(_)));
+    let protocol::Frame::Flow(flow) = raw_recv(&io).await else {
+        panic!()
+    };
+    assert_eq!(flow.link_credit(), Some(50));
+
+    Ok(())
+}
+
+struct CountGuard(Arc<AtomicUsize>);
+
+impl Drop for CountGuard {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+fn raw_detach(handle: u32) -> protocol::Frame {
+    protocol::Detach(Box::new(protocol::DetachInner {
+        handle,
+        closed: true,
+        error: None,
+    }))
+    .into()
+}
+
+#[ntex::test]
 async fn test_remote_disposition_range() -> std::io::Result<()> {
     let srv = TestServerBuilder::new(async || {
         server::Server::builder(async move |conn: server::Handshake| match conn {

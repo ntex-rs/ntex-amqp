@@ -1688,6 +1688,75 @@ mod tests {
     }
 
     #[ntex::test]
+    async fn remote_receiver_detach_before_confirm() {
+        for accept in [true, false] {
+            let (_io, conn, client) = connection();
+            let inner = conn.get_ref().0;
+            let handle = |frame: Frame| {
+                inner
+                    .get_mut()
+                    .handle_frame(AmqpFrame::new(0, frame), &inner)
+            };
+            handle(begin()).unwrap();
+            let session = session(&conn);
+
+            let Ok(Action::AttachReceiver(link, _, response)) =
+                handle(named_attach(Role::Sender, "r", "a", 5))
+            else {
+                panic!()
+            };
+            let Ok(Action::None) = handle(peer_detach(5)) else {
+                panic!()
+            };
+            assert!(!link.is_closed());
+
+            if accept {
+                assert!(!link.confirm_receiver_link(response));
+                assert!(link.is_closed());
+
+                // control service is notified
+                let conn_ref = conn.get_ref();
+                let queue = conn_ref.get_control_queue().pending.borrow();
+                assert!(matches!(
+                    queue.back().unwrap().kind(),
+                    crate::ControlFrameKind::RemoteDetachReceiver(..)
+                ));
+            } else {
+                link.close_with_error(crate::error::LinkError::force_detach())
+                    .await
+                    .unwrap();
+            }
+
+            // remote handle and link are released
+            assert!(!session.inner.get_ref().is_remote_handle_used(5));
+            let Ok(Action::AttachReceiver(link2, ..)) =
+                handle(named_attach(Role::Sender, "r", "a", 5))
+            else {
+                panic!()
+            };
+            assert_eq!(link2.handle(), 0);
+
+            ntex::time::sleep(ntex::time::Millis(50)).await;
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                match frame.into_parts().1 {
+                    Frame::Attach(attach) => {
+                        frames.push(format!("attach {} {:?}", attach.handle(), attach.role()));
+                    }
+                    Frame::Detach(detach) => {
+                        frames.push(format!("detach {} {}", detach.handle(), detach.closed()));
+                    }
+                    Frame::Flow(_) => frames.push("flow".into()),
+                    _ => (),
+                }
+            }
+            assert_eq!(frames, ["attach 0 Receiver", "detach 0 true"]);
+        }
+    }
+
+    #[ntex::test]
     async fn remote_sender_end_before_confirm() {
         for (local, accept) in [(false, true), (false, false), (true, true), (true, false)] {
             let (_io, conn, client) = connection();
