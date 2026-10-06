@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix session frames (`Detach`, `Flow`, `Disposition`, `Attach`, `Transfer`) could be sent after `End`. Link close during session end completes without `Detach`, new link attach and transfer fail with session end error
+
 * Fix `Flow` echo reply for attached link did not carry link state (handle, delivery-count, link-credit)
 
 * Fix router kept a handler entry for every link whose link service failed to create, router link services were not shutdown on connection close

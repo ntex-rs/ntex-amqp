@@ -1717,6 +1717,64 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn session_ending_sends_no_frames() {
+        use ntex::time::{Millis, sleep, timeout};
+
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+
+        let Ok(Action::AttachReceiver(rcv, _, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "r", "r", 3))
+        else {
+            panic!()
+        };
+        assert!(rcv.confirm_receiver_link(response));
+        rcv.set_link_credit(10);
+        let Ok(Action::AttachSender(snd, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
+        else {
+            panic!()
+        };
+        let snd =
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone());
+        let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
+            panic!()
+        };
+        flow.0.handle = Some(4);
+        handle_frame(&conn, flow.into()).unwrap();
+        assert_eq!(snd.credit(), 10);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            ["Begin", "Attach r 0", "Flow Some(0) Some(10)", "Attach s 1"]
+        );
+
+        let s = session.clone();
+        let end = ntex::rt::spawn(async move { s.end().await });
+        sleep(Millis(10)).await;
+
+        // new operations fail, links are closed without frames
+        let tr = timeout(Millis(500), snd.transfer(Bytes::from_static(b"m")).send());
+        assert!(tr.await.unwrap().is_err());
+        let attach = timeout(Millis(500), session.build_sender_link("a", "a").attach());
+        assert!(attach.await.unwrap().is_err());
+        let attach = timeout(Millis(500), session.build_receiver_link("b", "b").attach());
+        assert!(attach.await.unwrap().is_err());
+        rcv.set_link_credit(5);
+        assert!(timeout(Millis(500), rcv.close()).await.unwrap().is_ok());
+        assert!(timeout(Millis(500), snd.close()).await.unwrap().is_ok());
+        sleep(Millis(50)).await;
+        assert_eq!(frame_names(&client), ["End"]);
+
+        handle_frame(&conn, End { error: None }.into()).unwrap();
+        assert!(end.await.unwrap().is_ok());
+    }
+
+    #[ntex::test]
     async fn remote_receiver_stale_confirm() {
         let (_io, conn, client) = connection();
         let inner = conn.get_ref().0;
