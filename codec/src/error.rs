@@ -39,6 +39,8 @@ pub enum AmqpCodecError {
     UnparsedBytesLeft,
     #[error("Max inbound frame size exceeded")]
     MaxSizeExceeded,
+    #[error("Max outbound frame size exceeded")]
+    MaxOutboundSizeExceeded,
     #[error("Invalid inbound frame size")]
     InvalidFrameSize,
 }
