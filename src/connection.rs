@@ -225,8 +225,9 @@ impl ConnectionInner {
         log::trace!("{}: Set connection error: {:?}", self.io.tag(), err);
         for (_, channel) in &mut self.sessions {
             match channel {
-                SessionState::Opening(_, _) | SessionState::Closing(_) => (),
-                SessionState::Established(ses) => {
+                SessionState::Opening(_, _) => (),
+                // closing session waits for remote end, links and `end()` wait as well
+                SessionState::Established(ses) | SessionState::Closing(ses) => {
                     ses.get_mut().set_error(err.clone());
                 }
             }
@@ -1919,10 +1920,72 @@ pub(crate) mod tests {
         let t4 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"4")).settled().send());
         sleep(Millis(50)).await;
         let _ = handle_frame(&conn, peer_detach(4));
-        session_flow(None, 10);
         assert!(timeout(Millis(500), t4).await.unwrap().unwrap().is_err());
+        session_flow(None, 10);
         sleep(Millis(50)).await;
         assert_eq!(frames(), ["Detach"]);
+    }
+
+    #[ntex::test]
+    async fn sender_link_close_fails_waiting_transfers() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        let flow = |handle: u32, credit: u32, window: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(handle);
+            flow.0.incoming_window = window;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        let attach = |name: &str, handle: u32| {
+            let Ok(Action::AttachSender(snd, attach, response)) =
+                handle_frame(&conn, named_attach(Role::Receiver, name, name, handle))
+            else {
+                panic!()
+            };
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone())
+        };
+        let send = |snd: &SenderLink, body: &'static [u8]| {
+            ntex::rt::spawn(snd.transfer(Bytes::from_static(body)).settled().send())
+        };
+
+        // transfer waits for link credit
+        let a = attach("a", 4);
+        let t1 = send(&a, b"1");
+        // transfer waits for session window
+        let b = attach("b", 5);
+        flow(5, 1, 0);
+        let t2 = send(&b, b"2");
+        sleep(Millis(50)).await;
+        frame_names(&client);
+
+        let (a2, b2) = (a.clone(), b.clone());
+        let _c1 = ntex::rt::spawn(async move { a2.close().await });
+        let _c2 = ntex::rt::spawn(async move { b2.close().await });
+        assert!(timeout(Millis(500), t1).await.unwrap().unwrap().is_err());
+        assert!(timeout(Millis(500), t2).await.unwrap().unwrap().is_err());
+
+        // link is closed after transfer is woken up
+        let c = attach("c", 6);
+        let t3 = send(&c, b"3");
+        sleep(Millis(50)).await;
+        assert_eq!(frame_names(&client), ["Detach 0", "Detach 1", "Attach c 2"]);
+        flow(6, 1, 10);
+        let mut close = Box::pin(c.close());
+        assert!(poll_fn(|cx| Poll::Ready(close.as_mut().poll(cx).is_pending())).await);
+        assert!(timeout(Millis(500), t3).await.unwrap().unwrap().is_err());
+
+        // no transfers after detach
+        sleep(Millis(50)).await;
+        assert_eq!(frame_names(&client), ["Detach 2"]);
     }
 
     #[ntex::test]
@@ -1961,6 +2024,70 @@ pub(crate) mod tests {
         assert_eq!(
             windows,
             [("Begin", u32::MAX), ("Flow", u32::MAX), ("Flow", u32::MAX)]
+        );
+    }
+
+    #[ntex::test]
+    async fn closing_session_connection_error() {
+        use ntex::time::{Millis, sleep, timeout};
+
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+
+        // local links wait for attach response
+        let s = session.clone();
+        let rcv = ntex::rt::spawn(async move { s.build_receiver_link("r", "r").attach().await });
+        let s = session.clone();
+        let snd = ntex::rt::spawn(async move { s.build_sender_link("s", "s").attach().await });
+        sleep(Millis(10)).await;
+
+        // local end waits for remote end
+        let s = session.clone();
+        let end = ntex::rt::spawn(async move { s.end().await });
+        sleep(Millis(10)).await;
+        assert!(!end.is_finished());
+
+        conn.get_ref()
+            .0
+            .get_mut()
+            .set_error(AmqpProtocolError::Disconnected);
+        assert!(matches!(
+            timeout(Millis(100), rcv).await.unwrap().unwrap(),
+            Err(AmqpProtocolError::Disconnected)
+        ));
+        assert!(matches!(
+            timeout(Millis(100), snd).await.unwrap().unwrap(),
+            Err(AmqpProtocolError::Disconnected)
+        ));
+        timeout(Millis(100), end).await.unwrap().unwrap().unwrap();
+
+        // session ended with error keeps the error
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = super::tests::session(&conn);
+        let Ok(Action::AttachReceiver(..)) =
+            handle_frame(&conn, named_attach(Role::Sender, "a", "a", 3))
+        else {
+            panic!()
+        };
+        let Ok(Action::SessionEnded(_)) =
+            handle_frame(&conn, named_attach(Role::Sender, "b", "b", 3))
+        else {
+            panic!()
+        };
+        conn.get_ref()
+            .0
+            .get_mut()
+            .set_error(AmqpProtocolError::Disconnected);
+        let err = session
+            .build_receiver_link("c", "c")
+            .attach()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AmqpProtocolError::SessionEnded(Some(ref e)) if e.condition() == &SessionError::HandleInUse.into()),
+            "{err:?}"
         );
     }
 

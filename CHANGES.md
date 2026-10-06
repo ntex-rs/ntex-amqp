@@ -2,6 +2,10 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix link attach and session end hang if connection fails while session is ending
+
+* Fix sender link transfers waiting for session window or link credit were not failed on link detach or close
+
 * Fix cancelled transfer waiting for session window consumed sender link credit
 
 * Fix session `outgoing-window` in `Begin` and `Flow` frames was set from remote incoming window

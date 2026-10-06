@@ -249,10 +249,6 @@ impl SenderLinkInner {
         self.id as u32
     }
 
-    pub(crate) fn remote_handle(&self) -> Handle {
-        self.remote_handle
-    }
-
     pub(crate) fn max_message_size(&self) -> Option<u32> {
         self.max_message_size
     }
@@ -283,6 +279,16 @@ impl SenderLinkInner {
             self.closed = true;
             self.on_close.notify_and_lock(());
             self.on_credit.notify_and_lock(());
+
+            // fail transfers waiting for link credit or session window
+            let err = AmqpProtocolError::Disconnected;
+            for tx in self.pending_transfers.drain(..) {
+                let _ = tx.send(Err(err.clone()));
+            }
+            self.session
+                .inner
+                .get_mut()
+                .drop_link_transfers(self.id as Handle, &err);
 
             let (tx, rx) = oneshot::channel();
 
@@ -400,6 +406,8 @@ impl SenderLinkInner {
             let inner = link.get_mut();
             if let Some(ref err) = inner.error {
                 return Err(err.clone());
+            } else if inner.closed {
+                return Err(AmqpProtocolError::Disconnected);
             }
             if inner.link_credit == 0 || !inner.pending_transfers.is_empty() {
                 log::trace!(
