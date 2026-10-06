@@ -3534,10 +3534,13 @@ pub(crate) mod tests {
         sleep(Millis(50)).await;
         assert_eq!(transfer_frames(&client).len(), 4);
 
-        // abort is sent before next delivery
+        // queued abort is sent by session flow, before next delivery
         session_window(&conn, 3, 5);
         sleep(Millis(50)).await;
-        assert!(transfer_frames(&client).is_empty());
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(0) more:false aborted:true"]
+        );
         let t2 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"2")).settled().send());
         assert_eq!(
             timeout(Millis(500), t2)
@@ -3551,10 +3554,7 @@ pub(crate) mod tests {
         sleep(Millis(50)).await;
         assert_eq!(
             transfer_frames(&client),
-            [
-                "Transfer Some(0) more:false aborted:true",
-                "Transfer Some(1) more:false aborted:false"
-            ]
+            ["Transfer Some(1) more:false aborted:false"]
         );
 
         // abort is sent if session window is available
@@ -4511,7 +4511,7 @@ pub(crate) mod tests {
         assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
         assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
 
-        // cancelled delivery is aborted later, window goes to next waiter
+        // abort of cancelled delivery is queued behind next waiter
         session_window(&conn, 2, 1);
         drop(t1);
         let Poll::Ready(Ok(d2)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
@@ -4519,7 +4519,7 @@ pub(crate) mod tests {
         };
         assert_eq!(d2.id(), 1);
 
-        // abort takes window claimed by woken transfer
+        // queued abort is sent by session flow, before new transfers
         let mut t3 = Box::pin(snd.transfer(Bytes::from_static(b"3")).send());
         let mut t4 = Box::pin(snd2.transfer(Bytes::from_static(b"4")).send());
         assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
@@ -4545,6 +4545,132 @@ pub(crate) mod tests {
                 "Transfer Some(2) more:false aborted:false",
                 "Transfer Some(3) more:false aborted:false"
             ]
+        );
+    }
+
+    /// Sender with partial delivery waiting for session window, and second sender waiting
+    async fn queued_abort_sender() -> (
+        Io,
+        Connection,
+        IoTest,
+        SenderLink,
+        Pin<Box<dyn Future<Output = Result<crate::Delivery, AmqpProtocolError>>>>,
+    ) {
+        use ntex::time::{Millis, sleep};
+        use std::{future::poll_fn, task::Poll};
+
+        let (io, conn, client, snd) = small_frames_sender();
+        let snd2 = add_sender(&conn, "s2", 5, 1);
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+
+        let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
+        let mut t2: Pin<Box<dyn Future<Output = _>>> =
+            Box::pin(snd2.transfer(Bytes::from_static(b"2")).send());
+        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+        drop(t1);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(0) more:true aborted:false"]
+        );
+        (io, conn, client, snd, t2)
+    }
+
+    #[ntex::test]
+    async fn sender_queued_abort_keeps_order() {
+        use ntex::time::{Millis, sleep};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client, snd, mut t2) = queued_abort_sender().await;
+
+        // new delivery on the same link waits behind its abort
+        let mut t3 = Box::pin(snd.transfer(Bytes::from_static(b"3")).send());
+        assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+
+        session_window(&conn, 2, 1);
+        let Poll::Ready(Ok(d2)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
+            panic!()
+        };
+        assert_eq!(d2.id(), 1);
+        assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(1) more:false aborted:false"]
+        );
+
+        session_window(&conn, 3, 1);
+        assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(0) more:false aborted:true"]
+        );
+
+        session_window(&conn, 4, 1);
+        let Poll::Ready(Ok(d3)) = poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx))).await else {
+            panic!()
+        };
+        assert_eq!(d3.id(), 2);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(2) more:false aborted:false"]
+        );
+    }
+
+    #[ntex::test]
+    async fn sender_detach_drops_queued_abort() {
+        use ntex::time::{Millis, sleep};
+        use std::{future::poll_fn, task::Poll};
+
+        for local in [false, true] {
+            let (_io, conn, client, snd, mut t2) = queued_abort_sender().await;
+            if local {
+                let mut fut = Box::pin(snd.close());
+                assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await);
+            } else {
+                handle_frame(&conn, peer_detach(4)).unwrap();
+            }
+
+            // window goes to next waiter, abort is not sent
+            session_window(&conn, 2, 2);
+            let Poll::Ready(Ok(d2)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
+                panic!()
+            };
+            assert_eq!(d2.id(), 1);
+            sleep(Millis(50)).await;
+            assert_eq!(
+                transfer_frames(&client)
+                    .into_iter()
+                    .filter(|f| f.starts_with("Transfer"))
+                    .collect::<Vec<_>>(),
+                ["Transfer Some(1) more:false aborted:false"]
+            );
+            assert_eq!(session(&conn).inner.get_ref().pending_transfers(), 0);
+        }
+    }
+
+    #[ntex::test]
+    async fn session_end_drops_queued_abort() {
+        use ntex::time::{Millis, sleep};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client, _snd, mut t2) = queued_abort_sender().await;
+        let s = session(&conn);
+        assert_eq!(s.inner.get_ref().pending_transfers(), 3);
+        handle_frame(&conn, End { error: None }.into()).unwrap();
+        assert_eq!(s.inner.get_ref().pending_transfers(), 0);
+        let Poll::Ready(Err(_)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
+            panic!()
+        };
+        sleep(Millis(50)).await;
+        assert!(
+            !transfer_frames(&client)
+                .iter()
+                .any(|f| f.starts_with("Transfer"))
         );
     }
 }

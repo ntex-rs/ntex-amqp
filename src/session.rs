@@ -338,11 +338,27 @@ pub(crate) struct TransferChunks {
 
 #[derive(Debug)]
 struct PendingTransfer {
-    tx: pool::Sender<Result<(), AmqpProtocolError>>,
+    kind: Pending,
     link_handle: Handle,
 }
 
-/// Fail link transfers waiting for session window
+#[derive(Debug)]
+enum Pending {
+    /// Transfer waits for session window
+    Wake(pool::Sender<Result<(), AmqpProtocolError>>),
+    /// Abort of cancelled delivery waits for session window
+    Abort(DeliveryNumber),
+}
+
+impl PendingTransfer {
+    fn fail(self, err: &AmqpProtocolError) {
+        if let Pending::Wake(tx) = self.kind {
+            let _ = tx.send(Err(err.clone()));
+        }
+    }
+}
+
+/// Fail link transfers and drop aborts waiting for session window
 fn drop_pending_transfers(
     pending: &mut VecDeque<PendingTransfer>,
     link_handle: Handle,
@@ -351,8 +367,7 @@ fn drop_pending_transfers(
     let mut idx = 0;
     while idx < pending.len() {
         if pending[idx].link_handle == link_handle {
-            let tr = pending.remove(idx).unwrap();
-            let _ = tr.tx.send(Err(err.clone()));
+            pending.remove(idx).unwrap().fail(err);
         } else {
             idx += 1;
         }
@@ -557,7 +572,7 @@ impl SessionInner {
 
         // drop pending transfers
         for tr in self.pending_transfers.drain(..) {
-            let _ = tr.tx.send(Err(err.clone()));
+            tr.fail(&err);
         }
 
         // drop unsettled deliveries
@@ -1792,15 +1807,20 @@ impl SessionInner {
         self.wake_window_waiters();
     }
 
-    /// Wake up transfers waiting for session window
+    /// Wake up transfers and send aborts waiting for session window, in order
     ///
     /// Number of woken transfers is limited by window not claimed by woken transfers
     fn wake_window_waiters(&mut self) {
         while self.remote_incoming_window > self.window_woken
             && let Some(tr) = self.pending_transfers.pop_front()
         {
-            if tr.tx.send(Ok(())).is_ok() {
-                self.window_woken += 1;
+            match tr.kind {
+                Pending::Wake(tx) => {
+                    if tx.send(Ok(())).is_ok() {
+                        self.window_woken += 1;
+                    }
+                }
+                Pending::Abort(id) => self.post_abort(tr.link_handle, id),
             }
         }
     }
@@ -1828,6 +1848,11 @@ impl SessionInner {
         self.post_frame(flow.into());
     }
 
+    #[cfg(test)]
+    pub(crate) fn pending_transfers(&self) -> usize {
+        self.pending_transfers.len()
+    }
+
     /// Fail sender link transfers waiting for session window
     pub(crate) fn drop_link_transfers(&mut self, link_handle: Handle, err: &AmqpProtocolError) {
         drop_pending_transfers(&mut self.pending_transfers, link_handle, err);
@@ -1851,8 +1876,10 @@ impl SessionInner {
                 self.sink.tag()
             );
             let (tx, rx) = self.pool_credit.channel();
-            self.pending_transfers
-                .push_back(PendingTransfer { tx, link_handle });
+            self.pending_transfers.push_back(PendingTransfer {
+                kind: Pending::Wake(tx),
+                link_handle,
+            });
             Ok(Some(rx))
         } else {
             Ok(None)
@@ -1978,27 +2005,33 @@ impl SessionInner {
 
     /// Abort partially sent delivery, AMQP 1.0 2.6.14
     ///
-    /// Returns `false` if remote incoming window not claimed by woken
-    /// transfers is not available
-    pub(crate) fn abort_transfer(
-        &mut self,
-        link_handle: Handle,
-        delivery_id: DeliveryNumber,
-    ) -> bool {
-        if self.remote_incoming_window <= self.window_woken {
-            false
+    /// Abort waits in order with transfers if remote incoming window
+    /// not claimed by woken transfers is not available
+    pub(crate) fn abort_transfer(&mut self, link_handle: Handle, delivery_id: DeliveryNumber) {
+        if self.remote_incoming_window > self.window_woken {
+            self.post_abort(link_handle, delivery_id);
         } else {
             log::trace!(
-                "{}: Abort delivery {delivery_id:?} over handle {link_handle}",
+                "{}: Remote window is not available, push abort of delivery {delivery_id:?} to pending queue, hnd:{link_handle:?}",
                 self.tag()
             );
-            let mut transfer = Transfer(Box::default());
-            transfer.0.handle = link_handle;
-            transfer.0.delivery_id = Some(delivery_id);
-            transfer.0.aborted = true;
-            self.post_transfer(transfer);
-            true
+            self.pending_transfers.push_back(PendingTransfer {
+                kind: Pending::Abort(delivery_id),
+                link_handle,
+            });
         }
+    }
+
+    fn post_abort(&mut self, link_handle: Handle, delivery_id: DeliveryNumber) {
+        log::trace!(
+            "{}: Abort delivery {delivery_id:?} over handle {link_handle}",
+            self.tag()
+        );
+        let mut transfer = Transfer(Box::default());
+        transfer.0.handle = link_handle;
+        transfer.0.delivery_id = Some(delivery_id);
+        transfer.0.aborted = true;
+        self.post_transfer(transfer);
     }
 
     /// Each transfer frame consumes remote incoming window, AMQP 1.0 2.5.6

@@ -36,8 +36,6 @@ pub(crate) struct SenderLinkInner {
     window_waiters: u32,
     // delivery is partially sent, frames of deliveries must not interleave
     partial: bool,
-    // cancelled delivery, must be aborted before next delivery
-    abort: Option<DeliveryNumber>,
     // receiver drain mode
     drain: bool,
     pub(crate) error: Option<AmqpProtocolError>,
@@ -225,7 +223,6 @@ impl SenderLinkInner {
             active: 0,
             window_waiters: 0,
             partial: false,
-            abort: None,
             drain: false,
             error: None,
             closed: false,
@@ -502,16 +499,6 @@ impl SenderLinkInner {
                 woken = true;
                 continue;
             }
-
-            // cancelled delivery is aborted before next delivery
-            if let Some(id) = inner.abort.take() {
-                // abort frame takes claimed window
-                if let Some(claim) = claim.take() {
-                    claim.consume();
-                }
-                inner.session.inner.get_mut().abort_transfer(handle, id);
-                continue;
-            }
             break;
         }
 
@@ -568,8 +555,8 @@ impl SenderLinkInner {
             let handle = self.id as Handle;
             let session = self.session.inner.get_mut();
             session.unsettled_snd_deliveries.remove(&id);
-            if !self.closed && !session.abort_transfer(handle, id) {
-                self.abort = Some(id);
+            if !self.closed {
+                session.abort_transfer(handle, id);
             }
         }
         self.wake_pending();
