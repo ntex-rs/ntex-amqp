@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix publish service `Message::Detached` and `Message::DetachedAll` calls were not cancelled on dispatcher shutdown, pending calls kept publish service alive after disconnect
+
 * Fix publish service `Message::Attached` call for remotely opened receiver link was not cancelled on dispatcher shutdown, pending link service creation kept connection and link state alive after disconnect
 
 * Fix remotely opened receiver link was not closed on session end before link confirmation and was not included in session ended links. Confirmation or rejection after session end sent `Attach` and `Detach` frames after `End`, publish service was notified with `Message::Attached` for closed link

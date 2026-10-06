@@ -783,6 +783,65 @@ async fn test_remote_receiver_attach_disconnect() -> std::io::Result<()> {
     Ok(())
 }
 
+#[ntex::test]
+async fn test_remote_receiver_detached_disconnect() -> std::io::Result<()> {
+    // pending Detached and DetachedAll publish calls are cancelled on disconnect
+    for session_end in [false, true] {
+        let started = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let (started2, dropped2) = (started.clone(), dropped.clone());
+
+        let srv = test_server(async move || {
+            let (started, dropped) = (started2.clone(), dropped2.clone());
+            server::Server::builder(async move |conn: server::Handshake| match conn {
+                server::Handshake::Amqp(conn) => {
+                    let conn = conn.open().await.map_err(|_| ())?;
+                    Ok::<_, ()>(conn.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            })
+            .build(fn_service(move |msg: types::Message| {
+                let (started, dropped) = (started.clone(), dropped.clone());
+                async move {
+                    if matches!(
+                        msg,
+                        types::Message::Detached(_) | types::Message::DetachedAll(_)
+                    ) {
+                        started.fetch_add(1, Ordering::SeqCst);
+                        let _guard = CountGuard(dropped);
+                        sleep(Millis(10_000)).await;
+                    }
+                    Ok::<_, LinkError>(())
+                }
+            }))
+        });
+
+        let io = raw_connect(srv.addr()).await;
+        raw_begin_session(&io).await;
+        raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+        assert!(matches!(raw_recv(&io).await, protocol::Frame::Attach(_)));
+
+        if session_end {
+            raw_send(&io, 0, protocol::End { error: None }.into()).await;
+        } else {
+            raw_send(&io, 0, raw_detach(0)).await;
+        }
+        sleep(Millis(100)).await;
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+
+        io.close();
+        sleep(Millis(200)).await;
+        assert_eq!(
+            dropped.load(Ordering::SeqCst),
+            1,
+            "session_end: {session_end}"
+        );
+    }
+
+    Ok(())
+}
+
 struct CountGuard(Arc<AtomicUsize>);
 
 impl Drop for CountGuard {
