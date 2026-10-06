@@ -1015,3 +1015,139 @@ async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[ntex::test]
+async fn test_control_flow_order() -> std::io::Result<()> {
+    let credits = Arc::new(Mutex::new(Vec::new()));
+    let credit = Arc::new(Mutex::new(None));
+    let credits2 = credits.clone();
+    let credit2 = credit.clone();
+
+    let srv = test_server(async move || {
+        let credits = credits2.clone();
+        let credit = credit2.clone();
+        server::Server::builder(async move |con: server::Handshake| match con {
+            server::Handshake::Amqp(con) => {
+                let con = con.open().await.unwrap();
+                Ok(con.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .control(async move |frm: ControlFrame| {
+            if let ControlFrameKind::Flow(flow, link) = frm.kind() {
+                credits.lock().unwrap().push(flow.link_credit().unwrap());
+                if flow.link_credit() == Some(5) {
+                    // first flow completes after the second one
+                    sleep(Millis(100)).await;
+                } else {
+                    let link = link.clone();
+                    let credit = credit.clone();
+                    rt::spawn(async move {
+                        sleep(Millis(300)).await;
+                        *credit.lock().unwrap() = Some(link.credit());
+                    });
+                }
+            }
+            Ok::<_, ()>(())
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    });
+
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
+        .call(client::Connect::new(uri))
+        .await
+        .unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let link = session
+        .build_receiver_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    link.set_link_credit(5);
+    link.set_link_credit(10);
+
+    sleep(Millis(500)).await;
+    assert_eq!(*credits.lock().unwrap(), vec![5, 15]);
+    assert_eq!(*credit.lock().unwrap(), Some(15));
+    Ok(())
+}
+
+struct DropGuard(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for DropGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+#[ntex::test]
+async fn test_control_call_cancelled_on_disconnect() -> std::io::Result<()> {
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let started2 = started.clone();
+    let dropped2 = dropped.clone();
+
+    let srv = test_server(async move || {
+        let started = started2.clone();
+        let dropped = dropped2.clone();
+        server::Server::builder(async move |con: server::Handshake| match con {
+            server::Handshake::Amqp(con) => {
+                let con = con.open().await.unwrap();
+                Ok(con.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .control(async move |frm: ControlFrame| {
+            if let ControlFrameKind::Flow(..) = frm.kind() {
+                let _guard = DropGuard(dropped.clone());
+                started.store(true, Ordering::SeqCst);
+                sleep(Millis(10_000)).await;
+            }
+            Ok::<_, ()>(())
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", server)
+                .build(),
+        )
+    });
+
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
+        .call(client::Connect::new(uri))
+        .await
+        .unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let link = session
+        .build_receiver_link("test", "test")
+        .attach()
+        .await
+        .unwrap();
+    link.set_link_credit(5);
+
+    sleep(Millis(200)).await;
+    assert!(started.load(Ordering::SeqCst));
+    assert!(!dropped.load(Ordering::SeqCst));
+
+    sink.close().await.unwrap();
+    sleep(Millis(300)).await;
+    assert!(dropped.load(Ordering::SeqCst));
+    Ok(())
+}

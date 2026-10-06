@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix stale sender link `Flow` could overwrite newer link credit when control service calls completed out of order, and session flow state was applied only after control service call. Session and link flows are applied in frames order before control service is notified, control service calls are spawned and cancelled on dispatcher shutdown
+
 * Fix server dispatcher stopped processing control frames, link attach confirmations, control service errors and keep-alive pings while publish service was not ready
 
 * Fix remotely opened sender link waiting for control service confirmation was not closed on session end or connection error and was missing from session ended links. Confirmation after session end no longer sends `Attach`/`Detach` frames, rejected link is closed, rejection `Attach` uses sender role

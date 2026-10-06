@@ -914,14 +914,15 @@ impl SessionInner {
         if self.error.is_none() {
             match frame {
                 Frame::Flow(flow) => {
-                    // apply link flow
+                    let mut established = None;
                     match flow
                         .handle()
                         .and_then(|h| self.remote_handles.get(&h).copied())
                         .and_then(|h| self.links.get_mut(h))
                     {
+                        // link credit is applied in frames order, control service is notified
                         Some(Either::Left(SenderLinkState::Established(link))) => {
-                            return Ok(Action::Flow((*link).clone(), flow));
+                            established = Some((*link).clone());
                         }
                         // link is not confirmed yet, link credit is applied after confirmation
                         Some(Either::Left(SenderLinkState::OpeningRemote {
@@ -933,8 +934,14 @@ impl SessionInner {
                         }
                         _ => (),
                     }
-                    self.handle_flow(&flow, None);
-                    Ok(Action::None)
+                    // session flow state is applied in frames order
+                    self.handle_flow(&flow);
+                    if let Some(link) = established {
+                        link.inner.get_mut().apply_flow(&flow);
+                        Ok(Action::Flow(link, flow))
+                    } else {
+                        Ok(Action::None)
+                    }
                 }
                 Frame::Disposition(disp) => {
                     self.settle_deliveries(&disp);
@@ -1262,7 +1269,7 @@ impl SessionInner {
         });
     }
 
-    pub(crate) fn handle_flow(&mut self, flow: &Flow, link: Option<&SenderLink>) {
+    pub(crate) fn handle_flow(&mut self, flow: &Flow) {
         // # AMQP1.0 2.5.6
         self.next_incoming_id = flow.next_outgoing_id();
         self.remote_outgoing_window = flow.outgoing_window();
@@ -1300,11 +1307,6 @@ impl SessionInner {
                 properties: None,
             }));
             self.post_frame(flow.into());
-        }
-
-        // apply link flow
-        if let Some(link) = link {
-            link.inner.get_mut().apply_flow(flow);
         }
     }
 
