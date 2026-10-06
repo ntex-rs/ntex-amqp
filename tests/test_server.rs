@@ -913,6 +913,105 @@ async fn test_router_link_service_shutdown_on_disconnect() -> std::io::Result<()
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum LocalDetach {
+    Close,
+    CloseInFlight,
+    SessionEnd,
+}
+
+#[ntex::test]
+async fn test_router_link_service_shutdown_on_local_detach() -> std::io::Result<()> {
+    struct Srv(Arc<AtomicUsize>, Arc<AtomicUsize>);
+
+    impl Service<types::Link<()>, types::Transfer> for Srv {
+        type Res = types::Outcome;
+        type Error = LinkError;
+
+        async fn call(
+            &self,
+            _: types::Transfer,
+            _: Ctx<'_, Self, types::Link<()>>,
+        ) -> Result<types::Outcome, LinkError> {
+            sleep(Millis(150)).await;
+            self.1.fetch_add(1, Ordering::SeqCst);
+            Ok(types::Outcome::Accept)
+        }
+
+        async fn shutdown(&self, _: Ctx<'_, Self, types::Link<()>>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    for mode in [
+        LocalDetach::Close,
+        LocalDetach::CloseInFlight,
+        LocalDetach::SessionEnd,
+    ] {
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (shutdowns2, calls2) = (shutdowns.clone(), calls.clone());
+
+        let srv = test_server(async move || {
+            let (shutdowns, calls) = (shutdowns2.clone(), calls2.clone());
+            server::Server::builder(async move |conn: server::Handshake| match conn {
+                server::Handshake::Amqp(conn) => {
+                    let conn = conn.open().await.map_err(|_| ())?;
+                    Ok::<_, ()>(conn.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            })
+            .build(
+                server::Router::<()>::builder()
+                    .service("test", async move |link: &types::Link<()>| {
+                        let link = link.clone();
+                        rt::spawn(async move {
+                            sleep(Millis(50)).await;
+                            if mode == LocalDetach::SessionEnd {
+                                let _ = link.session().end().await;
+                            } else {
+                                let _ = link.receiver().close().await;
+                            }
+                        });
+                        Ok::<_, LinkError>(Srv(shutdowns.clone(), calls.clone()))
+                    })
+                    .build(),
+            )
+        });
+
+        let uri =
+            Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+        let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
+            .call(client::Connect::new(uri))
+            .await
+            .unwrap();
+        let sink = client.sink();
+        ntex::rt::spawn(async move {
+            let _ = client.start_default().await;
+        });
+        let session = sink.open_session().await.unwrap();
+        let link = session
+            .build_sender_link("test", "test")
+            .attach()
+            .await
+            .unwrap();
+        if mode == LocalDetach::CloseInFlight {
+            // link service call is in progress during detach
+            let _delivery = link.transfer(Bytes::from_static(b"test")).send().await;
+        }
+
+        // link service is released without remote detach or disconnect
+        timeout(Millis(1000), link.on_close()).await.unwrap();
+        sleep(Millis(250)).await;
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+        let in_flight = usize::from(mode == LocalDetach::CloseInFlight);
+        assert_eq!(calls.load(Ordering::SeqCst), in_flight);
+        assert!(sink.is_opened());
+    }
+
+    Ok(())
+}
+
 struct CountGuard(Arc<AtomicUsize>);
 
 impl Drop for CountGuard {

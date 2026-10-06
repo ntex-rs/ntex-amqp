@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix router link service leaked until disconnect after local receiver link detach or local session end
+
 * Fix receiver link recv() hung after local receiver link detach
 
 * Fix transfers waiting for link credit or session window hung after local sender link detach; unsettled deliveries fail on detach confirmation
