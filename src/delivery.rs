@@ -339,11 +339,9 @@ impl TransferBuilder {
                 return Err(AmqpProtocolError::BodyTooLarge);
             }
 
-            let (id, tag) = self
-                .sender
-                .get_mut()
-                .send(self.data, self.tag, self.settled, self.format)
-                .await?;
+            let (id, tag) =
+                SenderLinkInner::send(&self.sender, self.data, self.tag, self.settled, self.format)
+                    .await?;
 
             Ok(Delivery {
                 id,

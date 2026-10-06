@@ -647,8 +647,10 @@ impl SessionInner {
         self.set_link_name(token, attach.name().clone(), true);
 
         // link flow received before confirmation
-        if let Some(flow) = flow {
-            link.get_mut().apply_flow(&flow);
+        if let Some(flow) = flow
+            && link.get_mut().apply_flow(&flow)
+        {
+            self.post_flow(Some(link.get_ref().flow_state()));
         }
         SenderLink::new(link)
     }
@@ -1094,15 +1096,16 @@ impl SessionInner {
                     }
                     // session flow state is applied in frames order
                     self.handle_flow(&flow);
+                    let mut drained = false;
                     let state = if let Some(ref link) = established {
                         let inner = link.inner.get_mut();
-                        inner.apply_flow(&flow);
+                        drained = inner.apply_flow(&flow);
                         Some(inner.flow_state())
                     } else {
                         receiver
                     };
-                    // echo reply carries link state of attached link
-                    if flow.echo() {
+                    // echo reply and drained credit carry link state of attached link
+                    if flow.echo() || drained {
                         self.post_flow(state);
                     }
                     if let Some(link) = established {
@@ -1472,11 +1475,11 @@ impl SessionInner {
     }
 
     pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
-        self.post_flow(Some((handle, delivery_count, credit)));
+        self.post_flow(Some((handle, delivery_count, credit, false)));
     }
 
-    /// Send session flow, with link state `(handle, delivery-count, link-credit)`
-    fn post_flow(&mut self, link: Option<(Handle, codec::SequenceNo, u32)>) {
+    /// Send session flow, with link state `(handle, delivery-count, link-credit, drain)`
+    pub(crate) fn post_flow(&mut self, link: Option<(Handle, codec::SequenceNo, u32, bool)>) {
         let flow = Flow(Box::new(codec::FlowInner {
             next_incoming_id: Some(self.next_incoming_id),
             incoming_window: u32::MAX,
@@ -1486,7 +1489,7 @@ impl SessionInner {
             delivery_count: link.map(|l| l.1),
             link_credit: link.map(|l| l.2),
             available: None,
-            drain: false,
+            drain: link.is_some_and(|l| l.3),
             echo: false,
             properties: None,
         }));

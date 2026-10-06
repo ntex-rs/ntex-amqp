@@ -1,4 +1,5 @@
-use std::{collections::VecDeque, future::Future};
+use std::task::{Context, Poll, Waker, ready};
+use std::{collections::VecDeque, future::Future, pin::Pin};
 
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
@@ -26,6 +27,10 @@ pub(crate) struct SenderLinkInner {
     delivery_tag: u32,
     link_credit: u32,
     pending_transfers: VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>,
+    // woken credit waiters and in-flight transfers
+    active: u32,
+    // receiver drain mode
+    drain: bool,
     pub(crate) error: Option<AmqpProtocolError>,
     pub(crate) closed: bool,
     pub(crate) max_message_size: Option<u32>,
@@ -207,6 +212,8 @@ impl SenderLinkInner {
             remote_handle: handle,
             link_credit: 0,
             pending_transfers: VecDeque::new(),
+            active: 0,
+            drain: false,
             error: None,
             closed: false,
             delivery_tag: 0,
@@ -292,12 +299,18 @@ impl SenderLinkInner {
         }
     }
 
-    /// Link flow state `(handle, delivery-count, link-credit)`
-    pub(crate) fn flow_state(&self) -> (Handle, SequenceNo, u32) {
-        (self.id as Handle, self.delivery_count, self.link_credit)
+    /// Link flow state `(handle, delivery-count, link-credit, drain)`
+    pub(crate) fn flow_state(&self) -> (Handle, SequenceNo, u32, bool) {
+        (
+            self.id as Handle,
+            self.delivery_count,
+            self.link_credit,
+            self.drain,
+        )
     }
 
-    pub(crate) fn apply_flow(&mut self, flow: &Flow) {
+    /// Apply remote flow, returns `true` if link credit is drained
+    pub(crate) fn apply_flow(&mut self, flow: &Flow) -> bool {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
             let new_credit = flow
@@ -318,65 +331,110 @@ impl SenderLinkInner {
             );
 
             self.link_credit = new_credit;
+            self.drain = flow.drain();
 
-            // credit became available => drain pending_transfers
+            // credit became available => wake up pending transfers
             while let Some(tx) = self.pending_transfers.pop_front() {
-                let _ = tx.send(Ok(()));
+                if tx.send(Ok(())).is_ok() {
+                    self.active += 1;
+                }
             }
 
             // notify available credit waiters
             if self.link_credit > 0 {
                 self.on_credit.notify(());
             }
+            self.drain_credit()
+        } else {
+            false
+        }
+    }
+
+    /// Consume remaining credit if receiver requested drain and link is idle
+    ///
+    /// AMQP 1.0 2.6.7, returns `true` if link credit is drained
+    fn drain_credit(&mut self) -> bool {
+        if self.drain
+            && self.link_credit > 0
+            && self.active == 0
+            && self.pending_transfers.is_empty()
+            && !self.closed
+        {
+            log::trace!(
+                "{}: Drain sender link {:?} credit {:?}",
+                self.session.tag(),
+                self.name,
+                self.link_credit
+            );
+            self.delivery_count = self.delivery_count.wrapping_add(self.link_credit);
+            self.link_credit = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drain link credit and send link state to the receiver
+    fn drain_and_post(&mut self) {
+        if self.drain_credit() {
+            let state = self.flow_state();
+            self.session.inner.get_mut().post_flow(Some(state));
         }
     }
 
     pub(crate) async fn send<T: Into<TransferBody>>(
-        &mut self,
+        link: &Cell<SenderLinkInner>,
         body: T,
         tag: Option<Bytes>,
         settled: bool,
         format: Option<MessageFormat>,
     ) -> Result<(DeliveryNumber, Bytes), AmqpProtocolError> {
-        if let Some(ref err) = self.error {
-            Err(err.clone())
-        } else {
-            let body = body.into();
-            let tag = self.get_tag(tag);
-
-            loop {
-                if self.link_credit == 0 || !self.pending_transfers.is_empty() {
-                    log::trace!(
-                        "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
-                        self.session.tag(),
-                        self.link_credit,
-                        self.name,
-                        self.id,
-                        self.remote_handle,
-                        self.pending_transfers.len()
-                    );
-                    let (tx, rx) = self.session.inner.get_ref().pool_credit.channel();
-                    self.pending_transfers.push_back(tx);
-                    rx.await
-                        .map_err(|_| AmqpProtocolError::ConnectionDropped)
-                        .and_then(|v| v)?;
-                    continue;
-                }
-                break;
-            }
-
-            // reduce link credit
-            self.link_credit -= 1;
-            self.delivery_count = self.delivery_count.wrapping_add(1);
-            let id = self
-                .session
-                .inner
-                .get_mut()
-                .send_transfer(self.id as u32, tag.clone(), body, settled, format)
-                .await?;
-
-            Ok((id, tag))
+        let inner = link.get_mut();
+        if let Some(ref err) = inner.error {
+            return Err(err.clone());
         }
+        let body = body.into();
+        let tag = inner.get_tag(tag);
+
+        loop {
+            let inner = link.get_mut();
+            if inner.link_credit == 0 || !inner.pending_transfers.is_empty() {
+                log::trace!(
+                    "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
+                    inner.session.tag(),
+                    inner.link_credit,
+                    inner.name,
+                    inner.id,
+                    inner.remote_handle,
+                    inner.pending_transfers.len()
+                );
+                let (tx, rx) = inner.session.inner.get_ref().pool_credit.channel();
+                inner.pending_transfers.push_back(tx);
+                CreditWaiter {
+                    rx,
+                    link: link.clone(),
+                    done: false,
+                }
+                .await?;
+                continue;
+            }
+            break;
+        }
+
+        // reduce link credit
+        let inner = link.get_mut();
+        inner.link_credit -= 1;
+        inner.delivery_count = inner.delivery_count.wrapping_add(1);
+        inner.active += 1;
+        let _guard = ActiveTransfer(link.clone());
+        let id = inner
+            .session
+            .inner
+            .get_mut()
+            .send_transfer(inner.id as u32, tag.clone(), body, settled, format)
+            .await?;
+
+        Ok((id, tag))
     }
 
     fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {
@@ -393,6 +451,57 @@ impl SenderLinkInner {
             buf.put_u32(delivery_tag);
             buf.freeze()
         })
+    }
+}
+
+/// Waits for link credit
+///
+/// Woken waiter is counted as active until it resumes or gets dropped
+struct CreditWaiter {
+    rx: pool::Receiver<Result<(), AmqpProtocolError>>,
+    link: Cell<SenderLinkInner>,
+    done: bool,
+}
+
+impl Future for CreditWaiter {
+    type Output = Result<(), AmqpProtocolError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let result = ready!(self.rx.poll_recv(cx));
+        self.done = true;
+        Poll::Ready(match result {
+            Ok(Ok(())) => {
+                self.link.get_mut().active -= 1;
+                Ok(())
+            }
+            Ok(Err(err)) => Err(err),
+            Err(_) => Err(AmqpProtocolError::ConnectionDropped),
+        })
+    }
+}
+
+impl Drop for CreditWaiter {
+    fn drop(&mut self) {
+        // waiter is dropped after wake up
+        if !self.done
+            && let Poll::Ready(Ok(Ok(()))) =
+                self.rx.poll_recv(&mut Context::from_waker(Waker::noop()))
+        {
+            let link = self.link.get_mut();
+            link.active -= 1;
+            link.drain_and_post();
+        }
+    }
+}
+
+/// Transfer in progress, link credit could be drained after transfer is sent
+struct ActiveTransfer(Cell<SenderLinkInner>);
+
+impl Drop for ActiveTransfer {
+    fn drop(&mut self) {
+        let link = self.0.get_mut();
+        link.active -= 1;
+        link.drain_and_post();
     }
 }
 
