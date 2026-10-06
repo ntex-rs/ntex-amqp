@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Respect remote session handle-max: opening a link without free handle fails with new `AmqpProtocolError::TooManyLinks` error, remotely opened link without free local handle ends the session with `amqp:resource-limit-exceeded` error
+
 * Fix `Session::end()` used remote channel id to find the session, when local and remote channel ids differ it marked a wrong session as closing and sent a second `End` frame
 
 * Fix max-message-size handling: remote max-message-size `0` means unlimited instead of rejecting all sends, locally attached receiver links use max size from `ReceiverLinkBuilder::max_message_size()` instead of hard-coded 256KiB, `0` max size means unlimited for receiver and sender links, single-frame transfers are checked against receiver max size

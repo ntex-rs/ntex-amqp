@@ -41,6 +41,8 @@ pub enum AmqpProtocolError {
     Codec(#[from] AmqpCodecError),
     #[error("Too many channels")]
     TooManyChannels,
+    #[error("Too many links")]
+    TooManyLinks,
     #[error("Body is too large")]
     BodyTooLarge,
     #[error("Keep-alive timeout")]
