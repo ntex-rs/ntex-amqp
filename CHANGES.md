@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix session `outgoing-window` in `Begin` and `Flow` frames was set from remote incoming window
+
 * Handle receiver `drain` request for sender links, remaining link credit is consumed and reported once queued transfers are sent
 
 * Fix session frames (`Detach`, `Flow`, `Disposition`, `Attach`, `Transfer`) could be sent after `End`. Link close during session end completes without `Detach`, new link attach and transfer fail with session end error

@@ -1484,7 +1484,8 @@ impl SessionInner {
             next_incoming_id: Some(self.next_incoming_id),
             incoming_window: u32::MAX,
             next_outgoing_id: self.next_outgoing_id,
-            outgoing_window: self.remote_incoming_window,
+            // outgoing transfers are limited by remote incoming window only
+            outgoing_window: u32::MAX,
             handle: link.map(|l| l.0),
             delivery_count: link.map(|l| l.1),
             link_credit: link.map(|l| l.2),
