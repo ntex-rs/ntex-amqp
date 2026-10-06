@@ -47,6 +47,8 @@ pub enum AmqpProtocolError {
     LinkNameInUse,
     #[error("Link attach timeout")]
     LinkAttachTimeout,
+    #[error("Link is not attached")]
+    LinkNotAttached,
     #[error("Body is too large")]
     BodyTooLarge,
     #[error("Keep-alive timeout")]

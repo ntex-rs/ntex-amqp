@@ -1521,6 +1521,159 @@ pub(crate) mod tests {
         }
     }
 
+    async fn detach_by_handle(
+        s: &Session,
+        sender: bool,
+        handle: u32,
+        error: Option<Error>,
+    ) -> Result<(), AmqpProtocolError> {
+        if sender {
+            s.detach_sender_link(handle, error).await
+        } else {
+            s.detach_receiver_link(handle, error).await
+        }
+    }
+
+    #[ntex::test]
+    async fn detach_opening_local_link() {
+        for sender in [true, false] {
+            let ctx = format!("sender: {sender}");
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+            let role = if sender { Role::Receiver } else { Role::Sender };
+
+            let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+
+            // attach response is not received
+            let res = ntex::time::timeout(
+                ntex::time::Millis(1000),
+                detach_by_handle(&s, sender, 0, None),
+            )
+            .await
+            .expect(&ctx);
+            assert!(
+                matches!(res, Err(AmqpProtocolError::LinkNotAttached)),
+                "{ctx}"
+            );
+
+            // attach is not affected
+            let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 3)) else {
+                panic!("{ctx}")
+            };
+            ntex::time::timeout(ntex::time::Millis(1000), fut)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            assert_eq!(frame_names(&client), ["Begin", "Attach x 0"], "{ctx}");
+            if sender {
+                assert!(s.get_sender_link("x").is_some(), "{ctx}");
+            } else {
+                assert!(s.get_receiver_link_by_local_handle(0).is_some(), "{ctx}");
+            }
+        }
+    }
+
+    #[ntex::test]
+    async fn detach_refused_local_link() {
+        let not_found = Error(Box::new(codec::ErrorInner {
+            condition: AmqpError::NotFound.into(),
+            description: None,
+            info: None,
+        }));
+        for sender in [true, false] {
+            for error in [None, Some(not_found.clone())] {
+                let ctx = format!("sender: {sender} error: {error:?}");
+                let (_io, conn, client) = connection();
+                handle_frame(&conn, begin()).unwrap();
+                let s = session(&conn);
+                let role = if sender { Role::Receiver } else { Role::Sender };
+                let mut cx = Context::from_waker(std::task::Waker::noop());
+
+                let mut fut = Box::pin(attach_with_timeout(s.clone(), sender, None));
+                assert!(fut.as_mut().poll(&mut cx).is_pending(), "{ctx}");
+                let Frame::Attach(mut attach) = named_attach(role, "x", "l", 3) else {
+                    panic!()
+                };
+                if sender {
+                    attach.0.target = None;
+                } else {
+                    attach.0.source = None;
+                }
+                let Ok(Action::None) = handle_frame(&conn, attach.into()) else {
+                    panic!("{ctx}")
+                };
+
+                // local detach of refused link fails attach
+                let mut detach = Box::pin(detach_by_handle(&s, sender, 0, error.clone()));
+                assert!(detach.as_mut().poll(&mut cx).is_pending(), "{ctx}");
+                let Poll::Ready(Err(AmqpProtocolError::LinkDetached(err))) =
+                    fut.as_mut().poll(&mut cx)
+                else {
+                    panic!("{ctx}")
+                };
+                assert_eq!(err, error, "{ctx}");
+
+                // remote detach completes local detach
+                let Ok(Action::None) = handle_frame(&conn, peer_detach(3)) else {
+                    panic!("{ctx}")
+                };
+                let Poll::Ready(Ok(())) = detach.as_mut().poll(&mut cx) else {
+                    panic!("{ctx}")
+                };
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                assert_eq!(
+                    frame_names(&client),
+                    ["Begin", "Attach x 0", "Detach 0"],
+                    "{ctx}"
+                );
+
+                // name and handle are released
+                let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 3)) else {
+                    panic!("{ctx}")
+                };
+                ntex::time::timeout(ntex::time::Millis(1000), fut)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(frame_names(&client), ["Attach x 0"], "{ctx}");
+            }
+        }
+    }
+
+    #[ntex::test]
+    async fn detach_unconfirmed_remote_sender_link() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let s = session(&conn);
+        let Ok(Action::AttachSender(link, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "n", "a", 3))
+        else {
+            panic!()
+        };
+        let res = ntex::time::timeout(
+            ntex::time::Millis(1000),
+            s.detach_sender_link(link.id(), None),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(res, Err(AmqpProtocolError::LinkNotAttached)));
+
+        // link is confirmed
+        s.inner
+            .get_mut()
+            .attach_remote_sender_link(&attach, response, link.inner.clone());
+        assert!(s.get_sender_link("n").is_some());
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        assert_eq!(frame_names(&client), ["Begin", "Attach n 0"]);
+    }
+
     #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
