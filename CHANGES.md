@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix duplicate local link name hung first link attach, add `AmqpProtocolError::LinkNameInUse`
+
 * Fix cancelled local link attach leaked attached link
 
 * Fix local receiver link ignored remote sender initial delivery count

@@ -556,6 +556,7 @@ impl SessionInner {
             detach: None,
         }));
         self.remote_handles.insert(attach.handle(), id);
+        self.set_link_name(id, attach.name().clone(), true);
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -585,6 +586,23 @@ impl SessionInner {
         };
         names.insert(name.clone(), idx);
         self.link_names.insert(idx, name);
+    }
+
+    /// Check if link name is used by not closing link
+    fn is_link_name_used(&self, name: &str, sender: bool) -> bool {
+        let names = if sender {
+            &self.sender_names
+        } else {
+            &self.receiver_names
+        };
+        match names.get(name).and_then(|idx| self.links.get(*idx)) {
+            Some(
+                Either::Left(SenderLinkState::Closing(_))
+                | Either::Right(ReceiverLinkState::Closing(_)),
+            )
+            | None => false,
+            Some(_) => true,
+        }
     }
 
     /// Remove link and its name
@@ -631,6 +649,10 @@ impl SessionInner {
         }
         if !self.check_handle() {
             let _ = tx.send(Err(AmqpProtocolError::TooManyLinks));
+            return rx;
+        }
+        if self.is_link_name_used(frame.name(), true) {
+            let _ = tx.send(Err(AmqpProtocolError::LinkNameInUse));
             return rx;
         }
 
@@ -719,8 +741,6 @@ impl SessionInner {
         self.links[token] = Either::Left(SenderLinkState::Established(EstablishedSenderLink::new(
             link.clone(),
         )));
-
-        self.set_link_name(token, attach.name().clone(), true);
 
         // link flow received before confirmation
         if let Some(flow) = flow
@@ -905,6 +925,7 @@ impl SessionInner {
             None,
         )));
         self.remote_handles.insert(handle, token);
+        self.set_link_name(token, attach.name().clone(), false);
 
         let response = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -942,6 +963,10 @@ impl SessionInner {
         }
         if !self.check_handle() {
             let _ = tx.send(Err(AmqpProtocolError::TooManyLinks));
+            return rx;
+        }
+        if self.is_link_name_used(frame.name(), false) {
+            let _ = tx.send(Err(AmqpProtocolError::LinkNameInUse));
             return rx;
         }
 

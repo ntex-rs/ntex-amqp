@@ -43,6 +43,8 @@ pub enum AmqpProtocolError {
     TooManyChannels,
     #[error("Too many links")]
     TooManyLinks,
+    #[error("Link name is in use")]
+    LinkNameInUse,
     #[error("Body is too large")]
     BodyTooLarge,
     #[error("Keep-alive timeout")]

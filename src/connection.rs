@@ -1114,6 +1114,155 @@ pub(crate) mod tests {
         }
     }
 
+    enum TestLink {
+        Sender(SenderLink),
+        Receiver(crate::ReceiverLink),
+    }
+
+    impl TestLink {
+        async fn attach(
+            s: Session,
+            sender: bool,
+            name: &'static str,
+        ) -> Result<Self, AmqpProtocolError> {
+            if sender {
+                s.build_sender_link(name, "l")
+                    .attach()
+                    .await
+                    .map(TestLink::Sender)
+            } else {
+                s.build_receiver_link(name, "l")
+                    .attach()
+                    .await
+                    .map(TestLink::Receiver)
+            }
+        }
+
+        async fn close(self) -> Result<(), AmqpProtocolError> {
+            match self {
+                TestLink::Sender(l) => l.close().await,
+                TestLink::Receiver(l) => l.close().await,
+            }
+        }
+    }
+
+    #[ntex::test]
+    async fn duplicate_local_link_name() {
+        for sender in [true, false] {
+            let ctx = format!("sender: {sender}");
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+            let role = if sender { Role::Receiver } else { Role::Sender };
+            let other = if sender { Role::Sender } else { Role::Receiver };
+            let in_use = async |sender| {
+                let res = ntex::time::timeout(
+                    ntex::time::Millis(1000),
+                    TestLink::attach(s.clone(), sender, "x"),
+                )
+                .await
+                .unwrap();
+                assert!(
+                    matches!(res, Err(AmqpProtocolError::LinkNameInUse)),
+                    "{ctx}"
+                );
+            };
+
+            // name is used by opening link
+            let first = ntex::rt::spawn(TestLink::attach(s.clone(), sender, "x"));
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            in_use(sender).await;
+
+            let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 0)) else {
+                panic!("{ctx}")
+            };
+            let first = ntex::time::timeout(ntex::time::Millis(1000), first)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+
+            // name is used by established link
+            in_use(sender).await;
+
+            // same name in other direction is a different link
+            let opposite = ntex::rt::spawn(TestLink::attach(s.clone(), !sender, "x"));
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            let Ok(Action::None) = handle_frame(&conn, named_attach(other, "x", "l", 1)) else {
+                panic!("{ctx}")
+            };
+            ntex::time::timeout(ntex::time::Millis(1000), opposite)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            assert_eq!(
+                frame_names(&client),
+                ["Begin", "Attach x 0", "Attach x 1"],
+                "{ctx}"
+            );
+
+            // name of closing link can be reused
+            let closed = ntex::rt::spawn(first.close());
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            let second = ntex::rt::spawn(TestLink::attach(s.clone(), sender, "x"));
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            handle_frame(&conn, peer_detach(0)).unwrap();
+            let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 2)) else {
+                panic!("{ctx}")
+            };
+            ntex::time::timeout(ntex::time::Millis(1000), closed)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            ntex::time::timeout(ntex::time::Millis(1000), second)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            assert_eq!(frame_names(&client), ["Detach 0", "Attach x 2"], "{ctx}");
+            if sender {
+                assert_eq!(s.get_sender_link("x").unwrap().remote_handle(), 2, "{ctx}");
+            } else {
+                let link = s.get_receiver_link_by_remote_handle(2).unwrap();
+                assert_eq!(link.handle(), 2, "{ctx}");
+            }
+        }
+    }
+
+    #[ntex::test]
+    async fn local_link_name_used_by_remote_link() {
+        for sender in [true, false] {
+            let ctx = format!("sender: {sender}");
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+
+            // remote receiver opens sender link, remote sender opens receiver link
+            let role = if sender { Role::Receiver } else { Role::Sender };
+            match handle_frame(&conn, named_attach(role, "x", "l", 0)) {
+                Ok(Action::AttachSender(..)) if sender => (),
+                Ok(Action::AttachReceiver(..)) if !sender => (),
+                _ => panic!("{ctx}"),
+            }
+            let res = ntex::time::timeout(
+                ntex::time::Millis(1000),
+                TestLink::attach(s.clone(), sender, "x"),
+            )
+            .await
+            .unwrap();
+            assert!(
+                matches!(res, Err(AmqpProtocolError::LinkNameInUse)),
+                "{ctx}"
+            );
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            assert_eq!(frame_names(&client), ["Begin"], "{ctx}");
+        }
+    }
+
     #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
