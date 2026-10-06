@@ -11,7 +11,6 @@ use crate::codec::protocol::{
 use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
-use crate::sndlink::{SenderLink, SenderLinkInner};
 use crate::{
     AmqpServiceConfig, RemoteServiceConfig, cell::Cell, detach, error::AmqpProtocolError,
     types::Action,
@@ -486,13 +485,9 @@ impl ConnectionInner {
                             match attach.0.role {
                                 Role::Receiver => {
                                     // remotly opened sender link
-                                    let (id, response) =
-                                        session.get_mut().new_remote_sender(&attach);
-                                    let link = SenderLink::new(Cell::new(SenderLinkInner::with(
-                                        id,
-                                        &attach,
-                                        session.clone(),
-                                    )));
+                                    let (link, response) = session
+                                        .get_mut()
+                                        .new_remote_sender(session.clone(), &attach);
                                     Ok(Action::AttachSender(link, attach, response))
                                 }
                                 Role::Sender => {
@@ -691,6 +686,7 @@ mod tests {
 
     use super::*;
     use crate::delivery::DeliveryInner;
+    use crate::sndlink::SenderLink;
 
     const LONG: &str = "value-that-does-not-fit-into-inline-storage";
 
@@ -1383,6 +1379,7 @@ mod tests {
                     .inner
                     .get_mut()
                     .detach_unconfirmed_sender_link(&attach, &link.inner, None);
+                assert!(link.is_closed());
             }
 
             // remote handle and link name are released
@@ -1396,14 +1393,90 @@ mod tests {
             let mut frames = Vec::new();
             while let Some(frame) = codec.decode(&mut buf).unwrap() {
                 match frame.into_parts().1 {
-                    Frame::Attach(attach) => frames.push(format!("attach {}", attach.handle())),
+                    Frame::Attach(attach) => {
+                        frames.push(format!("attach {} {:?}", attach.handle(), attach.role()));
+                    }
                     Frame::Detach(detach) => {
                         frames.push(format!("detach {} {}", detach.handle(), detach.closed()));
                     }
                     _ => (),
                 }
             }
-            assert_eq!(frames, ["attach 0", "detach 0 true"]);
+            assert_eq!(frames, ["attach 0 Sender", "detach 0 true"]);
+        }
+    }
+
+    #[ntex::test]
+    async fn remote_sender_end_before_confirm() {
+        for (local, accept) in [(false, true), (false, false), (true, true), (true, false)] {
+            let (_io, conn, client) = connection();
+            let inner = conn.get_ref().0;
+            let handle = |frame: Frame| {
+                inner
+                    .get_mut()
+                    .handle_frame(AmqpFrame::new(0, frame), &inner)
+            };
+            handle(begin()).unwrap();
+            let session = session(&conn);
+
+            let Ok(Action::AttachSender(link, attach, response)) =
+                handle(peer_attach(Role::Receiver, None))
+            else {
+                panic!()
+            };
+
+            if local {
+                let s = session.clone();
+                ntex::rt::spawn(async move { s.end().await });
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+
+                let conn_ref = conn.get_ref();
+                let queue = conn_ref.get_control_queue().pending.borrow();
+                let crate::ControlFrameKind::LocalSessionEnded(links) =
+                    queue.back().unwrap().kind()
+                else {
+                    panic!()
+                };
+                assert_eq!(links.len(), 1);
+                assert!(!link.is_closed());
+            } else {
+                let Ok(Action::SessionEnded(links)) = handle(End { error: None }.into()) else {
+                    panic!()
+                };
+                assert_eq!(links.len(), 1);
+                assert!(link.is_closed());
+                let ready = ntex::time::timeout(ntex::time::Millis(100), link.ready()).await;
+                assert!(matches!(ready, Ok(false)));
+            }
+
+            // confirmation after end does not send frames
+            if accept {
+                session.inner.get_mut().attach_remote_sender_link(
+                    &attach,
+                    response,
+                    link.inner.clone(),
+                );
+            } else {
+                session
+                    .inner
+                    .get_mut()
+                    .detach_unconfirmed_sender_link(&attach, &link.inner, None);
+            }
+
+            if local {
+                // remote end confirms local end
+                handle(End { error: None }.into()).unwrap();
+                assert!(link.is_closed());
+            }
+
+            ntex::time::sleep(ntex::time::Millis(50)).await;
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                frames.push(frame.into_parts().1.name());
+            }
+            assert_eq!(frames, ["Begin", "End"], "local: {local} accept: {accept}");
         }
     }
 }
