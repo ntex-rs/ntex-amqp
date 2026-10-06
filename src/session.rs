@@ -1714,8 +1714,10 @@ impl SessionInner {
             self.pending_transfers.len(),
         );
 
-        while let Some(tr) = self.pending_transfers.pop_front() {
-            let _ = tr.tx.send(Ok(()));
+        if self.remote_incoming_window > 0 {
+            while let Some(tr) = self.pending_transfers.pop_front() {
+                let _ = tr.tx.send(Ok(()));
+            }
         }
     }
 

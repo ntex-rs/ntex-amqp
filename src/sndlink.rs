@@ -381,10 +381,19 @@ impl SenderLinkInner {
     }
 
     /// Wake up transfers waiting for link credit
+    ///
+    /// Number of woken transfers is limited by credit not claimed by active transfers
     fn wake_pending(&mut self) {
-        while let Some(tx) = self.pending_transfers.pop_front() {
+        if self.partial {
+            return;
+        }
+        let mut available = self.link_credit.saturating_sub(self.active);
+        while available > 0
+            && let Some(tx) = self.pending_transfers.pop_front()
+        {
             if tx.send(Ok(())).is_ok() {
                 self.active += 1;
+                available -= 1;
             }
         }
     }
@@ -435,6 +444,8 @@ impl SenderLinkInner {
         let body = body.into();
         let tag = inner.get_tag(tag);
 
+        // woken transfer claims credit ahead of queued transfers
+        let mut woken = false;
         loop {
             let inner = link.get_mut();
             if let Some(ref err) = inner.error {
@@ -442,7 +453,10 @@ impl SenderLinkInner {
             } else if inner.closed {
                 return Err(AmqpProtocolError::Disconnected);
             }
-            if inner.link_credit == 0 || inner.partial || !inner.pending_transfers.is_empty() {
+            if inner.link_credit == 0
+                || inner.partial
+                || (!woken && !inner.pending_transfers.is_empty())
+            {
                 log::trace!(
                     "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
                     inner.session.tag(),
@@ -460,6 +474,7 @@ impl SenderLinkInner {
                     done: false,
                 }
                 .await?;
+                woken = true;
                 continue;
             }
 
@@ -471,6 +486,7 @@ impl SenderLinkInner {
                 let guard = ActiveTransfer(Some(link.clone()));
                 wait_window(rx).await?;
                 guard.resume();
+                woken = true;
                 continue;
             }
 
@@ -585,6 +601,7 @@ impl Drop for CreditWaiter {
         {
             let link = self.link.get_mut();
             link.active -= 1;
+            link.wake_pending();
             link.drain_and_post();
         }
     }
@@ -607,6 +624,7 @@ impl Drop for ActiveTransfer {
         if let Some(link) = self.0.take() {
             let link = link.get_mut();
             link.active -= 1;
+            link.wake_pending();
             link.drain_and_post();
         }
     }
