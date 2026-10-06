@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix `Delivery::wait()` returned `LinkDetached(None)` instead of session or connection error after session end
+
 * Fix abort of cancelled delivery was not sent until next transfer on the same link; abort waits for session window in order with other transfers
 
 * Fix new transfers could take link credit or session window of woken transfers; session flow wakes transfers up to the window, cancelled delivery abort does not take window of woken transfers
