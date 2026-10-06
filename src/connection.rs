@@ -966,6 +966,39 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn local_receiver_delivery_count() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let s = session(&conn);
+        let fut = ntex::rt::spawn(async move { s.build_receiver_link("r", "r").attach().await });
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+
+        // remote sender initializes delivery-count
+        let Frame::Attach(mut attach) = named_attach(Role::Sender, "r", "r", 0) else {
+            panic!()
+        };
+        attach.0.initial_delivery_count = Some(100);
+        let Ok(Action::None) = handle_frame(&conn, attach.into()) else {
+            panic!()
+        };
+        let link = fut.await.unwrap().unwrap();
+        link.set_link_credit(10);
+        handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
+        link.set_link_credit(1);
+
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut flows = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Flow(flow) = frame.into_parts().1 {
+                flows.push((flow.delivery_count(), flow.link_credit()));
+            }
+        }
+        assert_eq!(flows, [(Some(100), Some(10)), (Some(101), Some(10))]);
+    }
+
+    #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,

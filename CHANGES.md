@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix local receiver link ignored remote sender initial delivery count
+
 * Fix link attach and session end hang if connection fails while session is ending
 
 * Fix sender link transfers waiting for session window or link credit were not failed on link detach or close
