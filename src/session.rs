@@ -1187,6 +1187,7 @@ impl SessionInner {
                     }
                 }
                 ReceiverLinkState::Established(receiver_link) => {
+                    receiver_link.inner.get_mut().local_detached();
                     let receiver_link = receiver_link.clone();
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,

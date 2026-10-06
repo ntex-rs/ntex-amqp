@@ -306,6 +306,12 @@ impl ReceiverLinkInner {
         self.closed = true;
     }
 
+    /// Link is detached locally, wake up reader
+    pub(crate) fn local_detached(&mut self) {
+        self.closed = true;
+        self.wake();
+    }
+
     pub(crate) fn close(
         &mut self,
         error: Option<Error>,
@@ -319,8 +325,7 @@ impl ReceiverLinkInner {
                 .get_mut()
                 .detach_receiver_link(self.handle, true, error, tx);
         }
-        self.closed = true;
-        self.wake();
+        self.local_detached();
 
         async move {
             match rx.await {
@@ -534,7 +539,7 @@ impl std::ops::Deref for EstablishedReceiverLink {
 
 impl Drop for EstablishedReceiverLink {
     fn drop(&mut self) {
-        self.0.inner.get_mut().closed = true;
+        self.0.inner.get_mut().local_detached();
     }
 }
 
