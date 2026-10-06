@@ -667,9 +667,9 @@ async fn open_session(
 mod tests {
     use ntex::codec::{Decoder, Encoder};
     use ntex_amqp_codec::protocol::{
-        Attach, AttachInner, Begin, BeginInner, DeliveryState, Disposition, DispositionInner, Open,
-        OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode, Source, TerminusDurability,
-        TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
+        Attach, AttachInner, Begin, BeginInner, DeliveryState, Disposition, DispositionInner, Flow,
+        FlowInner, Open, OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode, Source,
+        TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
     };
     use ntex_amqp_codec::types::{Multiple, Symbol};
     use ntex_bytes::{BytePages, Bytes, BytesMut};
@@ -707,6 +707,70 @@ mod tests {
         })
     }
 
+    fn begin() -> Frame {
+        Begin(Box::new(BeginInner {
+            remote_channel: None,
+            next_outgoing_id: 1,
+            incoming_window: 100,
+            outgoing_window: 100,
+            handle_max: 10,
+            offered_capabilities: Some(symbols()),
+            desired_capabilities: None,
+            properties: None,
+        }))
+        .into()
+    }
+
+    fn attach() -> Frame {
+        Attach(Box::new(AttachInner {
+            name: LONG.into(),
+            handle: 0,
+            role: Role::Sender,
+            snd_settle_mode: SenderSettleMode::Mixed,
+            rcv_settle_mode: ReceiverSettleMode::First,
+            source: Some(Source {
+                address: Some(LONG.into()),
+                durable: TerminusDurability::None,
+                expiry_policy: TerminusExpiryPolicy::SessionEnd,
+                timeout: 0,
+                dynamic: false,
+                dynamic_node_properties: None,
+                distribution_mode: None,
+                filter: None,
+                default_outcome: None,
+                outcomes: None,
+                capabilities: Some(symbols()),
+            }),
+            target: None,
+            unsettled: None,
+            incomplete_unsettled: false,
+            initial_delivery_count: Some(0),
+            max_message_size: None,
+            offered_capabilities: None,
+            desired_capabilities: None,
+            properties: None,
+        }))
+        .into()
+    }
+
+    fn transfer(delivery_id: u32, more: bool, state: Option<DeliveryState>, body: u8) -> Frame {
+        Transfer(Box::new(TransferInner {
+            handle: 0,
+            delivery_id: Some(delivery_id),
+            delivery_tag: Some(Bytes::from(LONG)),
+            message_format: None,
+            settled: Some(false),
+            more,
+            rcv_settle_mode: None,
+            state,
+            resume: false,
+            aborted: false,
+            batchable: false,
+            body: Some(TransferBody::Data(Bytes::from(vec![body; 10]))),
+        }))
+        .into()
+    }
+
     #[ntex::test]
     async fn frames_detached_from_read_buffer() {
         // remote open
@@ -740,50 +804,12 @@ mod tests {
         };
 
         // remote begin
-        let begin = Begin(Box::new(BeginInner {
-            remote_channel: None,
-            next_outgoing_id: 1,
-            incoming_window: 100,
-            outgoing_window: 100,
-            handle_max: 10,
-            offered_capabilities: Some(symbols()),
-            desired_capabilities: None,
-            properties: None,
-        }));
-        let (frame, buf) = read(begin.into());
+        let (frame, buf) = read(begin());
         handle(frame).unwrap();
         assert!(buf.is_unique(), "begin");
 
         // remote attach
-        let attach = Attach(Box::new(AttachInner {
-            name: LONG.into(),
-            handle: 0,
-            role: Role::Sender,
-            snd_settle_mode: SenderSettleMode::Mixed,
-            rcv_settle_mode: ReceiverSettleMode::First,
-            source: Some(Source {
-                address: Some(LONG.into()),
-                durable: TerminusDurability::None,
-                expiry_policy: TerminusExpiryPolicy::SessionEnd,
-                timeout: 0,
-                dynamic: false,
-                dynamic_node_properties: None,
-                distribution_mode: None,
-                filter: None,
-                default_outcome: None,
-                outcomes: None,
-                capabilities: Some(symbols()),
-            }),
-            target: None,
-            unsettled: None,
-            incomplete_unsettled: false,
-            initial_delivery_count: Some(0),
-            max_message_size: None,
-            offered_capabilities: None,
-            desired_capabilities: None,
-            properties: None,
-        }));
-        let (frame, buf) = read(attach.into());
+        let (frame, buf) = read(attach());
         let Ok(Action::AttachReceiver(link, _, response)) = handle(frame) else {
             panic!()
         };
@@ -793,21 +819,7 @@ mod tests {
 
         // partial transfers
         for (idx, more) in [true, true, false].into_iter().enumerate() {
-            let transfer = Transfer(Box::new(TransferInner {
-                handle: 0,
-                delivery_id: Some(0),
-                delivery_tag: Some(Bytes::from(LONG)),
-                message_format: None,
-                settled: Some(false),
-                more,
-                rcv_settle_mode: None,
-                state: (idx == 0).then(rejected),
-                resume: false,
-                aborted: false,
-                batchable: false,
-                body: Some(TransferBody::Data(Bytes::from(vec![idx as u8; 10]))),
-            }));
-            let (frame, buf) = read(transfer.into());
+            let (frame, buf) = read(transfer(0, more, (idx == 0).then(rejected), idx as u8));
             handle(frame).unwrap();
             assert!(buf.is_unique(), "transfer {idx}");
         }
@@ -838,5 +850,59 @@ mod tests {
         let (frame, buf) = read(disp.into());
         handle(frame).unwrap();
         assert!(buf.is_unique(), "disposition");
+    }
+
+    #[ntex::test]
+    async fn transfers_advance_next_incoming_id() {
+        let remote = RemoteServiceConfig::new(&Open(Box::default()));
+        let (server, client) = IoTest::create();
+        client.remote_buffer_cap(64 * 1024);
+        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let io = Io::new(server, cfg.clone());
+        let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+
+        handle(begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, _, response)) = handle(attach()) else {
+            panic!()
+        };
+        link.confirm_receiver_link(response);
+        link.set_link_credit(10);
+        for id in 0..3 {
+            handle(transfer(id, false, None, 0)).unwrap();
+        }
+        handle(transfer(3, true, None, 0)).unwrap();
+        link.set_link_credit(5);
+        assert_eq!(link.credit(), 12);
+
+        // session flow with echo, reply carries next-incoming-id
+        let flow = Flow(Box::new(FlowInner {
+            next_incoming_id: Some(1),
+            incoming_window: 100,
+            next_outgoing_id: 5,
+            outgoing_window: 100,
+            echo: true,
+            ..Default::default()
+        }));
+        handle(flow.into()).unwrap();
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut flows = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Flow(flow) = frame.into_parts().1 {
+                flows.push((flow.next_incoming_id(), flow.link_credit()));
+            }
+        }
+        assert_eq!(
+            flows,
+            [(Some(1), Some(10)), (Some(5), Some(12)), (Some(5), None)]
+        );
     }
 }

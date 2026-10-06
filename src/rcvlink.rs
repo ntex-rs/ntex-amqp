@@ -94,7 +94,7 @@ impl ReceiverLink {
             .confirm_receiver_link(inner.handle, response, size);
     }
 
-    /// Set link credit.
+    /// Add credit to the link.
     ///
     /// Each queued, not yet received delivery may keep its read buffer
     /// alive, credit bounds the memory retained by the link.
@@ -294,11 +294,11 @@ impl ReceiverLinkInner {
     }
 
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
-        self.credit += credit;
+        self.credit = self.credit.saturating_add(credit);
         self.session
             .inner
             .get_mut()
-            .rcv_link_flow(self.handle, self.delivery_count, credit);
+            .rcv_link_flow(self.handle, self.delivery_count, self.credit);
     }
 
     #[allow(clippy::unnecessary_unwrap)]
