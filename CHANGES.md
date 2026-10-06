@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix refused local link attach returned attached link
+
 * Add local link attach timeout, `AmqpServiceConfig::set_link_attach_timeout()` and `attach_timeout()` link builder methods
 
 * Fix local sender link did not set initial delivery count and used remote receiver value
