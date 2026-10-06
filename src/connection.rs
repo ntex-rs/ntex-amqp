@@ -968,6 +968,98 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn receiver_aborted_transfer() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+            panic!()
+        };
+        link.confirm_receiver_link(response);
+        link.set_link_credit(1);
+        let aborted = |id: Option<u32>, more: bool| {
+            let Frame::Transfer(mut tr) = transfer(0, more, None, 9) else {
+                panic!()
+            };
+            tr.0.delivery_id = id;
+            tr.0.aborted = true;
+            handle_frame(&conn, tr.into()).unwrap()
+        };
+
+        // multi-frame delivery aborted by last frame
+        handle_frame(&conn, transfer(0, true, None, 0)).unwrap();
+        assert!(matches!(aborted(Some(0), false), Action::None));
+        // multi-frame delivery aborted with `more` set
+        handle_frame(&conn, transfer(1, true, None, 1)).unwrap();
+        assert!(matches!(aborted(None, true), Action::None));
+        // single-frame aborted delivery, delivery-id is not required
+        assert!(matches!(aborted(None, false), Action::None));
+        assert!(matches!(aborted(Some(2), true), Action::None));
+
+        // aborted deliveries are discarded and implicitly settled,
+        // credit is returned to the sender
+        assert!(!link.has_deliveries());
+        assert!(
+            session(&conn)
+                .inner
+                .get_ref()
+                .unsettled_rcv_deliveries
+                .is_empty()
+        );
+        assert_eq!(link.credit(), 1);
+
+        // next delivery is not merged into aborted one
+        let Ok(Action::Transfer(_)) = handle_frame(&conn, transfer(3, false, None, 3)) else {
+            panic!()
+        };
+        let (delivery, tr) = link.get_delivery().unwrap();
+        assert_eq!(delivery.id(), 3);
+        assert_eq!(
+            tr.body(),
+            Some(&TransferBody::Data(Bytes::from(vec![3; 10])))
+        );
+        drop(delivery);
+        assert_eq!(link.credit(), 0);
+
+        // delivery-count includes aborted deliveries
+        link.set_link_credit(1);
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut frames = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            match frame.into_parts().1 {
+                Frame::Flow(flow) => frames.push(format!(
+                    "Flow {:?} {:?}",
+                    flow.delivery_count(),
+                    flow.link_credit()
+                )),
+                Frame::Disposition(disp) => frames.push(format!("Disposition {}", disp.first())),
+                frame => frames.push(frame.name().to_string()),
+            }
+        }
+        assert_eq!(
+            frames,
+            [
+                "Begin",
+                "Attach",
+                "Flow Some(0) Some(1)",
+                "Flow Some(1) Some(1)",
+                "Flow Some(2) Some(1)",
+                "Flow Some(3) Some(1)",
+                "Flow Some(4) Some(1)",
+                "Disposition 3",
+                "Flow Some(5) Some(1)",
+            ]
+        );
+
+        // wrong delivery-id in aborted transfer
+        handle_frame(&conn, transfer(4, true, None, 4)).unwrap();
+        aborted(Some(5), false);
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        assert_eq!(frame_names(&client), ["Detach 0"]);
+    }
+
+    #[ntex::test]
     async fn local_receiver_delivery_count() {
         let (_io, conn, client) = connection();
         handle_frame(&conn, begin()).unwrap();

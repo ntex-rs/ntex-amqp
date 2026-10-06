@@ -64,6 +64,15 @@ impl Delivery {
         }
     }
 
+    /// Drop delivery without sending disposition
+    pub(crate) fn discard(self) {
+        self.session
+            .inner
+            .get_mut()
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .remove(&self.id);
+    }
+
     pub fn id(&self) -> DeliveryNumber {
         self.id
     }
