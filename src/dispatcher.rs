@@ -1,12 +1,12 @@
 use std::task::{Context, Poll, ready};
-use std::{cell, cmp, future::Future, marker, pin::Pin};
+use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin};
 
 use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
 use ntex_service::pipeline::{Pipeline, PipelineCall};
 use ntex_service::{Ctx, Service};
+use ntex_util::future::Either;
 use ntex_util::time::{Millis, Sleep, sleep};
-use ntex_util::{future::Either, task::LocalWaker};
 
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
@@ -21,7 +21,6 @@ pub(crate) struct Dispatcher {
     ctl_service: Pipeline<ControlFrame, (), Error>,
     ctl_fut: cell::RefCell<Vec<(ControlFrame, ControlCall)>>,
     ctl_error: cell::Cell<Option<AmqpDispatcherError>>,
-    ctl_error_waker: LocalWaker,
     idle_sleep: Sleep,
     idle_timeout: Millis,
 }
@@ -41,7 +40,6 @@ impl Dispatcher {
             ctl_service,
             ctl_fut: cell::RefCell::new(Vec::new()),
             ctl_error: cell::Cell::new(None),
-            ctl_error_waker: LocalWaker::default(),
             idle_sleep: sleep(idle_timeout),
         }
     }
@@ -51,36 +49,41 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
     type Res = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
 
-    async fn ready(&self, ctx: Ctx<'_, Self, ()>) -> Result<(), Self::Error> {
-        if let Some(err) = self.ctl_error.take() {
-            log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
-            let _ = self.sink.close();
-            return Err(err);
-        }
+    async fn ready(&self, _: Ctx<'_, Self, ()>) -> Result<(), Self::Error> {
+        poll_fn(|cx| {
+            // control frames and keep-alive pings must progress
+            // while the publish service applies backpressure
+            self.poll_dispatcher(cx);
 
-        // check readiness
-        self.service.ready().await.map_err(|err| {
-            log::error!(
-                "{}: Publish service readiness check failed: {:?}",
-                self.sink.tag(),
-                err
-            );
-            let _ = self.sink.close_with_error(err);
-            AmqpDispatcherError::Service
-        })?;
+            if let Some(err) = self.ctl_error.take() {
+                log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
+                let _ = self.sink.close();
+                return Poll::Ready(Err(err));
+            }
 
-        self.ctl_service.ready().await.map_err(|err| {
-            log::error!(
-                "{}: Control service readiness check failed: {:?}",
-                self.sink.tag(),
-                err
-            );
-            let _ = self.sink.close_with_error(err);
-            AmqpDispatcherError::Service
-        })?;
+            if let Err(err) = ready!(self.service.poll_ready(cx)) {
+                log::error!(
+                    "{}: Publish service readiness check failed: {:?}",
+                    self.sink.tag(),
+                    err
+                );
+                let _ = self.sink.close_with_error(err);
+                return Poll::Ready(Err(AmqpDispatcherError::Service));
+            }
 
-        ctx.poll_once(|cx| self.poll_dispatcher(cx));
-        Ok(())
+            if let Err(err) = ready!(self.ctl_service.poll_ready(cx)) {
+                log::error!(
+                    "{}: Control service readiness check failed: {:?}",
+                    self.sink.tag(),
+                    err
+                );
+                let _ = self.sink.close_with_error(err);
+                return Poll::Ready(Err(AmqpDispatcherError::Service));
+            }
+
+            Poll::Ready(Ok(()))
+        })
+        .await
     }
 
     async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
@@ -259,7 +262,6 @@ impl Dispatcher {
 
             if let Err(err) = result {
                 self.ctl_error.set(Some(err));
-                self.ctl_error_waker.wake();
                 return;
             }
         }

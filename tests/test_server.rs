@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex, atomic::AtomicUsize, atomic::Ordering};
+use std::{cell::Cell, rc::Rc};
 
 use ntex::server::{TestServerBuilder, test_server};
-use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
+use ntex::service::{Ctx, Pipeline, Service, boxed, boxed::BoxService, fn_factory, fn_service};
 use ntex::util::{Bytes, Either};
-use ntex::{SharedCfg, rt, time::Millis, time::sleep, url::Url};
+use ntex::{SharedCfg, rt, time::Millis, time::sleep, time::timeout, url::Url};
 use ntex_amqp::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, protocol::ProtocolId};
 use ntex_amqp::{
     AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
@@ -941,5 +942,76 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     assert!(res.is_err());
 
     assert!(link.is_closed());
+    Ok(())
+}
+
+struct GatedPublish(Rc<Cell<bool>>);
+
+impl Service<server::State<()>, types::Message> for GatedPublish {
+    type Res = ();
+    type Error = LinkError;
+
+    async fn ready(&self, _: Ctx<'_, Self, server::State<()>>) -> Result<(), LinkError> {
+        while self.0.get() {
+            sleep(Millis(10)).await;
+        }
+        Ok(())
+    }
+
+    async fn call(
+        &self,
+        _: types::Message,
+        _: Ctx<'_, Self, server::State<()>>,
+    ) -> Result<(), LinkError> {
+        Ok(())
+    }
+}
+
+#[ntex::test]
+async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
+    let srv = test_server(async move || {
+        // publish service is not ready while the control service is processing a frame
+        let blocked = Rc::new(Cell::new(false));
+        let blocked2 = blocked.clone();
+
+        server::Server::builder(async move |con: server::Handshake| match con {
+            server::Handshake::Amqp(con) => {
+                let con = con.open().await.unwrap();
+                Ok(con.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .control(async move |frm: ControlFrame| {
+            if let ControlFrameKind::AttachSender(..) = frm.kind() {
+                blocked.set(true);
+                sleep(Millis(50)).await;
+                blocked.set(false);
+            }
+            Ok::<_, ()>(())
+        })
+        .build(fn_factory(async move |_: &server::State<()>| {
+            Ok::<_, std::convert::Infallible>(GatedPublish(blocked2.clone()))
+        }))
+    });
+
+    let uri = Url::try_from(format!("amqp://{}:{}", srv.addr().ip(), srv.addr().port())).unwrap();
+    let client = Pipeline::new(SharedCfg::default(), client::Connector::new())
+        .call(client::Connect::new(uri))
+        .await
+        .unwrap();
+
+    let sink = client.sink();
+    ntex::rt::spawn(async move {
+        let _ = client.start_default().await;
+    });
+
+    let session = sink.open_session().await.unwrap();
+    let res = timeout(
+        Millis(2000),
+        session.build_receiver_link("test", "test").attach(),
+    )
+    .await;
+    assert!(matches!(res, Ok(Ok(_))), "{res:?}");
+
     Ok(())
 }
