@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix dispositions were sent for unsettled deliveries of detached links
+
 * Fix `Delivery::wait()` returned on non-terminal disposition (no state or `Received`), consumed `Modified` outcome, and failed concurrent waiters with `ConnectionDropped`
 
 * Fix `Delivery::wait()` returned `LinkDetached(None)` instead of session or connection error after session end

@@ -4905,4 +4905,75 @@ pub(crate) mod tests {
             ));
         }
     }
+
+    #[ntex::test]
+    async fn delivery_no_disposition_after_link_detach() {
+        use ntex::time::{Millis, sleep};
+
+        let rejected = || DeliveryState::Rejected(Rejected { error: None });
+
+        // 0 - settle(), 1 - update_state(), 2 - drop
+        for case in 0..3 {
+            // remote detach, local detach confirmed by remote
+            for local in [false, true] {
+                let (_io, conn, client, snd) = small_frames_sender();
+                let mut d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+                let s = session(&conn);
+                let _d = local.then(|| s.detach_sender_link(snd.inner.get_ref().id(), None));
+                handle_frame(&conn, peer_detach(4)).unwrap();
+                sleep(Millis(50)).await;
+                let _ = dispositions(&client);
+
+                match case {
+                    0 => d.settle(rejected()),
+                    1 => d.update_state(rejected()),
+                    _ => (),
+                }
+                drop(d);
+                sleep(Millis(50)).await;
+                assert!(
+                    dispositions(&client).is_empty(),
+                    "case: {case} local: {local}"
+                );
+                assert!(
+                    session(&conn)
+                        .inner
+                        .get_ref()
+                        .unsettled_snd_deliveries
+                        .is_empty()
+                );
+            }
+
+            // receiver link
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach())
+            else {
+                panic!()
+            };
+            link.confirm_receiver_link(response);
+            link.set_link_credit(1);
+            handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
+            let (mut d, _) = link.get_delivery().unwrap();
+            handle_frame(&conn, peer_detach(0)).unwrap();
+            sleep(Millis(50)).await;
+            let _ = dispositions(&client);
+
+            match case {
+                0 => d.settle(rejected()),
+                1 => d.update_state(rejected()),
+                _ => (),
+            }
+            drop(d);
+            sleep(Millis(50)).await;
+            assert!(dispositions(&client).is_empty(), "case: {case}");
+            assert!(
+                session(&conn)
+                    .inner
+                    .get_ref()
+                    .unsettled_rcv_deliveries
+                    .is_empty()
+            );
+        }
+    }
 }
