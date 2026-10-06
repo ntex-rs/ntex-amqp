@@ -270,8 +270,6 @@ impl ConnectionInner {
             );
             return Err(AmqpProtocolError::TooManyChannels);
         }
-        let outgoing_window = begin.incoming_window();
-
         let session = Cell::new(SessionInner::new(
             local_token,
             false,
@@ -283,7 +281,7 @@ impl ConnectionInner {
         self.sessions_map.insert(remote_channel_id, local_token);
 
         let begin = Begin(Box::new(codec::BeginInner {
-            outgoing_window,
+            outgoing_window: u32::MAX,
             remote_channel: Some(remote_channel_id),
             next_outgoing_id: 1,
             incoming_window: u32::MAX,
@@ -1822,6 +1820,45 @@ pub(crate) mod tests {
         assert_eq!(lnk.credit(), 0);
         sleep(Millis(50)).await;
         assert_eq!(frames(), ["Attach", "Flow Some(1) Some(3) Some(0) true"]);
+    }
+
+    #[ntex::test]
+    async fn session_outgoing_window() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+
+        let Ok(Action::AttachReceiver(rcv, _, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "r", "r", 3))
+        else {
+            panic!()
+        };
+        assert!(rcv.confirm_receiver_link(response));
+        rcv.set_link_credit(10);
+
+        let Frame::Flow(mut flow) = peer_flow(None) else {
+            panic!()
+        };
+        flow.0.handle = None;
+        flow.0.incoming_window = 7;
+        flow.0.echo = true;
+        handle_frame(&conn, flow.into()).unwrap();
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+
+        // local outgoing window is not limited, peer windows are not echoed
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut windows = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            match frame.into_parts().1 {
+                Frame::Begin(begin) => windows.push(("Begin", begin.outgoing_window())),
+                Frame::Flow(flow) => windows.push(("Flow", flow.outgoing_window())),
+                _ => (),
+            }
+        }
+        assert_eq!(
+            windows,
+            [("Begin", u32::MAX), ("Flow", u32::MAX), ("Flow", u32::MAX)]
+        );
     }
 
     #[ntex::test]
