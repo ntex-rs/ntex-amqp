@@ -1805,6 +1805,54 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn receiver_link_detach_wakes_recv() {
+        use ntex::time::{Millis, sleep, timeout};
+
+        for queued in [false, true] {
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+            let fut = ntex::rt::spawn({
+                let s = s.clone();
+                async move { s.build_receiver_link("r", "r").attach().await }
+            });
+            sleep(Millis(10)).await;
+            let Ok(Action::None) = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0))
+            else {
+                panic!()
+            };
+            let link = fut.await.unwrap().unwrap();
+            link.set_link_credit(10);
+            if queued {
+                handle_frame(&conn, transfer(0, false, None, 1)).unwrap();
+            }
+            let rx = ntex::rt::spawn({
+                let link = link.clone();
+                async move {
+                    let mut items = Vec::new();
+                    while let Some(item) = link.recv().await {
+                        items.push(item.map(|(_, tr)| tr.delivery_id()));
+                    }
+                    items
+                }
+            });
+            sleep(Millis(50)).await;
+            frame_names(&client);
+
+            let _d = s.detach_receiver_link(link.inner.get_ref().id(), None);
+            let items = timeout(Millis(500), rx).await.unwrap().unwrap();
+            if queued {
+                assert!(matches!(items[..], [Ok(Some(0))]));
+            } else {
+                assert!(items.is_empty());
+            }
+            assert!(link.is_closed());
+            sleep(Millis(50)).await;
+            assert_eq!(frame_names(&client), ["Detach 0"]);
+        }
+    }
+
+    #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,
