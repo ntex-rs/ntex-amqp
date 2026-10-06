@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix `Delivery::wait()` returned on non-terminal disposition (no state or `Received`), consumed `Modified` outcome, and failed concurrent waiters with `ConnectionDropped`
+
 * Fix `Delivery::wait()` returned `LinkDetached(None)` instead of session or connection error after session end
 
 * Fix abort of cancelled delivery was not sent until next transfer on the same link; abort waits for session window in order with other transfers
