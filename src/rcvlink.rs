@@ -10,6 +10,7 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 use ntex_bytes::{BytePages, ByteString, Bytes};
+use ntex_util::time::{Seconds, timeout_checked};
 use ntex_util::{Stream, channel::oneshot, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
@@ -521,6 +522,7 @@ impl Drop for EstablishedReceiverLink {
 pub struct ReceiverLinkBuilder {
     frame: Attach,
     session: Cell<SessionInner>,
+    timeout: Seconds,
 }
 
 impl ReceiverLinkBuilder {
@@ -555,7 +557,12 @@ impl ReceiverLinkBuilder {
             properties: None,
         }));
 
-        ReceiverLinkBuilder { frame, session }
+        let timeout = session.get_ref().link_attach_timeout();
+        ReceiverLinkBuilder {
+            frame,
+            session,
+            timeout,
+        }
     }
 
     #[must_use]
@@ -594,6 +601,16 @@ impl ReceiverLinkBuilder {
     }
 
     #[must_use]
+    /// Set link attach timeout
+    ///
+    /// By default connection's link attach timeout is used.
+    /// Use `Seconds::ZERO` to disable timeout.
+    pub fn attach_timeout(mut self, timeout: Seconds) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    #[must_use]
     /// Modify attach frame
     pub fn with_frame<F>(mut self, f: F) -> Self
     where
@@ -610,7 +627,9 @@ impl ReceiverLinkBuilder {
             .session
             .get_mut()
             .attach_local_receiver_link(cell, self.frame);
-        rx.recv().await
+        timeout_checked(self.timeout, rx.recv())
+            .await
+            .map_err(|()| AmqpProtocolError::LinkAttachTimeout)?
     }
 }
 

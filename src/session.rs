@@ -3,7 +3,7 @@ use std::{cmp, collections::VecDeque, fmt, future::Future, mem, ptr};
 
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
-use ntex_util::{HashMap, future::Either};
+use ntex_util::{HashMap, future::Either, time::Seconds};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -590,6 +590,10 @@ impl SessionInner {
         };
         names.insert(name.clone(), idx);
         self.link_names.insert(idx, name);
+    }
+
+    pub(crate) fn link_attach_timeout(&self) -> Seconds {
+        self.sink.0.get_ref().link_attach_timeout
     }
 
     /// Check if link name is used by not closing link
