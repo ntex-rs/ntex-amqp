@@ -71,6 +71,7 @@ pub struct AmqpServiceConfig {
     pub desired_capabilities: Option<Symbols>,
     pub properties: Option<Fields>,
     pub(crate) handshake_timeout: Seconds,
+    pub(crate) link_attach_timeout: Seconds,
     config: CfgContext,
 }
 
@@ -114,6 +115,7 @@ impl AmqpServiceConfig {
             container_id: None,
             hostname: None,
             handshake_timeout: Seconds(5),
+            link_attach_timeout: Seconds(30),
             offered_capabilities: None,
             desired_capabilities: None,
             properties: None,
@@ -223,6 +225,20 @@ impl AmqpServiceConfig {
     /// By default handshake timeout is 5 seconds.
     pub fn set_handshake_timeout(mut self, timeout: Seconds) -> Self {
         self.handshake_timeout = timeout;
+        self
+    }
+
+    #[must_use]
+    /// Set local link attach timeout.
+    ///
+    /// Link attach fails with `AmqpProtocolError::LinkAttachTimeout` if remote
+    /// peer does not respond in time. Link is detached if remote attach is
+    /// received later, link name stays in use until then.
+    /// Use `Seconds::ZERO` to disable timeout.
+    ///
+    /// By default link attach timeout is 30 seconds.
+    pub fn set_link_attach_timeout(mut self, timeout: Seconds) -> Self {
+        self.link_attach_timeout = timeout;
         self
     }
 

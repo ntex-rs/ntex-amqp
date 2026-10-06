@@ -2,8 +2,8 @@ use std::{fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll}
 
 use ntex_io::{IoConfig, IoRef};
 use ntex_service::cfg::Cfg;
-use ntex_util::HashMap;
 use ntex_util::channel::{condition::Condition, condition::Waiter, oneshot};
+use ntex_util::{HashMap, time::Seconds};
 
 use crate::codec::protocol::{
     self as codec, AmqpError, Begin, Close, End, Error, ErrorCondition, Frame, Role, SessionError,
@@ -34,6 +34,7 @@ pub(crate) struct ConnectionInner {
     channel_max: u16,
     handle_max: u32,
     pub(crate) max_frame_size: u32,
+    pub(crate) link_attach_timeout: Seconds,
 }
 
 #[derive(Debug)]
@@ -75,6 +76,7 @@ impl Connection {
             channel_max: local_config.channel_max,
             handle_max: local_config.handle_max,
             max_frame_size: remote_config.max_frame_size,
+            link_attach_timeout: local_config.link_attach_timeout,
         })))
     }
 
@@ -1334,6 +1336,107 @@ pub(crate) mod tests {
         }
     }
 
+    async fn attach_with_timeout(
+        s: Session,
+        sender: bool,
+        timeout: Option<Seconds>,
+    ) -> Result<(), AmqpProtocolError> {
+        if sender {
+            let mut builder = s.build_sender_link("x", "l");
+            if let Some(timeout) = timeout {
+                builder = builder.attach_timeout(timeout);
+            }
+            builder.attach().await.map(|_| ())
+        } else {
+            let mut builder = s.build_receiver_link("x", "l");
+            if let Some(timeout) = timeout {
+                builder = builder.attach_timeout(timeout);
+            }
+            builder.attach().await.map(|_| ())
+        }
+    }
+
+    #[ntex::test]
+    async fn link_attach_timeout() {
+        // (config timeout, builder timeout)
+        let cases = [(Seconds(1), None), (Seconds::ZERO, Some(Seconds(1)))];
+        for sender in [true, false] {
+            for (config, builder) in cases {
+                let ctx = format!("sender: {sender} config: {config:?} builder: {builder:?}");
+                let (_io, conn, client) =
+                    connection_with(AmqpServiceConfig::new().set_link_attach_timeout(config));
+                handle_frame(&conn, begin()).unwrap();
+                let s = session(&conn);
+                let role = if sender { Role::Receiver } else { Role::Sender };
+
+                let res = ntex::time::timeout(
+                    ntex::time::Millis(3000),
+                    attach_with_timeout(s.clone(), sender, builder),
+                )
+                .await
+                .expect(&ctx);
+                assert!(
+                    matches!(res, Err(AmqpProtocolError::LinkAttachTimeout)),
+                    "{ctx}"
+                );
+
+                // late attach response detaches link
+                let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 0)) else {
+                    panic!("{ctx}")
+                };
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                assert_eq!(
+                    frame_names(&client),
+                    ["Begin", "Attach x 0", "Detach 0"],
+                    "{ctx}"
+                );
+                handle_frame(&conn, peer_detach(0)).unwrap();
+
+                // name is released
+                let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, builder));
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 1)) else {
+                    panic!("{ctx}")
+                };
+                ntex::time::timeout(ntex::time::Millis(1000), fut)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            }
+        }
+    }
+
+    #[ntex::test]
+    async fn link_attached_before_timeout() {
+        for sender in [true, false] {
+            let ctx = format!("sender: {sender}");
+            let (_io, conn, client) =
+                connection_with(AmqpServiceConfig::new().set_link_attach_timeout(Seconds(1)));
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+            let role = if sender { Role::Receiver } else { Role::Sender };
+
+            let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 0)) else {
+                panic!("{ctx}")
+            };
+            ntex::time::timeout(ntex::time::Millis(1000), fut)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            ntex::time::sleep(ntex::time::Millis(1500)).await;
+            assert_eq!(frame_names(&client), ["Begin", "Attach x 0"], "{ctx}");
+            if sender {
+                assert!(s.get_sender_link("x").is_some(), "{ctx}");
+            } else {
+                assert!(s.get_receiver_link_by_local_handle(0).is_some(), "{ctx}");
+            }
+        }
+    }
+
     #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
@@ -1388,10 +1491,14 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn connection() -> (Io, Connection, IoTest) {
+        connection_with(AmqpServiceConfig::new())
+    }
+
+    fn connection_with(cfg: AmqpServiceConfig) -> (Io, Connection, IoTest) {
         let remote = RemoteServiceConfig::new(&Open(Box::default()));
         let (server, client) = IoTest::create();
         client.remote_buffer_cap(64 * 1024);
-        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let cfg = SharedCfg::new("T").add(cfg).build();
         let io = Io::new(server, cfg.clone());
         let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
         (io, conn, client)

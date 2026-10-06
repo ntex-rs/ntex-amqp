@@ -7,6 +7,7 @@ use ntex_amqp_codec::protocol::{
 };
 use ntex_bytes::{BufMut, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
+use ntex_util::time::{Seconds, timeout_checked};
 
 use crate::delivery::TransferBuilder;
 use crate::session::{Session, SessionInner};
@@ -584,6 +585,7 @@ impl Drop for EstablishedSenderLink {
 pub struct SenderLinkBuilder {
     frame: Attach,
     session: Cell<SessionInner>,
+    timeout: Seconds,
 }
 
 impl SenderLinkBuilder {
@@ -614,13 +616,28 @@ impl SenderLinkBuilder {
             properties: None,
         }));
 
-        SenderLinkBuilder { frame, session }
+        let timeout = session.get_ref().link_attach_timeout();
+        SenderLinkBuilder {
+            frame,
+            session,
+            timeout,
+        }
     }
 
     #[must_use]
     /// Set max message size
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
+        self
+    }
+
+    #[must_use]
+    /// Set link attach timeout
+    ///
+    /// By default connection's link attach timeout is used.
+    /// Use `Seconds::ZERO` to disable timeout.
+    pub fn attach_timeout(mut self, timeout: Seconds) -> Self {
+        self.timeout = timeout;
         self
     }
 
@@ -637,7 +654,9 @@ impl SenderLinkBuilder {
     /// Initiate attach sender process
     pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
         let rx = self.session.get_mut().attach_local_sender_link(self.frame);
-        let inner = rx.recv().await?;
+        let inner = timeout_checked(self.timeout, rx.recv())
+            .await
+            .map_err(|()| AmqpProtocolError::LinkAttachTimeout)??;
         Ok(SenderLink { inner })
     }
 }
