@@ -286,7 +286,7 @@ impl ConnectionInner {
         let begin = Begin(Box::new(codec::BeginInner {
             outgoing_window: u32::MAX,
             remote_channel: Some(remote_channel_id),
-            next_outgoing_id: 1,
+            next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
             incoming_window: u32::MAX,
             handle_max: self.handle_max,
             offered_capabilities: None,
@@ -2953,6 +2953,54 @@ pub(crate) mod tests {
             });
         }
         frames
+    }
+
+    #[ntex::test]
+    async fn session_flow_window() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client, snd) = small_frames_sender();
+        let session = session(&conn);
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+        assert_eq!(session.remote_window_size(), 2);
+        for _ in 0..2 {
+            let t = snd.transfer(Bytes::from_static(b"1")).settled().send();
+            assert!(timeout(Millis(500), t).await.unwrap().is_ok());
+        }
+        assert_eq!(session.remote_window_size(), 0);
+
+        // flow issued before remote got sent transfers
+        session_window(&conn, 1, 1);
+        assert_eq!(session.remote_window_size(), 0);
+        let mut t = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
+        assert!(poll_fn(|cx| Poll::Ready(t.as_mut().poll(cx).is_pending())).await);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            [
+                "Transfer Some(0) more:false aborted:false",
+                "Transfer Some(1) more:false aborted:false"
+            ]
+        );
+        session_window(&conn, 1, 3);
+        assert!(timeout(Millis(500), t).await.unwrap().is_ok());
+        assert_eq!(session.remote_window_size(), 0);
+
+        // remote has not received begin yet, initial outgoing id is used
+        let Frame::Flow(mut flow) = peer_flow(None) else {
+            panic!()
+        };
+        flow.0.handle = None;
+        flow.0.next_incoming_id = None;
+        flow.0.incoming_window = 5;
+        handle_frame(&conn, flow.into()).unwrap();
+        assert_eq!(session.remote_window_size(), 2);
+
+        // remote next-incoming-id is ahead, window is used as is
+        session_window(&conn, 10, 3);
+        assert_eq!(session.remote_window_size(), 3);
     }
 
     #[ntex::test]
