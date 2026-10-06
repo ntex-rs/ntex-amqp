@@ -842,6 +842,63 @@ async fn test_remote_receiver_detached_disconnect() -> std::io::Result<()> {
     Ok(())
 }
 
+#[ntex::test]
+async fn test_router_link_service_shutdown_on_disconnect() -> std::io::Result<()> {
+    struct Srv(Arc<AtomicUsize>);
+
+    impl Service<types::Link<()>, types::Transfer> for Srv {
+        type Res = types::Outcome;
+        type Error = LinkError;
+
+        async fn call(
+            &self,
+            _: types::Transfer,
+            _: Ctx<'_, Self, types::Link<()>>,
+        ) -> Result<types::Outcome, LinkError> {
+            Ok(types::Outcome::Accept)
+        }
+
+        async fn shutdown(&self, _: Ctx<'_, Self, types::Link<()>>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    // link services are shutdown when connection is closed
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let shutdowns2 = shutdowns.clone();
+
+    let srv = test_server(async move || {
+        let shutdowns = shutdowns2.clone();
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .build(
+            server::Router::<()>::builder()
+                .service("test", async move |_: &types::Link<()>| {
+                    Ok::<_, LinkError>(Srv(shutdowns.clone()))
+                })
+                .build(),
+        )
+    });
+
+    let io = raw_connect(srv.addr()).await;
+    raw_begin_session(&io).await;
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+    assert!(matches!(raw_recv(&io).await, protocol::Frame::Attach(_)));
+    sleep(Millis(100)).await;
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
+
+    io.close();
+    sleep(Millis(200)).await;
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+
+    Ok(())
+}
+
 struct CountGuard(Arc<AtomicUsize>);
 
 impl Drop for CountGuard {

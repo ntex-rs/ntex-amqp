@@ -71,12 +71,24 @@ struct RouterService<S>(Cell<RouterServiceInner<S>>);
 struct RouterServiceInner<S> {
     state: State<S>,
     router: Rc<PatternRouter<Handle<S>>>,
-    handlers: HashMap<ReceiverLink, Option<Pipeline<Transfer, Outcome, Error>>>,
+    handlers: HashMap<ReceiverLink, Pipeline<Transfer, Outcome, Error>>,
 }
 
 impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
     type Res = ();
     type Error = Error;
+
+    async fn shutdown(&self, _: Ctx<'_, Self, State<S>>) {
+        let handlers: Vec<_> = self
+            .0
+            .get_mut()
+            .handlers
+            .drain()
+            .map(|(_, srv)| srv)
+            .collect();
+        log::trace!("Shutting down {} handler services", handlers.len());
+        let _ = join_all(handlers.iter().map(Pipeline::shutdown).collect::<Vec<_>>()).await;
+    }
 
     async fn call(&self, msg: Message, _: Ctx<'_, Self, State<S>>) -> Result<(), Error> {
         match msg {
@@ -89,15 +101,14 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                     if let Some((hnd, _info)) = inner.router.recognize(link.path_mut()) {
                         log::trace!("Create handler service for {}", link.path().get_ref());
                         let rcv_link = link.link.clone();
-                        inner.handlers.insert(link.receiver().clone(), None);
 
                         match hnd.create(&link).await {
                             Ok(srv) => {
                                 log::trace!("Handler service is created for {}", rcv_link.name());
-                                self.0.get_mut().handlers.insert(
-                                    rcv_link.clone(),
-                                    Some(Pipeline::new(link.clone(), srv)),
-                                );
+                                self.0
+                                    .get_mut()
+                                    .handlers
+                                    .insert(rcv_link.clone(), Pipeline::new(link.clone(), srv));
                                 if let Some((delivery, tr)) = rcv_link.get_delivery() {
                                     service_call(rcv_link, delivery, tr, &self.0).await
                                 } else {
@@ -131,7 +142,7 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 }
             }
             Message::Detached(link) => {
-                if let Some(Some(srv)) = self.0.get_mut().handlers.remove(&link) {
+                if let Some(srv) = self.0.get_mut().handlers.remove(&link) {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
                     ntex_rt::spawn(async move {
@@ -149,7 +160,7 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                             .get_mut()
                             .handlers
                             .remove(&link)
-                            .and_then(move |srv| srv.map(|srv| (link, srv)))
+                            .map(move |srv| (link, srv))
                     })
                     .collect();
 
@@ -177,7 +188,7 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 Ok(())
             }
             Message::Transfer(link) => {
-                if let Some(Some(_)) = self.0.get_ref().handlers.get(&link)
+                if self.0.get_ref().handlers.contains_key(&link)
                     && let Some((delivery, tr)) = link.get_delivery()
                 {
                     service_call(link, delivery, tr, &self.0).await?;
@@ -194,7 +205,7 @@ async fn service_call<S>(
     tr: Transfer,
     inner: &Cell<RouterServiceInner<S>>,
 ) -> Result<(), Error> {
-    if let Some(Some(srv)) = inner.handlers.get(&link) {
+    if let Some(srv) = inner.handlers.get(&link) {
         // check readiness
         if let Err(e) = srv.ready().await {
             log::trace!("Service readiness check failed: {e:?}");
@@ -290,5 +301,96 @@ where
             Ok(v) => Ok(v),
             Err(err) => Outcome::try_from(err),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ntex_amqp_codec::protocol::Role;
+
+    use super::*;
+    use crate::connection::tests::{begin, connection, handle_frame, named_attach};
+    use crate::types::Action;
+
+    struct Srv(Rc<AtomicUsize>);
+
+    impl Service<Link<()>, Transfer> for Srv {
+        type Res = Outcome;
+        type Error = LinkError;
+
+        async fn call(
+            &self,
+            _: Transfer,
+            _: Ctx<'_, Self, Link<()>>,
+        ) -> Result<Outcome, LinkError> {
+            Ok(Outcome::Accept)
+        }
+
+        async fn shutdown(&self, _: Ctx<'_, Self, Link<()>>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[ntex::test]
+    async fn link_service_lifecycle() {
+        let (_io, conn, _client) = connection();
+        let attach = |name: &str, handle: u32| {
+            let Ok(Action::AttachReceiver(link, frm, _)) =
+                handle_frame(&conn, named_attach(Role::Sender, name, name, handle))
+            else {
+                panic!()
+            };
+            Message::Attached(frm, link)
+        };
+        handle_frame(&conn, begin()).unwrap();
+
+        let shutdowns = Rc::new(AtomicUsize::new(0));
+        let cnt = shutdowns.clone();
+        let router = Router::<()>::builder()
+            .service("fail", async |_: &Link<()>| {
+                Err::<Srv, _>(LinkError::force_detach())
+            })
+            .service("ok", async move |_: &Link<()>| {
+                Ok::<_, LinkError>(Srv(cnt.clone()))
+            });
+        let mut patterns = PatternRouter::builder();
+        for (addr, hnd) in router.0 {
+            patterns.path(addr, hnd);
+        }
+        let inner = Cell::new(RouterServiceInner {
+            state: State::new(()),
+            router: Rc::new(patterns.build()),
+            handlers: HashMap::default(),
+        });
+        let srv = Pipeline::new(State::new(()), RouterService(inner.clone()));
+
+        // failed link service creation does not keep link
+        for handle in 0..3 {
+            assert!(srv.call(attach("fail", handle)).await.is_err());
+        }
+        assert!(inner.get_ref().handlers.is_empty());
+
+        // detached link service is released
+        let Message::Attached(frm, link) = attach("ok", 3) else {
+            panic!()
+        };
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert_eq!(inner.get_ref().handlers.len(), 1);
+        srv.call(Message::Detached(link)).await.unwrap();
+        assert!(inner.get_ref().handlers.is_empty());
+
+        // link services are shutdown with router
+        srv.call(attach("ok", 4)).await.unwrap();
+        srv.call(attach("ok", 5)).await.unwrap();
+        assert_eq!(inner.get_ref().handlers.len(), 2);
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+        srv.shutdown().await;
+        assert!(inner.get_ref().handlers.is_empty());
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 3);
     }
 }
