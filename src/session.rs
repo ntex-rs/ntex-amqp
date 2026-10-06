@@ -370,6 +370,14 @@ impl<T> Drop for AttachReceiver<T> {
     }
 }
 
+fn detach_closed(idx: usize) -> Detach {
+    Detach(Box::new(codec::DetachInner {
+        handle: idx as Handle,
+        closed: true,
+        error: None,
+    }))
+}
+
 fn cancel_sender_attach(link: &Cell<SenderLinkInner>) {
     let inner = link.get_ref().session.inner.clone();
     let inner = inner.get_mut();
@@ -1304,14 +1312,7 @@ impl SessionInner {
             Some(Either::Right(link)) => *link = ReceiverLinkState::Closing(None),
             None => return,
         }
-        self.post_frame(
-            Detach(Box::new(codec::DetachInner {
-                handle: idx as Handle,
-                closed: true,
-                error: None,
-            }))
-            .into(),
-        );
+        self.post_frame(detach_closed(idx).into());
     }
 
     /// Handle `Attach` frame. return false if attach frame is remote and can not be handled
@@ -1331,6 +1332,16 @@ impl SessionInner {
 
         match self.links.get_mut(index) {
             Some(Either::Left(item)) if item.is_opening() => {
+                // refused link, attach fails on remote detach
+                if attach.target().is_none() {
+                    log::trace!(
+                        "{}: Local sender link attach is refused: {name:?} {index} -> {}",
+                        self.sink.tag(),
+                        attach.handle()
+                    );
+                    self.remote_handles.insert(attach.handle(), index);
+                    return true;
+                }
                 log::trace!(
                     "{}: Local sender link attached: {name:?} {index} -> {}, {:?}",
                     self.sink.tag(),
@@ -1366,6 +1377,16 @@ impl SessionInner {
                 true
             }
             Some(Either::Right(item)) if item.is_opening() => {
+                // refused link, attach fails on remote detach
+                if attach.source().is_none() {
+                    log::trace!(
+                        "{}: Local receiver link attach is refused: {name:?} {index} -> {}",
+                        self.sink.tag(),
+                        attach.handle()
+                    );
+                    self.remote_handles.insert(attach.handle(), index);
+                    return true;
+                }
                 log::trace!(
                     "{}: Local receiver link attached: {name:?} {index} -> {}",
                     self.sink.tag(),
@@ -1416,10 +1437,13 @@ impl SessionInner {
             match link {
                 Either::Left(link) => match link {
                     SenderLinkState::Opening(tx, _) => {
+                        // refused link
                         if let Some(tx) = tx.take() {
                             let err = AmqpProtocolError::LinkDetached(frame.0.error.clone());
                             let _ = tx.send(Err(err));
                         }
+                        self.sink
+                            .post_frame(AmqpFrame::new(self.id as u16, detach_closed(idx).into()));
                         true
                     }
                     SenderLinkState::Established(link) => {
@@ -1492,6 +1516,7 @@ impl SessionInner {
                         false
                     }
                     ReceiverLinkState::OpeningLocal(item) => {
+                        // refused link
                         if let Some((inner, tx)) = item.take() {
                             inner.get_mut().detached();
                             if let Some(err) = frame.0.error.clone() {
@@ -1502,7 +1527,8 @@ impl SessionInner {
                         } else {
                             log::error!("{}: Inconsistent session state, bug", self.tag());
                         }
-
+                        self.sink
+                            .post_frame(AmqpFrame::new(self.id as u16, detach_closed(idx).into()));
                         true
                     }
                     ReceiverLinkState::Established(link) => {

@@ -1438,6 +1438,90 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn refused_local_attach() {
+        let not_found = Error(Box::new(codec::ErrorInner {
+            condition: AmqpError::NotFound.into(),
+            description: None,
+            info: None,
+        }));
+        for sender in [true, false] {
+            for error in [None, Some(not_found.clone())] {
+                for cancel in [false, true] {
+                    let ctx = format!("sender: {sender} error: {error:?} cancel: {cancel}");
+                    let (_io, conn, client) = connection();
+                    handle_frame(&conn, begin()).unwrap();
+                    let s = session(&conn);
+                    let role = if sender { Role::Receiver } else { Role::Sender };
+
+                    let mut fut = Some(Box::pin(attach_with_timeout(s.clone(), sender, None)));
+                    let mut cx = Context::from_waker(std::task::Waker::noop());
+                    assert!(
+                        fut.as_mut().unwrap().as_mut().poll(&mut cx).is_pending(),
+                        "{ctx}"
+                    );
+
+                    // refused, attach waits for remote detach
+                    let Frame::Attach(mut attach) = named_attach(role, "x", "l", 3) else {
+                        panic!()
+                    };
+                    if sender {
+                        attach.0.target = None;
+                    } else {
+                        attach.0.source = None;
+                    }
+                    let Ok(Action::None) = handle_frame(&conn, attach.into()) else {
+                        panic!("{ctx}")
+                    };
+                    assert!(
+                        fut.as_mut().unwrap().as_mut().poll(&mut cx).is_pending(),
+                        "{ctx}"
+                    );
+                    if cancel {
+                        fut = None;
+                    }
+
+                    let detach = Detach(Box::new(DetachInner {
+                        handle: 3,
+                        closed: true,
+                        error: error.clone(),
+                    }));
+                    let Ok(Action::None) = handle_frame(&conn, detach.into()) else {
+                        panic!("{ctx}")
+                    };
+                    if let Some(mut fut) = fut {
+                        let Poll::Ready(Err(AmqpProtocolError::LinkDetached(err))) =
+                            fut.as_mut().poll(&mut cx)
+                        else {
+                            panic!("{ctx}")
+                        };
+                        assert_eq!(err, error, "{ctx}");
+                    }
+                    ntex::time::sleep(ntex::time::Millis(10)).await;
+                    assert_eq!(
+                        frame_names(&client),
+                        ["Begin", "Attach x 0", "Detach 0"],
+                        "{ctx}"
+                    );
+
+                    // name and handle are released
+                    let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
+                    ntex::time::sleep(ntex::time::Millis(10)).await;
+                    let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 3))
+                    else {
+                        panic!("{ctx}")
+                    };
+                    ntex::time::timeout(ntex::time::Millis(1000), fut)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(frame_names(&client), ["Attach x 0"], "{ctx}");
+                }
+            }
+        }
+    }
+
+    #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,
@@ -1520,6 +1604,7 @@ pub(crate) mod tests {
         };
         attach.0.role = role;
         attach.0.max_message_size = max_message_size;
+        attach.0.target = Some(Target::default());
         attach.into()
     }
 
