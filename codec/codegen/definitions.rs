@@ -511,7 +511,7 @@ fn encode_{{snake list.name}}_inner(list: &{{list.name}}, buf: &mut BytePages) {
     let content_size = 0 {{#each list.fields as |field|}} + list.{{list.inner}}{{field.name}}.encoded_size(){{/each}};
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32({{list.name}}::FIELD_COUNT as u32);
     }
     else {

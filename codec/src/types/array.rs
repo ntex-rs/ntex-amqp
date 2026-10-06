@@ -80,7 +80,7 @@ impl Encode for Array {
         let ctor_len = self.element_constructor.encoded_size();
         if self.is_array32(ctor_len) {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32((4 + ctor_len + self.payload.len()) as u32); // size. 4 for count
+            buf.put_u32(codec::size_u32(4 + ctor_len + self.payload.len())); // size. 4 for count
             buf.put_u32(self.count);
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);

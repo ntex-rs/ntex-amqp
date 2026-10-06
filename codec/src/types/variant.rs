@@ -457,8 +457,8 @@ mod tests {
             let data_size = self.encoded_data_size();
             if data_size + 1 > u8::MAX as usize {
                 buf.put_u8(format_codes::FORMATCODE_LIST32);
-                buf.put_u32((4 + data_size) as u32); // size. 4 for count
-                buf.put_u32(count as u32); // count
+                buf.put_u32(crate::codec::size_u32(4 + data_size)); // size. 4 for count
+                buf.put_u32(u32::from(count)); // count
             } else {
                 buf.put_u8(format_codes::FORMATCODE_LIST8);
                 buf.put_u8((1 + data_size) as u8); // size. 1 for count

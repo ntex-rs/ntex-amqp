@@ -1139,7 +1139,7 @@ fn encode_error_inner(list: &Error, buf: &mut BytePages) {
         + list.0.info.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Error::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -1472,7 +1472,7 @@ fn encode_open_inner(list: &Open, buf: &mut BytePages) {
         + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Open::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -1765,7 +1765,7 @@ fn encode_begin_inner(list: &Begin, buf: &mut BytePages) {
         + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Begin::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -2202,7 +2202,7 @@ fn encode_attach_inner(list: &Attach, buf: &mut BytePages) {
         + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Attach::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -2572,7 +2572,7 @@ fn encode_flow_inner(list: &Flow, buf: &mut BytePages) {
         + list.0.properties.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Flow::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -2949,7 +2949,7 @@ fn encode_transfer_inner(list: &Transfer, buf: &mut BytePages) {
         + list.0.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Transfer::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3191,7 +3191,7 @@ fn encode_disposition_inner(list: &Disposition, buf: &mut BytePages) {
         + list.0.batchable.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Disposition::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3351,7 +3351,7 @@ fn encode_detach_inner(list: &Detach, buf: &mut BytePages) {
         + list.0.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Detach::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3434,7 +3434,7 @@ fn encode_end_inner(list: &End, buf: &mut BytePages) {
     let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(End::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3515,7 +3515,7 @@ fn encode_close_inner(list: &Close, buf: &mut BytePages) {
     let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Close::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3601,7 +3601,7 @@ fn encode_sasl_mechanisms_inner(list: &SaslMechanisms, buf: &mut BytePages) {
     let content_size = 0 + list.sasl_server_mechanisms.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(SaslMechanisms::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3725,7 +3725,7 @@ fn encode_sasl_init_inner(list: &SaslInit, buf: &mut BytePages) {
         + list.hostname.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(SaslInit::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3809,7 +3809,7 @@ fn encode_sasl_challenge_inner(list: &SaslChallenge, buf: &mut BytePages) {
     let content_size = 0 + list.challenge.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(SaslChallenge::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3891,7 +3891,7 @@ fn encode_sasl_response_inner(list: &SaslResponse, buf: &mut BytePages) {
     let content_size = 0 + list.response.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(SaslResponse::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -3992,7 +3992,7 @@ fn encode_sasl_outcome_inner(list: &SaslOutcome, buf: &mut BytePages) {
     let content_size = 0 + list.code.encoded_size() + list.additional_data.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(SaslOutcome::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -4272,7 +4272,7 @@ fn encode_source_inner(list: &Source, buf: &mut BytePages) {
         + list.capabilities.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Source::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -4485,7 +4485,7 @@ fn encode_target_inner(list: &Target, buf: &mut BytePages) {
         + list.capabilities.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Target::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -4656,7 +4656,7 @@ fn encode_header_inner(list: &Header, buf: &mut BytePages) {
         + list.delivery_count.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Header::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -4973,7 +4973,7 @@ fn encode_properties_inner(list: &Properties, buf: &mut BytePages) {
         + list.reply_to_group_id.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Properties::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -5087,7 +5087,7 @@ fn encode_received_inner(list: &Received, buf: &mut BytePages) {
     let content_size = 0 + list.section_number.encoded_size() + list.section_offset.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Received::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -5151,7 +5151,7 @@ fn encode_accepted_inner(list: &Accepted, buf: &mut BytePages) {
     let content_size = 0;
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Accepted::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -5231,7 +5231,7 @@ fn encode_rejected_inner(list: &Rejected, buf: &mut BytePages) {
     let content_size = 0 + list.error.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Rejected::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -5294,7 +5294,7 @@ fn encode_released_inner(list: &Released, buf: &mut BytePages) {
     let content_size = 0;
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Released::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
@@ -5416,7 +5416,7 @@ fn encode_modified_inner(list: &Modified, buf: &mut BytePages) {
         + list.message_annotations.encoded_size();
     if content_size + 1 > u8::MAX as usize {
         buf.put_u8(codec::FORMATCODE_LIST32);
-        buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count
+        buf.put_u32(crate::codec::size_u32(content_size + 4)); // +4 for 4 byte count
         buf.put_u32(Modified::FIELD_COUNT as u32);
     } else {
         buf.put_u8(codec::FORMATCODE_LIST8);
