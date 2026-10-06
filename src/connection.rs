@@ -1717,6 +1717,114 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn sender_link_drain() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        let flow = |credit: u32, delivery_count: u32, drain: bool| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(4);
+            flow.0.delivery_count = Some(delivery_count);
+            flow.0.drain = drain;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        let frames = || {
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                frames.push(match frame.into_parts().1 {
+                    Frame::Flow(flow) => format!(
+                        "Flow {:?} {:?} {:?} {}",
+                        flow.handle(),
+                        flow.delivery_count(),
+                        flow.link_credit(),
+                        flow.drain()
+                    ),
+                    frame => frame.name().to_string(),
+                });
+            }
+            frames
+        };
+
+        let Ok(Action::AttachSender(snd, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
+        else {
+            panic!()
+        };
+        let snd =
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone());
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Begin", "Attach"]);
+
+        // idle link, credit is drained immediately
+        flow(5, 0, true);
+        assert_eq!(snd.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Flow Some(0) Some(5) Some(0) true"]);
+
+        // queued transfers are sent before credit is drained
+        let t1 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"1")).settled().send());
+        let t2 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"2")).settled().send());
+        sleep(Millis(50)).await;
+        flow(3, 5, true);
+        assert!(timeout(Millis(500), t1).await.unwrap().unwrap().is_ok());
+        assert!(timeout(Millis(500), t2).await.unwrap().unwrap().is_ok());
+        sleep(Millis(50)).await;
+        assert_eq!(
+            frames(),
+            ["Transfer", "Transfer", "Flow Some(0) Some(8) Some(0) true"]
+        );
+
+        // woken transfer is dropped before it resumes
+        let mut t3 = Box::pin(snd.transfer(Bytes::from_static(b"3")).settled().send());
+        assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+        flow(2, 8, true);
+        sleep(Millis(50)).await;
+        assert!(frames().is_empty());
+        assert_eq!(snd.credit(), 2);
+        drop(t3);
+        assert_eq!(snd.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Flow Some(0) Some(10) Some(0) true"]);
+
+        // no drain
+        flow(2, 10, false);
+        assert_eq!(snd.credit(), 2);
+        sleep(Millis(50)).await;
+        assert!(frames().is_empty());
+
+        // drain flow received before link confirmation
+        let Ok(Action::AttachSender(lnk, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "d", "d", 6))
+        else {
+            panic!()
+        };
+        let Frame::Flow(mut pending) = peer_flow(Some(3)) else {
+            panic!()
+        };
+        pending.0.handle = Some(6);
+        pending.0.drain = true;
+        handle_frame(&conn, pending.into()).unwrap();
+        let lnk =
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, lnk.inner.clone());
+        assert_eq!(lnk.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Attach", "Flow Some(1) Some(3) Some(0) true"]);
+    }
+
+    #[ntex::test]
     async fn session_ending_sends_no_frames() {
         use ntex::time::{Millis, sleep, timeout};
 
