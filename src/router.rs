@@ -205,7 +205,8 @@ async fn service_call<S>(
     tr: Transfer,
     inner: &Cell<RouterServiceInner<S>>,
 ) -> Result<(), Error> {
-    if let Some(srv) = inner.handlers.get(&link) {
+    // handler could be removed while call is in progress
+    if let Some(srv) = inner.handlers.get(&link).map(Pipeline::bind) {
         // check readiness
         if let Err(e) = srv.ready().await {
             log::trace!("Service readiness check failed: {e:?}");

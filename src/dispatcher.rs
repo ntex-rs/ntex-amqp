@@ -249,6 +249,23 @@ impl Dispatcher {
         // enqueue pending control frames
         let frames: Vec<_> = queue.pending.borrow_mut().drain(..).collect();
         for frame in frames {
+            // release publish service resources of locally detached links
+            match frame.kind() {
+                ControlFrameKind::LocalDetachReceiver(_, link) => {
+                    self.spawn_publish_call(types::Message::Detached(link.clone()));
+                }
+                ControlFrameKind::LocalSessionEnded(links) => {
+                    let receivers = links
+                        .iter()
+                        .filter_map(|either| match either {
+                            Either::Right(link) => Some(link.clone()),
+                            Either::Left(_) => None,
+                        })
+                        .collect();
+                    self.spawn_publish_call(types::Message::DetachedAll(receivers));
+                }
+                _ => (),
+            }
             self.spawn_control_call(frame);
         }
 
