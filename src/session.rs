@@ -112,7 +112,7 @@ impl Session {
             }
 
             if !inner.flags.contains(Flags::ENDING) {
-                inner.sink.close_session(inner.remote_channel_id as usize);
+                inner.sink.close_session(inner.id);
                 inner.post_frame(Frame::End(End { error: None }));
                 inner.flags.insert(Flags::ENDING);
                 inner

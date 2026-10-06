@@ -188,8 +188,9 @@ impl ConnectionRef {
         OpenSession::new(self.0.clone())
     }
 
-    pub(crate) fn close_session(&self, id: usize) {
-        if let Some(state) = self.0.get_mut().sessions.get_mut(id)
+    /// Mark session as closing, `local_id` is local channel id
+    pub(crate) fn close_session(&self, local_id: usize) {
+        if let Some(state) = self.0.get_mut().sessions.get_mut(local_id)
             && let SessionState::Established(inner) = state
         {
             *state = SessionState::Closing(inner.clone());
@@ -1148,5 +1149,63 @@ mod tests {
             link
         };
         (link, (io, conn, client))
+    }
+
+    #[ntex::test]
+    async fn session_end_uses_local_channel() {
+        let (_io, conn, client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |channel: u16, frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(channel, frame), &inner)
+        };
+
+        // local and remote channel ids are different
+        handle(1, begin()).unwrap();
+        handle(0, begin()).unwrap();
+        let session = conn.get_ref().get_session_by_local_id(0).unwrap();
+        assert_eq!(session.remote_channel_id(), 1);
+
+        let fut = ntex::rt::spawn(async move { session.end().await });
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        assert!(matches!(
+            inner.get_ref().sessions[0],
+            SessionState::Closing(_)
+        ));
+        assert!(matches!(
+            inner.get_ref().sessions[1],
+            SessionState::Established(_)
+        ));
+
+        // other session handles frames
+        let flow = Flow(Box::new(FlowInner {
+            next_incoming_id: Some(1),
+            incoming_window: 100,
+            next_outgoing_id: 1,
+            outgoing_window: 100,
+            echo: true,
+            ..Default::default()
+        }));
+        handle(0, flow.into()).unwrap();
+
+        // remote confirms session end
+        handle(1, End { error: None }.into()).unwrap();
+        assert!(fut.await.unwrap().is_ok());
+        assert!(!inner.get_ref().sessions.contains(0));
+        assert!(inner.get_ref().sessions.contains(1));
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut frames = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            match frame.into_parts() {
+                (ch, Frame::End(_)) => frames.push(("end", ch)),
+                (ch, Frame::Flow(_)) => frames.push(("flow", ch)),
+                _ => (),
+            }
+        }
+        assert_eq!(frames, [("end", 0), ("flow", 1)]);
     }
 }
