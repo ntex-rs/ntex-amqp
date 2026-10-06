@@ -1,5 +1,5 @@
-use std::task::{Context, Poll, Waker};
-use std::{cmp, collections::VecDeque, fmt, future::Future, mem, ptr};
+use std::task::{Context, Poll, Waker, ready};
+use std::{cmp, collections::VecDeque, fmt, future::Future, mem, pin::Pin, ptr};
 
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
@@ -47,6 +47,8 @@ pub(crate) struct SessionInner {
     next_incoming_id: TransferNumber,
     remote_outgoing_window: u32,
     remote_incoming_window: u32,
+    // window claimed by woken transfers that have not sent their frame yet
+    pub(crate) window_woken: u32,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
     // link names by direction, and names of links by index
@@ -357,6 +359,78 @@ fn drop_pending_transfers(
     }
 }
 
+/// Waits for session window
+///
+/// Woken waiter claims window until it sends transfer or gets dropped
+pub(crate) struct WindowWaiter {
+    rx: pool::Receiver<Result<(), AmqpProtocolError>>,
+    session: Cell<SessionInner>,
+    done: bool,
+}
+
+impl WindowWaiter {
+    pub(crate) fn new(
+        rx: pool::Receiver<Result<(), AmqpProtocolError>>,
+        session: Cell<SessionInner>,
+    ) -> Self {
+        WindowWaiter {
+            rx,
+            session,
+            done: false,
+        }
+    }
+}
+
+impl Future for WindowWaiter {
+    type Output = Result<WindowClaim, AmqpProtocolError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let result = ready!(self.rx.poll_recv(cx));
+        self.done = true;
+        Poll::Ready(match result {
+            Ok(Ok(())) => Ok(WindowClaim(Some(self.session.clone()))),
+            Ok(Err(err)) => Err(err),
+            Err(_) => Err(AmqpProtocolError::ConnectionDropped),
+        })
+    }
+}
+
+impl Drop for WindowWaiter {
+    fn drop(&mut self) {
+        // waiter is dropped after wake up
+        if !self.done
+            && let Poll::Ready(Ok(Ok(()))) =
+                self.rx.poll_recv(&mut Context::from_waker(Waker::noop()))
+        {
+            drop(WindowClaim(Some(self.session.clone())));
+        }
+    }
+}
+
+/// Session window claimed by woken transfer
+///
+/// Dropped claim wakes up next waiting transfer
+pub(crate) struct WindowClaim(Option<Cell<SessionInner>>);
+
+impl WindowClaim {
+    /// Transfer frame is sent
+    pub(crate) fn consume(mut self) {
+        if let Some(session) = self.0.take() {
+            session.get_mut().window_woken -= 1;
+        }
+    }
+}
+
+impl Drop for WindowClaim {
+    fn drop(&mut self) {
+        if let Some(session) = self.0.take() {
+            let session = session.get_mut();
+            session.window_woken -= 1;
+            session.wake_window_waiters();
+        }
+    }
+}
+
 /// Local link attach response
 ///
 /// Link attached after the attach future is dropped is detached.
@@ -426,6 +500,7 @@ impl SessionInner {
         SessionInner {
             next_incoming_id: begin.next_outgoing_id(),
             remote_incoming_window: begin.incoming_window(),
+            window_woken: 0,
             remote_outgoing_window: begin.outgoing_window(),
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
@@ -1714,9 +1789,18 @@ impl SessionInner {
             self.pending_transfers.len(),
         );
 
-        if self.remote_incoming_window > 0 {
-            while let Some(tr) = self.pending_transfers.pop_front() {
-                let _ = tr.tx.send(Ok(()));
+        self.wake_window_waiters();
+    }
+
+    /// Wake up transfers waiting for session window
+    ///
+    /// Number of woken transfers is limited by window not claimed by woken transfers
+    fn wake_window_waiters(&mut self) {
+        while self.remote_incoming_window > self.window_woken
+            && let Some(tr) = self.pending_transfers.pop_front()
+        {
+            if tr.tx.send(Ok(())).is_ok() {
+                self.window_woken += 1;
             }
         }
     }
@@ -1751,14 +1835,17 @@ impl SessionInner {
 
     /// Remote incoming window waiter, `None` if window is available
     ///
-    /// Window could be taken by other transfer after wake up
+    /// Window claimed by woken transfers is not available, except own claim.
+    /// Waiters are woken up to the window, queued waiters leave no window.
     pub(crate) fn window_waiter(
         &mut self,
         link_handle: Handle,
+        claimed: bool,
     ) -> Result<Option<pool::Receiver<Result<(), AmqpProtocolError>>>, AmqpProtocolError> {
+        let claimed_by_others = self.window_woken - u32::from(claimed);
         if let Some(err) = self.ending_error() {
             Err(err)
-        } else if self.remote_incoming_window == 0 {
+        } else if self.remote_incoming_window <= claimed_by_others {
             log::trace!(
                 "{}: Remote window is 0, push to pending queue, hnd:{link_handle:?}",
                 self.sink.tag()
@@ -1891,13 +1978,14 @@ impl SessionInner {
 
     /// Abort partially sent delivery, AMQP 1.0 2.6.14
     ///
-    /// Returns `false` if remote incoming window is not available
+    /// Returns `false` if remote incoming window not claimed by woken
+    /// transfers is not available
     pub(crate) fn abort_transfer(
         &mut self,
         link_handle: Handle,
         delivery_id: DeliveryNumber,
     ) -> bool {
-        if self.remote_incoming_window == 0 {
+        if self.remote_incoming_window <= self.window_woken {
             false
         } else {
             log::trace!(
