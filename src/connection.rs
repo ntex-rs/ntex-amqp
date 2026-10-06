@@ -669,8 +669,8 @@ mod tests {
     use ntex_amqp_codec::AmqpCodecError;
     use ntex_amqp_codec::protocol::{
         Attach, AttachInner, Begin, BeginInner, DeliveryState, Disposition, DispositionInner, Flow,
-        FlowInner, Open, OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode, Source,
-        TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
+        FlowInner, LinkError, Open, OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode,
+        Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
     };
     use ntex_amqp_codec::types::{Multiple, Symbol, Variant};
     use ntex_bytes::{BytePages, Bytes, BytesMut};
@@ -999,5 +999,154 @@ mod tests {
             Frame::Attach(_)
         ));
         assert!(buf.is_empty());
+    }
+
+    fn connection() -> (Io, Connection, IoTest) {
+        let remote = RemoteServiceConfig::new(&Open(Box::default()));
+        let (server, client) = IoTest::create();
+        client.remote_buffer_cap(64 * 1024);
+        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let io = Io::new(server, cfg.clone());
+        let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+        (io, conn, client)
+    }
+
+    fn session(conn: &Connection) -> Session {
+        let inner = conn.get_ref().0;
+        let SessionState::Established(session) =
+            &inner.get_ref().sessions[inner.get_ref().sessions_map[&0]]
+        else {
+            panic!()
+        };
+        Session::new(session.clone())
+    }
+
+    fn peer_attach(role: Role, max_message_size: Option<u64>) -> Frame {
+        let Frame::Attach(mut attach) = attach() else {
+            panic!()
+        };
+        attach.0.role = role;
+        attach.0.max_message_size = max_message_size;
+        attach.into()
+    }
+
+    #[ntex::test]
+    async fn receiver_max_message_size() {
+        // remotely attached link, max size is set by `set_max_message_size`
+        assert_eq!(receive(false, 0, &[true, true, false]).await, (true, false));
+        assert_eq!(
+            receive(false, 30, &[true, true, false]).await,
+            (true, false)
+        );
+        assert_eq!(
+            receive(false, 25, &[true, true, false]).await,
+            (false, true)
+        );
+        assert_eq!(receive(false, 5, &[true]).await, (false, true));
+        assert_eq!(receive(false, 10, &[false]).await, (true, false));
+        assert_eq!(receive(false, 5, &[false]).await, (false, true));
+
+        // locally attached link, max size is set by link builder
+        assert_eq!(receive(true, 0, &[true, true, false]).await, (true, false));
+        assert_eq!(receive(true, 25, &[true, true, false]).await, (false, true));
+    }
+
+    /// Receive message, returns (delivered, detached with message-size-exceeded)
+    async fn receive(local: bool, max: u64, frames: &[bool]) -> (bool, bool) {
+        let (_io, conn, client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+
+        let link = if local {
+            let session = session(&conn);
+            let fut = ntex::rt::spawn(async move {
+                session
+                    .build_receiver_link(LONG, LONG)
+                    .max_message_size(max)
+                    .attach()
+                    .await
+            });
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            handle(attach()).unwrap();
+            fut.await.unwrap().unwrap()
+        } else {
+            let Ok(Action::AttachReceiver(link, _, response)) = handle(attach()) else {
+                panic!()
+            };
+            link.set_max_message_size(max);
+            link.confirm_receiver_link(response);
+            link
+        };
+        link.set_link_credit(10);
+        for (idx, more) in frames.iter().enumerate() {
+            handle(transfer(0, *more, None, idx as u8)).unwrap();
+        }
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut exceeded = false;
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Detach(detach) = frame.into_parts().1 {
+                exceeded =
+                    *detach.error().unwrap().condition() == LinkError::MessageSizeExceeded.into();
+            }
+        }
+        (link.get_delivery().is_some(), exceeded)
+    }
+
+    #[ntex::test]
+    async fn sender_max_message_size() {
+        for local in [false, true] {
+            // peer max-message-size 0 means no limit
+            let (link, _conn) = sender(local, Some(0)).await;
+            assert_eq!(link.max_message_size(), None);
+
+            let (link, _conn) = sender(local, Some(10)).await;
+            assert_eq!(link.max_message_size(), Some(10));
+            assert!(matches!(
+                link.transfer(Bytes::from(vec![0; 11])).send().await,
+                Err(AmqpProtocolError::BodyTooLarge)
+            ));
+            link.set_max_message_size(0);
+            assert_eq!(link.max_message_size(), None);
+
+            let (link, _conn) = sender(local, Some(u64::MAX)).await;
+            assert_eq!(link.max_message_size(), Some(u32::MAX));
+        }
+    }
+
+    async fn sender(local: bool, max: Option<u64>) -> (SenderLink, (Io, Connection, IoTest)) {
+        let (io, conn, client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+
+        let link = if local {
+            let session = session(&conn);
+            let fut =
+                ntex::rt::spawn(
+                    async move { session.build_sender_link(LONG, LONG).attach().await },
+                );
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            handle(peer_attach(Role::Receiver, max)).unwrap();
+            fut.await.unwrap().unwrap()
+        } else {
+            let Ok(Action::AttachSender(link, _, _)) = handle(peer_attach(Role::Receiver, max))
+            else {
+                panic!()
+            };
+            link
+        };
+        (link, (io, conn, client))
     }
 }
