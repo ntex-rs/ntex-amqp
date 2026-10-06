@@ -169,8 +169,12 @@ impl SenderLink {
         self.inner.get_ref().max_message_size
     }
 
+    /// Set max message size.
+    ///
+    /// Sending larger messages fails with `AmqpProtocolError::BodyTooLarge`.
+    /// If max size is set to `0`, size is unlimited.
     pub fn set_max_message_size(&self, value: u32) {
-        self.inner.get_mut().max_message_size = Some(value);
+        self.inner.get_mut().max_message_size = (value != 0).then_some(value);
     }
 }
 
@@ -211,17 +215,13 @@ impl SenderLinkInner {
         name.trimdown();
 
         let delivery_count = frame.initial_delivery_count().unwrap_or(0);
-        let max_message_size = frame
-            .max_message_size()
-            .map(|size| u32::try_from(size).unwrap_or(u32::MAX));
-
         SenderLinkInner::new(
             id,
             name,
             frame.handle(),
             delivery_count,
             session,
-            max_message_size,
+            remote_max_message_size(frame),
         )
     }
 
@@ -379,6 +379,14 @@ impl SenderLinkInner {
             buf.put_u32(delivery_tag);
             buf.freeze()
         })
+    }
+}
+
+/// Max message size of remote link endpoint, `0` or unset means unlimited
+pub(crate) fn remote_max_message_size(attach: &Attach) -> Option<u32> {
+    match attach.max_message_size() {
+        None | Some(0) => None,
+        Some(size) => Some(u32::try_from(size).unwrap_or(u32::MAX)),
     }
 }
 

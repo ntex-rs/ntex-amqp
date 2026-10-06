@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix max-message-size handling: remote max-message-size `0` means unlimited instead of rejecting all sends, locally attached receiver links use max size from `ReceiverLinkBuilder::max_message_size()` instead of hard-coded 256KiB, `0` max size means unlimited for receiver and sender links, single-frame transfers are checked against receiver max size
+
 * Fix receiver link `delivery-count` overflow panic (with overflow checks) when remote `initial-delivery-count` is near `u32::MAX`, delivery count wraps around
 
 * Enforce remote max-frame-size for all outgoing frames, oversized frames fail the connection with new `AmqpCodecError::MaxOutboundSizeExceeded` error instead of being sent. Add `AmqpCodec::max_encode_size()` and `AmqpCodec::set_max_encode_size()`

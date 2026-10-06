@@ -103,6 +103,9 @@ impl ReceiverLink {
     }
 
     /// Set max message size.
+    ///
+    /// Larger messages detach the link with `message-size-exceeded` error.
+    /// If max size is set to `0`, size is unlimited.
     pub fn set_max_message_size(&self, size: u64) {
         self.inner.get_mut().max_message_size = size;
     }
@@ -230,6 +233,7 @@ impl ReceiverLinkInner {
         handle: Handle,
         remote_handle: Handle,
         frame: &Attach,
+        max_message_size: u64,
     ) -> ReceiverLinkInner {
         let mut name = frame.name().clone();
         name.trimdown();
@@ -245,7 +249,7 @@ impl ReceiverLinkInner {
             error: None,
             partial_body: None,
             delivery_count: frame.initial_delivery_count().unwrap_or(0),
-            max_message_size: 262_144,
+            max_message_size,
             reader_task: LocalWaker::new(),
         }
     }
@@ -291,6 +295,16 @@ impl ReceiverLinkInner {
                 Err(_) => Err(AmqpProtocolError::Disconnected),
             }
         }
+    }
+
+    fn close_size_exceeded(&mut self) -> Action {
+        let err = Error(Box::new(codec::ErrorInner {
+            condition: LinkError::MessageSizeExceeded.into(),
+            description: None,
+            info: None,
+        }));
+        let _ = self.close(Some(err));
+        Action::None
     }
 
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
@@ -342,14 +356,8 @@ impl ReceiverLinkInner {
 
                 // merge transfer data and check size
                 if let Some(transfer_body) = transfer.0.body.take() {
-                    if body.len() + transfer_body.len() > self.max_message_size as usize {
-                        let err = Error(Box::new(codec::ErrorInner {
-                            condition: LinkError::MessageSizeExceeded.into(),
-                            description: None,
-                            info: None,
-                        }));
-                        let _ = self.close(Some(err));
-                        return Action::None;
+                    if size_exceeded(self.max_message_size, body.len() + transfer_body.len()) {
+                        return self.close_size_exceeded();
                     }
 
                     append_body(body, transfer_body);
@@ -385,6 +393,10 @@ impl ReceiverLinkInner {
             } else if transfer.more() {
                 // handle first transfer in batch
                 if let Some(id) = transfer.delivery_id() {
+                    if size_exceeded(self.max_message_size, body_len(&transfer)) {
+                        return self.close_size_exceeded();
+                    }
+
                     let mut body = BytePages::default();
                     if let Some(data) = transfer.0.body.take() {
                         append_body(&mut body, data);
@@ -418,6 +430,10 @@ impl ReceiverLinkInner {
                     Action::None
                 }
             } else if let Some(id) = transfer.delivery_id() {
+                if size_exceeded(self.max_message_size, body_len(&transfer)) {
+                    return self.close_size_exceeded();
+                }
+
                 self.delivery_count = self.delivery_count.wrapping_add(1);
                 let delivery = Delivery::new_rcv(
                     id,
@@ -510,7 +526,10 @@ impl ReceiverLinkBuilder {
     }
 
     #[must_use]
-    /// Set attach frame max message size
+    /// Set max message size
+    ///
+    /// Larger messages detach the link with `message-size-exceeded` error.
+    /// If max size is set to `0`, size is unlimited.
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
@@ -566,6 +585,18 @@ impl ReceiverLinkBuilder {
             Err(_) => Err(AmqpProtocolError::Disconnected),
         }
     }
+}
+
+/// Default max message size of remotely attached receiver links
+pub(crate) const DEFAULT_MAX_MESSAGE_SIZE: u64 = 262_144;
+
+/// Check message size against max message size, `0` means unlimited
+fn size_exceeded(max_message_size: u64, size: usize) -> bool {
+    max_message_size != 0 && size as u64 > max_message_size
+}
+
+fn body_len(transfer: &Transfer) -> usize {
+    transfer.body().map_or(0, TransferBody::len)
 }
 
 /// Max size of transfer data copied into the message body

@@ -15,9 +15,12 @@ use ntex_amqp_codec::{AmqpFrame, Encode};
 use crate::delivery::DeliveryInner;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{
-    EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder, ReceiverLinkInner,
+    DEFAULT_MAX_MESSAGE_SIZE, EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder,
+    ReceiverLinkInner,
 };
-use crate::sndlink::{EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner};
+use crate::sndlink::{
+    EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner, remote_max_message_size,
+};
 use crate::{ConnectionRef, ControlFrame, cell::Cell, detach, types::Action};
 
 const FRAME_HEADER_LEN: usize = 8;
@@ -630,7 +633,13 @@ impl SessionInner {
         let entry = self.links.vacant_entry();
         let token = entry.key();
 
-        let inner = Cell::new(ReceiverLinkInner::new(cell, token as u32, handle, attach));
+        let inner = Cell::new(ReceiverLinkInner::new(
+            cell,
+            token as u32,
+            handle,
+            attach,
+            DEFAULT_MAX_MESSAGE_SIZE,
+        ));
         entry.insert(Either::Right(ReceiverLinkState::Opening(Box::new(Some((
             inner.clone(),
             attach.source().cloned(),
@@ -672,6 +681,7 @@ impl SessionInner {
             token as u32,
             token as u32,
             &frame,
+            frame.max_message_size().unwrap_or(0),
         ));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
             inner, tx,
@@ -902,9 +912,7 @@ impl SessionInner {
                             attach.handle(),
                             delivery_count,
                             cell,
-                            attach
-                                .max_message_size()
-                                .map(|v| u32::try_from(v).unwrap_or(u32::MAX)),
+                            remote_max_message_size(attach),
                         ));
                         let local_sender = mem::replace(
                             item,
