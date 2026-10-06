@@ -495,20 +495,31 @@ impl SessionInner {
                 Either::Left(SenderLinkState::OpeningRemote { link, .. }) => {
                     link.get_mut().remote_detached(err.clone());
                 }
-                Either::Left(SenderLinkState::Closing(link)) => {
-                    if let Some(tx) = link.take() {
+                Either::Left(SenderLinkState::Opening(tx, _)) => {
+                    if let Some(tx) = tx.take() {
+                        let _ = tx.send(Err(err.clone()));
+                    }
+                }
+                Either::Left(SenderLinkState::Closing(tx))
+                | Either::Right(ReceiverLinkState::Closing(tx)) => {
+                    if let Some(tx) = tx.take() {
                         let _ = tx.send(Err(err.clone()));
                     }
                 }
                 Either::Right(ReceiverLinkState::Established(link)) => {
-                    link.remote_detached(None);
+                    link.session_ended(err.clone());
                 }
                 Either::Right(ReceiverLinkState::Opening(link, _)) => {
                     if let Some((link, _)) = link.as_ref() {
-                        ReceiverLink::new(link.clone()).remote_detached(None);
+                        ReceiverLink::new(link.clone()).session_ended(err.clone());
                     }
                 }
-                _ => (),
+                Either::Right(ReceiverLinkState::OpeningLocal(item)) => {
+                    if let Some((link, tx)) = item.take() {
+                        link.get_mut().detached();
+                        let _ = tx.send(Err(err.clone()));
+                    }
+                }
             }
         }
         self.links.clear();

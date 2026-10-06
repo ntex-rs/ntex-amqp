@@ -34,7 +34,7 @@ pub(crate) struct ReceiverLinkInner {
     queue: VecDeque<(Delivery, Transfer)>,
     credit: u32,
     delivery_count: SequenceNo,
-    error: Option<Error>,
+    error: Option<AmqpProtocolError>,
     partial_body: Option<BytePages>,
     max_message_size: u64,
 }
@@ -82,8 +82,13 @@ impl ReceiverLink {
         self.inner.get_ref().closed
     }
 
+    /// Remote detach error
     pub fn error(&self) -> Option<&Error> {
-        self.inner.get_ref().error.as_ref()
+        if let Some(AmqpProtocolError::LinkDetached(Some(err))) = &self.inner.get_ref().error {
+            Some(err)
+        } else {
+            None
+        }
     }
 
     /// Confirm remote link, returns `false` if link is not established
@@ -177,7 +182,21 @@ impl ReceiverLink {
             );
         }
         inner.closed = true;
-        inner.error = error;
+        inner.error = error.map(|err| AmqpProtocolError::LinkDetached(Some(err)));
+        inner.wake();
+    }
+
+    /// Session is ended or connection is closed
+    pub(crate) fn session_ended(&self, err: AmqpProtocolError) {
+        let inner = self.inner.get_mut();
+        log::trace!(
+            "{}: Receiver link is closed by session error handle: {:?} name: {:?} error: {err:?}",
+            inner.session.tag(),
+            inner.remote_handle,
+            inner.name,
+        );
+        inner.closed = true;
+        inner.error = Some(err);
         inner.wake();
     }
 
@@ -200,7 +219,7 @@ impl ReceiverLink {
         if inner.partial_body.is_some() && inner.queue.len() == 1 {
             if inner.closed {
                 if let Some(err) = inner.error.take() {
-                    Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
+                    Poll::Ready(Some(Err(err)))
                 } else {
                     Poll::Ready(None)
                 }
@@ -212,7 +231,7 @@ impl ReceiverLink {
             Poll::Ready(Some(Ok(tr)))
         } else if inner.closed {
             if let Some(err) = inner.error.take() {
-                Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err)))))
+                Poll::Ready(Some(Err(err)))
             } else {
                 Poll::Ready(None)
             }
