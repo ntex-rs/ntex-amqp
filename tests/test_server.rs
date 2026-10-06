@@ -735,6 +735,54 @@ async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
     Ok(())
 }
 
+#[ntex::test]
+async fn test_remote_receiver_attach_disconnect() -> std::io::Result<()> {
+    // link service creation is cancelled on disconnect
+    let created = Arc::new(AtomicUsize::new(0));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let (created2, dropped2) = (created.clone(), dropped.clone());
+
+    let srv = test_server(async move || {
+        let (created, dropped) = (created2.clone(), dropped2.clone());
+        server::Server::builder(async move |conn: server::Handshake| match conn {
+            server::Handshake::Amqp(conn) => {
+                let conn = conn.open().await.map_err(|_| ())?;
+                Ok::<_, ()>(conn.ack(()))
+            }
+            server::Handshake::Sasl(_) => Err(()),
+        })
+        .control(async |_: ControlFrame| Ok::<_, ()>(()))
+        .build(
+            server::Router::<()>::builder()
+                .service("test", move |_: &types::Link<()>| {
+                    let _guard = CountGuard(dropped.clone());
+                    created.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        let _guard = _guard;
+                        sleep(Millis(10_000)).await;
+                        Ok::<_, LinkError>(boxed::service(fn_service(async |_req| {
+                            Ok::<_, LinkError>(types::Outcome::Accept)
+                        })))
+                    }
+                })
+                .build(),
+        )
+    });
+
+    let io = raw_connect(srv.addr()).await;
+    raw_begin_session(&io).await;
+    raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+    sleep(Millis(100)).await;
+    assert_eq!(created.load(Ordering::SeqCst), 1);
+    assert_eq!(dropped.load(Ordering::SeqCst), 0);
+
+    io.close();
+    sleep(Millis(200)).await;
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
+
+    Ok(())
+}
+
 struct CountGuard(Arc<AtomicUsize>);
 
 impl Drop for CountGuard {
