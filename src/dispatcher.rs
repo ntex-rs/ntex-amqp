@@ -175,11 +175,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                         ));
                     }
                     types::Action::DetachReceiver(link, frm) => {
-                        let lnk = link.clone();
-                        let fut = self.service.call_static(types::Message::Detached(lnk));
-                        spawn(async move {
-                            let _ = fut.await;
-                        });
+                        self.spawn_publish_call(types::Message::Detached(link.clone()));
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::RemoteDetachReceiver(frm, link),
@@ -194,12 +190,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                             })
                             .collect();
 
-                        let fut = self
-                            .service
-                            .call_static(types::Message::DetachedAll(receivers));
-                        spawn(async move {
-                            let _ = fut.await;
-                        });
+                        self.spawn_publish_call(types::Message::DetachedAll(receivers));
                         self.call_control_service(ControlFrame::new_kind(
                             ControlFrameKind::RemoteSessionEnded(links),
                         ));
@@ -271,6 +262,16 @@ impl Dispatcher {
             self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
             self.idle_sleep.reset(self.idle_timeout);
         }
+    }
+
+    fn spawn_publish_call(&self, msg: types::Message) {
+        let fut = self.service.call_static(msg);
+        let stop = self.ctl_state.stop.wait();
+
+        // publish service call is dropped on dispatcher shutdown
+        spawn(async move {
+            let _ = select(stop.ready(), fut).await;
+        });
     }
 
     fn call_control_service(&self, frame: ControlFrame) {
