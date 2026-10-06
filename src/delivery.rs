@@ -96,12 +96,12 @@ impl Delivery {
     }
 
     pub fn is_remote_settled(&self) -> bool {
-        self.is_set(Flags::REMOTE_SETTLED)
+        self.remote_settled()
     }
 
     pub fn settle(&mut self, state: DeliveryState) {
         // remote side is settled, not need to send disposition
-        if self.is_set(Flags::REMOTE_SETTLED) {
+        if self.remote_settled() {
             return;
         }
 
@@ -126,7 +126,7 @@ impl Delivery {
 
     pub fn update_state(&mut self, state: DeliveryState) {
         // remote side is settled, not need to send disposition
-        if self.is_set(Flags::REMOTE_SETTLED) || self.is_set(Flags::LOCAL_SETTLED) {
+        if self.is_set(Flags::LOCAL_SETTLED) || self.remote_settled() {
             return;
         }
 
@@ -155,6 +155,22 @@ impl Delivery {
         self.flags.set(flags);
     }
 
+    /// Check if remote side settled delivery, disposition could arrive before `wait()` call
+    fn remote_settled(&self) -> bool {
+        if !self.is_set(Flags::REMOTE_SETTLED)
+            && self
+                .session
+                .inner
+                .get_mut()
+                .unsettled_deliveries(self.is_set(Flags::SENDER))
+                .get(&self.id)
+                .is_some_and(|inner| inner.settled)
+        {
+            self.set_flag(Flags::REMOTE_SETTLED);
+        }
+        self.is_set(Flags::REMOTE_SETTLED)
+    }
+
     pub async fn wait(&self) -> Result<Option<DeliveryState>, AmqpProtocolError> {
         if self.flags.get().contains(Flags::LOCAL_SETTLED) {
             log::debug!("Delivery {:?} is settled locally", self.id);
@@ -168,6 +184,9 @@ impl Delivery {
             .unsettled_deliveries(self.is_set(Flags::SENDER))
             .get_mut(&self.id)
         {
+            if inner.settled {
+                self.set_flag(Flags::REMOTE_SETTLED);
+            }
             if let Some(st) = Self::check_inner(inner) {
                 return st;
             }
@@ -225,30 +244,30 @@ impl Drop for Delivery {
         let inner = self.session.inner.get_mut();
         let deliveries = inner.unsettled_deliveries(self.is_set(Flags::SENDER));
 
-        if deliveries.contains_key(&self.id) {
-            deliveries.remove(&self.id);
+        if let Some(delivery) = deliveries.remove(&self.id)
+            && !delivery.settled
+            && !self.is_set(Flags::REMOTE_SETTLED)
+            && !self.is_set(Flags::LOCAL_SETTLED)
+        {
+            let err = Error::build()
+                .condition(ErrorCondition::Custom(Symbol(Str::from_static(
+                    "Internal error",
+                ))))
+                .finish();
 
-            if !self.is_set(Flags::REMOTE_SETTLED) && !self.is_set(Flags::LOCAL_SETTLED) {
-                let err = Error::build()
-                    .condition(ErrorCondition::Custom(Symbol(Str::from_static(
-                        "Internal error",
-                    ))))
-                    .finish();
-
-                let disp = Disposition(Box::new(DispositionInner {
-                    role: if self.is_set(Flags::SENDER) {
-                        Role::Sender
-                    } else {
-                        Role::Receiver
-                    },
-                    first: self.id,
-                    last: None,
-                    settled: true,
-                    state: Some(DeliveryState::Rejected(Rejected { error: Some(err) })),
-                    batchable: false,
-                }));
-                inner.post_frame(disp.into());
-            }
+            let disp = Disposition(Box::new(DispositionInner {
+                role: if self.is_set(Flags::SENDER) {
+                    Role::Sender
+                } else {
+                    Role::Receiver
+                },
+                first: self.id,
+                last: None,
+                settled: true,
+                state: Some(DeliveryState::Rejected(Rejected { error: Some(err) })),
+                batchable: false,
+            }));
+            inner.post_frame(disp.into());
         }
     }
 }

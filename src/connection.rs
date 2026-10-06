@@ -675,10 +675,10 @@ pub(crate) mod tests {
     use ntex::codec::{Decoder, Encoder};
     use ntex_amqp_codec::AmqpCodecError;
     use ntex_amqp_codec::protocol::{
-        Attach, AttachInner, Begin, BeginInner, DeliveryState, Detach, DetachInner, Disposition,
-        DispositionInner, Flow, FlowInner, LinkError, Open, OpenInner, ReceiverSettleMode,
-        Rejected, SenderSettleMode, Source, Target, TerminusDurability, TerminusExpiryPolicy,
-        Transfer, TransferBody, TransferInner,
+        Accepted, Attach, AttachInner, Begin, BeginInner, DeliveryState, Detach, DetachInner,
+        Disposition, DispositionInner, Flow, FlowInner, LinkError, Open, OpenInner,
+        ReceiverSettleMode, Rejected, SenderSettleMode, Source, Target, TerminusDurability,
+        TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
     };
     use ntex_amqp_codec::types::{Multiple, Symbol, Variant};
     use ntex_bytes::{BytePages, Bytes, BytesMut};
@@ -4098,5 +4098,135 @@ pub(crate) mod tests {
             }
             assert_eq!(frames, ["Begin", "End"], "local: {local} accept: {accept}");
         }
+    }
+
+    fn remote_disposition(conn: &Connection, role: Role, id: u32, settled: bool) {
+        let disp = Disposition(Box::new(DispositionInner {
+            role,
+            first: id,
+            last: None,
+            settled,
+            state: Some(DeliveryState::Accepted(Accepted {})),
+            batchable: false,
+        }));
+        handle_frame(conn, disp.into()).unwrap();
+    }
+
+    #[ntex::test]
+    async fn sender_delivery_remote_settled() {
+        use ntex::time::{Millis, sleep};
+
+        // 0 - wait() after disposition, 1 - drop without wait(), 2 - settle(), 3 - update_state()
+        for case in 0..4 {
+            let (_io, conn, client, snd) = small_frames_sender();
+            sleep(Millis(50)).await;
+            transfer_frames(&client);
+
+            let mut d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+            remote_disposition(&conn, Role::Receiver, d.id(), true);
+            match case {
+                0 => assert!(
+                    matches!(d.wait().await, Ok(Some(DeliveryState::Accepted(_)))),
+                    "case: {case}"
+                ),
+                2 => d.settle(DeliveryState::Accepted(Accepted {})),
+                3 => d.update_state(DeliveryState::Accepted(Accepted {})),
+                _ => (),
+            }
+            drop(d);
+            assert!(
+                session(&conn)
+                    .inner
+                    .get_ref()
+                    .unsettled_snd_deliveries
+                    .is_empty()
+            );
+            sleep(Millis(50)).await;
+            assert_eq!(
+                transfer_frames(&client),
+                ["Transfer Some(0) more:false aborted:false"],
+                "case: {case}"
+            );
+        }
+
+        // remote settled state is preserved after session end
+        let (_io, conn, _client, snd) = small_frames_sender();
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        remote_disposition(&conn, Role::Receiver, d.id(), true);
+        assert!(matches!(
+            d.wait().await,
+            Ok(Some(DeliveryState::Accepted(_)))
+        ));
+        let s = session(&conn);
+        let _ = handle_frame(&conn, End { error: None }.into());
+        assert!(s.inner.get_ref().unsettled_snd_deliveries.is_empty());
+        assert!(d.is_remote_settled());
+
+        // remote state without settlement, delivery is settled locally on drop
+        let (_io, conn, client, snd) = small_frames_sender();
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        remote_disposition(&conn, Role::Receiver, d.id(), false);
+        assert!(!d.is_remote_settled());
+        assert!(matches!(
+            d.wait().await,
+            Ok(Some(DeliveryState::Accepted(_)))
+        ));
+        drop(d);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(0) more:false aborted:false", "Disposition"]
+        );
+    }
+
+    #[ntex::test]
+    async fn receiver_delivery_remote_settled() {
+        use ntex::time::{Millis, sleep};
+
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let s = session(&conn);
+        let fut = ntex::rt::spawn({
+            let s = s.clone();
+            async move { s.build_receiver_link("r", "r").attach().await }
+        });
+        sleep(Millis(10)).await;
+        let Ok(Action::None) = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0)) else {
+            panic!()
+        };
+        let link = fut.await.unwrap().unwrap();
+        link.set_link_credit(10);
+        for id in 0..3 {
+            handle_frame(&conn, transfer(id, false, None, 1)).unwrap();
+        }
+        let mut deliveries = Vec::new();
+        for _ in 0..3 {
+            deliveries.push(link.recv().await.unwrap().unwrap().0);
+        }
+        sleep(Millis(50)).await;
+        frame_names(&client);
+
+        // remote settled: settle() and drop do not send disposition
+        remote_disposition(&conn, Role::Sender, 0, true);
+        remote_disposition(&conn, Role::Sender, 1, true);
+        let mut d2 = deliveries.pop().unwrap();
+        let d1 = deliveries.pop().unwrap();
+        let mut d0 = deliveries.pop().unwrap();
+        assert!(d0.is_remote_settled());
+        d0.settle(DeliveryState::Accepted(Accepted {}));
+        drop(d0);
+        drop(d1);
+        sleep(Millis(50)).await;
+        assert!(frame_names(&client).is_empty());
+
+        // not settled by remote
+        assert!(!d2.is_remote_settled());
+        d2.settle(DeliveryState::Accepted(Accepted {}));
+        drop(d2);
+        assert!(s.inner.get_ref().unsettled_rcv_deliveries.is_empty());
+        sleep(Millis(50)).await;
+        assert_eq!(frame_names(&client), ["Disposition"]);
     }
 }
