@@ -272,6 +272,10 @@ impl ReceiverLinkInner {
         self.handle
     }
 
+    pub(crate) fn set_delivery_count(&mut self, delivery_count: SequenceNo) {
+        self.delivery_count = delivery_count;
+    }
+
     pub(crate) fn name(&self) -> &ByteString {
         &self.name
     }

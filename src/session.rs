@@ -1251,6 +1251,9 @@ impl SessionInner {
                 if let ReceiverLinkState::OpeningLocal(opt_item) = item {
                     if let Some((link, tx)) = opt_item.take() {
                         self.remote_handles.insert(attach.handle(), index);
+                        // delivery-count is initialized by the sender
+                        link.get_mut()
+                            .set_delivery_count(attach.initial_delivery_count().unwrap_or(0));
 
                         *item = ReceiverLinkState::Established(EstablishedReceiverLink::new(
                             link.clone(),
