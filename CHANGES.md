@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix session end and connection errors were lost for pending link attaches, receiver links and receiver link detaches
+
 * Fix detach of not attached link panicked or hung, add `AmqpProtocolError::LinkNotAttached`
 
 * Fix refused local link attach returned attached link
