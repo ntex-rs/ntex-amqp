@@ -77,7 +77,7 @@ impl Encode for MessageBody {
             let length = m.encoded_size();
             if length > u8::MAX as usize {
                 dst.put_u8(FORMATCODE_BINARY32);
-                dst.put_u32(length as u32);
+                dst.put_u32(crate::codec::size_u32(length));
             } else {
                 dst.put_u8(FORMATCODE_BINARY8);
                 dst.put_u8(length as u8);

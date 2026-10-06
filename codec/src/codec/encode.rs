@@ -296,7 +296,7 @@ impl Encode for Bytes {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_BINARY32);
-            buf.put_u32(length as u32);
+            buf.put_u32(codec::size_u32(length));
         } else {
             buf.put_u8(codec::FORMATCODE_BINARY8);
             buf.put_u8(length as u8);
@@ -311,7 +311,7 @@ impl ArrayEncode for Bytes {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytePages) {
-        buf.put_u32(self.len() as u32);
+        buf.put_u32(codec::size_u32(self.len()));
         buf.append(self.clone());
     }
 }
@@ -327,7 +327,7 @@ impl Encode for ByteString {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
-            buf.put_u32(length as u32);
+            buf.put_u32(codec::size_u32(length));
         } else {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
@@ -341,7 +341,7 @@ impl ArrayEncode for ByteString {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytePages) {
-        buf.put_u32(self.len() as u32);
+        buf.put_u32(codec::size_u32(self.len()));
         buf.append(self.as_bytes().clone());
     }
 }
@@ -357,7 +357,7 @@ impl Encode for str {
         let length = self.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
-            buf.put_u32(length as u32);
+            buf.put_u32(codec::size_u32(length));
         } else {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
@@ -372,7 +372,7 @@ impl ArrayEncode for str {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytePages) {
-        buf.put_u32(self.len() as u32);
+        buf.put_u32(codec::size_u32(self.len()));
         buf.put_slice(self.as_bytes());
     }
 }
@@ -388,7 +388,7 @@ impl Encode for Str {
         let length = self.as_str().len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_STRING32);
-            buf.put_u32(length as u32);
+            buf.put_u32(codec::size_u32(length));
         } else {
             buf.put_u8(codec::FORMATCODE_STRING8);
             buf.put_u8(length as u8);
@@ -408,7 +408,7 @@ impl Encode for Symbol {
         let length = self.as_str().len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_SYMBOL32);
-            buf.put_u32(length as u32);
+            buf.put_u32(codec::size_u32(length));
         } else {
             buf.put_u8(codec::FORMATCODE_SYMBOL8);
             buf.put_u8(length as u8);
@@ -423,7 +423,7 @@ impl ArrayEncode for Symbol {
         4 + self.len()
     }
     fn array_encode(&self, buf: &mut BytePages) {
-        buf.put_u32(self.len() as u32);
+        buf.put_u32(codec::size_u32(self.len()));
         buf.append(self.to_bytes_str());
     }
 }
@@ -439,7 +439,7 @@ impl Encode for StaticSymbol {
         let length = self.0.len();
         if length > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_SYMBOL32);
-            buf.put_u32(length as u32);
+            buf.put_u32(codec::size_u32(length));
         } else {
             buf.put_u8(codec::FORMATCODE_SYMBOL8);
             buf.put_u8(length as u8);
@@ -467,8 +467,8 @@ macro_rules! hashmap {
                     .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
                 if size + 1 > u8::MAX as usize {
                     buf.put_u8(codec::FORMATCODE_MAP32);
-                    buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follows
-                    buf.put_u32(count as u32);
+                    buf.put_u32(codec::size_u32(size + 4)); // +4 for 4 byte count that follows
+                    buf.put_u32(codec::size_u32(count));
                 } else {
                     buf.put_u8(codec::FORMATCODE_MAP8);
                     buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
@@ -495,8 +495,8 @@ macro_rules! hashmap {
                 let size = 4 + self
                     .iter()
                     .fold(0, |r, (k, v)| r + k.encoded_size() + v.encoded_size());
-                buf.put_u32(size as u32);
-                buf.put_u32(count as u32);
+                buf.put_u32(codec::size_u32(size));
+                buf.put_u32(codec::size_u32(count));
 
                 for (k, v) in self {
                     k.encode(buf);
@@ -530,8 +530,8 @@ impl Encode for VecSymbolMap {
 
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_MAP32);
-            buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follows
-            buf.put_u32(count as u32);
+            buf.put_u32(codec::size_u32(size + 4)); // +4 for 4 byte count that follows
+            buf.put_u32(codec::size_u32(count));
         } else {
             buf.put_u8(codec::FORMATCODE_MAP8);
             buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
@@ -566,8 +566,8 @@ impl Encode for VecStringMap {
 
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_MAP32);
-            buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follows
-            buf.put_u32(count as u32);
+            buf.put_u32(codec::size_u32(size + 4)); // +4 for 4 byte count that follows
+            buf.put_u32(codec::size_u32(count));
         } else {
             buf.put_u8(codec::FORMATCODE_MAP8);
             buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follows
@@ -602,8 +602,8 @@ impl<T: ArrayEncode> Encode for Vec<T> {
         let ctor_size = T::ARRAY_CONSTRUCTOR.encoded_size();
         if size + 1 + ctor_size > u8::MAX as usize || self.len() > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_ARRAY32);
-            buf.put_u32((size + 4 + ctor_size) as u32); // +4 for count
-            buf.put_u32(self.len() as u32);
+            buf.put_u32(codec::size_u32(size + 4 + ctor_size)); // +4 for count
+            buf.put_u32(codec::size_u32(self.len()));
         } else {
             buf.put_u8(codec::FORMATCODE_ARRAY8);
             buf.put_u8((size + 1 + ctor_size) as u8); // +1 for count
@@ -649,8 +649,8 @@ impl Encode for List {
         let size = self.iter().fold(0, |r, i| r + i.encoded_size());
         if size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
-            buf.put_u32((size + 4) as u32); // +4 for 4 byte count that follow
-            buf.put_u32(self.len() as u32);
+            buf.put_u32(codec::size_u32(size + 4)); // +4 for 4 byte count that follow
+            buf.put_u32(codec::size_u32(self.len()));
         } else {
             buf.put_u8(codec::FORMATCODE_LIST8);
             buf.put_u8((size + 1) as u8); // +1 for 1 byte count that follow
@@ -686,8 +686,8 @@ impl<T: Composite> Encode for ListDescribed<T> {
 
         if content_size + 1 > u8::MAX as usize {
             buf.put_u8(codec::FORMATCODE_LIST32);
-            buf.put_u32((content_size + 4) as u32); // +4 for 4 byte count that follow
-            buf.put_u32(self.len() as u32);
+            buf.put_u32(codec::size_u32(content_size + 4)); // +4 for 4 byte count that follow
+            buf.put_u32(codec::size_u32(self.len()));
         } else {
             buf.put_u8(codec::FORMATCODE_LIST8);
             buf.put_u8((content_size + 1) as u8); // +1 for 1 byte count that follow
@@ -842,7 +842,7 @@ impl Encode for AmqpFrame {
 
     fn encode(&self, buf: &mut BytePages) {
         let doff: u8 = (framing::HEADER_LEN / WORD_LEN) as u8;
-        buf.put_u32(self.encoded_size() as u32);
+        buf.put_u32(codec::size_u32(self.encoded_size()));
         buf.put_u8(doff);
         buf.put_u8(framing::FRAME_TYPE_AMQP);
         buf.put_u16(self.channel_id());
@@ -857,7 +857,7 @@ impl Encode for SaslFrame {
 
     fn encode(&self, buf: &mut BytePages) {
         let doff: u8 = (framing::HEADER_LEN / WORD_LEN) as u8;
-        buf.put_u32(self.encoded_size() as u32);
+        buf.put_u32(codec::size_u32(self.encoded_size()));
         buf.put_u8(doff);
         buf.put_u8(framing::FRAME_TYPE_SASL);
         buf.put_u16(0);

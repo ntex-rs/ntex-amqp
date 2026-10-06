@@ -1257,13 +1257,7 @@ impl SessionInner {
                 .insert(delivery_id, DeliveryInner::new(link_handle));
         }
 
-        // frame header and transfer performative must fit into remote max frame size
-        let max_chunk = match self.max_frame_size() {
-            0 => usize::MAX,
-            size => (size as usize)
-                .saturating_sub(FRAME_HEADER_LEN + transfer.encoded_size())
-                .max(1),
-        };
+        let max_chunk = max_transfer_chunk(self.max_frame_size(), transfer.encoded_size());
 
         // body is larger than allowed frame size, send body as a set of transfers
         if body.len() > max_chunk {
@@ -1325,6 +1319,20 @@ impl SessionInner {
     }
 }
 
+/// Max transfer body chunk, frame header and transfer performative must fit
+/// into remote max frame size.
+///
+/// Frame size is a 32-bit field on the wire, `0` is treated as `u32::MAX`.
+fn max_transfer_chunk(max_frame_size: u32, transfer_size: usize) -> usize {
+    let max_frame_size = match max_frame_size {
+        0 => u32::MAX,
+        size => size,
+    };
+    (max_frame_size as usize)
+        .saturating_sub(FRAME_HEADER_LEN + transfer_size)
+        .max(1)
+}
+
 /// Call `f` for each entry with key in `from..=to` range (RFC-1982 serial numbers).
 ///
 /// Cost is bounded by the smaller of the range length and the map size.
@@ -1383,5 +1391,14 @@ mod tests {
         assert_eq!(collect(&mut map, u32::MAX, 10), vec![0, 1, 2, 5, u32::MAX]);
         assert_eq!(collect(&mut map, 0, u32::MAX).len(), 6);
         assert_eq!(collect(&mut map, 6, 100), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn transfer_chunk() {
+        assert_eq!(max_transfer_chunk(512, 20), 512 - 28);
+        assert_eq!(max_transfer_chunk(512, 1000), 1);
+        assert_eq!(max_transfer_chunk(u32::MAX, 20), u32::MAX as usize - 28);
+        // unlimited frame size is still limited by 32-bit frame size field
+        assert_eq!(max_transfer_chunk(0, 20), u32::MAX as usize - 28);
     }
 }
