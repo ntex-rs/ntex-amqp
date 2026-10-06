@@ -4673,4 +4673,70 @@ pub(crate) mod tests {
                 .any(|f| f.starts_with("Transfer"))
         );
     }
+
+    #[ntex::test]
+    async fn delivery_wait_returns_session_error() {
+        use ntex::time::{Millis, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let err = Error(Box::new(codec::ErrorInner {
+            condition: AmqpError::InternalError.into(),
+            description: None,
+            info: None,
+        }));
+        let ended = format!("{:?}", AmqpProtocolError::SessionEnded(Some(err.clone())));
+        for remote_end in [true, false] {
+            let expected = if remote_end {
+                ended.clone()
+            } else {
+                format!("{:?}", AmqpProtocolError::Disconnected)
+            };
+            let (_io, conn, _client, snd) = small_frames_sender();
+            let d1 = snd.transfer(Bytes::from_static(b"1")).send().await.unwrap();
+            let d2 = snd.transfer(Bytes::from_static(b"2")).send().await.unwrap();
+            let mut wait = Box::pin(d1.wait());
+            assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+
+            if remote_end {
+                handle_frame(
+                    &conn,
+                    End {
+                        error: Some(err.clone()),
+                    }
+                    .into(),
+                )
+                .unwrap();
+            } else {
+                conn.get_ref()
+                    .0
+                    .get_mut()
+                    .set_error(AmqpProtocolError::Disconnected);
+            }
+
+            // pending and late `wait()` return session error
+            let res = timeout(Millis(500), wait).await.unwrap();
+            assert_eq!(format!("{:?}", res.unwrap_err()), expected);
+            assert_eq!(format!("{:?}", d2.wait().await.unwrap_err()), expected);
+        }
+
+        // receiver delivery
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+            panic!()
+        };
+        link.confirm_receiver_link(response);
+        link.set_link_credit(1);
+        handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
+        let (delivery, _) = link.get_delivery().unwrap();
+        handle_frame(
+            &conn,
+            End {
+                error: Some(err.clone()),
+            }
+            .into(),
+        )
+        .unwrap();
+        assert_eq!(format!("{:?}", delivery.wait().await.unwrap_err()), ended);
+    }
 }

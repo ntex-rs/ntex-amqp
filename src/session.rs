@@ -2055,6 +2055,11 @@ impl SessionInner {
         }
     }
 
+    /// Session error, set when session is ended
+    pub(crate) fn error(&self) -> Option<&AmqpProtocolError> {
+        self.error.as_ref()
+    }
+
     /// Session end error, if session is ending or ended
     fn ending_error(&self) -> Option<AmqpProtocolError> {
         if self.flags.intersects(Flags::ENDING | Flags::ENDED) {

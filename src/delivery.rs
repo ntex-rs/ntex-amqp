@@ -195,8 +195,7 @@ impl Delivery {
             inner.tx = Some(tx);
             rx
         } else {
-            // session ended
-            return Err(AmqpProtocolError::LinkDetached(None));
+            return Err(self.session_error());
         };
         if rx.await.is_err() {
             return Err(AmqpProtocolError::ConnectionDropped);
@@ -216,10 +215,19 @@ impl Delivery {
                 return st;
             }
         } else {
-            // session ended
-            return Err(AmqpProtocolError::LinkDetached(None));
+            return Err(self.session_error());
         }
         Ok(None)
+    }
+
+    /// Unsettled deliveries are dropped on session end, return session error
+    fn session_error(&self) -> AmqpProtocolError {
+        self.session
+            .inner
+            .get_ref()
+            .error()
+            .cloned()
+            .unwrap_or(AmqpProtocolError::LinkDetached(None))
     }
 
     fn check_inner(
