@@ -249,22 +249,31 @@ impl Drop for Delivery {
             && !self.is_set(Flags::REMOTE_SETTLED)
             && !self.is_set(Flags::LOCAL_SETTLED)
         {
-            let err = Error::build()
-                .condition(ErrorCondition::Custom(Symbol(Str::from_static(
-                    "Internal error",
-                ))))
-                .finish();
+            let (role, state) = if self.is_set(Flags::SENDER) {
+                // settle with remote outcome, outcome is decided by receiver
+                let state = delivery
+                    .state
+                    .clone()
+                    .filter(|st| !matches!(st, DeliveryState::Received(_)));
+                (Role::Sender, state)
+            } else {
+                let err = Error::build()
+                    .condition(ErrorCondition::Custom(Symbol(Str::from_static(
+                        "Internal error",
+                    ))))
+                    .finish();
+                (
+                    Role::Receiver,
+                    Some(DeliveryState::Rejected(Rejected { error: Some(err) })),
+                )
+            };
 
             let disp = Disposition(Box::new(DispositionInner {
-                role: if self.is_set(Flags::SENDER) {
-                    Role::Sender
-                } else {
-                    Role::Receiver
-                },
+                role,
                 first: self.id,
                 last: None,
                 settled: true,
-                state: Some(DeliveryState::Rejected(Rejected { error: Some(err) })),
+                state,
                 batchable: false,
             }));
             inner.post_frame(disp.into());

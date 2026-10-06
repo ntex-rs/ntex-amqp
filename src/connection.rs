@@ -676,7 +676,7 @@ pub(crate) mod tests {
     use ntex_amqp_codec::AmqpCodecError;
     use ntex_amqp_codec::protocol::{
         Accepted, Attach, AttachInner, Begin, BeginInner, DeliveryState, Detach, DetachInner,
-        Disposition, DispositionInner, Flow, FlowInner, LinkError, Open, OpenInner,
+        Disposition, DispositionInner, Flow, FlowInner, LinkError, Open, OpenInner, Received,
         ReceiverSettleMode, Rejected, SenderSettleMode, Source, Target, TerminusDurability,
         TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
     };
@@ -4161,24 +4161,74 @@ pub(crate) mod tests {
         let _ = handle_frame(&conn, End { error: None }.into());
         assert!(s.inner.get_ref().unsettled_snd_deliveries.is_empty());
         assert!(d.is_remote_settled());
+    }
 
-        // remote state without settlement, delivery is settled locally on drop
-        let (_io, conn, client, snd) = small_frames_sender();
-        sleep(Millis(50)).await;
-        transfer_frames(&client);
-        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
-        remote_disposition(&conn, Role::Receiver, d.id(), false);
-        assert!(!d.is_remote_settled());
-        assert!(matches!(
-            d.wait().await,
-            Ok(Some(DeliveryState::Accepted(_)))
-        ));
-        drop(d);
-        sleep(Millis(50)).await;
-        assert_eq!(
-            transfer_frames(&client),
-            ["Transfer Some(0) more:false aborted:false", "Disposition"]
-        );
+    fn dispositions(client: &IoTest) -> Vec<String> {
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut frames = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Disposition(disp) = frame.into_parts().1 {
+                frames.push(format!(
+                    "{:?} {} {} {:?}",
+                    disp.role(),
+                    disp.first(),
+                    disp.settled(),
+                    disp.state()
+                ));
+            }
+        }
+        frames
+    }
+
+    #[ntex::test]
+    async fn sender_delivery_drop_settles_with_remote_outcome() {
+        use ntex::time::{Millis, sleep};
+
+        let rejected = DeliveryState::Rejected(Rejected { error: None });
+        let received = DeliveryState::Received(Received {
+            section_number: 0,
+            section_offset: 1,
+        });
+        for (state, expected) in [
+            (None, "Sender 0 true None"),
+            (
+                Some(DeliveryState::Accepted(Accepted {})),
+                "Sender 0 true Some(Accepted(Accepted))",
+            ),
+            (
+                Some(rejected),
+                "Sender 0 true Some(Rejected(Rejected { error: None }))",
+            ),
+            (Some(received), "Sender 0 true None"),
+        ] {
+            let (_io, conn, client, snd) = small_frames_sender();
+            sleep(Millis(50)).await;
+            transfer_frames(&client);
+            let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+            if let Some(state) = state {
+                let disp = Disposition(Box::new(DispositionInner {
+                    role: Role::Receiver,
+                    first: d.id(),
+                    last: None,
+                    settled: false,
+                    state: Some(state),
+                    batchable: false,
+                }));
+                handle_frame(&conn, disp.into()).unwrap();
+                assert!(!d.is_remote_settled());
+            }
+            drop(d);
+            assert!(
+                session(&conn)
+                    .inner
+                    .get_ref()
+                    .unsettled_snd_deliveries
+                    .is_empty()
+            );
+            sleep(Millis(50)).await;
+            assert_eq!(dispositions(&client), [expected]);
+        }
     }
 
     #[ntex::test]
@@ -4198,11 +4248,11 @@ pub(crate) mod tests {
         };
         let link = fut.await.unwrap().unwrap();
         link.set_link_credit(10);
-        for id in 0..3 {
+        for id in 0..4 {
             handle_frame(&conn, transfer(id, false, None, 1)).unwrap();
         }
         let mut deliveries = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..4 {
             deliveries.push(link.recv().await.unwrap().unwrap().0);
         }
         sleep(Millis(50)).await;
@@ -4211,6 +4261,7 @@ pub(crate) mod tests {
         // remote settled: settle() and drop do not send disposition
         remote_disposition(&conn, Role::Sender, 0, true);
         remote_disposition(&conn, Role::Sender, 1, true);
+        let d3 = deliveries.pop().unwrap();
         let mut d2 = deliveries.pop().unwrap();
         let d1 = deliveries.pop().unwrap();
         let mut d0 = deliveries.pop().unwrap();
@@ -4225,8 +4276,12 @@ pub(crate) mod tests {
         assert!(!d2.is_remote_settled());
         d2.settle(DeliveryState::Accepted(Accepted {}));
         drop(d2);
+        drop(d3);
         assert!(s.inner.get_ref().unsettled_rcv_deliveries.is_empty());
         sleep(Millis(50)).await;
-        assert_eq!(frame_names(&client), ["Disposition"]);
+        let disp = dispositions(&client);
+        assert_eq!(disp.len(), 2);
+        assert_eq!(disp[0], "Receiver 2 true Some(Accepted(Accepted))");
+        assert!(disp[1].starts_with("Receiver 3 true Some(Rejected("));
     }
 }
