@@ -670,7 +670,7 @@ async fn open_session(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use ntex::codec::{Decoder, Encoder};
     use ntex_amqp_codec::AmqpCodecError;
     use ntex_amqp_codec::protocol::{
@@ -716,7 +716,7 @@ mod tests {
         })
     }
 
-    fn begin() -> Frame {
+    pub(crate) fn begin() -> Frame {
         Begin(Box::new(BeginInner {
             remote_channel: None,
             next_outgoing_id: 1,
@@ -1009,7 +1009,17 @@ mod tests {
         assert!(buf.is_empty());
     }
 
-    fn connection() -> (Io, Connection, IoTest) {
+    pub(crate) fn handle_frame(
+        conn: &Connection,
+        frame: Frame,
+    ) -> Result<Action, AmqpProtocolError> {
+        let inner = conn.get_ref().0;
+        inner
+            .get_mut()
+            .handle_frame(AmqpFrame::new(0, frame), &inner)
+    }
+
+    pub(crate) fn connection() -> (Io, Connection, IoTest) {
         let remote = RemoteServiceConfig::new(&Open(Box::default()));
         let (server, client) = IoTest::create();
         client.remote_buffer_cap(64 * 1024);
@@ -1326,7 +1336,7 @@ mod tests {
         assert!(link.ready().await);
     }
 
-    fn named_attach(role: Role, name: &str, address: &str, handle: u32) -> Frame {
+    pub(crate) fn named_attach(role: Role, name: &str, address: &str, handle: u32) -> Frame {
         let Frame::Attach(mut attach) = attach() else {
             panic!()
         };
