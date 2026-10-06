@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix dropped unsettled sender delivery was settled as rejected; delivery is settled with remote outcome if received
+
 * Fix delivery sent rejected disposition on drop if remote settled it before `wait()` call; `settle()`, `update_state()` and `is_remote_settled()` ignored remote settlement until `wait()` call
 
 * Fix sender link drain was delayed by transfers waiting for session window
