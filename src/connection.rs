@@ -2832,6 +2832,69 @@ pub(crate) mod tests {
         assert_eq!(frame_names(&client), ["Detach 2"]);
     }
 
+    #[ntex::test]
+    async fn sender_link_stale_flow() {
+        for initial in [0, u32::MAX - 1] {
+            sender_link_stale_flow_with(initial).await;
+        }
+    }
+
+    async fn sender_link_stale_flow_with(initial: u32) {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        let flow = |delivery_count: Option<u32>, credit: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(4);
+            flow.0.delivery_count = delivery_count.map(|dc| initial.wrapping_add(dc));
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+
+        let Frame::Attach(mut attach) = named_attach(Role::Receiver, "s", "s", 4) else {
+            panic!()
+        };
+        attach.0.initial_delivery_count = Some(initial);
+        let Ok(Action::AttachSender(snd, attach, response)) = handle_frame(&conn, attach.into())
+        else {
+            panic!()
+        };
+        let snd =
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone());
+
+        // receiver has not received attach yet, initial delivery count is used
+        flow(None, 10);
+        assert_eq!(snd.credit(), 10);
+        for _ in 0..3 {
+            let t = snd.transfer(Bytes::from_static(b"1")).settled().send();
+            assert!(timeout(Millis(500), t).await.unwrap().is_ok());
+        }
+        assert_eq!(snd.credit(), 7);
+        flow(None, 10);
+        assert_eq!(snd.credit(), 7);
+
+        // flow issued before receiver got sent transfers
+        flow(Some(0), 2);
+        assert_eq!(snd.credit(), 0);
+        let mut t = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
+        assert!(poll_fn(|cx| Poll::Ready(t.as_mut().poll(cx).is_pending())).await);
+        flow(Some(0), 5);
+        assert!(timeout(Millis(500), t).await.unwrap().is_ok());
+        assert_eq!(snd.credit(), 1);
+
+        // receiver delivery count is ahead, credit is used as is
+        flow(Some(10), 4);
+        assert_eq!(snd.credit(), 4);
+        sleep(Millis(10)).await;
+    }
+
     fn small_frames_sender() -> (Io, Connection, IoTest, SenderLink) {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,

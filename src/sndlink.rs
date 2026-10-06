@@ -25,6 +25,8 @@ pub(crate) struct SenderLinkInner {
     pub(crate) session: Session,
     remote_handle: Handle,
     delivery_count: SequenceNo,
+    // used if receiver has not received attach yet
+    initial_delivery_count: SequenceNo,
     delivery_tag: u32,
     link_credit: u32,
     pending_transfers: VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>,
@@ -212,6 +214,7 @@ impl SenderLinkInner {
             name,
             address,
             delivery_count,
+            initial_delivery_count: delivery_count,
             max_message_size,
             session: Session::new(session),
             remote_handle: handle,
@@ -326,20 +329,30 @@ impl SenderLinkInner {
     pub(crate) fn apply_flow(&mut self, flow: &Flow) -> bool {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
-            // delivery-count is null if receiver has not received attach yet,
-            // local delivery-count is initial delivery-count at that point
-            let new_credit = flow
-                .delivery_count()
-                .unwrap_or(self.delivery_count)
-                .wrapping_add(credit)
-                .wrapping_sub(self.delivery_count);
+            // delivery-count is null if receiver has not received attach yet
+            let rcv_delivery_count = flow.delivery_count().unwrap_or(self.initial_delivery_count);
+
+            // deliveries sent after flow was issued consume its credit
+            let in_flight = self.delivery_count.wrapping_sub(rcv_delivery_count);
+            let new_credit = if in_flight > i32::MAX as u32 {
+                log::warn!(
+                    "{}: Sender link {:?} flow delivery count {:?} is ahead of local delivery count {:?}",
+                    self.session.tag(),
+                    self.name,
+                    rcv_delivery_count,
+                    self.delivery_count
+                );
+                credit
+            } else {
+                credit.saturating_sub(in_flight)
+            };
 
             log::trace!(
                 "{}: Apply sender link {:?} flow, credit: {:?}, delivery count: {:?}, local delivery count: {:?}, pending: {:?}, old credit {:?}",
                 self.session.tag(),
                 self.name,
                 new_credit,
-                flow.delivery_count().unwrap_or(self.delivery_count),
+                rcv_delivery_count,
                 self.delivery_count,
                 self.pending_transfers.len(),
                 self.link_credit
