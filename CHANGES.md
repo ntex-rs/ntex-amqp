@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix transfers waiting for link credit or session window hung after local sender link detach; unsettled deliveries fail on detach confirmation
+
 * Fix session remote incoming window wrapped on flow issued before remote got sent transfers; null flow next-incoming-id uses initial outgoing id
 
 * Fix sender link credit wrapped on flow issued before receiver got sent transfers; null flow delivery-count uses initial delivery count
