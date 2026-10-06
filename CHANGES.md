@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix receiver link `delivery-count` overflow panic (with overflow checks) when remote `initial-delivery-count` is near `u32::MAX`, delivery count wraps around
+
 * Enforce remote max-frame-size for all outgoing frames, oversized frames fail the connection with new `AmqpCodecError::MaxOutboundSizeExceeded` error instead of being sent. Add `AmqpCodec::max_encode_size()` and `AmqpCodec::set_max_encode_size()`
 
 * Fix encoded sizes larger than `u32::MAX` were silently truncated, producing corrupted frames. Encoding now panics on 32-bit size overflow, transfers with unlimited remote max-frame-size are split into frames up to `u32::MAX`

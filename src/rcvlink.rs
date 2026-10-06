@@ -5,8 +5,8 @@ use std::{
 
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, Source, Symbols, TerminusDurability, TerminusExpiryPolicy, Transfer,
-    TransferBody,
+    SenderSettleMode, SequenceNo, Source, Symbols, TerminusDurability, TerminusExpiryPolicy,
+    Transfer, TransferBody,
 };
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 use ntex_bytes::{BytePages, ByteString, Bytes};
@@ -30,7 +30,7 @@ pub(crate) struct ReceiverLinkInner {
     reader_task: LocalWaker,
     queue: VecDeque<(Delivery, Transfer)>,
     credit: u32,
-    delivery_count: u32,
+    delivery_count: SequenceNo,
     error: Option<Error>,
     partial_body: Option<BytePages>,
     max_message_size: u64,
@@ -360,7 +360,7 @@ impl ReceiverLinkInner {
                     Action::None
                 } else {
                     // received last partial transfer
-                    self.delivery_count += 1;
+                    self.delivery_count = self.delivery_count.wrapping_add(1);
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
                         self.queue.back_mut().unwrap().1.0.body =
@@ -418,7 +418,7 @@ impl ReceiverLinkInner {
                     Action::None
                 }
             } else if let Some(id) = transfer.delivery_id() {
-                self.delivery_count += 1;
+                self.delivery_count = self.delivery_count.wrapping_add(1);
                 let delivery = Delivery::new_rcv(
                     id,
                     self.handle,
