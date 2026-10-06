@@ -1823,6 +1823,109 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn sender_link_credit_on_window_wait() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        let flow = |delivery_count: u32, credit: u32, drain: bool, window: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(4);
+            flow.0.delivery_count = Some(delivery_count);
+            flow.0.drain = drain;
+            flow.0.incoming_window = window;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        let frames = || {
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                frames.push(match frame.into_parts().1 {
+                    Frame::Flow(flow) => format!(
+                        "Flow {:?} {:?} {:?} {}",
+                        flow.handle(),
+                        flow.delivery_count(),
+                        flow.link_credit(),
+                        flow.drain()
+                    ),
+                    frame => frame.name().to_string(),
+                });
+            }
+            frames
+        };
+
+        let Ok(Action::AttachSender(snd, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
+        else {
+            panic!()
+        };
+        let snd =
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone());
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Begin", "Attach"]);
+
+        // transfer waits for session window, link credit is kept on cancel
+        flow(0, 2, false, 0);
+        let mut t1 = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
+        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        assert_eq!(snd.credit(), 2);
+        drop(t1);
+        assert_eq!(snd.credit(), 2);
+
+        // waiting transfer delays drain until it is dropped
+        let mut t2 = Box::pin(snd.transfer(Bytes::from_static(b"2")).settled().send());
+        assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+        flow(0, 2, true, 0);
+        assert_eq!(snd.credit(), 2);
+        sleep(Millis(50)).await;
+        assert!(frames().is_empty());
+        drop(t2);
+        assert_eq!(snd.credit(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Flow Some(0) Some(2) Some(0) true"]);
+
+        // waiting transfer is sent before drain
+        let t3 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"3")).settled().send());
+        sleep(Millis(50)).await;
+        flow(2, 2, true, 0);
+        sleep(Millis(50)).await;
+        assert!(frames().is_empty());
+        assert_eq!(snd.credit(), 2);
+        flow(2, 2, true, 10);
+        assert!(timeout(Millis(500), t3).await.unwrap().unwrap().is_ok());
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Transfer", "Flow Some(0) Some(4) Some(0) true"]);
+
+        // link is detached while transfer waits for session window
+        let session_flow = |handle: Option<u32>, window: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(2)) else {
+                panic!()
+            };
+            flow.0.handle = handle;
+            flow.0.delivery_count = Some(4);
+            flow.0.next_incoming_id = Some(2);
+            flow.0.incoming_window = window;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        session_flow(Some(4), 0);
+        let t4 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"4")).settled().send());
+        sleep(Millis(50)).await;
+        let _ = handle_frame(&conn, peer_detach(4));
+        session_flow(None, 10);
+        assert!(timeout(Millis(500), t4).await.unwrap().unwrap().is_err());
+        sleep(Millis(50)).await;
+        assert_eq!(frames(), ["Detach"]);
+    }
+
+    #[ntex::test]
     async fn session_outgoing_window() {
         let (_io, conn, client) = connection();
         handle_frame(&conn, begin()).unwrap();

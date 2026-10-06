@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix cancelled transfer waiting for session window consumed sender link credit
+
 * Fix session `outgoing-window` in `Begin` and `Flow` frames was set from remote incoming window
 
 * Handle receiver `drain` request for sender links, remaining link credit is consumed and reported once queued transfers are sent

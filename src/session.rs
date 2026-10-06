@@ -1497,36 +1497,46 @@ impl SessionInner {
         self.post_frame(flow.into());
     }
 
-    #[allow(clippy::too_many_lines)]
-    pub(crate) async fn send_transfer(
+    /// Wait for remote incoming window, returns `false` if window is available
+    ///
+    /// Window could be taken by other transfer after wake up
+    pub(crate) async fn wait_window(
         &mut self,
         link_handle: Handle,
-        tag: Bytes,
+    ) -> Result<bool, AmqpProtocolError> {
+        if let Some(err) = self.ending_error() {
+            Err(err)
+        } else if self.remote_incoming_window == 0 {
+            log::trace!(
+                "{}: Remote window is 0, push to pending queue, hnd:{link_handle:?}",
+                self.sink.tag()
+            );
+            let (tx, rx) = self.pool_credit.channel();
+            self.pending_transfers
+                .push_back(PendingTransfer { tx, link_handle });
+
+            rx.await
+                .map_err(|_| AmqpProtocolError::ConnectionDropped)
+                .and_then(|v| v)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Send transfer, remote incoming window must be available
+    pub(crate) fn send_transfer(
+        &mut self,
+        link_handle: Handle,
+        tag: &Bytes,
         body: TransferBody,
         settled: bool,
         format: Option<MessageFormat>,
     ) -> Result<DeliveryNumber, AmqpProtocolError> {
-        loop {
-            if let Some(err) = self.ending_error() {
-                return Err(err);
-            }
-            if self.remote_incoming_window == 0 {
-                log::trace!(
-                    "{}: Remote window is 0, push to pending queue, hnd:{link_handle:?}",
-                    self.sink.tag()
-                );
-                let (tx, rx) = self.pool_credit.channel();
-                self.pending_transfers
-                    .push_back(PendingTransfer { tx, link_handle });
-
-                rx.await
-                    .map_err(|_| AmqpProtocolError::ConnectionDropped)
-                    .and_then(|v| v)?;
-                continue;
-            }
-            break;
+        if let Some(err) = self.ending_error() {
+            return Err(err);
         }
-
+        debug_assert!(self.remote_incoming_window > 0);
         self.remote_incoming_window -= 1;
 
         let delivery_id = self.next_outgoing_id;
