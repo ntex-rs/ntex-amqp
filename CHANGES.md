@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix remotely opened sender link waiting for control service confirmation was not closed on session end or connection error and was missing from session ended links. Confirmation after session end no longer sends `Attach`/`Detach` frames, rejected link is closed, rejection `Attach` uses sender role
+
 * Fix remotely opened sender link lost link credit from `Flow` received before control service confirmation, and remote `Detach` received before confirmation was never answered and confirmed link stayed open. Detach is answered after confirmation, link is closed and `RemoteDetachSender` control frame is sent
 
 * Respect remote session handle-max: opening a link without free handle fails with new `AmqpProtocolError::TooManyLinks` error, remotely opened link without free local handle ends the session with `amqp:resource-limit-exceeded` error

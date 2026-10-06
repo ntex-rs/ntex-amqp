@@ -245,7 +245,11 @@ enum SenderLinkState {
     Established(EstablishedSenderLink),
     /// Remote link waits for control service confirmation, keeps last
     /// link flow and remote detach received before confirmation
-    OpeningRemote(Option<Flow>, Option<Detach>),
+    OpeningRemote {
+        link: Cell<SenderLinkInner>,
+        flow: Option<Flow>,
+        detach: Option<Detach>,
+    },
     Opening(Option<oneshot::Sender<Result<Cell<SenderLinkInner>, AmqpProtocolError>>>),
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
@@ -368,6 +372,9 @@ impl SessionInner {
                 Either::Left(SenderLinkState::Established(link)) => {
                     link.inner.get_mut().remote_detached(err.clone());
                 }
+                Either::Left(SenderLinkState::OpeningRemote { link, .. }) => {
+                    link.get_mut().remote_detached(err.clone());
+                }
                 Either::Left(SenderLinkState::Closing(link)) => {
                     if let Some(tx) = link.take() {
                         let _ = tx.send(Err(err.clone()));
@@ -403,6 +410,9 @@ impl SessionInner {
                 Either::Left(SenderLinkState::Established(link)) => {
                     Some(Either::Left((*link).clone()))
                 }
+                Either::Left(SenderLinkState::OpeningRemote { link, .. }) => {
+                    Some(Either::Left(SenderLink::new(link.clone())))
+                }
                 Either::Right(ReceiverLinkState::Established(link)) => {
                     Some(Either::Right((*link).clone()))
                 }
@@ -421,10 +431,19 @@ impl SessionInner {
     }
 
     /// Initialize creation of remote sender link
-    pub(crate) fn new_remote_sender(&mut self, attach: &Attach) -> (usize, Attach) {
-        let id = self
-            .links
-            .insert(Either::Left(SenderLinkState::OpeningRemote(None, None)));
+    pub(crate) fn new_remote_sender(
+        &mut self,
+        cell: Cell<SessionInner>,
+        attach: &Attach,
+    ) -> (SenderLink, Attach) {
+        let entry = self.links.vacant_entry();
+        let id = entry.key();
+        let link = Cell::new(SenderLinkInner::with(id, attach, cell));
+        entry.insert(Either::Left(SenderLinkState::OpeningRemote {
+            link: link.clone(),
+            flow: None,
+            detach: None,
+        }));
         self.remote_handles.insert(attach.handle(), id);
 
         let attach = Attach(Box::new(codec::AttachInner {
@@ -444,7 +463,16 @@ impl SessionInner {
             properties: None,
         }));
 
-        (id, attach)
+        (SenderLink::new(link), attach)
+    }
+
+    /// Check if remote sender link waits for confirmation and session is not ending
+    fn is_opening_remote(&self, token: usize) -> bool {
+        !self.flags.intersects(Flags::ENDING | Flags::ENDED)
+            && matches!(
+                self.links.get(token),
+                Some(Either::Left(SenderLinkState::OpeningRemote { .. }))
+            )
     }
 
     /// Open sender link
@@ -488,10 +516,14 @@ impl SessionInner {
         );
         let token = link.id;
 
-        // session could be ended while link was waiting for confirmation
-        let Some(Either::Left(SenderLinkState::OpeningRemote(flow, detach))) =
+        // session could be ended while link was waiting for confirmation,
+        // link is closed by session error
+        let state = if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            None
+        } else {
             self.links.get_mut(token)
-        else {
+        };
+        let Some(Either::Left(SenderLinkState::OpeningRemote { flow, detach, .. })) = state else {
             log::debug!(
                 "{}: Remote sender link is not opening: {:?}",
                 self.tag(),
@@ -588,7 +620,7 @@ impl SessionInner {
                             crate::ControlFrameKind::LocalDetachSender(detach, sender_link),
                         ));
                 }
-                SenderLinkState::OpeningRemote(..) => {
+                SenderLinkState::OpeningRemote { .. } => {
                     let _ = tx.send(Ok(()));
                     log::error!(
                         "{}: Unexpected sender link state: opening remote - {id}",
@@ -620,12 +652,26 @@ impl SessionInner {
         error: Option<Error>,
     ) {
         let token = link.id;
+        if !link.get_ref().closed {
+            link.get_mut()
+                .remote_detached(AmqpProtocolError::LinkDetached(error.clone()));
+        }
+
+        // session could be ended while link was waiting for confirmation
+        if !self.is_opening_remote(token) {
+            log::debug!(
+                "{}: Remote sender link is not opening: {:?}",
+                self.tag(),
+                attach.name()
+            );
+            return;
+        }
         self.remote_handles.remove(&attach.handle());
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
             handle: token as Handle,
-            role: attach.0.role,
+            role: Role::Sender,
             snd_settle_mode: SenderSettleMode::Unsettled,
             rcv_settle_mode: ReceiverSettleMode::First,
             source: None,
@@ -878,9 +924,11 @@ impl SessionInner {
                             return Ok(Action::Flow((*link).clone(), flow));
                         }
                         // link is not confirmed yet, link credit is applied after confirmation
-                        Some(Either::Left(SenderLinkState::OpeningRemote(pending, None)))
-                            if flow.link_credit().is_some() =>
-                        {
+                        Some(Either::Left(SenderLinkState::OpeningRemote {
+                            flow: pending,
+                            detach: None,
+                            ..
+                        })) if flow.link_credit().is_some() => {
                             *pending = Some(flow.clone());
                         }
                         _ => (),
@@ -1085,7 +1133,7 @@ impl SessionInner {
                         action = Action::DetachSender(link.clone(), frame);
                         true
                     }
-                    SenderLinkState::OpeningRemote(_, detach) => {
+                    SenderLinkState::OpeningRemote { detach, .. } => {
                         // detach is confirmed and link is removed after control service confirmation
                         if detach.is_some() {
                             log::warn!(
