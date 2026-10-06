@@ -1327,6 +1327,51 @@ mod tests {
     }
 
     #[ntex::test]
+    async fn remote_sender_flow_order() {
+        let (_io, conn, _client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+
+        let Ok(Action::AttachSender(link, attach, response)) =
+            handle(peer_attach(Role::Receiver, None))
+        else {
+            panic!()
+        };
+        let link = session.inner.get_mut().attach_remote_sender_link(
+            &attach,
+            response,
+            link.inner.clone(),
+        );
+
+        let flow = |credit, window| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.incoming_window = window;
+            Frame::Flow(flow)
+        };
+
+        // session and link flows are applied in frames order,
+        // before control service is notified
+        let Ok(Action::Flow(..)) = handle(flow(10, 50)) else {
+            panic!()
+        };
+        assert_eq!(link.credit(), 10);
+        let window = session.remote_window_size();
+        let Ok(Action::Flow(..)) = handle(flow(3, 80)) else {
+            panic!()
+        };
+        assert_eq!(session.remote_window_size(), window + 30);
+        assert_eq!(link.credit(), 3);
+    }
+
+    #[ntex::test]
     async fn remote_sender_detach_before_confirm() {
         for accept in [true, false] {
             let (_io, conn, client) = connection();

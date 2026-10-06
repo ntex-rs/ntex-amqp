@@ -29,6 +29,7 @@ impl fmt::Debug for ControlFrame {
 pub enum ControlFrameKind {
     AttachSender(protocol::Attach, Wrapper<protocol::Attach>, SenderLink),
     AttachReceiver(protocol::Attach, Wrapper<protocol::Attach>, ReceiverLink),
+    /// Sender link flow, link credit is already applied
     Flow(protocol::Flow, SenderLink),
     LocalDetachSender(protocol::Detach, SenderLink),
     RemoteDetachSender(protocol::Detach, SenderLink),

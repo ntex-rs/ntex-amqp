@@ -1,28 +1,36 @@
 use std::task::{Context, Poll, ready};
-use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin};
+use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin, rc::Rc};
 
 use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
-use ntex_service::pipeline::{Pipeline, PipelineCall};
+use ntex_service::pipeline::{Pipeline, PipelineBinding};
 use ntex_service::{Ctx, Service};
-use ntex_util::future::Either;
+use ntex_util::channel::condition::Condition;
+use ntex_util::future::{Either, select};
 use ntex_util::time::{Millis, Sleep, sleep};
 
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
+use crate::connection::{Connection, ConnectionRef};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
-use crate::{ControlFrame, ControlFrameKind, ReceiverLink, connection::Connection, types};
-
-type ControlCall = PipelineCall<ControlFrame, (), Error>;
+use crate::{ControlFrame, ControlFrameKind, ReceiverLink, types};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher {
     sink: Connection,
     service: Pipeline<types::Message, (), Error>,
     ctl_service: Pipeline<ControlFrame, (), Error>,
-    ctl_fut: cell::RefCell<Vec<(ControlFrame, ControlCall)>>,
-    ctl_error: cell::Cell<Option<AmqpDispatcherError>>,
+    ctl_state: Rc<ControlState>,
     idle_sleep: Sleep,
     idle_timeout: Millis,
+}
+
+/// State shared with spawned control service calls
+struct ControlState {
+    sink: ConnectionRef,
+    service: PipelineBinding<types::Message, (), Error>,
+    error: cell::Cell<Option<AmqpDispatcherError>>,
+    // cancels in-flight control service calls
+    stop: Condition,
 }
 
 impl Dispatcher {
@@ -34,14 +42,24 @@ impl Dispatcher {
     ) -> Self {
         let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
         Dispatcher {
+            ctl_state: Rc::new(ControlState {
+                sink: sink.clone(),
+                service: service.bind(),
+                error: cell::Cell::new(None),
+                stop: Condition::new(),
+            }),
             sink,
             idle_timeout,
             service,
             ctl_service,
-            ctl_fut: cell::RefCell::new(Vec::new()),
-            ctl_error: cell::Cell::new(None),
             idle_sleep: sleep(idle_timeout),
         }
+    }
+}
+
+impl Drop for Dispatcher {
+    fn drop(&mut self) {
+        self.ctl_state.stop.notify_and_lock(());
     }
 }
 
@@ -55,7 +73,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
             // while the publish service applies backpressure
             self.poll_dispatcher(cx);
 
-            if let Some(err) = self.ctl_error.take() {
+            if let Some(err) = self.ctl_state.error.take() {
                 log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
                 let _ = self.sink.close();
                 return Poll::Ready(Err(err));
@@ -87,6 +105,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
     }
 
     async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
+        self.ctl_state.stop.notify_and_lock(());
         self.sink
             .0
             .get_mut()
@@ -131,7 +150,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
                         }
                     }
                     types::Action::Flow(link, frm) => {
-                        // apply flow to specific link
+                        // link flow is already applied, notify control service
                         self.call_control_service(ControlFrame::new(
                             link.session().inner.clone(),
                             ControlFrameKind::Flow(frm, link.clone()),
@@ -233,37 +252,13 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
 
 impl Dispatcher {
     fn poll_dispatcher(&self, cx: &mut Context<'_>) {
-        let mut futs = self.ctl_fut.borrow_mut();
         let queue = self.sink.get_control_queue();
         queue.waker.register(cx.waker());
 
         // enqueue pending control frames
-        queue.pending.borrow_mut().drain(..).for_each(|frame| {
-            let fut = self.ctl_service.call_static(frame.clone());
-            futs.push((frame, fut));
-        });
-
-        // process control frame
-        let mut idx = 0;
-        while futs.len() > idx {
-            let item = &mut futs[idx];
-            let res = match Pin::new(&mut item.1).poll(cx) {
-                Poll::Pending => {
-                    idx += 1;
-                    continue;
-                }
-                Poll::Ready(res) => res,
-            };
-            let (frame, _) = futs.swap_remove(idx);
-            let result = match res {
-                Ok(()) => self.handle_control_frame(&frame, None),
-                Err(e) => self.handle_control_frame(&frame, Some(e)),
-            };
-
-            if let Err(err) = result {
-                self.ctl_error.set(Some(err));
-                return;
-            }
+        let frames: Vec<_> = queue.pending.borrow_mut().drain(..).collect();
+        for frame in frames {
+            self.spawn_control_call(frame);
         }
 
         // handle idle timeout
@@ -279,11 +274,27 @@ impl Dispatcher {
     }
 
     fn call_control_service(&self, frame: ControlFrame) {
-        let fut = self.ctl_service.call_static(frame.clone());
-        self.ctl_fut.borrow_mut().push((frame, fut));
-        self.sink.get_control_queue().waker.wake();
+        self.spawn_control_call(frame);
     }
 
+    fn spawn_control_call(&self, frame: ControlFrame) {
+        let fut = self.ctl_service.call_static(frame.clone());
+        let state = self.ctl_state.clone();
+        let stop = state.stop.wait();
+
+        spawn(async move {
+            // in-flight calls are dropped on dispatcher shutdown
+            if let Either::Right(res) = select(stop.ready(), fut).await
+                && let Err(err) = state.handle_control_frame(&frame, res.err())
+            {
+                state.error.set(Some(err));
+                state.sink.get_control_queue().waker.wake();
+            }
+        });
+    }
+}
+
+impl ControlState {
     fn handle_control_frame(
         &self,
         frame: &ControlFrame,
@@ -342,9 +353,6 @@ impl Dispatcher {
                         link.inner.clone(),
                     );
                 }
-                ControlFrameKind::Flow(ref frm, ref link) => {
-                    frame.session_cell().get_mut().handle_flow(frm, Some(link));
-                }
                 ControlFrameKind::ProtocolError(ref err) => {
                     self.sink.set_error(err.clone());
                     return Err(err.clone().into());
@@ -355,6 +363,7 @@ impl Dispatcher {
                 ControlFrameKind::LocalDetachSender(..)
                 | ControlFrameKind::LocalDetachReceiver(..)
                 | ControlFrameKind::LocalSessionEnded(_)
+                | ControlFrameKind::Flow(..)
                 | ControlFrameKind::RemoteDetachSender(..)
                 | ControlFrameKind::RemoteDetachReceiver(..)
                 | ControlFrameKind::RemoteSessionEnded(_) => (),
