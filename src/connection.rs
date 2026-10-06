@@ -679,9 +679,10 @@ mod tests {
     use ntex::codec::{Decoder, Encoder};
     use ntex_amqp_codec::AmqpCodecError;
     use ntex_amqp_codec::protocol::{
-        Attach, AttachInner, Begin, BeginInner, DeliveryState, Disposition, DispositionInner, Flow,
-        FlowInner, LinkError, Open, OpenInner, ReceiverSettleMode, Rejected, SenderSettleMode,
-        Source, TerminusDurability, TerminusExpiryPolicy, Transfer, TransferBody, TransferInner,
+        Attach, AttachInner, Begin, BeginInner, DeliveryState, Detach, DetachInner, Disposition,
+        DispositionInner, Flow, FlowInner, LinkError, Open, OpenInner, ReceiverSettleMode,
+        Rejected, SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
+        TransferBody, TransferInner,
     };
     use ntex_amqp_codec::types::{Multiple, Symbol, Variant};
     use ntex_bytes::{BytePages, Bytes, BytesMut};
@@ -1275,5 +1276,134 @@ mod tests {
             }
         }
         assert_eq!(frames, ["attach 1", "end true"]);
+    }
+
+    fn peer_flow(link_credit: Option<u32>) -> Frame {
+        Flow(Box::new(FlowInner {
+            next_incoming_id: Some(1),
+            incoming_window: 100,
+            next_outgoing_id: 1,
+            outgoing_window: 100,
+            handle: Some(0),
+            delivery_count: Some(0),
+            link_credit,
+            available: None,
+            drain: false,
+            echo: false,
+            properties: None,
+        }))
+        .into()
+    }
+
+    #[ntex::test]
+    async fn remote_sender_flow_before_confirm() {
+        let (_io, conn, _client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+
+        let Ok(Action::AttachSender(link, attach, response)) =
+            handle(peer_attach(Role::Receiver, None))
+        else {
+            panic!()
+        };
+
+        // link flow before confirmation, last flow with link credit is applied
+        for credit in [Some(5), Some(10), None] {
+            let Ok(Action::None) = handle(peer_flow(credit)) else {
+                panic!()
+            };
+        }
+        assert_eq!(link.credit(), 0);
+
+        let link = session.inner.get_mut().attach_remote_sender_link(
+            &attach,
+            response,
+            link.inner.clone(),
+        );
+        assert_eq!(link.credit(), 10);
+        assert!(link.ready().await);
+    }
+
+    #[ntex::test]
+    async fn remote_sender_detach_before_confirm() {
+        for accept in [true, false] {
+            let (_io, conn, client) = connection();
+            let inner = conn.get_ref().0;
+            let handle = |frame: Frame| {
+                inner
+                    .get_mut()
+                    .handle_frame(AmqpFrame::new(0, frame), &inner)
+            };
+            handle(begin()).unwrap();
+            let session = session(&conn);
+
+            let Ok(Action::AttachSender(link, attach, response)) =
+                handle(peer_attach(Role::Receiver, None))
+            else {
+                panic!()
+            };
+            let detach = Detach(Box::new(DetachInner {
+                handle: 0,
+                closed: true,
+                error: None,
+            }));
+            let Ok(Action::None) = handle(detach.into()) else {
+                panic!()
+            };
+            // flow after detach is ignored
+            let Ok(Action::None) = handle(peer_flow(Some(10))) else {
+                panic!()
+            };
+
+            if accept {
+                let link = session.inner.get_mut().attach_remote_sender_link(
+                    &attach,
+                    response,
+                    link.inner.clone(),
+                );
+                assert!(link.is_closed());
+                assert_eq!(link.credit(), 0);
+                assert!(!link.ready().await);
+
+                // control service is notified
+                let conn_ref = conn.get_ref();
+                let queue = conn_ref.get_control_queue().pending.borrow();
+                assert!(matches!(
+                    queue.back().unwrap().kind(),
+                    crate::ControlFrameKind::RemoteDetachSender(..)
+                ));
+            } else {
+                session
+                    .inner
+                    .get_mut()
+                    .detach_unconfirmed_sender_link(&attach, &link.inner, None);
+            }
+
+            // remote handle and link name are released
+            let Ok(Action::AttachSender(..)) = handle(peer_attach(Role::Receiver, None)) else {
+                panic!()
+            };
+
+            ntex::time::sleep(ntex::time::Millis(50)).await;
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                match frame.into_parts().1 {
+                    Frame::Attach(attach) => frames.push(format!("attach {}", attach.handle())),
+                    Frame::Detach(detach) => {
+                        frames.push(format!("detach {} {}", detach.handle(), detach.closed()));
+                    }
+                    _ => (),
+                }
+            }
+            assert_eq!(frames, ["attach 0", "detach 0 true"]);
+        }
     }
 }
