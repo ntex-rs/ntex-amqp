@@ -338,17 +338,22 @@ impl ControlState {
                         .call_static(types::Message::Attached(frm.clone(), link.clone()));
                     let response = pfrm.take();
                     let service = self.service.clone();
+                    let stop = self.stop.wait();
 
                     ntex_rt::spawn(async move {
-                        let result = fut.await;
-                        if let Err(err) = result {
-                            let _ = link.close_with_error(err);
-                        } else if link.confirm_receiver_link(response) {
-                            link.set_link_credit(50);
-                        } else {
-                            // link is detached, release publish service resources
-                            let _ = service.call(types::Message::Detached(link)).await;
-                        }
+                        // publish service call is dropped on dispatcher shutdown
+                        let _ = select(stop.ready(), async move {
+                            let result = fut.await;
+                            if let Err(err) = result {
+                                let _ = link.close_with_error(err);
+                            } else if link.confirm_receiver_link(response) {
+                                link.set_link_credit(50);
+                            } else {
+                                // link is detached, release publish service resources
+                                let _ = service.call(types::Message::Detached(link)).await;
+                            }
+                        })
+                        .await;
                     });
                 }
                 ControlFrameKind::AttachSender(ref frm, ref mut pfrm, ref link) => {
