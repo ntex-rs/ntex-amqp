@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix stale remote receiver link confirmation could establish another link reusing the same handle; link credit was sent for closed links and before the link's `Attach` response. Credit set before confirmation is sent after the `Attach` response
+
 * Fix publish service `Message::Detached` and `Message::DetachedAll` calls were not cancelled on dispatcher shutdown, pending calls kept publish service alive after disconnect
 
 * Fix publish service `Message::Attached` call for remotely opened receiver link was not cancelled on dispatcher shutdown, pending link service creation kept connection and link state alive after disconnect

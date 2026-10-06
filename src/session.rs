@@ -811,6 +811,7 @@ impl SessionInner {
             handle,
             attach,
             DEFAULT_MAX_MESSAGE_SIZE,
+            true,
         ));
         entry.insert(Either::Right(ReceiverLinkState::Opening(
             Box::new(Some((inner.clone(), attach.source().cloned()))),
@@ -858,6 +859,7 @@ impl SessionInner {
             token as u32,
             &frame,
             frame.max_message_size().unwrap_or(0),
+            false,
         ));
         entry.insert(Either::Right(ReceiverLinkState::OpeningLocal(Some((
             inner, tx,
@@ -873,18 +875,25 @@ impl SessionInner {
     /// Confirm remote receiver link, returns `false` if link is not established
     pub(crate) fn confirm_receiver_link(
         &mut self,
-        token: Handle,
+        inner: &Cell<ReceiverLinkInner>,
         mut response: Attach,
         max_message_size: Option<u64>,
     ) -> bool {
+        let token = inner.get_ref().id();
         // session could be ended while link was waiting for confirmation
         if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
             log::debug!("{}: Session is ending, receiver link: {token}", self.tag());
             return false;
         }
 
+        // handle could be reused by another link
         let (link, detach) = match self.links.get_mut(token as usize) {
-            Some(Either::Right(ReceiverLinkState::Opening(link, detach))) => {
+            Some(Either::Right(ReceiverLinkState::Opening(link, detach)))
+                if link
+                    .as_ref()
+                    .as_ref()
+                    .is_some_and(|(l, _)| std::ptr::eq(l.get_ref(), inner.get_ref())) =>
+            {
                 (link.take(), detach.take())
             }
             _ => (None, None),
@@ -926,9 +935,13 @@ impl SessionInner {
             return false;
         }
 
+        let credit = link.get_mut().confirmed();
         self.links[token as usize] = Either::Right(ReceiverLinkState::Established(
             EstablishedReceiverLink::new(link),
         ));
+        if let Some((delivery_count, credit)) = credit {
+            self.rcv_link_flow(token, delivery_count, credit);
+        }
         true
     }
 
