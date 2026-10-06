@@ -1585,6 +1585,109 @@ mod tests {
     }
 
     #[ntex::test]
+    async fn remote_receiver_reject_detach() {
+        let (_io, conn, _client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+
+        // rejected link keeps handles until remote detach
+        let Ok(Action::AttachReceiver(link, _, _)) =
+            handle(named_attach(Role::Sender, "r", "a", 5))
+        else {
+            panic!()
+        };
+        let closed = link.close_with_error(crate::error::LinkError::force_detach());
+        assert!(session.inner.get_ref().is_remote_handle_used(5));
+
+        let Ok(Action::AttachReceiver(link2, _, response)) =
+            handle(named_attach(Role::Sender, "r2", "b", 6))
+        else {
+            panic!()
+        };
+        assert_eq!(link2.handle(), 1);
+        link2.confirm_receiver_link(response);
+
+        // remote detach releases rejected link only
+        let Ok(Action::None) = handle(peer_detach(5)) else {
+            panic!()
+        };
+        closed.await.unwrap();
+        assert!(!link2.is_closed());
+        assert!(!session.inner.get_ref().is_remote_handle_used(5));
+
+        let Ok(Action::AttachReceiver(link3, _, _)) =
+            handle(named_attach(Role::Sender, "r3", "c", 5))
+        else {
+            panic!()
+        };
+        assert_eq!(link3.handle(), 0);
+    }
+
+    #[ntex::test]
+    async fn remote_sender_reject_detach() {
+        let (_io, conn, _client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+
+        // rejected link keeps handles until remote detach
+        let Ok(Action::AttachSender(link, attach, _)) =
+            handle(named_attach(Role::Receiver, "s", "a", 1))
+        else {
+            panic!()
+        };
+        session
+            .inner
+            .get_mut()
+            .detach_unconfirmed_sender_link(&attach, &link.inner, None);
+        assert!(session.inner.get_ref().is_remote_handle_used(1));
+
+        // local handle of established link is equal to remote handle of rejected link
+        let Ok(Action::AttachSender(link2, attach, response)) =
+            handle(named_attach(Role::Receiver, "s2", "b", 7))
+        else {
+            panic!()
+        };
+        let link2 = session.inner.get_mut().attach_remote_sender_link(
+            &attach,
+            response,
+            link2.inner.clone(),
+        );
+        assert_eq!(link2.id(), 1);
+
+        // remote detach releases rejected link only
+        let Ok(Action::None) = handle(peer_detach(1)) else {
+            panic!()
+        };
+        assert!(!link2.is_closed());
+        assert!(!session.inner.get_ref().is_remote_handle_used(1));
+
+        // detach of unknown remote handle is ignored
+        let Ok(Action::None) = handle(peer_detach(1)) else {
+            panic!()
+        };
+        assert!(!link2.is_closed());
+
+        let Ok(Action::AttachSender(link3, ..)) =
+            handle(named_attach(Role::Receiver, "s3", "c", 1))
+        else {
+            panic!()
+        };
+        assert_eq!(link3.id(), 0);
+    }
+
+    #[ntex::test]
     async fn remote_sender_end_before_confirm() {
         for (local, accept) in [(false, true), (false, false), (true, true), (true, false)] {
             let (_io, conn, client) = connection();

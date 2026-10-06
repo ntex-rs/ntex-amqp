@@ -716,7 +716,14 @@ impl SessionInner {
             );
             return;
         }
-        self.remote_handles.remove(&attach.handle());
+        let remote_detached = matches!(
+            self.links.get(token),
+            Some(Either::Left(SenderLinkState::OpeningRemote {
+                detach: Some(_),
+                ..
+            }))
+        );
+        let remote_handle = attach.handle();
 
         let attach = Attach(Box::new(codec::AttachInner {
             name: attach.0.name.clone(),
@@ -743,7 +750,13 @@ impl SessionInner {
         }));
         self.post_frame(detach.into());
 
-        self.remove_link(token);
+        if remote_detached {
+            self.remove_link(token);
+            self.remote_handles.remove(&remote_handle);
+        } else {
+            // handles are in use until remote detach
+            self.links[token] = Either::Left(SenderLinkState::Closing(None));
+        }
     }
 
     pub(crate) fn is_remote_handle_used(&self, hnd: Handle) -> bool {
@@ -873,7 +886,10 @@ impl SessionInner {
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
                 ReceiverLinkState::Opening(inner) => {
-                    if let Some((inner, source)) = inner.take() {
+                    let inner = inner.take();
+                    // handles are in use until remote detach
+                    *link = ReceiverLinkState::Closing(Some(tx));
+                    if let Some((inner, source)) = inner {
                         let attach = Attach(Box::new(codec::AttachInner {
                             source,
                             max_message_size: None,
@@ -898,8 +914,6 @@ impl SessionInner {
                         handle: id,
                     }));
                     self.post_frame(detach.into());
-                    let _ = tx.send(Ok(()));
-                    self.remove_link(id as usize);
                 }
                 ReceiverLinkState::Established(receiver_link) => {
                     let receiver_link = receiver_link.clone();
@@ -917,12 +931,9 @@ impl SessionInner {
                         ));
                 }
                 ReceiverLinkState::Closing(_) => {
+                    // link is removed on remote detach
                     let _ = tx.send(Ok(()));
-                    self.remove_link(id as usize);
-                    log::error!(
-                        "{}: Unexpected receiver link state: closing - {id}",
-                        self.tag()
-                    );
+                    log::debug!("{}: Receiver link is closing already - {id}", self.tag());
                 }
                 ReceiverLinkState::OpeningLocal(_inner) => unimplemented!(),
             }
@@ -1126,8 +1137,6 @@ impl SessionInner {
         // get local link instance
         let idx = if let Some(idx) = self.remote_handles.get(&frame.handle()) {
             *idx
-        } else if self.links.contains(frame.handle() as usize) {
-            frame.handle() as usize
         } else {
             // should not happen, error
             log::info!("{}: Detaching unknown link: {frame:?}", self.tag());

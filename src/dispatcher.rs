@@ -339,7 +339,7 @@ impl ControlState {
                     ntex_rt::spawn(async move {
                         let result = fut.await;
                         if let Err(err) = result {
-                            let _ = link.close_with_error(err).await;
+                            let _ = link.close_with_error(err);
                         } else {
                             link.confirm_receiver_link(response);
                             link.set_link_credit(50);
