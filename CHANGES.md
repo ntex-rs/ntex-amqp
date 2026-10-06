@@ -2,6 +2,10 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix `ReceiverLink::set_link_credit()` advertised only added credit in `Flow` instead of total link credit, credit overflow saturates
+
+* Fix session `next-incoming-id` was not advanced on received transfers, always send it in `Flow` frames
+
 * Fix memory amplification, received frames retained whole read buffers: small chunks of partial transfers are copied, stored `Begin`, `Attach`, `Open` data, delivery tags and states are detached from the read buffer
 
 * Fix CPU exhaustion on remote `Disposition` with a large delivery-id range, the range is walked up to the number of unsettled deliveries. Ranges wrapping past `u32::MAX` are supported

@@ -822,6 +822,10 @@ impl SessionInner {
                     Ok(Action::None)
                 }
                 Frame::Transfer(transfer) => {
+                    // incoming window is not limited (u32::MAX), memory is bounded
+                    // by link credit, max message size and handle-max
+                    self.next_incoming_id = self.next_incoming_id.wrapping_add(1);
+
                     let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
                         *idx
                     } else {
@@ -855,8 +859,6 @@ impl SessionInner {
                                     )))
                                 }
                                 ReceiverLinkState::Established(link) => {
-                                    // self.outgoing_window -= 1;
-                                    let _ = self.next_incoming_id.wrapping_add(1);
                                     Ok(link.inner.get_mut().handle_transfer(transfer, &link.inner))
                                 }
                                 ReceiverLinkState::Closing(_) => Ok(Action::None),
@@ -1160,11 +1162,7 @@ impl SessionInner {
 
         if flow.echo() {
             let flow = Flow(Box::new(codec::FlowInner {
-                next_incoming_id: if self.flags.contains(Flags::LOCAL) {
-                    Some(self.next_incoming_id)
-                } else {
-                    None
-                },
+                next_incoming_id: Some(self.next_incoming_id),
                 incoming_window: u32::MAX,
                 next_outgoing_id: self.next_outgoing_id,
                 outgoing_window: self.remote_incoming_window,

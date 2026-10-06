@@ -55,6 +55,10 @@ pub mod codec {
 }
 
 /// Amqp1 transport configuration.
+///
+/// Session incoming window is not limited, memory used by received
+/// transfers is bounded by link credit, max message size, handle-max
+/// and channel-max.
 #[derive(Debug)]
 pub struct AmqpServiceConfig {
     pub max_frame_size: u32,
