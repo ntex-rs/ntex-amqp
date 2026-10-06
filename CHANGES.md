@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix `Flow` echo reply for attached link did not carry link state (handle, delivery-count, link-credit)
+
 * Fix router kept a handler entry for every link whose link service failed to create, router link services were not shutdown on connection close
 
 * Fix stale remote receiver link confirmation could establish another link reusing the same handle; link credit was sent for closed links and before the link's `Attach` response. Credit set before confirmation is sent after the `Attach` response

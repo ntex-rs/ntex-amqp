@@ -1657,6 +1657,66 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn flow_echo_link_state() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        let echo = |handle: u32, link_credit: Option<u32>| {
+            let Frame::Flow(mut flow) = peer_flow(link_credit) else {
+                panic!()
+            };
+            flow.0.handle = Some(handle);
+            flow.0.echo = true;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+
+        let Ok(Action::AttachReceiver(rcv, _, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "r", "r", 3))
+        else {
+            panic!()
+        };
+        assert!(rcv.confirm_receiver_link(response));
+        rcv.set_link_credit(10);
+
+        let Ok(Action::AttachSender(snd, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
+        else {
+            panic!()
+        };
+        session
+            .inner
+            .get_mut()
+            .attach_remote_sender_link(&attach, response, snd.inner.clone());
+        let Ok(Action::AttachSender(..)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "o", "o", 5))
+        else {
+            panic!()
+        };
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            ["Begin", "Attach r 0", "Flow Some(0) Some(10)", "Attach s 1"]
+        );
+
+        // echo reply carries state of established links
+        echo(4, Some(7));
+        echo(3, None);
+        // opening and unknown links, session state only
+        echo(5, Some(7));
+        echo(9, Some(7));
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            [
+                "Flow Some(1) Some(7)",
+                "Flow Some(0) Some(10)",
+                "Flow None None",
+                "Flow None None"
+            ]
+        );
+    }
+
+    #[ntex::test]
     async fn remote_receiver_stale_confirm() {
         let (_io, conn, client) = connection();
         let inner = conn.get_ref().0;
