@@ -676,8 +676,8 @@ mod tests {
     use ntex_amqp_codec::protocol::{
         Attach, AttachInner, Begin, BeginInner, DeliveryState, Detach, DetachInner, Disposition,
         DispositionInner, Flow, FlowInner, LinkError, Open, OpenInner, ReceiverSettleMode,
-        Rejected, SenderSettleMode, Source, TerminusDurability, TerminusExpiryPolicy, Transfer,
-        TransferBody, TransferInner,
+        Rejected, SenderSettleMode, Source, Target, TerminusDurability, TerminusExpiryPolicy,
+        Transfer, TransferBody, TransferInner,
     };
     use ntex_amqp_codec::types::{Multiple, Symbol, Variant};
     use ntex_bytes::{BytePages, Bytes, BytesMut};
@@ -1324,6 +1324,139 @@ mod tests {
         );
         assert_eq!(link.credit(), 10);
         assert!(link.ready().await);
+    }
+
+    fn named_attach(role: Role, name: &str, address: &str, handle: u32) -> Frame {
+        let Frame::Attach(mut attach) = attach() else {
+            panic!()
+        };
+        attach.0.role = role;
+        attach.0.name = name.into();
+        attach.0.handle = handle;
+        attach.0.source.as_mut().unwrap().address = Some(address.into());
+        attach.0.target = Some(Target {
+            address: Some(address.into()),
+            durable: TerminusDurability::None,
+            expiry_policy: TerminusExpiryPolicy::SessionEnd,
+            timeout: 0,
+            dynamic: false,
+            dynamic_node_properties: None,
+            capabilities: None,
+        });
+        attach.into()
+    }
+
+    fn peer_detach(handle: u32) -> Frame {
+        Detach(Box::new(DetachInner {
+            handle,
+            closed: true,
+            error: None,
+        }))
+        .into()
+    }
+
+    #[ntex::test]
+    async fn remote_sender_link_names() {
+        let (_io, conn, _client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+        let confirm = |frame| {
+            let Ok(Action::AttachSender(link, attach, response)) = handle(frame) else {
+                panic!()
+            };
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, link.inner.clone())
+        };
+
+        // remote sender link is registered by link name
+        let link = confirm(named_attach(Role::Receiver, "n", "a", 0));
+        assert_eq!(link.name(), "n");
+        assert_eq!(link.address().unwrap(), "a");
+        assert_eq!(session.get_sender_link("n").unwrap().id(), link.id());
+        assert!(session.get_sender_link("a").is_none());
+        assert_eq!(
+            session.get_sender_link_by_address("a").unwrap().id(),
+            link.id()
+        );
+        assert!(session.get_sender_link_by_address("n").is_none());
+
+        // link named as address of other link
+        let link2 = confirm(named_attach(Role::Receiver, "a", "a", 1));
+        assert_eq!(session.get_sender_link("a").unwrap().id(), link2.id());
+
+        // duplicate name, newer link takes the name
+        let link3 = confirm(named_attach(Role::Receiver, "a", "b", 2));
+        assert_eq!(session.get_sender_link("a").unwrap().id(), link3.id());
+        let Ok(Action::DetachSender(..)) = handle(peer_detach(1)) else {
+            panic!()
+        };
+        assert_eq!(session.get_sender_link("a").unwrap().id(), link3.id());
+
+        // name is removed on detach
+        let Ok(Action::DetachSender(..)) = handle(peer_detach(0)) else {
+            panic!()
+        };
+        assert!(session.get_sender_link("n").is_none());
+        assert!(session.get_sender_link_by_address("a").is_none());
+        let Ok(Action::DetachSender(..)) = handle(peer_detach(2)) else {
+            panic!()
+        };
+        let inner = session.inner.get_ref();
+        assert!(inner.sender_names.is_empty() && inner.link_names.is_empty());
+    }
+
+    #[ntex::test]
+    async fn local_link_names() {
+        let (_io, conn, _client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+
+        let s = session.clone();
+        let fut = ntex::rt::spawn(async move { s.build_sender_link("x", "addr").attach().await });
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+
+        // peer opens link with the same name in other direction
+        let Ok(Action::AttachReceiver(..)) = handle(named_attach(Role::Sender, "x", "x", 0)) else {
+            panic!()
+        };
+        assert!(!fut.is_finished());
+
+        // local link confirmation
+        let Ok(Action::None) = handle(named_attach(Role::Receiver, "x", "peer", 1)) else {
+            panic!()
+        };
+        let link = fut.await.unwrap().unwrap();
+        assert_eq!(link.name(), "x");
+        assert_eq!(link.address().unwrap(), "peer");
+        assert_eq!(session.get_sender_link("x").unwrap().id(), link.id());
+
+        // name is removed after detach confirmation
+        let l = link.clone();
+        let fut = ntex::rt::spawn(async move { l.close().await });
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        handle(peer_detach(1)).unwrap();
+        fut.await.unwrap().unwrap();
+        assert!(session.get_sender_link("x").is_none());
+        assert!(!session.inner.get_ref().sender_names.contains_key("x"));
+
+        // remote attach with the name of removed link
+        let Ok(Action::AttachSender(..)) = handle(named_attach(Role::Receiver, "x", "x", 2)) else {
+            panic!()
+        };
     }
 
     #[ntex::test]

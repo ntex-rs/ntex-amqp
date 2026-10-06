@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix remotely opened sender link was registered by source address instead of link name, link names were not removed on link removal. Remote attach with the name of established, closing or unrelated link was ignored, attach with the name of opening local link in the same direction was handled as its confirmation. `SenderLink::name()` returns link name for remotely opened links, `Session::get_sender_link()` finds link by name. Add `SenderLink::address()` and `Session::get_sender_link_by_address()`
+
 * Fix stale sender link `Flow` could overwrite newer link credit when control service calls completed out of order, and session flow state was applied only after control service call. Session and link flows are applied in frames order before control service is notified, control service calls are spawned and cancelled on dispatcher shutdown
 
 * Fix server dispatcher stopped processing control frames, link attach confirmations, control service errors and keep-alive pings while publish service was not ready
