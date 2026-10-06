@@ -319,9 +319,11 @@ impl SenderLinkInner {
     pub(crate) fn apply_flow(&mut self, flow: &Flow) -> bool {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
+            // delivery-count is null if receiver has not received attach yet,
+            // local delivery-count is initial delivery-count at that point
             let new_credit = flow
                 .delivery_count()
-                .unwrap_or(0)
+                .unwrap_or(self.delivery_count)
                 .wrapping_add(credit)
                 .wrapping_sub(self.delivery_count);
 
@@ -330,7 +332,7 @@ impl SenderLinkInner {
                 self.session.tag(),
                 self.name,
                 new_credit,
-                flow.delivery_count().unwrap_or(0),
+                flow.delivery_count().unwrap_or(self.delivery_count),
                 self.delivery_count,
                 self.pending_transfers.len(),
                 self.link_credit
@@ -605,7 +607,7 @@ impl SenderLinkBuilder {
             target: Some(target),
             unsettled: None,
             incomplete_unsettled: false,
-            initial_delivery_count: None,
+            initial_delivery_count: Some(0),
             max_message_size: Some(65536 * 4),
             offered_capabilities: None,
             desired_capabilities: None,

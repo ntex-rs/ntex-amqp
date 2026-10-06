@@ -1264,6 +1264,77 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn local_sender_initial_delivery_count() {
+        // (attach initial delivery-count, sent value, flow delivery-count)
+        let cases = [
+            (None, 0, Some(0)),
+            (Some(Some(5)), 5, Some(5)),
+            (Some(None), 0, Some(0)),
+            (Some(Some(5)), 5, None),
+        ];
+        for (initial, sent, flow_count) in cases {
+            let ctx = format!("initial: {initial:?} flow: {flow_count:?}");
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+            let fut = ntex::rt::spawn(async move {
+                let mut builder = s.build_sender_link("s", "s");
+                if let Some(initial) = initial {
+                    builder = builder.with_frame(|f| f.0.initial_delivery_count = initial);
+                }
+                builder.attach().await
+            });
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut counts = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                if let Frame::Attach(att) = frame.into_parts().1 {
+                    counts.push(att.initial_delivery_count());
+                }
+            }
+            assert_eq!(counts, [Some(sent)], "{ctx}");
+
+            // receiver initial delivery-count is ignored
+            let Frame::Attach(mut attach) = named_attach(Role::Receiver, "s", "s", 0) else {
+                panic!()
+            };
+            attach.0.initial_delivery_count = Some(100);
+            let Ok(Action::None) = handle_frame(&conn, attach.into()) else {
+                panic!("{ctx}")
+            };
+            let link = ntex::time::timeout(ntex::time::Millis(1000), fut)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+
+            let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
+                panic!()
+            };
+            flow.0.delivery_count = flow_count;
+            handle_frame(&conn, flow.into()).unwrap();
+            assert_eq!(link.credit(), 10, "{ctx}");
+
+            // delivery-count is advanced by transfer
+            ntex::time::timeout(
+                ntex::time::Millis(1000),
+                link.transfer(Bytes::from_static(b"1")).settled().send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
+                panic!()
+            };
+            flow.0.delivery_count = Some(sent + 1);
+            handle_frame(&conn, flow.into()).unwrap();
+            assert_eq!(link.credit(), 10, "{ctx}");
+        }
+    }
+
+    #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,

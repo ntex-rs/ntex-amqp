@@ -9,7 +9,7 @@ use slab::Slab;
 use ntex_amqp_codec::protocol::{
     self as codec, Accepted, Attach, Begin, DeliveryNumber, DeliveryState, Detach, Disposition,
     End, Error, Flow, Frame, Handle, MessageFormat, ReceiverSettleMode, Role, SenderSettleMode,
-    Source, Transfer, TransferBody, TransferNumber,
+    SequenceNo, Source, Transfer, TransferBody, TransferNumber,
 };
 use ntex_amqp_codec::{AmqpFrame, Encode};
 
@@ -272,7 +272,11 @@ enum SenderLinkState {
         flow: Option<Flow>,
         detach: Option<Detach>,
     },
-    Opening(Option<oneshot::Sender<Result<Cell<SenderLinkInner>, AmqpProtocolError>>>),
+    /// Local link waits for remote attach, keeps initial delivery-count
+    Opening(
+        Option<oneshot::Sender<Result<Cell<SenderLinkInner>, AmqpProtocolError>>>,
+        SequenceNo,
+    ),
     Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
 }
 
@@ -296,7 +300,7 @@ enum ReceiverLinkState {
 
 impl SenderLinkState {
     fn is_opening(&self) -> bool {
-        matches!(self, SenderLinkState::Opening(_))
+        matches!(self, SenderLinkState::Opening(..))
     }
 }
 
@@ -656,9 +660,14 @@ impl SessionInner {
             return rx;
         }
 
+        // delivery-count is initialized by the sender
+        let delivery_count = *frame.0.initial_delivery_count.get_or_insert(0);
         let entry = self.links.vacant_entry();
         let token = entry.key();
-        entry.insert(Either::Left(SenderLinkState::Opening(Some(tx))));
+        entry.insert(Either::Left(SenderLinkState::Opening(
+            Some(tx),
+            delivery_count,
+        )));
         log::trace!(
             "{}: Local sender link opening: {:?} hnd:{token:?}",
             self.tag(),
@@ -766,7 +775,7 @@ impl SessionInner {
         }
         if let Some(Either::Left(link)) = self.links.get_mut(id as usize) {
             match link {
-                SenderLinkState::Opening(_) => {
+                SenderLinkState::Opening(..) => {
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,
                         closed,
@@ -1326,7 +1335,10 @@ impl SessionInner {
                 );
 
                 self.remote_handles.insert(attach.handle(), index);
-                let delivery_count = attach.initial_delivery_count().unwrap_or(0);
+                // remote receiver initial delivery-count is ignored
+                let SenderLinkState::Opening(_, delivery_count) = *item else {
+                    unreachable!()
+                };
                 let link = Cell::new(SenderLinkInner::new(
                     index,
                     name.clone(),
@@ -1342,7 +1354,7 @@ impl SessionInner {
                 );
 
                 // attach future is dropped
-                if let SenderLinkState::Opening(Some(tx)) = local_sender
+                if let SenderLinkState::Opening(Some(tx), _) = local_sender
                     && tx.send(Ok(link)).is_err()
                 {
                     self.detach_cancelled_link(index);
@@ -1399,7 +1411,7 @@ impl SessionInner {
         let remove = if let Some(link) = self.links.get_mut(idx) {
             match link {
                 Either::Left(link) => match link {
-                    SenderLinkState::Opening(tx) => {
+                    SenderLinkState::Opening(tx, _) => {
                         if let Some(tx) = tx.take() {
                             let err = AmqpProtocolError::LinkDetached(frame.0.error.clone());
                             let _ = tx.send(Err(err));
