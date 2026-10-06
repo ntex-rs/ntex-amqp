@@ -663,6 +663,78 @@ async fn test_remote_receiver_detach_before_confirm() -> std::io::Result<()> {
     Ok(())
 }
 
+#[ntex::test]
+async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
+    // session ends during control service call or link service creation
+    for slow_control in [false, true] {
+        let created = Arc::new(AtomicUsize::new(0));
+        let released = Arc::new(AtomicUsize::new(0));
+        let ended = Arc::new(AtomicUsize::new(0));
+        let (created2, released2, ended2) = (created.clone(), released.clone(), ended.clone());
+
+        let srv = test_server(async move || {
+            let (created, released, ended) = (created2.clone(), released2.clone(), ended2.clone());
+            server::Server::builder(async move |conn: server::Handshake| match conn {
+                server::Handshake::Amqp(conn) => {
+                    let conn = conn.open().await.map_err(|_| ())?;
+                    Ok::<_, ()>(conn.ack(()))
+                }
+                server::Handshake::Sasl(_) => Err(()),
+            })
+            .control(async move |msg: ControlFrame| {
+                match msg.kind() {
+                    ControlFrameKind::AttachReceiver(..) if slow_control => {
+                        sleep(Millis(50)).await;
+                    }
+                    ControlFrameKind::RemoteSessionEnded(links) => {
+                        ended.fetch_add(links.len(), Ordering::SeqCst);
+                    }
+                    _ => (),
+                }
+                Ok::<_, ()>(())
+            })
+            .build(
+                server::Router::<()>::builder()
+                    .service("test", move |_: &types::Link<()>| {
+                        let created = created.clone();
+                        let released = released.clone();
+                        async move {
+                            created.fetch_add(1, Ordering::SeqCst);
+                            sleep(Millis(50)).await;
+                            let guard = CountGuard(released);
+                            Ok::<_, LinkError>(boxed::service(fn_service(move |_req| {
+                                let _ = &guard;
+                                async { Ok::<_, LinkError>(types::Outcome::Accept) }
+                            })))
+                        }
+                    })
+                    .build(),
+            )
+        });
+
+        let io = raw_connect(srv.addr()).await;
+        raw_begin_session(&io).await;
+        raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
+        sleep(Millis(10)).await;
+        raw_send(&io, 0, protocol::End { error: None }.into()).await;
+        assert!(matches!(raw_recv(&io).await, protocol::Frame::End(_)));
+
+        // no frames after session end
+        let res = timeout(Millis(150), io.recv(&AmqpCodec::<AmqpFrame>::new())).await;
+        assert!(res.is_err(), "slow_control: {slow_control}");
+        assert_eq!(ended.load(Ordering::SeqCst), 1);
+        if slow_control {
+            // link service is not created for closed link
+            assert_eq!(created.load(Ordering::SeqCst), 0);
+        } else {
+            assert_eq!(created.load(Ordering::SeqCst), 1);
+            assert_eq!(released.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    Ok(())
+}
+
 struct CountGuard(Arc<AtomicUsize>);
 
 impl Drop for CountGuard {

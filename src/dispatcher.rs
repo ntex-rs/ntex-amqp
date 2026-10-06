@@ -329,6 +329,8 @@ impl ControlState {
             }
         } else {
             match frame.0.get_mut().kind {
+                // session is ended or link is closed by control service
+                ControlFrameKind::AttachReceiver(_, _, ref link) if link.is_closed() => {}
                 ControlFrameKind::AttachReceiver(ref frm, ref mut pfrm, ref link) => {
                     let link = link.clone();
                     let fut = self

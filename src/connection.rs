@@ -1829,4 +1829,75 @@ mod tests {
             assert_eq!(frames, ["Begin", "End"], "local: {local} accept: {accept}");
         }
     }
+
+    #[ntex::test]
+    async fn remote_receiver_end_before_confirm() {
+        for (local, accept) in [(false, true), (false, false), (true, true), (true, false)] {
+            let (_io, conn, client) = connection();
+            let inner = conn.get_ref().0;
+            let handle = |frame: Frame| {
+                inner
+                    .get_mut()
+                    .handle_frame(AmqpFrame::new(0, frame), &inner)
+            };
+            handle(begin()).unwrap();
+            let session = session(&conn);
+
+            let Ok(Action::AttachReceiver(link, _, response)) =
+                handle(named_attach(Role::Sender, "r", "a", 0))
+            else {
+                panic!()
+            };
+
+            if local {
+                let s = session.clone();
+                ntex::rt::spawn(async move { s.end().await });
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+
+                let conn_ref = conn.get_ref();
+                let queue = conn_ref.get_control_queue().pending.borrow();
+                let crate::ControlFrameKind::LocalSessionEnded(links) =
+                    queue.back().unwrap().kind()
+                else {
+                    panic!()
+                };
+                assert_eq!(links.len(), 1);
+                assert!(!link.is_closed());
+            } else {
+                let Ok(Action::SessionEnded(links)) = handle(End { error: None }.into()) else {
+                    panic!()
+                };
+                assert!(matches!(&links[..], [ntex::util::Either::Right(l)] if *l == link));
+                assert!(link.is_closed());
+            }
+
+            // confirmation after end does not send frames
+            if accept {
+                assert!(!link.confirm_receiver_link(response));
+            } else {
+                ntex::time::timeout(
+                    ntex::time::Millis(500),
+                    link.close_with_error(crate::error::LinkError::force_detach()),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            }
+
+            if local {
+                // remote end confirms local end
+                handle(End { error: None }.into()).unwrap();
+                assert!(link.is_closed());
+            }
+
+            ntex::time::sleep(ntex::time::Millis(50)).await;
+            let codec = AmqpCodec::<AmqpFrame>::new();
+            let mut buf = BytesMut::from(&client.read_any()[..]);
+            let mut frames = Vec::new();
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                frames.push(frame.into_parts().1.name());
+            }
+            assert_eq!(frames, ["Begin", "End"], "local: {local} accept: {accept}");
+        }
+    }
 }

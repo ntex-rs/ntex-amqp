@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix remotely opened receiver link was not closed on session end before link confirmation and was not included in session ended links. Confirmation or rejection after session end sent `Attach` and `Detach` frames after `End`, publish service was notified with `Message::Attached` for closed link
+
 * Fix remote `Detach` for remotely opened receiver link was ignored before link confirmation, link was confirmed with link credit and never detached, router link service was not released. Remote `Detach` is applied after control and publish services complete, link is detached and closed, control service is notified with `RemoteDetachReceiver` and publish service with `Message::Detached`
 
 * Fix rejected remotely opened link released its handle before remote `Detach`, remote handle stayed registered for rejected receiver link. Remote `Detach` could close unrelated link, re-attach with the same remote handle ended session with `handle-in-use`. Rejected links keep handles until remote `Detach`, `Detach` with unknown remote handle is ignored

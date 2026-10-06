@@ -413,6 +413,11 @@ impl SessionInner {
                 Either::Right(ReceiverLinkState::Established(link)) => {
                     link.remote_detached(None);
                 }
+                Either::Right(ReceiverLinkState::Opening(link, _)) => {
+                    if let Some((link, _)) = link.as_ref() {
+                        ReceiverLink::new(link.clone()).remote_detached(None);
+                    }
+                }
                 _ => (),
             }
         }
@@ -446,6 +451,10 @@ impl SessionInner {
                 Either::Right(ReceiverLinkState::Established(link)) => {
                     Some(Either::Right((*link).clone()))
                 }
+                Either::Right(ReceiverLinkState::Opening(link, _)) => link
+                    .as_ref()
+                    .as_ref()
+                    .map(|(link, _)| Either::Right(ReceiverLink::new(link.clone()))),
                 _ => None,
             })
             .collect()
@@ -868,6 +877,12 @@ impl SessionInner {
         mut response: Attach,
         max_message_size: Option<u64>,
     ) -> bool {
+        // session could be ended while link was waiting for confirmation
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            log::debug!("{}: Session is ending, receiver link: {token}", self.tag());
+            return false;
+        }
+
         let (link, detach) = match self.links.get_mut(token as usize) {
             Some(Either::Right(ReceiverLinkState::Opening(link, detach))) => {
                 (link.take(), detach.take())
@@ -925,8 +940,13 @@ impl SessionInner {
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
+        let ending = self.flags.intersects(Flags::ENDING | Flags::ENDED);
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
+                // session is ending, link is removed on session end
+                ReceiverLinkState::Opening(..) if ending => {
+                    let _ = tx.send(Ok(()));
+                }
                 ReceiverLinkState::Opening(inner, remote_detach) => {
                     let inner = inner.take();
                     let remote_detach = remote_detach.take();
