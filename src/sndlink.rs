@@ -282,19 +282,25 @@ impl SenderLinkInner {
         self.on_credit.notify_and_lock(());
     }
 
+    /// Link is detached locally, fail transfers waiting for link credit
+    pub(crate) fn local_detached(&mut self, err: &AmqpProtocolError) {
+        for tx in self.pending_transfers.drain(..) {
+            let _ = tx.send(Err(err.clone()));
+        }
+        if !self.closed {
+            self.closed = true;
+            self.on_close.notify_and_lock(());
+            self.on_credit.notify_and_lock(());
+        }
+    }
+
     pub(crate) async fn close(&mut self, error: Option<Error>) -> Result<(), AmqpProtocolError> {
         if self.closed {
             Ok(())
         } else {
-            self.closed = true;
-            self.on_close.notify_and_lock(());
-            self.on_credit.notify_and_lock(());
-
             // fail transfers waiting for link credit or session window
             let err = AmqpProtocolError::Disconnected;
-            for tx in self.pending_transfers.drain(..) {
-                let _ = tx.send(Err(err.clone()));
-            }
+            self.local_detached(&err);
             self.session
                 .inner
                 .get_mut()
@@ -660,12 +666,10 @@ impl std::ops::Deref for EstablishedSenderLink {
 
 impl Drop for EstablishedSenderLink {
     fn drop(&mut self) {
-        let inner = self.0.inner.get_mut();
-        if !inner.closed {
-            inner.closed = true;
-            inner.on_close.notify_and_lock(());
-            inner.on_credit.notify_and_lock(());
-        }
+        self.0
+            .inner
+            .get_mut()
+            .local_detached(&AmqpProtocolError::Disconnected);
     }
 }
 

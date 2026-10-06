@@ -2833,6 +2833,115 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn sender_link_detach_fails_waiting_transfers() {
+        use ntex::time::{Millis, sleep, timeout};
+
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let session = session(&conn);
+        let flow = |handle: u32, credit: u32, window: u32| {
+            let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
+                panic!()
+            };
+            flow.0.handle = Some(handle);
+            flow.0.incoming_window = window;
+            handle_frame(&conn, flow.into()).unwrap();
+        };
+        let attach = |name: &str, handle: u32| {
+            let Ok(Action::AttachSender(snd, attach, response)) =
+                handle_frame(&conn, named_attach(Role::Receiver, name, name, handle))
+            else {
+                panic!()
+            };
+            session
+                .inner
+                .get_mut()
+                .attach_remote_sender_link(&attach, response, snd.inner.clone())
+        };
+        let send = |snd: &SenderLink, body: &'static [u8]| {
+            ntex::rt::spawn(snd.transfer(Bytes::from_static(body)).settled().send())
+        };
+
+        // transfer waits for link credit
+        let a = attach("a", 4);
+        let t1 = send(&a, b"1");
+        // transfer waits for session window
+        let b = attach("b", 5);
+        flow(5, 1, 0);
+        let t2 = send(&b, b"2");
+        sleep(Millis(50)).await;
+        frame_names(&client);
+
+        let _d1 = session.detach_sender_link(a.inner.get_ref().id(), None);
+        let _d2 = session.detach_sender_link(b.inner.get_ref().id(), None);
+        let res = timeout(Millis(500), t1).await.unwrap().unwrap();
+        assert!(matches!(res, Err(AmqpProtocolError::Disconnected)));
+        let res = timeout(Millis(500), t2).await.unwrap().unwrap();
+        assert!(matches!(res, Err(AmqpProtocolError::Disconnected)));
+        assert!(a.transfer(Bytes::from_static(b"3")).send().await.is_err());
+
+        // no transfers after detach
+        flow(5, 1, 10);
+        sleep(Millis(50)).await;
+        assert_eq!(frame_names(&client), ["Detach 0", "Detach 1"]);
+    }
+
+    #[ntex::test]
+    async fn sender_link_detach_fails_partial_delivery() {
+        use ntex::time::{Millis, sleep, timeout};
+
+        let (_io, conn, client, snd) = small_frames_sender();
+        let session = session(&conn);
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+
+        // delivery waits for session window, next transfer waits for delivery
+        let body = Bytes::from(vec![0u8; 2048]);
+        let t1 = ntex::rt::spawn(snd.transfer(body).settled().send());
+        let t2 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"2")).settled().send());
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            [
+                "Transfer Some(0) more:true aborted:false",
+                "Transfer None more:true aborted:false"
+            ]
+        );
+
+        let _d = session.detach_sender_link(snd.inner.get_ref().id(), None);
+        let res = timeout(Millis(500), t1).await.unwrap().unwrap();
+        assert!(matches!(res, Err(AmqpProtocolError::Disconnected)));
+        let res = timeout(Millis(500), t2).await.unwrap().unwrap();
+        assert!(matches!(res, Err(AmqpProtocolError::Disconnected)));
+
+        // no transfers after detach
+        session_window(&conn, 1, 10);
+        sleep(Millis(50)).await;
+        assert_eq!(transfer_frames(&client), ["Detach"]);
+    }
+
+    #[ntex::test]
+    async fn sender_link_detach_fails_unsettled() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, _client, snd) = small_frames_sender();
+        let session = session(&conn);
+        let delivery = snd.transfer(Bytes::from_static(b"1")).send().await.unwrap();
+        let mut wait = Box::pin(delivery.wait());
+        assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+
+        // disposition could be received before detach confirmation
+        let _d = session.detach_sender_link(snd.inner.get_ref().id(), None);
+        sleep(Millis(50)).await;
+        assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+
+        handle_frame(&conn, peer_detach(4)).unwrap();
+        let res = timeout(Millis(500), wait).await.unwrap();
+        assert!(matches!(res, Err(AmqpProtocolError::LinkDetached(None))));
+    }
+
+    #[ntex::test]
     async fn sender_link_stale_flow() {
         for initial in [0, u32::MAX - 1] {
             sender_link_stale_flow_with(initial).await;
