@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix session remote incoming window wrapped on flow issued before remote got sent transfers; null flow next-incoming-id uses initial outgoing id
+
 * Fix sender link credit wrapped on flow issued before receiver got sent transfers; null flow delivery-count uses initial delivery count
 
 * Fix session window was consumed per delivery instead of per transfer frame, multi-frame deliveries could stall sending; delivery ids are separate from transfer ids, cancelled partially sent deliveries are aborted

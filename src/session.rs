@@ -1676,11 +1676,22 @@ impl SessionInner {
         self.next_incoming_id = flow.next_outgoing_id();
         self.remote_outgoing_window = flow.outgoing_window();
 
-        self.remote_incoming_window = flow
-            .next_incoming_id()
-            .unwrap_or(0)
-            .wrapping_add(flow.incoming_window())
-            .wrapping_sub(self.next_outgoing_id);
+        // next-incoming-id is null if remote has not received begin yet
+        let next_incoming_id = flow.next_incoming_id().unwrap_or(INITIAL_NEXT_OUTGOING_ID);
+
+        // transfers sent after flow was issued consume its window
+        let in_flight = self.next_outgoing_id.wrapping_sub(next_incoming_id);
+        self.remote_incoming_window = if in_flight > i32::MAX as u32 {
+            log::warn!(
+                "{}: Session flow next-incoming-id {:?} is ahead of next-outgoing-id {:?}",
+                self.tag(),
+                next_incoming_id,
+                self.next_outgoing_id
+            );
+            flow.incoming_window()
+        } else {
+            flow.incoming_window().saturating_sub(in_flight)
+        };
 
         log::trace!(
             "{}: Session received credit {:?}. window: {}, pending: {}",
