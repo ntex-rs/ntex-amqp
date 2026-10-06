@@ -398,6 +398,9 @@ impl SenderLinkInner {
 
         loop {
             let inner = link.get_mut();
+            if let Some(ref err) = inner.error {
+                return Err(err.clone());
+            }
             if inner.link_credit == 0 || !inner.pending_transfers.is_empty() {
                 log::trace!(
                     "{}: Sender link credit is 0({:?}), push to pending queue hnd:{}({} -> {}), queue size: {}",
@@ -418,21 +421,37 @@ impl SenderLinkInner {
                 .await?;
                 continue;
             }
+
+            // link credit is not reserved while transfer waits for session window,
+            // waiting transfer prevents credit drain
+            inner.active += 1;
+            let guard = ActiveTransfer(Some(link.clone()));
+            if inner
+                .session
+                .inner
+                .get_mut()
+                .wait_window(inner.id as Handle)
+                .await?
+            {
+                guard.resume();
+                continue;
+            }
+            guard.resume();
             break;
         }
 
-        // reduce link credit
+        // transfer is sent and link credit is consumed together
         let inner = link.get_mut();
+        let id = inner.session.inner.get_mut().send_transfer(
+            inner.id as Handle,
+            &tag,
+            body,
+            settled,
+            format,
+        )?;
         inner.link_credit -= 1;
         inner.delivery_count = inner.delivery_count.wrapping_add(1);
-        inner.active += 1;
-        let _guard = ActiveTransfer(link.clone());
-        let id = inner
-            .session
-            .inner
-            .get_mut()
-            .send_transfer(inner.id as u32, tag.clone(), body, settled, format)
-            .await?;
+        inner.drain_and_post();
 
         Ok((id, tag))
     }
@@ -494,14 +513,25 @@ impl Drop for CreditWaiter {
     }
 }
 
-/// Transfer in progress, link credit could be drained after transfer is sent
-struct ActiveTransfer(Cell<SenderLinkInner>);
+/// Transfer waits for session window, link credit could be drained after it is gone
+struct ActiveTransfer(Option<Cell<SenderLinkInner>>);
+
+impl ActiveTransfer {
+    /// Transfer continues without awaiting
+    fn resume(mut self) {
+        if let Some(link) = self.0.take() {
+            link.get_mut().active -= 1;
+        }
+    }
+}
 
 impl Drop for ActiveTransfer {
     fn drop(&mut self) {
-        let link = self.0.get_mut();
-        link.active -= 1;
-        link.drain_and_post();
+        if let Some(link) = self.0.take() {
+            let link = link.get_mut();
+            link.active -= 1;
+            link.drain_and_post();
+        }
     }
 }
 
