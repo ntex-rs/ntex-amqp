@@ -1,4 +1,5 @@
-use std::{cmp, collections::VecDeque, fmt, future::Future, mem};
+use std::task::{Context, Poll, Waker};
+use std::{cmp, collections::VecDeque, fmt, future::Future, mem, ptr};
 
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
@@ -337,6 +338,56 @@ fn drop_pending_transfers(
     }
 }
 
+/// Local link attach response
+///
+/// Link attached after the attach future is dropped is detached.
+pub(crate) struct AttachReceiver<T> {
+    rx: oneshot::Receiver<Result<T, AmqpProtocolError>>,
+    cancel: fn(&T),
+}
+
+impl<T> AttachReceiver<T> {
+    pub(crate) async fn recv(&self) -> Result<T, AmqpProtocolError> {
+        match self.rx.recv().await {
+            Ok(res) => res,
+            Err(_) => Err(AmqpProtocolError::Disconnected),
+        }
+    }
+}
+
+impl<T> Drop for AttachReceiver<T> {
+    fn drop(&mut self) {
+        // link is attached, but not received
+        if let Poll::Ready(Ok(Ok(link))) =
+            self.rx.poll_recv(&mut Context::from_waker(Waker::noop()))
+        {
+            (self.cancel)(&link);
+        }
+    }
+}
+
+fn cancel_sender_attach(link: &Cell<SenderLinkInner>) {
+    let inner = link.get_ref().session.inner.clone();
+    let inner = inner.get_mut();
+    let idx = link.get_ref().id() as usize;
+    if matches!(inner.links.get(idx), Some(Either::Left(SenderLinkState::Established(l)))
+        if ptr::eq(l.inner.get_ref(), link.get_ref()))
+    {
+        inner.detach_cancelled_link(idx);
+    }
+}
+
+fn cancel_receiver_attach(link: &ReceiverLink) {
+    let inner = link.session().inner.clone();
+    let inner = inner.get_mut();
+    let idx = link.inner.get_ref().id() as usize;
+    if matches!(inner.links.get(idx), Some(Either::Right(ReceiverLinkState::Established(l)))
+        if ptr::eq(l.inner.get_ref(), link.inner.get_ref()))
+    {
+        inner.detach_cancelled_link(idx);
+    }
+}
+
 impl SessionInner {
     pub(crate) fn new(
         id: usize,
@@ -568,8 +619,12 @@ impl SessionInner {
     pub(crate) fn attach_local_sender_link(
         &mut self,
         mut frame: Attach,
-    ) -> oneshot::Receiver<Result<Cell<SenderLinkInner>, AmqpProtocolError>> {
+    ) -> AttachReceiver<Cell<SenderLinkInner>> {
         let (tx, rx) = oneshot::channel();
+        let rx = AttachReceiver {
+            rx,
+            cancel: cancel_sender_attach,
+        };
         if let Some(err) = self.ending_error() {
             let _ = tx.send(Err(err));
             return rx;
@@ -875,8 +930,12 @@ impl SessionInner {
         &mut self,
         cell: Cell<SessionInner>,
         mut frame: Attach,
-    ) -> oneshot::Receiver<Result<ReceiverLink, AmqpProtocolError>> {
+    ) -> AttachReceiver<ReceiverLink> {
         let (tx, rx) = oneshot::channel();
+        let rx = AttachReceiver {
+            rx,
+            cancel: cancel_receiver_attach,
+        };
         if let Some(err) = self.ending_error() {
             let _ = tx.send(Err(err));
             return rx;
@@ -1197,6 +1256,26 @@ impl SessionInner {
         }
     }
 
+    /// Detach local link, attach future of which is dropped
+    ///
+    /// Link is removed on remote detach.
+    fn detach_cancelled_link(&mut self, idx: usize) {
+        log::trace!("{}: Link attach is cancelled, detaching {idx}", self.tag());
+        match self.links.get_mut(idx) {
+            Some(Either::Left(link)) => *link = SenderLinkState::Closing(None),
+            Some(Either::Right(link)) => *link = ReceiverLinkState::Closing(None),
+            None => return,
+        }
+        self.post_frame(
+            Detach(Box::new(codec::DetachInner {
+                handle: idx as Handle,
+                closed: true,
+                error: None,
+            }))
+            .into(),
+        );
+    }
+
     /// Handle `Attach` frame. return false if attach frame is remote and can not be handled
     pub(crate) fn handle_attach(&mut self, attach: &Attach, cell: Cell<SessionInner>) -> bool {
         let name = attach.name();
@@ -1237,8 +1316,11 @@ impl SessionInner {
                     SenderLinkState::Established(EstablishedSenderLink::new(link.clone())),
                 );
 
-                if let SenderLinkState::Opening(Some(tx)) = local_sender {
-                    let _ = tx.send(Ok(link));
+                // attach future is dropped
+                if let SenderLinkState::Opening(Some(tx)) = local_sender
+                    && tx.send(Ok(link)).is_err()
+                {
+                    self.detach_cancelled_link(index);
                 }
                 true
             }
@@ -1258,7 +1340,10 @@ impl SessionInner {
                         *item = ReceiverLinkState::Established(EstablishedReceiverLink::new(
                             link.clone(),
                         ));
-                        let _ = tx.send(Ok(ReceiverLink::new(link)));
+                        // attach future is dropped
+                        if tx.send(Ok(ReceiverLink::new(link))).is_err() {
+                            self.detach_cancelled_link(index);
+                        }
                     } else {
                         // TODO: close session
                         log::error!("{}: Inconsistent session state, bug", self.tag());

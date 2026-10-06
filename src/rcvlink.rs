@@ -606,17 +606,11 @@ impl ReceiverLinkBuilder {
     /// Attach receiver link
     pub async fn attach(self) -> Result<ReceiverLink, AmqpProtocolError> {
         let cell = self.session.clone();
-        let res = self
+        let rx = self
             .session
             .get_mut()
-            .attach_local_receiver_link(cell, self.frame)
-            .await;
-
-        match res {
-            Ok(Ok(res)) => Ok(res),
-            Ok(Err(err)) => Err(err),
-            Err(_) => Err(AmqpProtocolError::Disconnected),
-        }
+            .attach_local_receiver_link(cell, self.frame);
+        rx.recv().await
     }
 }
 

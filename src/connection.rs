@@ -999,6 +999,122 @@ pub(crate) mod tests {
     }
 
     #[ntex::test]
+    async fn cancelled_local_attach_detached() {
+        for sender in [true, false] {
+            // attach response is received after or before attach future is dropped
+            for delivered in [false, true] {
+                let (_io, conn, client) = connection();
+                handle_frame(&conn, begin()).unwrap();
+                let s = session(&conn);
+                let role = if sender { Role::Receiver } else { Role::Sender };
+                let attach = |s: Session| async move {
+                    if sender {
+                        s.build_sender_link("l", "l").attach().await.map(|_| ())
+                    } else {
+                        s.build_receiver_link("l", "l").attach().await.map(|_| ())
+                    }
+                };
+                {
+                    let mut fut = std::pin::pin!(attach(s.clone()));
+                    let pending =
+                        std::future::poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending()))
+                            .await;
+                    assert!(pending);
+                    if delivered {
+                        let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0))
+                        else {
+                            panic!()
+                        };
+                    }
+                }
+                if !delivered {
+                    let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0))
+                    else {
+                        panic!()
+                    };
+                }
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                let ctx = format!("sender: {sender} delivered: {delivered}");
+                assert_eq!(
+                    frame_names(&client),
+                    ["Begin", "Attach l 0", "Detach 0"],
+                    "{ctx}"
+                );
+                assert!(s.get_sender_link("l").is_none(), "{ctx}");
+                assert!(s.get_sender_link_by_local_handle(0).is_none(), "{ctx}");
+                assert!(s.get_receiver_link_by_local_handle(0).is_none(), "{ctx}");
+
+                // name and handles are released on remote detach
+                let Ok(Action::None) = handle_frame(&conn, peer_detach(0)) else {
+                    panic!()
+                };
+                let fut = ntex::rt::spawn(attach(s.clone()));
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0)) else {
+                    panic!()
+                };
+                ntex::time::timeout(ntex::time::Millis(1000), fut)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(frame_names(&client), ["Attach l 0"], "{ctx}");
+            }
+        }
+    }
+
+    #[ntex::test]
+    async fn cancelled_local_attach_slot_reused() {
+        for sender in [true, false] {
+            let (_io, conn, client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let s = session(&conn);
+            let role = if sender { Role::Receiver } else { Role::Sender };
+            let attach = |s: Session, name: &'static str| async move {
+                if sender {
+                    s.build_sender_link(name, "l").attach().await.map(|_| ())
+                } else {
+                    s.build_receiver_link(name, "l").attach().await.map(|_| ())
+                }
+            };
+            {
+                let mut fut = std::pin::pin!(attach(s.clone(), "l"));
+                let pending =
+                    std::future::poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending()))
+                        .await;
+                assert!(pending);
+                let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0)) else {
+                    panic!()
+                };
+
+                // remote detach releases slot, new link reuses it
+                handle_frame(&conn, peer_detach(0)).unwrap();
+                let new = ntex::rt::spawn(attach(s.clone(), "m"));
+                ntex::time::sleep(ntex::time::Millis(10)).await;
+                let Ok(Action::None) = handle_frame(&conn, named_attach(role, "m", "l", 1)) else {
+                    panic!()
+                };
+                ntex::time::timeout(ntex::time::Millis(1000), new)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap();
+            }
+            ntex::time::sleep(ntex::time::Millis(10)).await;
+            assert_eq!(
+                frame_names(&client),
+                ["Begin", "Attach l 0", "Detach 0", "Attach m 0"],
+                "sender: {sender}"
+            );
+            if sender {
+                assert!(s.get_sender_link("m").is_some());
+            } else {
+                assert!(s.get_receiver_link_by_local_handle(0).is_some());
+            }
+        }
+    }
+
+    #[ntex::test]
     async fn outbound_frames_limited_by_remote_max_frame_size() {
         let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
             max_frame_size: 512,

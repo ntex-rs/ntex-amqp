@@ -634,16 +634,8 @@ impl SenderLinkBuilder {
 
     /// Initiate attach sender process
     pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
-        let result = self
-            .session
-            .get_mut()
-            .attach_local_sender_link(self.frame)
-            .await;
-
-        match result {
-            Ok(Ok(inner)) => Ok(SenderLink { inner }),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AmqpProtocolError::Disconnected),
-        }
+        let rx = self.session.get_mut().attach_local_sender_link(self.frame);
+        let inner = rx.recv().await?;
+        Ok(SenderLink { inner })
     }
 }
