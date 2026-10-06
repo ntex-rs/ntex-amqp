@@ -208,6 +208,9 @@ impl Session {
     }
 
     /// Detach receiver link
+    ///
+    /// Link that is not attached yet cannot be detached, returns
+    /// `AmqpProtocolError::LinkNotAttached`. Drop link attach future to cancel attach.
     pub fn detach_receiver_link(
         &self,
         handle: Handle,
@@ -235,6 +238,9 @@ impl Session {
     }
 
     /// Detach sender link
+    ///
+    /// Link that is not attached yet cannot be detached, returns
+    /// `AmqpProtocolError::LinkNotAttached`. Drop link attach future to cancel attach.
     pub fn detach_sender_link(
         &self,
         handle: Handle,
@@ -605,6 +611,11 @@ impl SessionInner {
     }
 
     /// Check if link name is used by not closing link
+    /// Remote handle is registered for local link
+    fn has_remote_handle(&self, idx: usize) -> bool {
+        self.remote_handles.values().any(|i| *i == idx)
+    }
+
     fn is_link_name_used(&self, name: &str, sender: bool) -> bool {
         let names = if sender {
             &self.sender_names
@@ -785,9 +796,18 @@ impl SessionInner {
             let _ = tx.send(Ok(()));
             return;
         }
+        let has_remote_handle = self.has_remote_handle(id as usize);
         if let Some(Either::Left(link)) = self.links.get_mut(id as usize) {
             match link {
-                SenderLinkState::Opening(..) => {
+                // attach response is not received
+                SenderLinkState::Opening(..) if !has_remote_handle => {
+                    let _ = tx.send(Err(AmqpProtocolError::LinkNotAttached));
+                }
+                // refused link, waiting for remote detach
+                SenderLinkState::Opening(attach_tx, _) => {
+                    if let Some(attach_tx) = attach_tx.take() {
+                        let _ = attach_tx.send(Err(AmqpProtocolError::LinkDetached(error.clone())));
+                    }
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,
                         closed,
@@ -812,12 +832,9 @@ impl SessionInner {
                             crate::ControlFrameKind::LocalDetachSender(detach, sender_link),
                         ));
                 }
+                // link is not confirmed by control service
                 SenderLinkState::OpeningRemote { .. } => {
-                    let _ = tx.send(Ok(()));
-                    log::error!(
-                        "{}: Unexpected sender link state: opening remote - {id}",
-                        self.tag()
-                    );
+                    let _ = tx.send(Err(AmqpProtocolError::LinkNotAttached));
                 }
                 SenderLinkState::Closing(_) => {
                     let _ = tx.send(Ok(()));
@@ -1099,6 +1116,7 @@ impl SessionInner {
             let _ = tx.send(Ok(()));
             return;
         }
+        let has_remote_handle = self.has_remote_handle(id as usize);
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
                 ReceiverLinkState::Opening(inner, remote_detach) => {
@@ -1162,7 +1180,24 @@ impl SessionInner {
                     let _ = tx.send(Ok(()));
                     log::debug!("{}: Receiver link is closing already - {id}", self.tag());
                 }
-                ReceiverLinkState::OpeningLocal(_inner) => unimplemented!(),
+                // attach response is not received
+                ReceiverLinkState::OpeningLocal(_) if !has_remote_handle => {
+                    let _ = tx.send(Err(AmqpProtocolError::LinkNotAttached));
+                }
+                // refused link, waiting for remote detach
+                ReceiverLinkState::OpeningLocal(item) => {
+                    if let Some((inner, attach_tx)) = item.take() {
+                        inner.get_mut().detached();
+                        let _ = attach_tx.send(Err(AmqpProtocolError::LinkDetached(error.clone())));
+                    }
+                    let detach = Detach(Box::new(codec::DetachInner {
+                        handle: id,
+                        closed,
+                        error,
+                    }));
+                    *link = ReceiverLinkState::Closing(Some(tx));
+                    self.post_frame(detach.into());
+                }
             }
         } else {
             let _ = tx.send(Ok(()));

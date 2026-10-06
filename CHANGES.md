@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix detach of not attached link panicked or hung, add `AmqpProtocolError::LinkNotAttached`
+
 * Fix refused local link attach returned attached link
 
 * Add local link attach timeout, `AmqpServiceConfig::set_link_attach_timeout()` and `attach_timeout()` link builder methods
