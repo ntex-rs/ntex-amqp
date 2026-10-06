@@ -438,13 +438,28 @@ impl ConnectionInner {
                     SessionState::Established(session) => match frame {
                         Frame::Attach(attach) => {
                             let handle = attach.handle();
-                            let condition = if handle > self.handle_max {
+                            let mut condition = if handle > self.handle_max {
                                 Some(ErrorCondition::AmqpError(AmqpError::ResourceLimitExceeded))
                             } else if session.get_ref().is_remote_handle_used(handle) {
                                 Some(ErrorCondition::SessionError(SessionError::HandleInUse))
                             } else {
                                 None
                             };
+
+                            // attach frame is stored for link lifetime
+                            let attach = detach(&attach);
+                            if condition.is_none() {
+                                let cell = session.clone();
+                                if session.get_mut().handle_attach(&attach, cell) {
+                                    return Ok(Action::None);
+                                }
+                                // remotely opened link, local handle must be within remote handle-max
+                                if !session.get_ref().check_handle() {
+                                    condition = Some(ErrorCondition::AmqpError(
+                                        AmqpError::ResourceLimitExceeded,
+                                    ));
+                                }
+                            }
 
                             if let Some(condition) = condition {
                                 log::trace!(
@@ -468,29 +483,24 @@ impl ConnectionInner {
                                 return Ok(action);
                             }
 
-                            // attach frame is stored for link lifetime
-                            let attach = detach(&attach);
-                            let cell = session.clone();
-                            if session.get_mut().handle_attach(&attach, cell) {
-                                Ok(Action::None)
-                            } else {
-                                match attach.0.role {
-                                    Role::Receiver => {
-                                        // remotly opened sender link
-                                        let (id, response) =
-                                            session.get_mut().new_remote_sender(&attach);
-                                        let link = SenderLink::new(Cell::new(
-                                            SenderLinkInner::with(id, &attach, session.clone()),
-                                        ));
-                                        Ok(Action::AttachSender(link, attach, response))
-                                    }
-                                    Role::Sender => {
-                                        // receiver link
-                                        let (response, link) = session
-                                            .get_mut()
-                                            .attach_remote_receiver_link(session.clone(), &attach);
-                                        Ok(Action::AttachReceiver(link, attach, response))
-                                    }
+                            match attach.0.role {
+                                Role::Receiver => {
+                                    // remotly opened sender link
+                                    let (id, response) =
+                                        session.get_mut().new_remote_sender(&attach);
+                                    let link = SenderLink::new(Cell::new(SenderLinkInner::with(
+                                        id,
+                                        &attach,
+                                        session.clone(),
+                                    )));
+                                    Ok(Action::AttachSender(link, attach, response))
+                                }
+                                Role::Sender => {
+                                    // receiver link
+                                    let (response, link) = session
+                                        .get_mut()
+                                        .attach_remote_receiver_link(session.clone(), &attach);
+                                    Ok(Action::AttachReceiver(link, attach, response))
                                 }
                             }
                         }
@@ -1207,5 +1217,63 @@ mod tests {
             }
         }
         assert_eq!(frames, [("end", 0), ("flow", 1)]);
+    }
+
+    #[ntex::test]
+    async fn links_limited_by_remote_handle_max() {
+        let (_io, conn, client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+
+        // remote handle-max is 1, two links are allowed
+        let Frame::Begin(mut begin) = begin() else { panic!() };
+        begin.0.handle_max = 1;
+        handle(begin.into()).unwrap();
+        let session = session(&conn);
+
+        // remotely opened link
+        let Frame::Attach(mut r0) = attach() else { panic!() };
+        r0.0.name = "r0".into();
+        let Ok(Action::AttachReceiver(..)) = handle(r0.into()) else {
+            panic!()
+        };
+
+        // locally opened links
+        let s = session.clone();
+        ntex::rt::spawn(async move { s.build_sender_link("s1", LONG).attach().await });
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        let ms = ntex::time::Millis(100);
+        let s2 = ntex::time::timeout(ms, session.build_sender_link("s2", LONG).attach());
+        assert!(matches!(s2.await, Ok(Err(AmqpProtocolError::TooManyLinks))));
+        let s3 = ntex::time::timeout(ms, session.build_receiver_link("s3", LONG).attach());
+        assert!(matches!(s3.await, Ok(Err(AmqpProtocolError::TooManyLinks))));
+
+        // remotely opened link, no free local handles
+        let Frame::Attach(mut r1) = attach() else { panic!() };
+        r1.0.name = "r1".into();
+        r1.0.handle = 1;
+        let Ok(Action::SessionEnded(_)) = handle(r1.into()) else {
+            panic!()
+        };
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut frames = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            match frame.into_parts().1 {
+                Frame::Attach(attach) => frames.push(format!("attach {}", attach.handle())),
+                Frame::End(end) => frames.push(format!(
+                    "end {}",
+                    *end.error.unwrap().condition() == AmqpError::ResourceLimitExceeded.into()
+                )),
+                _ => (),
+            }
+        }
+        assert_eq!(frames, ["attach 1", "end true"]);
     }
 }

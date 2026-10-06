@@ -413,6 +413,11 @@ impl SessionInner {
         self.sink.0.max_frame_size
     }
 
+    /// Check if next link handle is within remote handle-max
+    pub(crate) fn check_handle(&self) -> bool {
+        self.links.vacant_key() <= self.begin.handle_max() as usize
+    }
+
     /// Initialize creation of remote sender link
     pub(crate) fn new_remote_sender(&mut self, attach: &Attach) -> (usize, Attach) {
         let id = self
@@ -446,6 +451,10 @@ impl SessionInner {
         mut frame: Attach,
     ) -> oneshot::Receiver<Result<Cell<SenderLinkInner>, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
+        if !self.check_handle() {
+            let _ = tx.send(Err(AmqpProtocolError::TooManyLinks));
+            return rx;
+        }
 
         let entry = self.links.vacant_entry();
         let token = entry.key();
@@ -672,6 +681,10 @@ impl SessionInner {
         mut frame: Attach,
     ) -> oneshot::Receiver<Result<ReceiverLink, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
+        if !self.check_handle() {
+            let _ = tx.send(Err(AmqpProtocolError::TooManyLinks));
+            return rx;
+        }
 
         let entry = self.links.vacant_entry();
         let token = entry.key();
