@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Reject remote `Open` with max-frame-size below 512 (`MIN_MAX_FRAME_SIZE`), new `HandshakeError::InvalidMaxFrameSize` and `ConnectError::InvalidMaxFrameSize` errors. `AmqpServiceConfig::set_max_frame_size()` panics on values below 512, `max_frame_size` field set to `0` is advertised as unlimited
+
 * Fix `ReceiverLink::set_link_credit()` advertised only added credit in `Flow` instead of total link credit, credit overflow saturates
 
 * Fix session `next-incoming-id` was not advanced on received transfers, always send it in `Flow` frames

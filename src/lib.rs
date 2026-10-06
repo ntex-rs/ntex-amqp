@@ -149,7 +149,17 @@ impl AmqpServiceConfig {
     /// Also limits inbound frames, including handshake frames.
     ///
     /// By default max frame size is set to 16kb
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is lower than 512 (`MIN_MAX_FRAME_SIZE`), peers
+    /// must accept frames of at least 512 bytes.
     pub fn set_max_frame_size(mut self, size: u32) -> Self {
+        assert!(
+            size >= codec::protocol::MIN_MAX_FRAME_SIZE,
+            "max frame size must be at least {}, got {size}",
+            codec::protocol::MIN_MAX_FRAME_SIZE
+        );
         self.max_frame_size = size;
         self
     }
@@ -243,7 +253,12 @@ impl AmqpServiceConfig {
                 .clone()
                 .unwrap_or_else(|| ByteString::from(Uuid::new_v4().simple().to_string())),
             hostname: self.hostname.clone(),
-            max_frame_size: self.max_frame_size,
+            // `0` is unlimited locally, advertise max value
+            max_frame_size: if self.max_frame_size == 0 {
+                u32::MAX
+            } else {
+                self.max_frame_size
+            },
             channel_max: self.channel_max,
             idle_time_out: if self.idle_time_out > 0 {
                 Some(self.idle_time_out)

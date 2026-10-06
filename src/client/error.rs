@@ -27,6 +27,9 @@ pub enum ConnectError {
     Sasl(protocol::SaslCode),
     #[error("Peer disconnected")]
     Disconnected,
+    /// Remote max frame size is below `MIN_MAX_FRAME_SIZE`
+    #[error("Invalid remote max frame size: {_0}")]
+    InvalidMaxFrameSize(u32),
     /// Connect error
     #[error("Amqp connect")]
     Connect(
@@ -54,6 +57,7 @@ impl Clone for ConnectError {
             ConnectError::ExpectOpenFrame(frame) => ConnectError::ExpectOpenFrame(frame.clone()),
             ConnectError::Sasl(err) => ConnectError::Sasl(*err),
             ConnectError::Disconnected => ConnectError::Disconnected,
+            ConnectError::InvalidMaxFrameSize(size) => ConnectError::InvalidMaxFrameSize(*size),
             ConnectError::Connect(err) => ConnectError::Connect(err.clone()),
             ConnectError::Io(err) => {
                 ConnectError::Io(std::io::Error::new(err.kind(), format!("{err}")))
@@ -71,6 +75,7 @@ impl ErrorDiagnostic for ConnectError {
             ConnectError::ExpectOpenFrame(_) => "amqp-client-ExpectOpenFrame",
             ConnectError::Sasl(_) => "amqp-client-Sasl",
             ConnectError::Disconnected => "amqp-client-Disconnected",
+            ConnectError::InvalidMaxFrameSize(_) => "amqp-client-InvalidMaxFrameSize",
             ConnectError::Connect(err) => err.signature(),
             ConnectError::Io(err) => err.signature(),
         }

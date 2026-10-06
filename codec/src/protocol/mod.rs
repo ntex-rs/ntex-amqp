@@ -35,6 +35,9 @@ pub type Symbols = Multiple<Symbol>;
 pub type IetfLanguageTags = Multiple<IetfLanguageTag>;
 pub type Annotations = HashMap<Symbol, Variant>;
 
+/// Smallest max-frame-size value a peer is allowed to advertise
+pub const MIN_MAX_FRAME_SIZE: u32 = 512;
+
 #[allow(
     clippy::unreadable_literal,
     clippy::match_bool,
