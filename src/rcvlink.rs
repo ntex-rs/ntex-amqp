@@ -27,6 +27,8 @@ pub(crate) struct ReceiverLinkInner {
     remote_handle: Handle,
     session: Session,
     closed: bool,
+    // remote link is not confirmed yet
+    opening: bool,
     reader_task: LocalWaker,
     queue: VecDeque<(Delivery, Transfer)>,
     credit: u32,
@@ -85,14 +87,14 @@ impl ReceiverLink {
 
     /// Confirm remote link, returns `false` if link is not established
     pub(crate) fn confirm_receiver_link(&self, response: Attach) -> bool {
-        let inner = self.inner.get_mut();
-        let size = self.inner.get_ref().max_message_size;
+        let inner = self.inner.get_ref();
+        let size = inner.max_message_size;
         let size = if size != 0 { Some(size) } else { None };
         inner
             .session
             .inner
             .get_mut()
-            .confirm_receiver_link(inner.handle, response, size)
+            .confirm_receiver_link(&self.inner, response, size)
     }
 
     /// Add credit to the link.
@@ -235,6 +237,7 @@ impl ReceiverLinkInner {
         remote_handle: Handle,
         frame: &Attach,
         max_message_size: u64,
+        opening: bool,
     ) -> ReceiverLinkInner {
         let mut name = frame.name().clone();
         name.trimdown();
@@ -245,6 +248,7 @@ impl ReceiverLinkInner {
             remote_handle,
             session: Session::new(session),
             closed: false,
+            opening,
             queue: VecDeque::with_capacity(4),
             credit: 0,
             error: None,
@@ -309,11 +313,30 @@ impl ReceiverLinkInner {
     }
 
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
+        // link handle could be reused by another link
+        if self.closed {
+            return;
+        }
         self.credit = self.credit.saturating_add(credit);
-        self.session
-            .inner
-            .get_mut()
-            .rcv_link_flow(self.handle, self.delivery_count, self.credit);
+
+        // credit is sent after link confirmation
+        if !self.opening {
+            self.session.inner.get_mut().rcv_link_flow(
+                self.handle,
+                self.delivery_count,
+                self.credit,
+            );
+        }
+    }
+
+    /// Mark remote link as confirmed, returns pending link credit
+    pub(crate) fn confirmed(&mut self) -> Option<(SequenceNo, u32)> {
+        self.opening = false;
+        if self.credit > 0 {
+            Some((self.delivery_count, self.credit))
+        } else {
+            None
+        }
     }
 
     #[allow(clippy::unnecessary_unwrap)]

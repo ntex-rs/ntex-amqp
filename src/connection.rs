@@ -1629,6 +1629,114 @@ mod tests {
         assert_eq!(link3.handle(), 0);
     }
 
+    fn frame_names(client: &IoTest) -> Vec<String> {
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut frames = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            frames.push(match frame.into_parts().1 {
+                Frame::Attach(att) => format!("Attach {} {}", att.name(), att.handle()),
+                Frame::Detach(det) => format!("Detach {}", det.handle()),
+                Frame::Flow(flow) => {
+                    format!("Flow {:?} {:?}", flow.handle(), flow.link_credit())
+                }
+                frame => frame.name().to_string(),
+            });
+        }
+        frames
+    }
+
+    #[ntex::test]
+    async fn remote_receiver_stale_confirm() {
+        let (_io, conn, client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+        let session = session(&conn);
+
+        let Ok(Action::AttachReceiver(link_a, _, response_a)) =
+            handle(named_attach(Role::Sender, "a", "a", 0))
+        else {
+            panic!()
+        };
+        let closed = link_a.close_with_error(crate::error::LinkError::force_detach());
+        handle(peer_detach(0)).unwrap();
+        closed.await.unwrap();
+
+        // new link reuses handle of closed link
+        let Ok(Action::AttachReceiver(link_b, _, response_b)) =
+            handle(named_attach(Role::Sender, "b", "b", 1))
+        else {
+            panic!()
+        };
+        assert_eq!(link_a.handle(), link_b.handle());
+
+        // stale confirmation and credit are ignored
+        assert!(!session.inner.get_mut().confirm_receiver_link(
+            &link_a.inner,
+            response_a.clone(),
+            None
+        ));
+        assert!(!link_a.confirm_receiver_link(response_a));
+        link_a.set_link_credit(10);
+        assert_eq!(link_a.credit(), 0);
+
+        assert!(link_b.confirm_receiver_link(response_b));
+        link_b.set_link_credit(5);
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            [
+                "Begin",
+                "Attach a 0",
+                "Detach 0",
+                "Attach b 0",
+                "Flow Some(0) Some(5)"
+            ]
+        );
+    }
+
+    #[ntex::test]
+    async fn remote_receiver_credit_before_confirm() {
+        let (_io, conn, client) = connection();
+        let inner = conn.get_ref().0;
+        let handle = |frame: Frame| {
+            inner
+                .get_mut()
+                .handle_frame(AmqpFrame::new(0, frame), &inner)
+        };
+        handle(begin()).unwrap();
+
+        let Ok(Action::AttachReceiver(link, _, response)) =
+            handle(named_attach(Role::Sender, "a", "a", 0))
+        else {
+            panic!()
+        };
+
+        // credit is sent after attach response
+        link.set_link_credit(10);
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(frame_names(&client), ["Begin"]);
+
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(5);
+
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            [
+                "Attach a 0",
+                "Flow Some(0) Some(10)",
+                "Flow Some(0) Some(15)"
+            ]
+        );
+    }
+
     #[ntex::test]
     async fn remote_sender_reject_detach() {
         let (_io, conn, _client) = connection();
