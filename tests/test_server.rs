@@ -157,9 +157,23 @@ async fn test_large_transfer() -> std::io::Result<()> {
         .unwrap();
     let st = delivery.wait().await.unwrap().unwrap();
     assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
+
+    // session window is consumed by each transfer frame, credit refresh
+    // must not close the window
+    for _ in 0..60 {
+        let delivery = timeout(
+            Millis(1000),
+            link.transfer(Bytes::from_static(b"test")).send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let st = delivery.wait().await.unwrap().unwrap();
+        assert_eq!(st, protocol::DeliveryState::Accepted(protocol::Accepted {}));
+    }
     sleep(Millis(250)).await;
 
-    assert_eq!(count.load(Ordering::Relaxed), 1);
+    assert_eq!(count.load(Ordering::Relaxed), 61);
     Ok(())
 }
 

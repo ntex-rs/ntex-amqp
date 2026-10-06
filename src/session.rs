@@ -37,7 +37,9 @@ pub struct Session {
 pub(crate) struct SessionInner {
     id: usize,
     sink: ConnectionRef,
+    // transfer frame id, AMQP 1.0 2.5.6
     next_outgoing_id: TransferNumber,
+    next_delivery_id: DeliveryNumber,
     flags: Flags,
     begin: Begin,
 
@@ -325,6 +327,13 @@ bitflags::bitflags! {
     }
 }
 
+/// Remaining body of partially sent delivery
+pub(crate) struct TransferChunks {
+    body: Bytes,
+    max_chunk: usize,
+    message_format: Option<MessageFormat>,
+}
+
 #[derive(Debug)]
 struct PendingTransfer {
     tx: pool::Sender<Result<(), AmqpProtocolError>>,
@@ -420,6 +429,7 @@ impl SessionInner {
             remote_outgoing_window: begin.outgoing_window(),
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
+            next_delivery_id: 0,
             unsettled_snd_deliveries: HashMap::default(),
             unsettled_rcv_deliveries: HashMap::default(),
             links: Slab::new(),
@@ -1713,13 +1723,13 @@ impl SessionInner {
         drop_pending_transfers(&mut self.pending_transfers, link_handle, err);
     }
 
-    /// Wait for remote incoming window, returns `false` if window is available
+    /// Remote incoming window waiter, `None` if window is available
     ///
     /// Window could be taken by other transfer after wake up
-    pub(crate) async fn wait_window(
+    pub(crate) fn window_waiter(
         &mut self,
         link_handle: Handle,
-    ) -> Result<bool, AmqpProtocolError> {
+    ) -> Result<Option<pool::Receiver<Result<(), AmqpProtocolError>>>, AmqpProtocolError> {
         if let Some(err) = self.ending_error() {
             Err(err)
         } else if self.remote_incoming_window == 0 {
@@ -1730,17 +1740,15 @@ impl SessionInner {
             let (tx, rx) = self.pool_credit.channel();
             self.pending_transfers
                 .push_back(PendingTransfer { tx, link_handle });
-
-            rx.await
-                .map_err(|_| AmqpProtocolError::ConnectionDropped)
-                .and_then(|v| v)?;
-            Ok(true)
+            Ok(Some(rx))
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 
-    /// Send transfer, remote incoming window must be available
+    /// Start delivery, remote incoming window must be available
+    ///
+    /// Sends first transfer frame, returns remaining chunks of the body
     pub(crate) fn send_transfer(
         &mut self,
         link_handle: Handle,
@@ -1748,15 +1756,13 @@ impl SessionInner {
         body: TransferBody,
         settled: bool,
         format: Option<MessageFormat>,
-    ) -> Result<DeliveryNumber, AmqpProtocolError> {
+    ) -> Result<(DeliveryNumber, Option<TransferChunks>), AmqpProtocolError> {
         if let Some(err) = self.ending_error() {
             return Err(err);
         }
-        debug_assert!(self.remote_incoming_window > 0);
-        self.remote_incoming_window -= 1;
 
-        let delivery_id = self.next_outgoing_id;
-        self.next_outgoing_id = self.next_outgoing_id.wrapping_add(1);
+        let delivery_id = self.next_delivery_id;
+        self.next_delivery_id = self.next_delivery_id.wrapping_add(1);
 
         let tr_settled = if settled {
             Some(DeliveryState::Accepted(Accepted {}))
@@ -1812,32 +1818,81 @@ impl SessionInner {
                 transfer.batchable(),
                 transfer.settled(),
             );
-            self.post_frame(Frame::Transfer(transfer));
+            self.post_transfer(transfer);
 
-            loop {
-                // last chunk
-                if body.is_empty() {
-                    log::trace!("{}: Last tranfer for {tag:?} is sent", self.tag());
-                    break;
-                }
-
-                let chunk = body.split_to(cmp::min(max_chunk, body.len()));
-
-                log::trace!("{}: Sending chunk tranfer for {tag:?}", self.tag());
-                let mut transfer = Transfer(Box::default());
-                transfer.0.handle = link_handle;
-                transfer.0.body = Some(TransferBody::Data(chunk));
-                transfer.0.more = !body.is_empty();
-                transfer.0.batchable = true;
-                transfer.0.message_format = message_format;
-                self.post_frame(Frame::Transfer(transfer));
-            }
+            Ok((
+                delivery_id,
+                Some(TransferChunks {
+                    body,
+                    max_chunk,
+                    message_format,
+                }),
+            ))
         } else {
             transfer.0.body = Some(body);
-            self.post_frame(Frame::Transfer(transfer));
+            self.post_transfer(transfer);
+            Ok((delivery_id, None))
         }
+    }
 
-        Ok(delivery_id)
+    /// Send next chunk of partially sent delivery, remote incoming window must be available
+    ///
+    /// Returns `true` if last chunk is sent
+    pub(crate) fn send_transfer_chunk(
+        &mut self,
+        link_handle: Handle,
+        chunks: &mut TransferChunks,
+    ) -> bool {
+        let chunk = chunks
+            .body
+            .split_to(cmp::min(chunks.max_chunk, chunks.body.len()));
+
+        let mut transfer = Transfer(Box::default());
+        transfer.0.handle = link_handle;
+        transfer.0.body = Some(TransferBody::Data(chunk));
+        transfer.0.more = !chunks.body.is_empty();
+        transfer.0.batchable = true;
+        transfer.0.message_format = chunks.message_format;
+
+        log::trace!(
+            "{}: Sending chunk transfer over handle {link_handle}, more: {:?}",
+            self.tag(),
+            transfer.more()
+        );
+        self.post_transfer(transfer);
+        chunks.body.is_empty()
+    }
+
+    /// Abort partially sent delivery, AMQP 1.0 2.6.14
+    ///
+    /// Returns `false` if remote incoming window is not available
+    pub(crate) fn abort_transfer(
+        &mut self,
+        link_handle: Handle,
+        delivery_id: DeliveryNumber,
+    ) -> bool {
+        if self.remote_incoming_window == 0 {
+            false
+        } else {
+            log::trace!(
+                "{}: Abort delivery {delivery_id:?} over handle {link_handle}",
+                self.tag()
+            );
+            let mut transfer = Transfer(Box::default());
+            transfer.0.handle = link_handle;
+            transfer.0.delivery_id = Some(delivery_id);
+            transfer.0.aborted = true;
+            self.post_transfer(transfer);
+            true
+        }
+    }
+
+    /// Each transfer frame consumes remote incoming window, AMQP 1.0 2.5.6
+    fn post_transfer(&mut self, transfer: Transfer) {
+        debug_assert!(self.remote_incoming_window > 0);
+        self.remote_incoming_window = self.remote_incoming_window.saturating_sub(1);
+        self.next_outgoing_id = self.next_outgoing_id.wrapping_add(1);
+        self.post_frame(Frame::Transfer(transfer));
     }
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {

@@ -2832,6 +2832,194 @@ pub(crate) mod tests {
         assert_eq!(frame_names(&client), ["Detach 2"]);
     }
 
+    fn small_frames_sender() -> (Io, Connection, IoTest, SenderLink) {
+        let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {
+            max_frame_size: 512,
+            ..Default::default()
+        })));
+        let (server, client) = IoTest::create();
+        client.remote_buffer_cap(64 * 1024);
+        let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+        let io = Io::new(server, cfg.clone());
+        let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+        handle_frame(&conn, begin()).unwrap();
+
+        let Ok(Action::AttachSender(snd, attach, response)) =
+            handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
+        else {
+            panic!()
+        };
+        let snd = session(&conn).inner.get_mut().attach_remote_sender_link(
+            &attach,
+            response,
+            snd.inner.clone(),
+        );
+        let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
+            panic!()
+        };
+        flow.0.handle = Some(4);
+        flow.0.incoming_window = 2;
+        handle_frame(&conn, flow.into()).unwrap();
+        (io, conn, client, snd)
+    }
+
+    fn session_window(conn: &Connection, next_incoming_id: u32, window: u32) {
+        let Frame::Flow(mut flow) = peer_flow(None) else {
+            panic!()
+        };
+        flow.0.handle = None;
+        flow.0.next_incoming_id = Some(next_incoming_id);
+        flow.0.incoming_window = window;
+        handle_frame(conn, flow.into()).unwrap();
+    }
+
+    fn transfer_frames(client: &IoTest) -> Vec<String> {
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut frames = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            frames.push(match frame.into_parts().1 {
+                Frame::Transfer(tr) => format!(
+                    "Transfer {:?} more:{} aborted:{}",
+                    tr.delivery_id(),
+                    tr.more(),
+                    tr.aborted()
+                ),
+                Frame::Flow(flow) => format!("Flow {}", flow.next_outgoing_id()),
+                frame => frame.name().to_string(),
+            });
+        }
+        frames
+    }
+
+    #[ntex::test]
+    async fn sender_multi_frame_delivery_window() {
+        use ntex::time::{Millis, sleep};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client, snd) = small_frames_sender();
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+
+        // each transfer frame consumes session window
+        let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
+        let mut t2 = Box::pin(snd.transfer(Bytes::from_static(b"2")).send());
+        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+        assert_eq!(snd.credit(), 9);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            [
+                "Transfer Some(0) more:true aborted:false",
+                "Transfer None more:true aborted:false"
+            ]
+        );
+
+        // frames of the delivery are not interleaved with next delivery
+        session_window(&conn, 3, 1);
+        assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+        sleep(Millis(50)).await;
+        assert!(transfer_frames(&client).is_empty());
+        let Poll::Ready(Ok(d1)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
+            panic!()
+        };
+        assert_eq!(d1.id(), 0);
+        assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer None more:false aborted:false"]
+        );
+
+        // delivery id is not a transfer id
+        session_window(&conn, 4, 5);
+        let Poll::Ready(Ok(d2)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
+            panic!()
+        };
+        assert_eq!(d2.id(), 1);
+        assert_eq!(snd.credit(), 8);
+
+        // next-outgoing-id counts transfer frames
+        let Frame::Flow(mut flow) = peer_flow(None) else {
+            panic!()
+        };
+        flow.0.handle = None;
+        flow.0.echo = true;
+        handle_frame(&conn, flow.into()).unwrap();
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(1) more:false aborted:false", "Flow 5"]
+        );
+    }
+
+    #[ntex::test]
+    async fn sender_cancelled_delivery_aborted() {
+        use ntex::time::{Millis, sleep, timeout};
+        use std::{future::poll_fn, task::Poll};
+
+        let (_io, conn, client, snd) = small_frames_sender();
+        let body = Bytes::from(vec![b'a'; 1200]);
+        let unsettled = || {
+            session(&conn)
+                .inner
+                .get_ref()
+                .unsettled_snd_deliveries
+                .len()
+        };
+
+        // delivery is cancelled while it waits for session window
+        let mut t1 = Box::pin(snd.transfer(body.clone()).send());
+        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        assert_eq!(unsettled(), 1);
+        drop(t1);
+        assert_eq!(unsettled(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(transfer_frames(&client).len(), 4);
+
+        // abort is sent before next delivery
+        session_window(&conn, 3, 5);
+        sleep(Millis(50)).await;
+        assert!(transfer_frames(&client).is_empty());
+        let t2 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"2")).settled().send());
+        assert_eq!(
+            timeout(Millis(500), t2)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .id(),
+            1
+        );
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            [
+                "Transfer Some(0) more:false aborted:true",
+                "Transfer Some(1) more:false aborted:false"
+            ]
+        );
+
+        // abort is sent if session window is available
+        session_window(&conn, 5, 2);
+        let mut t3 = Box::pin(snd.transfer(body).send());
+        assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+        session_window(&conn, 7, 5);
+        drop(t3);
+        assert_eq!(unsettled(), 0);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            [
+                "Transfer Some(2) more:true aborted:false",
+                "Transfer None more:true aborted:false",
+                "Transfer Some(2) more:false aborted:true"
+            ]
+        );
+        assert_eq!(snd.credit(), 7);
+    }
+
     #[ntex::test]
     async fn session_outgoing_window() {
         let (_io, conn, client) = connection();

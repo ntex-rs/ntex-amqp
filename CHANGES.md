@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix session window was consumed per delivery instead of per transfer frame, multi-frame deliveries could stall sending; delivery ids are separate from transfer ids, cancelled partially sent deliveries are aborted
+
 * Fix session end and connection errors were lost for pending link attaches, receiver links and receiver link detaches
 
 * Fix detach of not attached link panicked or hung, add `AmqpProtocolError::LinkNotAttached`
