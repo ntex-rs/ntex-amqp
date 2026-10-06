@@ -549,6 +549,10 @@ impl SessionInner {
         mut frame: Attach,
     ) -> oneshot::Receiver<Result<Cell<SenderLinkInner>, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
+        if let Some(err) = self.ending_error() {
+            let _ = tx.send(Err(err));
+            return rx;
+        }
         if !self.check_handle() {
             let _ = tx.send(Err(AmqpProtocolError::TooManyLinks));
             return rx;
@@ -657,6 +661,11 @@ impl SessionInner {
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
+        // session is ending, links are removed on session end
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            let _ = tx.send(Ok(()));
+            return;
+        }
         if let Some(Either::Left(link)) = self.links.get_mut(id as usize) {
             match link {
                 SenderLinkState::Opening(_) => {
@@ -845,6 +854,10 @@ impl SessionInner {
         mut frame: Attach,
     ) -> oneshot::Receiver<Result<ReceiverLink, AmqpProtocolError>> {
         let (tx, rx) = oneshot::channel();
+        if let Some(err) = self.ending_error() {
+            let _ = tx.send(Err(err));
+            return rx;
+        }
         if !self.check_handle() {
             let _ = tx.send(Err(AmqpProtocolError::TooManyLinks));
             return rx;
@@ -953,13 +966,13 @@ impl SessionInner {
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
-        let ending = self.flags.intersects(Flags::ENDING | Flags::ENDED);
+        // session is ending, links are removed on session end
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            let _ = tx.send(Ok(()));
+            return;
+        }
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
-                // session is ending, link is removed on session end
-                ReceiverLinkState::Opening(..) if ending => {
-                    let _ = tx.send(Ok(()));
-                }
                 ReceiverLinkState::Opening(inner, remote_detach) => {
                     let inner = inner.take();
                     let remote_detach = remote_detach.take();
@@ -1490,6 +1503,9 @@ impl SessionInner {
         format: Option<MessageFormat>,
     ) -> Result<DeliveryNumber, AmqpProtocolError> {
         loop {
+            if let Some(err) = self.ending_error() {
+                return Err(err);
+            }
             if self.remote_incoming_window == 0 {
                 log::trace!(
                     "{}: Remote window is 0, push to pending queue, hnd:{link_handle:?}",
@@ -1595,7 +1611,29 @@ impl SessionInner {
     }
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {
-        self.sink.post_frame(AmqpFrame::new(self.id(), frame));
+        // no frames are sent after session end, AMQP 1.0 2.5.5
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            log::trace!(
+                "{}: Session is ending, drop frame {}",
+                self.tag(),
+                frame.name()
+            );
+        } else {
+            self.sink.post_frame(AmqpFrame::new(self.id(), frame));
+        }
+    }
+
+    /// Session end error, if session is ending or ended
+    fn ending_error(&self) -> Option<AmqpProtocolError> {
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            Some(
+                self.error
+                    .clone()
+                    .unwrap_or(AmqpProtocolError::SessionEnded(None)),
+            )
+        } else {
+            None
+        }
     }
 }
 
