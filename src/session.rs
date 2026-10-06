@@ -1056,6 +1056,7 @@ impl SessionInner {
             match frame {
                 Frame::Flow(flow) => {
                     let mut established = None;
+                    let mut receiver = None;
                     match flow
                         .handle()
                         .and_then(|h| self.remote_handles.get(&h).copied())
@@ -1073,12 +1074,25 @@ impl SessionInner {
                         })) if flow.link_credit().is_some() => {
                             *pending = Some(flow.clone());
                         }
+                        Some(Either::Right(ReceiverLinkState::Established(link))) => {
+                            receiver = Some(link.inner.get_ref().flow_state());
+                        }
                         _ => (),
                     }
                     // session flow state is applied in frames order
                     self.handle_flow(&flow);
+                    let state = if let Some(ref link) = established {
+                        let inner = link.inner.get_mut();
+                        inner.apply_flow(&flow);
+                        Some(inner.flow_state())
+                    } else {
+                        receiver
+                    };
+                    // echo reply carries link state of attached link
+                    if flow.echo() {
+                        self.post_flow(state);
+                    }
                     if let Some(link) = established {
-                        link.inner.get_mut().apply_flow(&flow);
                         Ok(Action::Flow(link, flow))
                     } else {
                         Ok(Action::None)
@@ -1442,34 +1456,22 @@ impl SessionInner {
         while let Some(tr) = self.pending_transfers.pop_front() {
             let _ = tr.tx.send(Ok(()));
         }
-
-        if flow.echo() {
-            let flow = Flow(Box::new(codec::FlowInner {
-                next_incoming_id: Some(self.next_incoming_id),
-                incoming_window: u32::MAX,
-                next_outgoing_id: self.next_outgoing_id,
-                outgoing_window: self.remote_incoming_window,
-                handle: None,
-                delivery_count: None,
-                link_credit: None,
-                available: None,
-                drain: false,
-                echo: false,
-                properties: None,
-            }));
-            self.post_frame(flow.into());
-        }
     }
 
     pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
+        self.post_flow(Some((handle, delivery_count, credit)));
+    }
+
+    /// Send session flow, with link state `(handle, delivery-count, link-credit)`
+    fn post_flow(&mut self, link: Option<(Handle, codec::SequenceNo, u32)>) {
         let flow = Flow(Box::new(codec::FlowInner {
             next_incoming_id: Some(self.next_incoming_id),
             incoming_window: u32::MAX,
             next_outgoing_id: self.next_outgoing_id,
             outgoing_window: self.remote_incoming_window,
-            handle: Some(handle),
-            delivery_count: Some(delivery_count),
-            link_credit: Some(credit),
+            handle: link.map(|l| l.0),
+            delivery_count: link.map(|l| l.1),
+            link_credit: link.map(|l| l.2),
             available: None,
             drain: false,
             echo: false,

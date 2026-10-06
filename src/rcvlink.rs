@@ -263,6 +263,11 @@ impl ReceiverLinkInner {
         self.reader_task.wake();
     }
 
+    /// Link flow state `(handle, delivery-count, link-credit)`
+    pub(crate) fn flow_state(&self) -> (Handle, SequenceNo, u32) {
+        (self.handle, self.delivery_count, self.credit)
+    }
+
     pub(crate) fn id(&self) -> Handle {
         self.handle
     }

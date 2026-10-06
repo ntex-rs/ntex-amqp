@@ -292,6 +292,11 @@ impl SenderLinkInner {
         }
     }
 
+    /// Link flow state `(handle, delivery-count, link-credit)`
+    pub(crate) fn flow_state(&self) -> (Handle, SequenceNo, u32) {
+        (self.id as Handle, self.delivery_count, self.link_credit)
+    }
+
     pub(crate) fn apply_flow(&mut self, flow: &Flow) {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
