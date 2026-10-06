@@ -320,6 +320,23 @@ struct PendingTransfer {
     link_handle: Handle,
 }
 
+/// Fail link transfers waiting for session window
+fn drop_pending_transfers(
+    pending: &mut VecDeque<PendingTransfer>,
+    link_handle: Handle,
+    err: &AmqpProtocolError,
+) {
+    let mut idx = 0;
+    while idx < pending.len() {
+        if pending[idx].link_handle == link_handle {
+            let tr = pending.remove(idx).unwrap();
+            let _ = tr.tx.send(Err(err.clone()));
+        } else {
+            idx += 1;
+        }
+    }
+}
+
 impl SessionInner {
     pub(crate) fn new(
         id: usize,
@@ -375,6 +392,10 @@ impl SessionInner {
 
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
+        // session state is dropped already, keep first error
+        if self.flags.contains(Flags::ENDED) {
+            return;
+        }
         log::trace!(
             "{}: Connection is failed, dropping state: {err:?}",
             self.tag()
@@ -1281,20 +1302,9 @@ impl SessionInner {
                         }));
                         let err = AmqpProtocolError::LinkDetached(detach.0.error.clone());
 
-                        // drop pending transfers
-                        let mut idx = 0;
-                        let handle = link.inner.get_ref().remote_handle();
-                        while idx < self.pending_transfers.len() {
-                            if self.pending_transfers[idx].link_handle == handle {
-                                let tr = self.pending_transfers.remove(idx).unwrap();
-                                let _ = tr.tx.send(Err(err.clone()));
-                            } else {
-                                idx += 1;
-                            }
-                        }
-
-                        // drop unsettled transfers
+                        // drop pending and unsettled transfers
                         let handle = link.inner.get_ref().id() as Handle;
+                        drop_pending_transfers(&mut self.pending_transfers, handle, &err);
                         for delivery in self.unsettled_snd_deliveries.values_mut() {
                             if delivery.handle() == handle {
                                 delivery.set_error(err.clone());
@@ -1495,6 +1505,11 @@ impl SessionInner {
             properties: None,
         }));
         self.post_frame(flow.into());
+    }
+
+    /// Fail sender link transfers waiting for session window
+    pub(crate) fn drop_link_transfers(&mut self, link_handle: Handle, err: &AmqpProtocolError) {
+        drop_pending_transfers(&mut self.pending_transfers, link_handle, err);
     }
 
     /// Wait for remote incoming window, returns `false` if window is available
