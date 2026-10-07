@@ -176,11 +176,15 @@ impl SenderLink {
     }
 
     /// Close sender link
+    ///
+    /// Link is detached immediately, returned future resolves on remote detach.
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(None)
     }
 
     /// Close sender link with error
+    ///
+    /// Link is detached immediately, returned future resolves on remote detach.
     pub fn close_with_error<E>(
         &self,
         error: E,
@@ -314,18 +318,25 @@ impl SenderLinkInner {
         }
     }
 
-    pub(crate) async fn close(&mut self, error: Option<Error>) -> Result<(), AmqpProtocolError> {
-        if self.closed {
-            Ok(())
-        } else {
+    /// Link is detached immediately, returned future waits for remote detach
+    pub(crate) fn close(
+        &mut self,
+        error: Option<Error>,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
+        let detach = (!self.closed).then(|| {
             // fail transfers waiting for link credit or session window
             let err = AmqpProtocolError::Disconnected;
             self.local_detached(&err);
             let session = self.session.inner.get_mut();
             session.drop_link_transfers(self.id as Handle, &err);
-            session
-                .detach_sender_link(self.id as Handle, true, error)
-                .await
+            session.detach_sender_link(self.id as Handle, true, error)
+        });
+
+        async move {
+            match detach {
+                Some(detach) => detach.await,
+                None => Ok(()),
+            }
         }
     }
 
