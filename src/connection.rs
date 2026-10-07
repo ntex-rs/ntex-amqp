@@ -417,29 +417,18 @@ impl ConnectionInner {
                     return Ok(Action::None);
                 }
 
-                // get local session id
-                let state = if let Some(token) = self.sessions_map.get(&channel_id) {
-                    if let Some(state) = self.sessions.get_mut(*token) {
-                        state
-                    } else {
-                        log::error!("{}: Inconsistent internal state", self.io.tag());
-                        return Err(AmqpProtocolError::UnknownSession(frame));
-                    }
-                } else {
+                // get local session id, only established sessions are mapped
+                let Some(token) = self.sessions_map.get(&channel_id).copied() else {
                     return Err(AmqpProtocolError::UnknownSession(frame));
                 };
 
                 // handle session frames
-                match state {
-                    SessionState::Opening(_, _) => {
-                        log::error!(
-                            "{}: Unexpected opening state: {}",
-                            self.io.tag(),
-                            channel_id
-                        );
-                        Err(AmqpProtocolError::UnexpectedOpeningState(frame))
+                match self.sessions.get_mut(token) {
+                    None | Some(SessionState::Opening(..)) => {
+                        log::error!("{}: Inconsistent internal state", self.io.tag());
+                        Err(AmqpProtocolError::UnknownSession(frame))
                     }
-                    SessionState::Established(session) => match frame {
+                    Some(SessionState::Established(session)) => match frame {
                         Frame::Attach(attach) => {
                             let handle = attach.handle();
                             let mut condition = if handle > self.handle_max {
@@ -479,7 +468,7 @@ impl ConnectionInner {
                                 let action = session
                                     .get_mut()
                                     .end(AmqpProtocolError::SessionEnded(Some(err.clone())));
-                                *state = SessionState::Closing(session.clone());
+                                self.sessions[token] = SessionState::Closing(session.clone());
                                 self.post_frame(AmqpFrame::new(
                                     id,
                                     End { error: Some(err) }.into(),
@@ -518,7 +507,7 @@ impl ConnectionInner {
                         }
                         _ => session.get_mut().handle_frame(frame),
                     },
-                    SessionState::Closing(session) => match frame {
+                    Some(SessionState::Closing(session)) => match frame {
                         Frame::End(frm) => {
                             log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
                             let _ = session
