@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Abort multi-frame delivery if receiver settled it before last frame is sent
+
 * Fix router added link credit to link paused by `ReceiverLink::reset_link_credit(0)`
 
 * Fix receiver ignored `settled` flag on continuation transfers, dropped delivery was rejected
