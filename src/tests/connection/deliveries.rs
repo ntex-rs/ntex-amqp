@@ -686,3 +686,43 @@ async fn duplicate_delivery_id_detaches_link() {
         );
     }
 }
+
+#[ntex::test]
+async fn continuation_transfer_settles_delivery() {
+    use ntex::time::{Millis, sleep};
+
+    // index of the continuation frame with `settled` flag
+    for settled_frame in [1, 2] {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let s = session(&conn);
+        let fut = ntex::rt::spawn({
+            let s = s.clone();
+            async move { s.build_receiver_link("r", "r").attach().await }
+        });
+        sleep(Millis(10)).await;
+        let _ = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0));
+        let link = fut.await.unwrap().unwrap();
+        link.set_link_credit(10);
+        for idx in 0..3 {
+            let mut frame = transfer(0, idx < 2, None, idx);
+            if let Frame::Transfer(ref mut tr) = frame {
+                if idx > 0 {
+                    tr.0.delivery_id = None;
+                }
+                tr.0.settled = Some(idx == settled_frame);
+            }
+            handle_frame(&conn, frame).unwrap();
+        }
+        let mut d = link.recv().await.unwrap().unwrap().0;
+        sleep(Millis(50)).await;
+        frame_names(&client);
+
+        assert!(d.is_remote_settled());
+        d.settle(DeliveryState::Accepted(Accepted {}));
+        drop(d);
+        assert!(s.inner.get_ref().unsettled_rcv_deliveries.is_empty());
+        sleep(Millis(50)).await;
+        assert!(dispositions(&client).is_empty());
+    }
+}

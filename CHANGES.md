@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix receiver ignored `settled` flag on continuation transfers, dropped delivery was rejected
+
 * Fix duplicate delivery-id of unsettled delivery left original delivery without disposition,
   receiver link is detached
 
