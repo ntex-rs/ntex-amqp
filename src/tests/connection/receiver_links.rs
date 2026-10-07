@@ -338,3 +338,65 @@ async fn receiver_partial_delivery_and_detach() {
     assert_eq!(err, error);
     assert!(matches!(link.poll_recv(&mut cx), Poll::Ready(None)));
 }
+
+#[ntex::test]
+async fn receiver_applies_sender_flow() {
+    let (_io, conn, client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+        panic!()
+    };
+    link.confirm_receiver_link(response);
+    link.set_link_credit(10);
+    // sender's link-credit is its own view, receiver uses delivery-count only
+    let sender_flow = |delivery_count: u32, echo: bool| {
+        let Frame::Flow(mut flow) = peer_flow(Some(100)) else {
+            panic!()
+        };
+        flow.0.delivery_count = Some(delivery_count);
+        flow.0.echo = echo;
+        handle_frame(&conn, flow.into()).unwrap();
+        link.credit()
+    };
+    let flows = || {
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut flows = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Flow(flow) = frame.into_parts().1 {
+                flows.push((flow.delivery_count(), flow.link_credit()));
+            }
+        }
+        flows
+    };
+
+    handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
+    assert_eq!(link.credit(), 9);
+
+    // sender ahead, delivery-limit 10 is preserved
+    assert_eq!(sender_flow(3, false), 7);
+    // sender behind
+    assert_eq!(sender_flow(1, false), 9);
+    // sender beyond delivery-limit
+    assert_eq!(sender_flow(12, false), 0);
+    link.set_link_credit(5);
+
+    // sender counts multi-frame delivery at first frame
+    handle_frame(&conn, transfer(1, true, None, 0)).unwrap();
+    assert_eq!(sender_flow(13, false), 5);
+    handle_frame(&conn, transfer(1, false, None, 0)).unwrap();
+    assert_eq!(link.credit(), 4);
+
+    // echo reply carries applied state
+    assert_eq!(sender_flow(15, true), 2);
+
+    ntex::time::sleep(ntex::time::Millis(50)).await;
+    assert_eq!(
+        flows(),
+        [
+            (Some(0), Some(10)),
+            (Some(12), Some(5)),
+            (Some(15), Some(2))
+        ]
+    );
+}
