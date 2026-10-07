@@ -223,6 +223,15 @@ impl Stream for ReceiverLink {
     }
 }
 
+/// Incoming transfer result, applied by session after link is released
+pub(crate) enum TransferResult {
+    Action(Action),
+    /// Link state must be sent to the peer
+    Flow,
+    /// Link must be detached with error
+    Detach(Error),
+}
+
 impl ReceiverLinkInner {
     pub(crate) fn new(
         session: Cell<SessionInner>,
@@ -375,27 +384,22 @@ impl ReceiverLinkInner {
         }
     }
 
-    fn close_size_exceeded(&mut self) -> Action {
+    fn close_size_exceeded() -> TransferResult {
         let err = Error(Box::new(codec::ErrorInner {
             condition: LinkError::MessageSizeExceeded.into(),
             description: None,
             info: None,
         }));
-        let _ = self.close(Some(err));
-        Action::None
+        TransferResult::Detach(err)
     }
 
     /// Aborted delivery is implicitly settled and its payload is ignored.
     ///
     /// Application never sees aborted delivery, so its credit is returned
     /// to the sender, otherwise the link could stall without credit.
-    fn delivery_aborted(&mut self) -> Action {
+    fn delivery_aborted(&mut self) -> TransferResult {
         self.delivery_count = self.delivery_count.wrapping_add(1);
-        self.session
-            .inner
-            .get_mut()
-            .rcv_link_flow(self.handle, self.delivery_count, self.credit);
-        Action::None
+        TransferResult::Flow
     }
 
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
@@ -430,7 +434,7 @@ impl ReceiverLinkInner {
         &mut self,
         mut transfer: Transfer,
         inner: &Cell<ReceiverLinkInner>,
-    ) -> Action {
+    ) -> TransferResult {
         if self.credit == 0 {
             // check link credit
             let err = Error(Box::new(codec::ErrorInner {
@@ -438,8 +442,7 @@ impl ReceiverLinkInner {
                 description: None,
                 info: None,
             }));
-            let _ = self.close(Some(err));
-            Action::None
+            TransferResult::Detach(err)
         } else {
             // aborted transfer ends the delivery regardless of `more`,
             // credit used by aborted delivery is returned to the sender
@@ -462,8 +465,7 @@ impl ReceiverLinkInner {
                             description: Some(ByteString::from_static("delivery_id is wrong")),
                             info: None,
                         }));
-                        let _ = self.close(Some(err));
-                        return Action::None;
+                        return TransferResult::Detach(err);
                     }
                 }
 
@@ -478,7 +480,7 @@ impl ReceiverLinkInner {
                 // merge transfer data and check size
                 if let Some(transfer_body) = transfer.0.body.take() {
                     if size_exceeded(self.max_message_size, body.len() + transfer_body.len()) {
-                        return self.close_size_exceeded();
+                        return Self::close_size_exceeded();
                     }
 
                     append_body(body, transfer_body);
@@ -486,7 +488,7 @@ impl ReceiverLinkInner {
 
                 if transfer.more() {
                     // dont need to update queue, we use first transfer frame as primary
-                    Action::None
+                    TransferResult::Action(Action::None)
                 } else {
                     // received last partial transfer
                     self.delivery_count = self.delivery_count.wrapping_add(1);
@@ -497,9 +499,9 @@ impl ReceiverLinkInner {
                         if self.queue.len() == 1 {
                             self.wake();
                         }
-                        Action::Transfer(ReceiverLink {
+                        TransferResult::Action(Action::Transfer(ReceiverLink {
                             inner: inner.clone(),
-                        })
+                        }))
                     } else {
                         log::error!("{}: Inconsistent state, bug", self.session.tag());
                         let err = Error(Box::new(codec::ErrorInner {
@@ -507,8 +509,7 @@ impl ReceiverLinkInner {
                             description: Some(ByteString::from_static("Internal error")),
                             info: None,
                         }));
-                        let _ = self.close(Some(err));
-                        Action::None
+                        TransferResult::Detach(err)
                     }
                 }
             } else if aborted {
@@ -517,7 +518,7 @@ impl ReceiverLinkInner {
                 // handle first transfer in batch
                 if let Some(id) = transfer.delivery_id() {
                     if size_exceeded(self.max_message_size, body_len(&transfer)) {
-                        return self.close_size_exceeded();
+                        return Self::close_size_exceeded();
                     }
 
                     let mut body = BytePages::default();
@@ -542,19 +543,18 @@ impl ReceiverLinkInner {
                         self.session.clone(),
                     );
                     self.queue.push_back((delivery, transfer));
-                    Action::None
+                    TransferResult::Action(Action::None)
                 } else {
                     let err = Error(Box::new(codec::ErrorInner {
                         condition: LinkError::DetachForced.into(),
                         description: Some(ByteString::from_static("delivery_id is required")),
                         info: None,
                     }));
-                    let _ = self.close(Some(err));
-                    Action::None
+                    TransferResult::Detach(err)
                 }
             } else if let Some(id) = transfer.delivery_id() {
                 if size_exceeded(self.max_message_size, body_len(&transfer)) {
-                    return self.close_size_exceeded();
+                    return Self::close_size_exceeded();
                 }
 
                 self.delivery_count = self.delivery_count.wrapping_add(1);
@@ -569,17 +569,16 @@ impl ReceiverLinkInner {
                 if self.queue.len() == 1 {
                     self.wake();
                 }
-                Action::Transfer(ReceiverLink {
+                TransferResult::Action(Action::Transfer(ReceiverLink {
                     inner: inner.clone(),
-                })
+                }))
             } else {
                 let err = Error(Box::new(codec::ErrorInner {
                     condition: LinkError::DetachForced.into(),
                     description: Some(ByteString::from_static("delivery_id is required")),
                     info: None,
                 }));
-                let _ = self.close(Some(err));
-                Action::None
+                TransferResult::Detach(err)
             }
         }
     }
