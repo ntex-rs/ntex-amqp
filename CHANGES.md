@@ -2,6 +2,9 @@
 
 ## [6.2.0] - Unreleased
 
+* Add `ReceiverLink::reset_link_credit()`, it can reduce link credit, transfers in flight under
+  the previous credit are accepted
+
 * Fix cancelled sender link transfers stayed in credit and session window queues
 
 * Fix local link detach waited forever if remote peer did not confirm it, use link attach timeout
