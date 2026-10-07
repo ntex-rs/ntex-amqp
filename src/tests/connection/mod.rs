@@ -11,9 +11,11 @@ use ntex_bytes::{BytePages, Bytes, BytesMut};
 use ntex_io::{Io, testing::IoTest};
 use ntex_service::cfg::SharedCfg;
 
-use std::{future::Future, pin::Pin, task::Context, task::Poll};
-
+use ntex::time::{Millis, sleep, timeout};
 use ntex_util::time::Seconds;
+use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
+use std::task::{Context, Poll, Wake, Waker};
+use std::{future::Future, future::poll_fn, pin::Pin};
 
 use crate::codec::protocol::{
     self as codec, AmqpError, Close, End, Error, Frame, Role, SessionError,
@@ -22,6 +24,7 @@ use crate::codec::{AmqpCodec, AmqpFrame};
 use crate::connection::*;
 use crate::delivery::DeliveryInner;
 use crate::error::AmqpProtocolError;
+use crate::rcvlink::ReceiverLink;
 use crate::session::Session;
 use crate::sndlink::SenderLink;
 use crate::types::Action;
@@ -36,6 +39,7 @@ mod sender_links;
 mod sessions;
 
 const LONG: &str = "value-that-does-not-fit-into-inline-storage";
+const ACCEPTED: DeliveryState = DeliveryState::Accepted(Accepted {});
 
 fn symbols() -> Multiple<Symbol> {
     Multiple(vec![Symbol::from(LONG)])
@@ -195,7 +199,7 @@ async fn receive(local: bool, max: u64, frames: &[bool]) -> (bool, bool) {
                 .attach()
                 .await
         });
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         handle(attach()).unwrap();
         fut.await.unwrap().unwrap()
     } else {
@@ -211,16 +215,11 @@ async fn receive(local: bool, max: u64, frames: &[bool]) -> (bool, bool) {
         handle(transfer(0, *more, None, idx as u8)).unwrap();
     }
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut exceeded = false;
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Detach(detach) = frame.into_parts().1 {
-            exceeded =
-                *detach.error().unwrap().condition() == LinkError::MessageSizeExceeded.into();
-        }
-    }
+    sleep(Millis(50)).await;
+    let exceeded = detaches(&client).iter().any(|(_, _, err)| {
+        err.as_ref()
+            .is_some_and(|e| *e.condition() == LinkError::MessageSizeExceeded.into())
+    });
     (link.get_delivery().is_some(), exceeded)
 }
 
@@ -234,7 +233,7 @@ async fn sender(local: bool, max: Option<u64>) -> (SenderLink, (Io, Connection, 
         let session = session(&conn);
         let fut =
             ntex::rt::spawn(async move { session.build_sender_link(LONG, LONG).attach().await });
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         handle(peer_attach(Role::Receiver, max)).unwrap();
         fut.await.unwrap().unwrap()
     } else {
@@ -292,21 +291,109 @@ fn peer_detach(handle: u32) -> Frame {
     .into()
 }
 
-fn frame_names(client: &IoTest) -> Vec<String> {
+/// Decode frames written to the peer, returns (channel, frame)
+fn read_channel_frames(client: &IoTest) -> Vec<(u16, Frame)> {
     let codec = AmqpCodec::<AmqpFrame>::new();
     let mut buf = BytesMut::from(&client.read_any()[..]);
     let mut frames = Vec::new();
     while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        frames.push(match frame.into_parts().1 {
+        frames.push(frame.into_parts());
+    }
+    frames
+}
+
+/// Decode frames written to the peer
+fn read_frames(client: &IoTest) -> Vec<Frame> {
+    read_channel_frames(client)
+        .into_iter()
+        .map(|(_, frame)| frame)
+        .collect()
+}
+
+/// Detach frames written to the peer, (handle, closed, error)
+fn detaches(client: &IoTest) -> Vec<(u32, bool, Option<Error>)> {
+    read_frames(client)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            Frame::Detach(det) => Some((det.handle(), det.closed(), det.error().cloned())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Flow frames written to the peer
+fn flows(client: &IoTest) -> Vec<Flow> {
+    read_frames(client)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            Frame::Flow(flow) => Some(flow),
+            _ => None,
+        })
+        .collect()
+}
+
+fn frame_names(client: &IoTest) -> Vec<String> {
+    read_frames(client)
+        .into_iter()
+        .map(|frame| match frame {
             Frame::Attach(att) => format!("Attach {} {}", att.name(), att.handle()),
             Frame::Detach(det) => format!("Detach {}", det.handle()),
             Frame::Flow(flow) => {
                 format!("Flow {:?} {:?}", flow.handle(), flow.link_credit())
             }
             frame => frame.name().to_string(),
-        });
+        })
+        .collect()
+}
+
+/// Number of unsettled (sender, receiver) deliveries in session
+fn unsettled(conn: &Connection) -> (usize, usize) {
+    let s = session(conn);
+    let inner = s.inner.get_ref();
+    (
+        inner.unsettled_snd_deliveries.len(),
+        inner.unsettled_rcv_deliveries.len(),
+    )
+}
+
+/// Poll future once with noop waker
+fn poll_once<F: Future + ?Sized>(fut: Pin<&mut F>) -> Poll<F::Output> {
+    fut.poll(&mut Context::from_waker(Waker::noop()))
+}
+
+/// Waker that counts wake-ups
+struct WakeCounter(AtomicUsize);
+
+impl WakeCounter {
+    fn new() -> Arc<Self> {
+        Arc::new(Self(AtomicUsize::new(0)))
     }
-    frames
+
+    fn count(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+impl Wake for WakeCounter {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Returns true if future is pending
+async fn pending<F: Future + ?Sized>(mut fut: Pin<&mut F>) -> bool {
+    poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await
+}
+
+/// Local receiver link "r", attached by remote sender with `handle`
+async fn local_receiver(conn: &Connection, handle: u32) -> ReceiverLink {
+    let s = session(conn);
+    let fut = ntex::rt::spawn(async move { s.build_receiver_link("r", "r").attach().await });
+    sleep(Millis(10)).await;
+    let Ok(Action::None) = handle_frame(conn, named_attach(Role::Sender, "r", "r", handle)) else {
+        panic!()
+    };
+    fut.await.unwrap().unwrap()
 }
 
 fn small_frames_sender() -> (Io, Connection, IoTest, SenderLink) {
@@ -351,11 +438,9 @@ fn session_window(conn: &Connection, next_incoming_id: u32, window: u32) {
 }
 
 fn transfer_frames(client: &IoTest) -> Vec<String> {
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut frames = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        frames.push(match frame.into_parts().1 {
+    read_frames(client)
+        .into_iter()
+        .map(|frame| match frame {
             Frame::Transfer(tr) => format!(
                 "Transfer {:?} more:{} aborted:{}",
                 tr.delivery_id(),
@@ -364,9 +449,8 @@ fn transfer_frames(client: &IoTest) -> Vec<String> {
             ),
             Frame::Flow(flow) => format!("Flow {}", flow.next_outgoing_id()),
             frame => frame.name().to_string(),
-        });
-    }
-    frames
+        })
+        .collect()
 }
 
 /// Sender link with link credit 10, sets session window
@@ -412,9 +496,6 @@ async fn queued_abort_sender() -> (
     SenderLink,
     Pin<Box<dyn Future<Output = Result<crate::Delivery, AmqpProtocolError>>>>,
 ) {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     let (io, conn, client, snd) = small_frames_sender();
     let snd2 = add_sender(&conn, "s2", 5, 1);
     sleep(Millis(50)).await;
@@ -423,8 +504,8 @@ async fn queued_abort_sender() -> (
     let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
     let mut t2: Pin<Box<dyn Future<Output = _>>> =
         Box::pin(snd2.transfer(Bytes::from_static(b"2")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
+    assert!(pending(t2.as_mut()).await);
     drop(t1);
     sleep(Millis(50)).await;
     assert_eq!(

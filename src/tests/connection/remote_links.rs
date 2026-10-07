@@ -10,12 +10,9 @@ async fn detach_unconfirmed_remote_sender_link() {
     else {
         panic!()
     };
-    let res = ntex::time::timeout(
-        ntex::time::Millis(1000),
-        s.detach_sender_link(link.id(), None),
-    )
-    .await
-    .unwrap();
+    let res = timeout(Millis(1000), s.detach_sender_link(link.id(), None))
+        .await
+        .unwrap();
     assert!(matches!(res, Err(AmqpProtocolError::LinkNotAttached)));
 
     // link is confirmed
@@ -23,7 +20,7 @@ async fn detach_unconfirmed_remote_sender_link() {
         .get_mut()
         .attach_remote_sender_link(&attach, response, link.inner.clone());
     assert!(s.get_sender_link("n").is_some());
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_eq!(frame_names(&client), ["Begin", "Attach n 0"]);
 }
 
@@ -210,22 +207,8 @@ async fn remote_sender_detach_before_confirm() {
             panic!()
         };
 
-        ntex::time::sleep(ntex::time::Millis(50)).await;
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            match frame.into_parts().1 {
-                Frame::Attach(attach) => {
-                    frames.push(format!("attach {} {:?}", attach.handle(), attach.role()));
-                }
-                Frame::Detach(detach) => {
-                    frames.push(format!("detach {} {}", detach.handle(), detach.closed()));
-                }
-                _ => (),
-            }
-        }
-        assert_eq!(frames, ["attach 0 Sender", "detach 0 true"]);
+        sleep(Millis(50)).await;
+        assert_eq!(link_frames(&client), ["attach 0 Sender", "detach 0 true"]);
     }
 }
 
@@ -304,7 +287,7 @@ async fn flow_echo_link_state() {
     else {
         panic!()
     };
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(
         frame_names(&client),
         ["Begin", "Attach r 0", "Flow Some(0) Some(10)", "Attach s 1"]
@@ -316,7 +299,7 @@ async fn flow_echo_link_state() {
     // opening and unknown links, session state only
     echo(5, Some(7));
     echo(9, Some(7));
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(
         frame_names(&client),
         [
@@ -366,7 +349,7 @@ async fn remote_receiver_stale_confirm() {
     assert!(link_b.confirm_receiver_link(response_b));
     link_b.set_link_credit(5);
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(
         frame_names(&client),
         [
@@ -394,13 +377,13 @@ async fn remote_receiver_credit_before_confirm() {
 
     // credit is sent after attach response
     link.set_link_credit(10);
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(frame_names(&client), ["Begin"]);
 
     assert!(link.confirm_receiver_link(response));
     link.set_link_credit(5);
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(
         frame_names(&client),
         [
@@ -508,23 +491,8 @@ async fn remote_receiver_detach_before_confirm() {
         };
         assert_eq!(link2.handle(), 0);
 
-        ntex::time::sleep(ntex::time::Millis(50)).await;
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            match frame.into_parts().1 {
-                Frame::Attach(attach) => {
-                    frames.push(format!("attach {} {:?}", attach.handle(), attach.role()));
-                }
-                Frame::Detach(detach) => {
-                    frames.push(format!("detach {} {}", detach.handle(), detach.closed()));
-                }
-                Frame::Flow(_) => frames.push("flow".into()),
-                _ => (),
-            }
-        }
-        assert_eq!(frames, ["attach 0 Receiver", "detach 0 true"]);
+        sleep(Millis(50)).await;
+        assert_eq!(link_frames(&client), ["attach 0 Receiver", "detach 0 true"]);
     }
 }
 
@@ -546,7 +514,7 @@ async fn remote_sender_end_before_confirm() {
         if local {
             let s = session.clone();
             ntex::rt::spawn(async move { s.end().await });
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
 
             let conn_ref = conn.get_ref();
             let queue = conn_ref.get_control_queue().pending.borrow();
@@ -562,7 +530,7 @@ async fn remote_sender_end_before_confirm() {
             };
             assert_eq!(links.len(), 1);
             assert!(link.is_closed());
-            let ready = ntex::time::timeout(ntex::time::Millis(100), link.ready()).await;
+            let ready = timeout(Millis(100), link.ready()).await;
             assert!(matches!(ready, Ok(false)));
         }
 
@@ -586,14 +554,12 @@ async fn remote_sender_end_before_confirm() {
             assert!(link.is_closed());
         }
 
-        ntex::time::sleep(ntex::time::Millis(50)).await;
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            frames.push(frame.into_parts().1.name());
-        }
-        assert_eq!(frames, ["Begin", "End"], "local: {local} accept: {accept}");
+        sleep(Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            ["Begin", "End"],
+            "local: {local} accept: {accept}"
+        );
     }
 }
 
@@ -615,7 +581,7 @@ async fn remote_receiver_end_before_confirm() {
         if local {
             let s = session.clone();
             ntex::rt::spawn(async move { s.end().await });
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
 
             let conn_ref = conn.get_ref();
             let queue = conn_ref.get_control_queue().pending.borrow();
@@ -637,8 +603,8 @@ async fn remote_receiver_end_before_confirm() {
         if accept {
             assert!(!link.confirm_receiver_link(response));
         } else {
-            ntex::time::timeout(
-                ntex::time::Millis(500),
+            timeout(
+                Millis(500),
                 link.close_with_error(crate::error::LinkError::force_detach()),
             )
             .await
@@ -652,13 +618,23 @@ async fn remote_receiver_end_before_confirm() {
             assert!(link.is_closed());
         }
 
-        ntex::time::sleep(ntex::time::Millis(50)).await;
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            frames.push(frame.into_parts().1.name());
-        }
-        assert_eq!(frames, ["Begin", "End"], "local: {local} accept: {accept}");
+        sleep(Millis(50)).await;
+        assert_eq!(
+            frame_names(&client),
+            ["Begin", "End"],
+            "local: {local} accept: {accept}"
+        );
     }
+}
+
+/// Attach and detach frames written to the peer
+fn link_frames(client: &IoTest) -> Vec<String> {
+    read_frames(client)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            Frame::Attach(att) => Some(format!("attach {} {:?}", att.handle(), att.role())),
+            Frame::Detach(det) => Some(format!("detach {} {}", det.handle(), det.closed())),
+            _ => None,
+        })
+        .collect()
 }

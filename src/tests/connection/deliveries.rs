@@ -1,12 +1,19 @@
 use super::*;
 
-fn remote_disposition(conn: &Connection, role: Role, id: u32, settled: bool) {
+/// Remote disposition for delivery `id`
+fn disposition(
+    conn: &Connection,
+    role: Role,
+    id: u32,
+    settled: bool,
+    state: Option<DeliveryState>,
+) {
     let disp = Disposition(Box::new(DispositionInner {
         role,
         first: id,
         last: None,
         settled,
-        state: Some(DeliveryState::Accepted(Accepted {})),
+        state,
         batchable: false,
     }));
     handle_frame(conn, disp.into()).unwrap();
@@ -14,8 +21,6 @@ fn remote_disposition(conn: &Connection, role: Role, id: u32, settled: bool) {
 
 #[ntex::test]
 async fn sender_delivery_remote_settled() {
-    use ntex::time::{Millis, sleep};
-
     // 0 - wait() after disposition, 1 - drop without wait(), 2 - settle(), 3 - update_state()
     for case in 0..4 {
         let (_io, conn, client, snd) = small_frames_sender();
@@ -23,24 +28,18 @@ async fn sender_delivery_remote_settled() {
         transfer_frames(&client);
 
         let mut d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
-        remote_disposition(&conn, Role::Receiver, d.id(), true);
+        disposition(&conn, Role::Receiver, d.id(), true, Some(ACCEPTED));
         match case {
             0 => assert!(
                 matches!(d.wait().await, Ok(Some(DeliveryState::Accepted(_)))),
                 "case: {case}"
             ),
-            2 => d.settle(DeliveryState::Accepted(Accepted {})),
-            3 => d.update_state(DeliveryState::Accepted(Accepted {})),
+            2 => d.settle(ACCEPTED),
+            3 => d.update_state(ACCEPTED),
             _ => (),
         }
         drop(d);
-        assert!(
-            session(&conn)
-                .inner
-                .get_ref()
-                .unsettled_snd_deliveries
-                .is_empty()
-        );
+        assert_eq!(unsettled(&conn), (0, 0));
         sleep(Millis(50)).await;
         assert_eq!(
             transfer_frames(&client),
@@ -52,7 +51,7 @@ async fn sender_delivery_remote_settled() {
     // remote settled state is preserved after session end
     let (_io, conn, _client, snd) = small_frames_sender();
     let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
-    remote_disposition(&conn, Role::Receiver, d.id(), true);
+    disposition(&conn, Role::Receiver, d.id(), true, Some(ACCEPTED));
     assert!(matches!(
         d.wait().await,
         Ok(Some(DeliveryState::Accepted(_)))
@@ -64,27 +63,23 @@ async fn sender_delivery_remote_settled() {
 }
 
 fn dispositions(client: &IoTest) -> Vec<String> {
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut frames = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Disposition(disp) = frame.into_parts().1 {
-            frames.push(format!(
+    read_frames(client)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            Frame::Disposition(disp) => Some(format!(
                 "{:?} {} {} {:?}",
                 disp.role(),
                 disp.first(),
                 disp.settled(),
                 disp.state()
-            ));
-        }
-    }
-    frames
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 #[ntex::test]
 async fn sender_delivery_drop_settles_with_remote_outcome() {
-    use ntex::time::{Millis, sleep};
-
     let rejected = DeliveryState::Rejected(Rejected { error: None });
     let received = DeliveryState::Received(Received {
         section_number: 0,
@@ -92,10 +87,7 @@ async fn sender_delivery_drop_settles_with_remote_outcome() {
     });
     for (state, expected) in [
         (None, "Sender 0 true None"),
-        (
-            Some(DeliveryState::Accepted(Accepted {})),
-            "Sender 0 true Some(Accepted(Accepted))",
-        ),
+        (Some(ACCEPTED), "Sender 0 true Some(Accepted(Accepted))"),
         (
             Some(rejected),
             "Sender 0 true Some(Rejected(Rejected { error: None }))",
@@ -106,26 +98,12 @@ async fn sender_delivery_drop_settles_with_remote_outcome() {
         sleep(Millis(50)).await;
         transfer_frames(&client);
         let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
-        if let Some(state) = state {
-            let disp = Disposition(Box::new(DispositionInner {
-                role: Role::Receiver,
-                first: d.id(),
-                last: None,
-                settled: false,
-                state: Some(state),
-                batchable: false,
-            }));
-            handle_frame(&conn, disp.into()).unwrap();
+        if state.is_some() {
+            disposition(&conn, Role::Receiver, d.id(), false, state);
             assert!(!d.is_remote_settled());
         }
         drop(d);
-        assert!(
-            session(&conn)
-                .inner
-                .get_ref()
-                .unsettled_snd_deliveries
-                .is_empty()
-        );
+        assert_eq!(unsettled(&conn), (0, 0));
         sleep(Millis(50)).await;
         assert_eq!(dispositions(&client), [expected]);
     }
@@ -133,20 +111,9 @@ async fn sender_delivery_drop_settles_with_remote_outcome() {
 
 #[ntex::test]
 async fn receiver_delivery_remote_settled() {
-    use ntex::time::{Millis, sleep};
-
     let (_io, conn, client) = connection();
     handle_frame(&conn, begin()).unwrap();
-    let s = session(&conn);
-    let fut = ntex::rt::spawn({
-        let s = s.clone();
-        async move { s.build_receiver_link("r", "r").attach().await }
-    });
-    sleep(Millis(10)).await;
-    let Ok(Action::None) = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0)) else {
-        panic!()
-    };
-    let link = fut.await.unwrap().unwrap();
+    let link = local_receiver(&conn, 0).await;
     link.set_link_credit(10);
     for id in 0..4 {
         handle_frame(&conn, transfer(id, false, None, 1)).unwrap();
@@ -159,14 +126,14 @@ async fn receiver_delivery_remote_settled() {
     frame_names(&client);
 
     // remote settled: settle() and drop do not send disposition
-    remote_disposition(&conn, Role::Sender, 0, true);
-    remote_disposition(&conn, Role::Sender, 1, true);
+    disposition(&conn, Role::Sender, 0, true, Some(ACCEPTED));
+    disposition(&conn, Role::Sender, 1, true, Some(ACCEPTED));
     let d3 = deliveries.pop().unwrap();
     let mut d2 = deliveries.pop().unwrap();
     let d1 = deliveries.pop().unwrap();
     let mut d0 = deliveries.pop().unwrap();
     assert!(d0.is_remote_settled());
-    d0.settle(DeliveryState::Accepted(Accepted {}));
+    d0.settle(ACCEPTED);
     drop(d0);
     drop(d1);
     sleep(Millis(50)).await;
@@ -174,10 +141,10 @@ async fn receiver_delivery_remote_settled() {
 
     // not settled by remote
     assert!(!d2.is_remote_settled());
-    d2.settle(DeliveryState::Accepted(Accepted {}));
+    d2.settle(ACCEPTED);
     drop(d2);
     drop(d3);
-    assert!(s.inner.get_ref().unsettled_rcv_deliveries.is_empty());
+    assert_eq!(unsettled(&conn), (0, 0));
     sleep(Millis(50)).await;
     let disp = dispositions(&client);
     assert_eq!(disp.len(), 2);
@@ -187,9 +154,6 @@ async fn receiver_delivery_remote_settled() {
 
 #[ntex::test]
 async fn delivery_wait_returns_session_error() {
-    use ntex::time::{Millis, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let err = Error(Box::new(codec::ErrorInner {
         condition: AmqpError::InternalError.into(),
         description: None,
@@ -206,7 +170,7 @@ async fn delivery_wait_returns_session_error() {
         let d1 = snd.transfer(Bytes::from_static(b"1")).send().await.unwrap();
         let d2 = snd.transfer(Bytes::from_static(b"2")).send().await.unwrap();
         let mut wait = Box::pin(d1.wait());
-        assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+        assert!(pending(wait.as_mut()).await);
 
         if remote_end {
             handle_frame(
@@ -233,13 +197,7 @@ async fn delivery_wait_returns_session_error() {
     // receiver delivery
     let (_io, conn, _client) = connection();
     handle_frame(&conn, begin()).unwrap();
-    let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
-        panic!()
-    };
-    link.confirm_receiver_link(response);
-    link.set_link_credit(1);
-    handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
-    let (delivery, _) = link.get_delivery().unwrap();
+    let (delivery, _close) = link_with_delivery(&conn, false).await;
     handle_frame(
         &conn,
         End {
@@ -251,32 +209,9 @@ async fn delivery_wait_returns_session_error() {
     assert_eq!(format!("{:?}", delivery.wait().await.unwrap_err()), ended);
 }
 
-fn remote_state(conn: &Connection, id: u32, settled: bool, state: Option<DeliveryState>) {
-    let disp = Disposition(Box::new(DispositionInner {
-        role: Role::Receiver,
-        first: id,
-        last: None,
-        settled,
-        state,
-        batchable: false,
-    }));
-    handle_frame(conn, disp.into()).unwrap();
-}
-
 #[ntex::test]
 async fn delivery_wait_outcome() {
-    use ntex::time::{Millis, sleep, timeout};
     use ntex_amqp_codec::protocol::Modified;
-    use std::future::poll_fn;
-    use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
-    use std::task::{Context, Poll, Wake, Waker};
-
-    struct Wakes(AtomicUsize);
-    impl Wake for Wakes {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
 
     let received = || {
         Some(DeliveryState::Received(Received {
@@ -297,24 +232,19 @@ async fn delivery_wait_outcome() {
         let (_io, conn, _client, snd) = small_frames_sender();
         let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
         let mut wait = Box::pin(d.wait());
-        assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
-        remote_state(&conn, d.id(), false, None);
-        assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
-        remote_state(&conn, d.id(), false, received());
-        assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+        assert!(pending(wait.as_mut()).await);
+        disposition(&conn, Role::Receiver, d.id(), false, None);
+        assert!(pending(wait.as_mut()).await);
+        disposition(&conn, Role::Receiver, d.id(), false, received());
+        assert!(pending(wait.as_mut()).await);
 
         if settled {
             // settled without outcome
-            remote_state(&conn, d.id(), true, None);
+            disposition(&conn, Role::Receiver, d.id(), true, None);
             assert!(timeout(Millis(500), wait).await.unwrap().unwrap().is_none());
             assert!(d.is_remote_settled());
         } else {
-            remote_state(
-                &conn,
-                d.id(),
-                false,
-                Some(DeliveryState::Accepted(Accepted {})),
-            );
+            disposition(&conn, Role::Receiver, d.id(), false, Some(ACCEPTED));
             assert!(matches!(
                 timeout(Millis(500), wait).await.unwrap(),
                 Ok(Some(DeliveryState::Accepted(_)))
@@ -328,7 +258,7 @@ async fn delivery_wait_outcome() {
     sleep(Millis(50)).await;
     transfer_frames(&client);
     let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
-    remote_state(&conn, d.id(), false, modified());
+    disposition(&conn, Role::Receiver, d.id(), false, modified());
     for _ in 0..2 {
         assert!(matches!(
             d.wait().await,
@@ -347,21 +277,16 @@ async fn delivery_wait_outcome() {
     // concurrent `wait()` calls receive outcome, and do not wake each other
     let (_io, conn, _client, snd) = small_frames_sender();
     let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
-    let woken = Arc::new(Wakes(AtomicUsize::new(0)));
+    let woken = WakeCounter::new();
     let waker = Waker::from(woken.clone());
     let mut w1 = Box::pin(d.wait());
     let mut w2 = Box::pin(d.wait());
     let mut cx = Context::from_waker(&waker);
     assert!(w1.as_mut().poll(&mut cx).is_pending());
-    assert!(poll_fn(|cx| Poll::Ready(w2.as_mut().poll(cx).is_pending())).await);
-    assert_eq!(woken.0.load(Ordering::Relaxed), 0);
-    remote_state(
-        &conn,
-        d.id(),
-        true,
-        Some(DeliveryState::Accepted(Accepted {})),
-    );
-    assert_eq!(woken.0.load(Ordering::Relaxed), 1);
+    assert!(pending(w2.as_mut()).await);
+    assert_eq!(woken.count(), 0);
+    disposition(&conn, Role::Receiver, d.id(), true, Some(ACCEPTED));
+    assert_eq!(woken.count(), 1);
     for w in [w1, w2] {
         assert!(matches!(
             timeout(Millis(500), w).await.unwrap(),
@@ -374,7 +299,7 @@ async fn delivery_wait_outcome() {
     let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
     for _ in 0..3 {
         let mut w = Box::pin(d.wait());
-        assert!(poll_fn(|cx| Poll::Ready(w.as_mut().poll(cx).is_pending())).await);
+        assert!(pending(w.as_mut()).await);
     }
     let inner = session(&conn).inner;
     assert_eq!(
@@ -382,10 +307,10 @@ async fn delivery_wait_outcome() {
         0
     );
     let mut live = Box::pin(d.wait());
-    assert!(poll_fn(|cx| Poll::Ready(live.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(live.as_mut()).await);
     for _ in 0..3 {
         let mut w = Box::pin(d.wait());
-        assert!(poll_fn(|cx| Poll::Ready(w.as_mut().poll(cx).is_pending())).await);
+        assert!(pending(w.as_mut()).await);
     }
     assert_eq!(
         inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
@@ -398,17 +323,12 @@ async fn delivery_wait_outcome() {
     let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
     let mut w1 = Box::pin(d.wait());
     let mut w2 = Box::pin(d.wait());
-    assert!(poll_fn(|cx| Poll::Ready(w1.as_mut().poll(cx).is_pending())).await);
-    assert!(poll_fn(|cx| Poll::Ready(w2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(w1.as_mut()).await);
+    assert!(pending(w2.as_mut()).await);
     drop(w1);
     let mut w3 = Box::pin(d.wait());
-    assert!(poll_fn(|cx| Poll::Ready(w3.as_mut().poll(cx).is_pending())).await);
-    remote_state(
-        &conn,
-        d.id(),
-        false,
-        Some(DeliveryState::Accepted(Accepted {})),
-    );
+    assert!(pending(w3.as_mut()).await);
+    disposition(&conn, Role::Receiver, d.id(), false, Some(ACCEPTED));
     for w in [w2, w3] {
         assert!(matches!(
             timeout(Millis(500), w).await.unwrap(),
@@ -419,8 +339,6 @@ async fn delivery_wait_outcome() {
 
 #[ntex::test]
 async fn delivery_no_disposition_after_link_detach() {
-    use ntex::time::{Millis, sleep};
-
     let rejected = || DeliveryState::Rejected(Rejected { error: None });
 
     // 0 - settle(), 1 - update_state(), 2 - drop
@@ -446,25 +364,13 @@ async fn delivery_no_disposition_after_link_detach() {
                 dispositions(&client).is_empty(),
                 "case: {case} local: {local}"
             );
-            assert!(
-                session(&conn)
-                    .inner
-                    .get_ref()
-                    .unsettled_snd_deliveries
-                    .is_empty()
-            );
+            assert_eq!(unsettled(&conn), (0, 0));
         }
 
         // receiver link
         let (_io, conn, client) = connection();
         handle_frame(&conn, begin()).unwrap();
-        let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
-            panic!()
-        };
-        link.confirm_receiver_link(response);
-        link.set_link_credit(1);
-        handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
-        let (mut d, _) = link.get_delivery().unwrap();
+        let (mut d, _close) = link_with_delivery(&conn, false).await;
         handle_frame(&conn, peer_detach(0)).unwrap();
         sleep(Millis(50)).await;
         let _ = dispositions(&client);
@@ -477,13 +383,7 @@ async fn delivery_no_disposition_after_link_detach() {
         drop(d);
         sleep(Millis(50)).await;
         assert!(dispositions(&client).is_empty(), "case: {case}");
-        assert!(
-            session(&conn)
-                .inner
-                .get_ref()
-                .unsettled_rcv_deliveries
-                .is_empty()
-        );
+        assert_eq!(unsettled(&conn), (0, 0));
     }
 }
 
@@ -523,8 +423,6 @@ fn new_link_handle(conn: &Connection, sender: bool, remote: u32) -> u32 {
 
 #[ntex::test]
 async fn link_detach_timeout() {
-    use ntex::time::{Millis, sleep, timeout};
-
     for sender in [true, false] {
         for cfg in [Seconds(1), Seconds::ZERO] {
             let ctx = format!("sender: {sender} timeout: {cfg:?}");
@@ -573,8 +471,6 @@ async fn link_detach_timeout() {
 
 #[ntex::test]
 async fn link_detach_confirmation_fails_deliveries() {
-    use ntex::time::{Millis, timeout};
-
     for sender in [true, false] {
         for error in [None, Some(LinkError::DetachForced)] {
             let ctx = format!("sender: {sender} error: {error:?}");
@@ -615,8 +511,6 @@ async fn link_detach_confirmation_fails_deliveries() {
 
 #[ntex::test]
 async fn link_detach_confirmed_before_timeout() {
-    use ntex::time::{Millis, sleep, timeout};
-
     let (_io, conn, _client) =
         connection_with(AmqpServiceConfig::new().set_link_attach_timeout(Seconds(1)));
     handle_frame(&conn, begin()).unwrap();
@@ -637,20 +531,11 @@ async fn link_detach_confirmed_before_timeout() {
 
 #[ntex::test]
 async fn duplicate_delivery_id_detaches_link() {
-    use ntex::time::{Millis, sleep};
-
     // second transfer is single frame or first frame of multi-frame delivery
     for more in [false, true] {
         let (_io, conn, client) = connection();
         handle_frame(&conn, begin()).unwrap();
-        let s = session(&conn);
-        let fut = ntex::rt::spawn({
-            let s = s.clone();
-            async move { s.build_receiver_link("r", "r").attach().await }
-        });
-        sleep(Millis(10)).await;
-        let _ = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0));
-        let link = fut.await.unwrap().unwrap();
+        let link = local_receiver(&conn, 0).await;
         link.set_link_credit(10);
         handle_frame(&conn, transfer(5, false, None, 1)).unwrap();
         sleep(Millis(50)).await;
@@ -658,26 +543,17 @@ async fn duplicate_delivery_id_detaches_link() {
 
         handle_frame(&conn, transfer(5, more, None, 2)).unwrap();
         sleep(Millis(50)).await;
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut detached = false;
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            if let Frame::Detach(detach) = frame.into_parts().1 {
-                let err = detach.error().unwrap();
-                detached = *err.condition() == LinkError::DetachForced.into()
-                    && err.description()
-                        == Some(&ntex_bytes::ByteString::from_static(
-                            "duplicate delivery_id",
-                        ));
-            }
-        }
-        assert!(detached);
+        let [(0, true, Some(err))] = &detaches(&client)[..] else {
+            panic!()
+        };
+        assert_eq!(err.condition(), &LinkError::DetachForced.into());
+        assert_eq!(err.description().unwrap(), "duplicate delivery_id");
 
         // original delivery is settled, duplicate is dropped
         let mut d = link.get_delivery().unwrap().0;
         assert!(link.get_delivery().is_none());
-        assert_eq!(s.inner.get_ref().unsettled_rcv_deliveries.len(), 1);
-        d.settle(DeliveryState::Accepted(Accepted {}));
+        assert_eq!(unsettled(&conn), (0, 1));
+        d.settle(ACCEPTED);
         drop(d);
         sleep(Millis(50)).await;
         assert_eq!(
@@ -689,20 +565,11 @@ async fn duplicate_delivery_id_detaches_link() {
 
 #[ntex::test]
 async fn continuation_transfer_settles_delivery() {
-    use ntex::time::{Millis, sleep};
-
     // index of the continuation frame with `settled` flag
     for settled_frame in [1, 2] {
         let (_io, conn, client) = connection();
         handle_frame(&conn, begin()).unwrap();
-        let s = session(&conn);
-        let fut = ntex::rt::spawn({
-            let s = s.clone();
-            async move { s.build_receiver_link("r", "r").attach().await }
-        });
-        sleep(Millis(10)).await;
-        let _ = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0));
-        let link = fut.await.unwrap().unwrap();
+        let link = local_receiver(&conn, 0).await;
         link.set_link_credit(10);
         for idx in 0..3 {
             let mut frame = transfer(0, idx < 2, None, idx);
@@ -719,9 +586,9 @@ async fn continuation_transfer_settles_delivery() {
         frame_names(&client);
 
         assert!(d.is_remote_settled());
-        d.settle(DeliveryState::Accepted(Accepted {}));
+        d.settle(ACCEPTED);
         drop(d);
-        assert!(s.inner.get_ref().unsettled_rcv_deliveries.is_empty());
+        assert_eq!(unsettled(&conn), (0, 0));
         sleep(Millis(50)).await;
         assert!(dispositions(&client).is_empty());
     }
@@ -729,9 +596,6 @@ async fn continuation_transfer_settles_delivery() {
 
 #[ntex::test]
 async fn sender_delivery_settled_mid_transfer() {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     // (receiver settles delivery, last frame)
     let cases = [
         (true, "Transfer Some(0) more:false aborted:true"),
@@ -743,7 +607,7 @@ async fn sender_delivery_settled_mid_transfer() {
         transfer_frames(&client);
 
         let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
-        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        assert!(pending(t1.as_mut()).await);
         sleep(Millis(50)).await;
         assert_eq!(
             transfer_frames(&client),
@@ -754,7 +618,7 @@ async fn sender_delivery_settled_mid_transfer() {
         );
 
         // remaining frames are aborted if receiver settled delivery
-        remote_disposition(&conn, Role::Receiver, 0, settled);
+        disposition(&conn, Role::Receiver, 0, settled, Some(ACCEPTED));
         session_window(&conn, 2, 5);
         let Poll::Ready(Ok(d)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
             panic!("settled: {settled}")

@@ -36,15 +36,8 @@ async fn receiver_delivery_count(multi_first: bool) {
         link.set_link_credit(1);
     }
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut counts = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Flow(flow) = frame.into_parts().1 {
-            counts.push(flow.delivery_count());
-        }
-    }
+    sleep(Millis(50)).await;
+    let counts: Vec<_> = flows(&client).iter().map(Flow::delivery_count).collect();
     assert_eq!(counts, [Some(u32::MAX), Some(0), Some(1)]);
 }
 
@@ -79,13 +72,7 @@ async fn receiver_aborted_transfer() {
     // aborted deliveries are discarded and implicitly settled,
     // credit is returned to the sender
     assert!(!link.has_deliveries());
-    assert!(
-        session(&conn)
-            .inner
-            .get_ref()
-            .unsettled_rcv_deliveries
-            .is_empty()
-    );
+    assert_eq!(unsettled(&conn), (0, 0));
     assert_eq!(link.credit(), 1);
 
     // next delivery is not merged into aborted one
@@ -103,21 +90,17 @@ async fn receiver_aborted_transfer() {
 
     // delivery-count includes aborted deliveries
     link.set_link_credit(1);
-    ntex::time::sleep(ntex::time::Millis(10)).await;
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut frames = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        match frame.into_parts().1 {
-            Frame::Flow(flow) => frames.push(format!(
-                "Flow {:?} {:?}",
-                flow.delivery_count(),
-                flow.link_credit()
-            )),
-            Frame::Disposition(disp) => frames.push(format!("Disposition {}", disp.first())),
-            frame => frames.push(frame.name().to_string()),
-        }
-    }
+    sleep(Millis(10)).await;
+    let frames: Vec<_> = read_frames(&client)
+        .into_iter()
+        .map(|frame| match frame {
+            Frame::Flow(flow) => {
+                format!("Flow {:?} {:?}", flow.delivery_count(), flow.link_credit())
+            }
+            Frame::Disposition(disp) => format!("Disposition {}", disp.first()),
+            frame => frame.name().to_string(),
+        })
+        .collect();
     assert_eq!(
         frames,
         [
@@ -136,7 +119,7 @@ async fn receiver_aborted_transfer() {
     // wrong delivery-id in aborted transfer
     handle_frame(&conn, transfer(4, true, None, 4)).unwrap();
     aborted(Some(5), false);
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_eq!(frame_names(&client), ["Detach 0"]);
 }
 
@@ -146,7 +129,7 @@ async fn local_receiver_delivery_count() {
     handle_frame(&conn, begin()).unwrap();
     let s = session(&conn);
     let fut = ntex::rt::spawn(async move { s.build_receiver_link("r", "r").attach().await });
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
 
     // remote sender initializes delivery-count
     let Frame::Attach(mut attach) = named_attach(Role::Sender, "r", "r", 0) else {
@@ -161,16 +144,11 @@ async fn local_receiver_delivery_count() {
     handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
     link.set_link_credit(1);
 
-    ntex::time::sleep(ntex::time::Millis(10)).await;
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut flows = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Flow(flow) = frame.into_parts().1 {
-            flows.push((flow.delivery_count(), flow.link_credit()));
-        }
-    }
-    assert_eq!(flows, [(Some(100), Some(10)), (Some(101), Some(10))]);
+    sleep(Millis(10)).await;
+    assert_eq!(
+        rcv_flows(&client),
+        [(Some(100), Some(10)), (Some(101), Some(10))]
+    );
 }
 
 #[ntex::test]
@@ -182,16 +160,7 @@ async fn receiver_remote_detach_error() {
     }));
     let (_io, conn, _client) = connection();
     handle_frame(&conn, begin()).unwrap();
-    let s = session(&conn);
-    let fut = ntex::rt::spawn({
-        let s = s.clone();
-        async move { s.build_receiver_link("r", "r").attach().await }
-    });
-    ntex::time::sleep(ntex::time::Millis(10)).await;
-    let Ok(Action::None) = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 1)) else {
-        panic!()
-    };
-    let link = fut.await.unwrap().unwrap();
+    let link = local_receiver(&conn, 1).await;
 
     let detach = Detach(Box::new(DetachInner {
         handle: 1,
@@ -202,7 +171,7 @@ async fn receiver_remote_detach_error() {
         panic!()
     };
     assert_eq!(link.error(), Some(&err));
-    let mut cx = Context::from_waker(std::task::Waker::noop());
+    let mut cx = Context::from_waker(Waker::noop());
     let Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(e))))) = link.poll_recv(&mut cx)
     else {
         panic!()
@@ -213,21 +182,10 @@ async fn receiver_remote_detach_error() {
 
 #[ntex::test]
 async fn receiver_link_detach_wakes_recv() {
-    use ntex::time::{Millis, sleep, timeout};
-
     for queued in [false, true] {
         let (_io, conn, client) = connection();
         handle_frame(&conn, begin()).unwrap();
-        let s = session(&conn);
-        let fut = ntex::rt::spawn({
-            let s = s.clone();
-            async move { s.build_receiver_link("r", "r").attach().await }
-        });
-        sleep(Millis(10)).await;
-        let Ok(Action::None) = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0)) else {
-            panic!()
-        };
-        let link = fut.await.unwrap().unwrap();
+        let link = local_receiver(&conn, 0).await;
         link.set_link_credit(10);
         if queued {
             handle_frame(&conn, transfer(0, false, None, 1)).unwrap();
@@ -245,7 +203,7 @@ async fn receiver_link_detach_wakes_recv() {
         sleep(Millis(50)).await;
         frame_names(&client);
 
-        let _d = s.detach_receiver_link(link.inner.get_ref().id(), None);
+        let _d = session(&conn).detach_receiver_link(link.inner.get_ref().id(), None);
         let items = timeout(Millis(500), rx).await.unwrap().unwrap();
         if queued {
             assert!(matches!(items[..], [Ok(Some(0))]));
@@ -290,7 +248,7 @@ async fn receiver_partial_delivery_and_detach() {
     link.set_link_credit(10);
     assert_eq!(format!("{link:?}"), format!("ReceiverLink({LONG:?})"));
 
-    let mut cx = Context::from_waker(std::task::Waker::noop());
+    let mut cx = Context::from_waker(Waker::noop());
 
     // partial delivery is not visible
     handle_frame(&conn, transfer(0, true, None, 0)).unwrap();
@@ -358,17 +316,6 @@ async fn receiver_applies_sender_flow() {
         handle_frame(&conn, flow.into()).unwrap();
         link.credit()
     };
-    let flows = || {
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut flows = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            if let Frame::Flow(flow) = frame.into_parts().1 {
-                flows.push((flow.delivery_count(), flow.link_credit()));
-            }
-        }
-        flows
-    };
 
     handle_frame(&conn, transfer(0, false, None, 0)).unwrap();
     assert_eq!(link.credit(), 9);
@@ -390,9 +337,9 @@ async fn receiver_applies_sender_flow() {
     // echo reply carries applied state
     assert_eq!(sender_flow(15, true), 2);
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(
-        flows(),
+        rcv_flows(&client),
         [
             (Some(0), Some(10)),
             (Some(12), Some(5)),
@@ -401,29 +348,20 @@ async fn receiver_applies_sender_flow() {
     );
 }
 
+/// (delivery-count, link-credit) of flow frames
 fn rcv_flows(client: &IoTest) -> Vec<(Option<u32>, Option<u32>)> {
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut flows = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Flow(flow) = frame.into_parts().1 {
-            flows.push((flow.delivery_count(), flow.link_credit()));
-        }
-    }
-    flows
+    flows(client)
+        .iter()
+        .map(|flow| (flow.delivery_count(), flow.link_credit()))
+        .collect()
 }
 
 fn assert_limit_exceeded(link: &crate::ReceiverLink, client: &IoTest) {
     assert!(link.is_closed());
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut detaches = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Detach(det) = frame.into_parts().1 {
-            detaches.push(det.error().map(|e| e.condition().clone()));
-        }
-    }
-    assert_eq!(detaches, [Some(LinkError::TransferLimitExceeded.into())]);
+    let [(_, _, Some(err))] = &detaches(client)[..] else {
+        panic!()
+    };
+    assert_eq!(err.condition(), &LinkError::TransferLimitExceeded.into());
 }
 
 #[ntex::test]
@@ -462,7 +400,7 @@ async fn receiver_reset_link_credit() {
     ));
     assert_eq!(accepted(transfer(9, false, None, 0)), 0);
     assert!(!link.is_closed());
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_eq!(
         rcv_flows(&client),
         [(Some(0), Some(10)), (Some(1), Some(2)), (Some(2), Some(0))]
@@ -473,7 +411,7 @@ async fn receiver_reset_link_credit() {
         handle_frame(&conn, transfer(10, false, None, 0)),
         Ok(Action::None)
     ));
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_limit_exceeded(&link, &client);
 }
 
@@ -497,14 +435,14 @@ async fn receiver_reset_link_credit_opening() {
             panic!()
         };
     }
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_eq!(rcv_flows(&client), [(Some(0), Some(2)), (Some(0), Some(3))]);
 
     assert!(matches!(
         handle_frame(&conn, transfer(3, false, None, 0)),
         Ok(Action::None)
     ));
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_limit_exceeded(&link, &client);
 }
 
@@ -539,7 +477,7 @@ async fn receiver_reset_link_credit_expires() {
         handle_frame(&conn, transfer(0, false, None, 0)),
         Ok(Action::None)
     ));
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     assert_limit_exceeded(&link, &client);
 }
 
@@ -572,7 +510,7 @@ async fn receiver_transfer_error_detaches_link() {
 
         assert!(matches!(handle_frame(&conn, frame), Ok(Action::None)));
         assert!(link.is_closed());
-        let mut cx = Context::from_waker(std::task::Waker::noop());
+        let mut cx = Context::from_waker(Waker::noop());
         assert!(matches!(link.poll_recv(&mut cx), Poll::Ready(None)));
         // link is closing, transfers are ignored
         assert!(matches!(
@@ -580,15 +518,8 @@ async fn receiver_transfer_error_detaches_link() {
             Ok(Action::None)
         ));
 
-        ntex::time::sleep(ntex::time::Millis(10)).await;
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut detaches = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            if let Frame::Detach(det) = frame.into_parts().1 {
-                detaches.push((det.handle(), det.closed(), det.error().cloned()));
-            }
-        }
+        sleep(Millis(10)).await;
+        let detaches = detaches(&client);
         let [(0, true, Some(err))] = &detaches[..] else {
             panic!("{detaches:?}")
         };
