@@ -726,3 +726,54 @@ async fn continuation_transfer_settles_delivery() {
         assert!(dispositions(&client).is_empty());
     }
 }
+
+#[ntex::test]
+async fn sender_delivery_settled_mid_transfer() {
+    use ntex::time::{Millis, sleep};
+    use std::{future::poll_fn, task::Poll};
+
+    // (receiver settles delivery, last frame)
+    let cases = [
+        (true, "Transfer Some(0) more:false aborted:true"),
+        (false, "Transfer None more:false aborted:false"),
+    ];
+    for (settled, last) in cases {
+        let (_io, conn, client, snd) = small_frames_sender();
+        sleep(Millis(50)).await;
+        transfer_frames(&client);
+
+        let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
+        assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            [
+                "Transfer Some(0) more:true aborted:false",
+                "Transfer None more:true aborted:false"
+            ]
+        );
+
+        // remaining frames are aborted if receiver settled delivery
+        remote_disposition(&conn, Role::Receiver, 0, settled);
+        session_window(&conn, 2, 5);
+        let Poll::Ready(Ok(d)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
+            panic!("settled: {settled}")
+        };
+        sleep(Millis(50)).await;
+        assert_eq!(transfer_frames(&client), [last], "settled: {settled}");
+        assert_eq!(d.is_remote_settled(), settled);
+        assert!(matches!(
+            d.wait().await,
+            Ok(Some(DeliveryState::Accepted(_)))
+        ));
+
+        // link is usable for next delivery
+        let d = snd.transfer(Bytes::from_static(b"2")).send().await.unwrap();
+        assert_eq!(d.id(), 1);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            transfer_frames(&client),
+            ["Transfer Some(1) more:false aborted:false"]
+        );
+    }
+}

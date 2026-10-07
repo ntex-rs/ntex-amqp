@@ -9,7 +9,7 @@ use ntex_bytes::{BufMut, ByteString, Bytes};
 use ntex_util::channel::{condition, pool};
 use ntex_util::time::{Seconds, timeout_checked};
 
-use crate::delivery::TransferBuilder;
+use crate::delivery::{DeliveryInner, TransferBuilder};
 use crate::session::{Session, SessionInner, WindowClaim, WindowWaiter};
 use crate::{Handle, cell::Cell, error::AmqpProtocolError};
 
@@ -539,6 +539,17 @@ impl SenderLinkInner {
                 if let Some(rx) = session.window_waiter(handle, claim.is_some())? {
                     drop(claim.take());
                     claim = Some(WindowWaiter::new(rx, inner.session.inner.clone()).await?);
+                } else if session
+                    .unsettled_snd_deliveries
+                    .get(&id)
+                    .is_some_and(DeliveryInner::is_settled)
+                {
+                    // receiver settled delivery, remaining frames are not needed
+                    session.post_abort(handle, id);
+                    if let Some(claim) = claim.take() {
+                        claim.consume();
+                    }
+                    break;
                 } else {
                     let last = session.send_transfer_chunk(handle, &mut chunks);
                     if let Some(claim) = claim.take() {

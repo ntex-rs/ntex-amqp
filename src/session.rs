@@ -2176,7 +2176,7 @@ impl SessionInner {
         }
     }
 
-    fn post_abort(&mut self, link_handle: Handle, delivery_id: DeliveryNumber) {
+    pub(crate) fn post_abort(&mut self, link_handle: Handle, delivery_id: DeliveryNumber) {
         log::trace!(
             "{}: Abort delivery {delivery_id:?} over handle {link_handle}",
             self.tag()

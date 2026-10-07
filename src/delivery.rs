@@ -322,6 +322,10 @@ impl DeliveryInner {
         self.handle
     }
 
+    pub(crate) fn is_settled(&self) -> bool {
+        self.settled
+    }
+
     pub(crate) fn set_error(&mut self, error: AmqpProtocolError) {
         self.error = Some(error);
         self.notify();
