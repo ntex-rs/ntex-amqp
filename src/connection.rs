@@ -161,27 +161,28 @@ impl ConnectionRef {
     }
 
     /// Gracefully close connection
-    pub async fn close(&self) -> Result<(), AmqpProtocolError> {
-        let inner = self.0.get_mut();
-        inner.post_frame(AmqpFrame::new(0, Frame::Close(Close { error: None })));
-        inner.io.close();
-        Ok(())
+    ///
+    /// Connection is closed immediately, returned future is ready.
+    pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
+        self.post_close(None);
+        async { Ok(()) }
     }
 
     /// Close connection with error
-    pub async fn close_with_error<E>(&self, err: E) -> Result<(), AmqpProtocolError>
+    ///
+    /// Connection is closed immediately, returned future is ready.
+    pub fn close_with_error<E>(&self, err: E) -> impl Future<Output = Result<(), AmqpProtocolError>>
     where
         Error: From<E>,
     {
+        self.post_close(Some(err.into()));
+        async { Ok(()) }
+    }
+
+    fn post_close(&self, error: Option<Error>) {
         let inner = self.0.get_mut();
-        inner.post_frame(AmqpFrame::new(
-            0,
-            Frame::Close(Close {
-                error: Some(err.into()),
-            }),
-        ));
+        inner.post_frame(AmqpFrame::new(0, Frame::Close(Close { error })));
         inner.io.close();
-        Ok(())
     }
 
     /// Opens the session

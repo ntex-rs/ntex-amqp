@@ -2,6 +2,9 @@
 
 ## [6.2.0] - 2026-10-07
 
+* Fix `ConnectionRef::close()` did nothing until returned future was polled, dispatcher
+  did not close connection on service readiness or control service failure
+
 * Fix `SenderLink::close()` did nothing until returned future was polled, control service error
   on `Flow` did not detach sender link
 
