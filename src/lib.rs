@@ -234,6 +234,12 @@ impl AmqpServiceConfig {
     /// Link attach fails with `AmqpProtocolError::LinkAttachTimeout` if remote
     /// peer does not respond in time. Link is detached if remote attach is
     /// received later, link name stays in use until then.
+    ///
+    /// The same timeout applies to local link detach. If remote peer does not
+    /// confirm detach in time, detach and unsettled link deliveries fail with
+    /// `AmqpProtocolError::LinkDetached(None)`. Link handle stays in use until
+    /// remote detach is received.
+    ///
     /// Use `Seconds::ZERO` to disable timeout.
     ///
     /// By default link attach timeout is 30 seconds.
