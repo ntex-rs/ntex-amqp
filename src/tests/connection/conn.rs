@@ -104,21 +104,26 @@ async fn remote_close_responds_and_reports() {
 
 #[ntex::test]
 async fn close_confirmation() {
-    let (_io, conn, _client) = connection();
+    let (_io, conn, client) = connection();
     conn.close().await.unwrap();
+    assert!(!conn.is_opened());
+    sleep(Millis(25)).await;
+    let [Frame::Close(close)] = &read_frames(&client)[..] else {
+        panic!()
+    };
+    assert!(close.error.is_none());
 
-    // BUG: `ConnectionRef::close` never moves the connection into
-    // `ConnectionState::Closing`, so the peer's `Close` reply is handled as a
-    // remote close (reported as `Closed` instead of `Disconnected`) and another
-    // `Close` frame is echoed back.
+    // peer's `Close` confirms local close, nothing is sent back
     assert!(matches!(
         handle_frame(&conn, Close { error: None }.into()),
-        Ok(Action::RemoteClose(AmqpProtocolError::Closed(None)))
+        Ok(Action::None)
     ));
     assert!(matches!(
         conn.get_error(),
-        Some(AmqpProtocolError::Closed(None))
+        Some(AmqpProtocolError::Disconnected)
     ));
+    sleep(Millis(25)).await;
+    assert!(read_frames(&client).is_empty());
 }
 
 #[ntex::test]

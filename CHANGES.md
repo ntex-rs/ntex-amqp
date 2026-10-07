@@ -2,6 +2,8 @@
 
 ## [6.2.0] - 2026-10-07
 
+* Fix peer's `Close` reply to local `ConnectionRef::close()` was handled as remote close
+
 * Fix `ConnectionRef::close()` did nothing until returned future was polled, dispatcher
   did not close connection on service readiness or control service failure
 

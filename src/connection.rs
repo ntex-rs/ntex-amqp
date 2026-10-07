@@ -181,6 +181,9 @@ impl ConnectionRef {
 
     fn post_close(&self, error: Option<Error>) {
         let inner = self.0.get_mut();
+        if inner.state == ConnectionState::Normal {
+            inner.state = ConnectionState::Closing;
+        }
         inner.post_frame(AmqpFrame::new(0, Frame::Close(Close { error })));
         inner.io.close();
     }
