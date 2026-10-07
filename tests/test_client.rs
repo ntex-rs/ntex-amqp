@@ -71,23 +71,32 @@ async fn connect(srv: &TestServer) -> Result<client::Client, ntex_error::Error<C
 }
 
 /// Server side of the plain amqp protocol negotiation, returns client's open frame
-async fn negotiate_plain(io: &Io, server_open: protocol::Open) -> protocol::Open {
+async fn negotiate_plain(io: &Io, server_open: protocol::Open) {
+    negotiate_plain_with(io, server_open, |_| ()).await;
+}
+
+/// Server side of the plain amqp protocol negotiation, `f` inspects client's
+/// open frame before the reply, so it completes before the client is connected
+async fn negotiate_plain_with(
+    io: &Io,
+    server_open: protocol::Open,
+    f: impl FnOnce(&protocol::Open),
+) {
     let proto = io.recv(&ProtocolIdCodec).await.unwrap().unwrap();
     assert_eq!(proto, ProtocolId::Amqp);
     io.send(ProtocolId::Amqp, &ProtocolIdCodec).await.unwrap();
 
     let frame = io.recv(&amqp_codec()).await.unwrap().unwrap();
-    let open = match frame.performative() {
-        protocol::Frame::Open(open) => open.clone(),
+    match frame.performative() {
+        protocol::Frame::Open(open) => f(open),
         frame => panic!("unexpected frame: {frame:?}"),
-    };
+    }
     io.send(
         AmqpFrame::new(0, protocol::Frame::Open(server_open)),
         &amqp_codec(),
     )
     .await
     .unwrap();
-    open
 }
 
 fn server_open() -> protocol::Open {
@@ -188,12 +197,14 @@ async fn test_client_open_frame_from_config() {
     let srv = raw_server(move |io: Io| {
         let log = log2.clone();
         async move {
-            let open = negotiate_plain(&io, server_open()).await;
-            push(&log, open.container_id().to_string());
-            push(&log, format!("{:?}", open.hostname()));
-            push(&log, open.max_frame_size().to_string());
-            push(&log, open.channel_max().to_string());
-            push(&log, format!("{:?}", open.idle_time_out()));
+            negotiate_plain_with(&io, server_open(), |open| {
+                push(&log, open.container_id().to_string());
+                push(&log, format!("{:?}", open.hostname()));
+                push(&log, open.max_frame_size().to_string());
+                push(&log, open.channel_max().to_string());
+                push(&log, format!("{:?}", open.idle_time_out()));
+            })
+            .await;
             let _ = io.recv(&amqp_codec()).await;
         }
     });
@@ -228,9 +239,11 @@ async fn test_client_connect_hostname_override() {
     let srv = raw_server(move |io: Io| {
         let log = log2.clone();
         async move {
-            let open = negotiate_plain(&io, server_open()).await;
-            push(&log, format!("{:?}", open.hostname()));
-            push(&log, open.container_id().to_string());
+            negotiate_plain_with(&io, server_open(), |open| {
+                push(&log, format!("{:?}", open.hostname()));
+                push(&log, open.container_id().to_string());
+            })
+            .await;
             let _ = io.recv(&amqp_codec()).await;
         }
     });
@@ -448,8 +461,10 @@ async fn test_client_sasl_connect() {
         let log = log2.clone();
         async move {
             negotiate_sasl(&io, protocol::SaslCode::Ok, &log).await;
-            let open = negotiate_plain(&io, server_open()).await;
-            push(&log, open.container_id().to_string());
+            negotiate_plain_with(&io, server_open(), |open| {
+                push(&log, open.container_id().to_string());
+            })
+            .await;
             let _ = io.recv(&amqp_codec()).await;
         }
     });
@@ -616,8 +631,10 @@ async fn test_client_negotiate_over_existing_io() {
     let srv = raw_server(move |io: Io| {
         let log = log2.clone();
         async move {
-            let open = negotiate_plain(&io, server_open()).await;
-            push(&log, format!("{:?}", open.hostname()));
+            negotiate_plain_with(&io, server_open(), |open| {
+                push(&log, format!("{:?}", open.hostname()));
+            })
+            .await;
             let _ = io.recv(&amqp_codec()).await;
         }
     });

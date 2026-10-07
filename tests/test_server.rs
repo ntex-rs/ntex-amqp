@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, atomic::AtomicUsize, atomic::Ordering};
+use std::sync::{Arc, Mutex, atomic::AtomicBool, atomic::AtomicUsize, atomic::Ordering};
 use std::{cell::Cell, rc::Rc};
 
 use ntex::server::{TestServerBuilder, test_server};
@@ -684,10 +684,16 @@ async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
         let created = Arc::new(AtomicUsize::new(0));
         let released = Arc::new(AtomicUsize::new(0));
         let ended = Arc::new(AtomicUsize::new(0));
+        // server is blocked in control service or link service creation until gate is open
+        let blocked = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(AtomicBool::new(false));
         let (created2, released2, ended2) = (created.clone(), released.clone(), ended.clone());
+        let (blocked2, gate2) = (blocked.clone(), gate.clone());
 
         let srv = test_server(async move || {
             let (created, released, ended) = (created2.clone(), released2.clone(), ended2.clone());
+            let (blocked, gate) = (blocked2.clone(), gate2.clone());
+            let (blocked_ctl, gate_ctl) = (blocked.clone(), gate.clone());
             server::Server::builder(async move |conn: server::Handshake| match conn {
                 server::Handshake::Amqp(conn) => {
                     let conn = conn.open().await.map_err(|_| ())?;
@@ -698,7 +704,8 @@ async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
             .control(async move |msg: ControlFrame| {
                 match msg.kind() {
                     ControlFrameKind::AttachReceiver(..) if slow_control => {
-                        sleep(Millis(50)).await;
+                        blocked_ctl.fetch_add(1, Ordering::SeqCst);
+                        wait_gate(&gate_ctl).await;
                     }
                     ControlFrameKind::RemoteSessionEnded(links) => {
                         ended.fetch_add(links.len(), Ordering::SeqCst);
@@ -710,11 +717,12 @@ async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
             .build(
                 server::Router::<()>::builder()
                     .service("test", move |_: &types::Link<()>| {
-                        let created = created.clone();
-                        let released = released.clone();
+                        let (created, released) = (created.clone(), released.clone());
+                        let (blocked, gate) = (blocked.clone(), gate.clone());
                         async move {
                             created.fetch_add(1, Ordering::SeqCst);
-                            sleep(Millis(50)).await;
+                            blocked.fetch_add(1, Ordering::SeqCst);
+                            wait_gate(&gate).await;
                             let guard = CountGuard(released);
                             Ok::<_, LinkError>(boxed::service(fn_service(move |_req| {
                                 let _ = &guard;
@@ -729,24 +737,42 @@ async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
         let io = raw_connect(srv.addr()).await;
         raw_begin_session(&io).await;
         raw_send(&io, 0, raw_attach(0, protocol::Role::Sender)).await;
-        sleep(Millis(10)).await;
+        wait_for(|| blocked.load(Ordering::SeqCst) == 1).await;
         raw_send(&io, 0, protocol::End { error: None }.into()).await;
-        assert!(matches!(raw_recv(&io).await, protocol::Frame::End(_)));
+        let frame = raw_recv(&io).await;
+        assert!(matches!(frame, protocol::Frame::End(_)), "{frame:?}");
+        gate.store(true, Ordering::SeqCst);
 
         // no frames after session end
         let res = timeout(Millis(150), io.recv(&AmqpCodec::<AmqpFrame>::new())).await;
         assert!(res.is_err(), "slow_control: {slow_control}");
-        assert_eq!(ended.load(Ordering::SeqCst), 1);
+        wait_for(|| ended.load(Ordering::SeqCst) == 1).await;
         if slow_control {
             // link service is not created for closed link
             assert_eq!(created.load(Ordering::SeqCst), 0);
         } else {
+            wait_for(|| released.load(Ordering::SeqCst) == 1).await;
             assert_eq!(created.load(Ordering::SeqCst), 1);
-            assert_eq!(released.load(Ordering::SeqCst), 1);
         }
     }
 
     Ok(())
+}
+
+async fn wait_gate(gate: &AtomicBool) {
+    while !gate.load(Ordering::SeqCst) {
+        sleep(Millis(5)).await;
+    }
+}
+
+async fn wait_for(f: impl Fn() -> bool) {
+    for _ in 0..500 {
+        if f() {
+            return;
+        }
+        sleep(Millis(10)).await;
+    }
+    panic!("condition is not met");
 }
 
 #[ntex::test]
