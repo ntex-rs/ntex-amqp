@@ -401,6 +401,148 @@ async fn receiver_applies_sender_flow() {
     );
 }
 
+fn rcv_flows(client: &IoTest) -> Vec<(Option<u32>, Option<u32>)> {
+    let codec = AmqpCodec::<AmqpFrame>::new();
+    let mut buf = BytesMut::from(&client.read_any()[..]);
+    let mut flows = Vec::new();
+    while let Some(frame) = codec.decode(&mut buf).unwrap() {
+        if let Frame::Flow(flow) = frame.into_parts().1 {
+            flows.push((flow.delivery_count(), flow.link_credit()));
+        }
+    }
+    flows
+}
+
+fn assert_limit_exceeded(link: &crate::ReceiverLink, client: &IoTest) {
+    assert!(link.is_closed());
+    let codec = AmqpCodec::<AmqpFrame>::new();
+    let mut buf = BytesMut::from(&client.read_any()[..]);
+    let mut detaches = Vec::new();
+    while let Some(frame) = codec.decode(&mut buf).unwrap() {
+        if let Frame::Detach(det) = frame.into_parts().1 {
+            detaches.push(det.error().map(|e| e.condition().clone()));
+        }
+    }
+    assert_eq!(detaches, [Some(LinkError::TransferLimitExceeded.into())]);
+}
+
+#[ntex::test]
+async fn receiver_reset_link_credit() {
+    let (_io, conn, client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+        panic!()
+    };
+    link.confirm_receiver_link(response);
+    link.set_link_credit(10);
+    let accepted = |frame: Frame| {
+        let Ok(Action::Transfer(_)) = handle_frame(&conn, frame) else {
+            panic!()
+        };
+        link.credit()
+    };
+    assert_eq!(accepted(transfer(0, false, None, 0)), 9);
+
+    // credit is reduced
+    link.reset_link_credit(2);
+    assert_eq!(link.credit(), 2);
+    assert_eq!(accepted(transfer(1, false, None, 0)), 1);
+    // stop sender, larger delivery-limit is preserved
+    link.reset_link_credit(0);
+    assert_eq!(link.credit(), 0);
+
+    // transfers sent before sender got reduced credit are accepted
+    for id in 2..9 {
+        assert_eq!(accepted(transfer(id, false, None, 0)), 0);
+    }
+    // multi-frame delivery up to previous delivery-limit
+    assert!(matches!(
+        handle_frame(&conn, transfer(9, true, None, 0)),
+        Ok(Action::None)
+    ));
+    assert_eq!(accepted(transfer(9, false, None, 0)), 0);
+    assert!(!link.is_closed());
+    ntex::time::sleep(ntex::time::Millis(10)).await;
+    assert_eq!(
+        rcv_flows(&client),
+        [(Some(0), Some(10)), (Some(1), Some(2)), (Some(2), Some(0))]
+    );
+
+    // transfer beyond previous delivery-limit
+    assert!(matches!(
+        handle_frame(&conn, transfer(10, false, None, 0)),
+        Ok(Action::None)
+    ));
+    ntex::time::sleep(ntex::time::Millis(10)).await;
+    assert_limit_exceeded(&link, &client);
+}
+
+#[ntex::test]
+async fn receiver_reset_link_credit_opening() {
+    let (_io, conn, client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+        panic!()
+    };
+    // credit is not advertised before link confirmation
+    link.set_link_credit(10);
+    link.reset_link_credit(2);
+    link.confirm_receiver_link(response);
+    // credit is raised
+    link.reset_link_credit(3);
+    assert_eq!(link.credit(), 3);
+
+    for id in 0..3 {
+        let Ok(Action::Transfer(_)) = handle_frame(&conn, transfer(id, false, None, 0)) else {
+            panic!()
+        };
+    }
+    ntex::time::sleep(ntex::time::Millis(10)).await;
+    assert_eq!(rcv_flows(&client), [(Some(0), Some(2)), (Some(0), Some(3))]);
+
+    assert!(matches!(
+        handle_frame(&conn, transfer(3, false, None, 0)),
+        Ok(Action::None)
+    ));
+    ntex::time::sleep(ntex::time::Millis(10)).await;
+    assert_limit_exceeded(&link, &client);
+}
+
+#[ntex::test]
+async fn receiver_reset_link_credit_expires() {
+    let (_io, conn, client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+        panic!()
+    };
+    link.confirm_receiver_link(response);
+    link.set_link_credit(10);
+    link.reset_link_credit(0);
+    // sender drains credit
+    let sender_flow = |delivery_count: u32| {
+        let Frame::Flow(mut flow) = peer_flow(Some(100)) else {
+            panic!()
+        };
+        flow.0.delivery_count = Some(delivery_count);
+        handle_frame(&conn, flow.into()).unwrap();
+        assert_eq!(link.credit(), 0);
+    };
+    sender_flow(10);
+
+    // delivery-count wraps around previous delivery-limit
+    let half = 1 << 31;
+    link.set_link_credit(half - 1);
+    sender_flow(half + 9);
+    link.set_link_credit(half - 1);
+    sender_flow(8);
+    assert!(matches!(
+        handle_frame(&conn, transfer(0, false, None, 0)),
+        Ok(Action::None)
+    ));
+    ntex::time::sleep(ntex::time::Millis(10)).await;
+    assert_limit_exceeded(&link, &client);
+}
+
 #[ntex::test]
 async fn receiver_transfer_error_detaches_link() {
     let no_id = |more: bool| {

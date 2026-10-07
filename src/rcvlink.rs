@@ -33,6 +33,9 @@ pub(crate) struct ReceiverLinkInner {
     queue: VecDeque<(Delivery, Transfer)>,
     credit: u32,
     delivery_count: SequenceNo,
+    // delivery-limit advertised before credit was reduced, transfers
+    // sent by peer before it received reduced credit are accepted (#2.6.7)
+    in_flight_limit: Option<SequenceNo>,
     error: Option<AmqpProtocolError>,
     partial_body: Option<BytePages>,
     max_message_size: u64,
@@ -132,10 +135,21 @@ impl ReceiverLink {
 
     /// Add credit to the link.
     ///
+    /// Credit is added to available link credit, use
+    /// [`reset_link_credit`](Self::reset_link_credit) to reduce it.
+    ///
     /// Each queued, not yet received delivery may keep its read buffer
     /// alive, credit bounds the memory retained by the link.
     pub fn set_link_credit(&self, credit: u32) {
         self.inner.get_mut().set_link_credit(credit);
+    }
+
+    /// Set available link credit, `0` stops the remote sender.
+    ///
+    /// Transfers sent by the remote sender before it received reduced
+    /// credit are still accepted.
+    pub fn reset_link_credit(&self, credit: u32) {
+        self.inner.get_mut().reset_link_credit(credit);
     }
 
     /// Set max message size.
@@ -253,6 +267,7 @@ impl ReceiverLinkInner {
             opening,
             queue: VecDeque::with_capacity(4),
             credit: 0,
+            in_flight_limit: None,
             error: None,
             partial_body: None,
             delivery_count: frame.initial_delivery_count().unwrap_or(0),
@@ -333,19 +348,31 @@ impl ReceiverLinkInner {
             let limit = self.delivery_count.wrapping_add(self.credit);
             let credit = limit.wrapping_sub(snd_delivery_count);
             if credit > i32::MAX as u32 {
-                log::warn!(
-                    "{}: Receiver link {:?} flow delivery count {:?} is beyond delivery limit {:?}",
-                    self.session.tag(),
-                    self.name,
-                    snd_delivery_count,
-                    limit
-                );
+                // sender could use credit advertised before credit reduction
+                if self
+                    .in_flight_limit
+                    .is_none_or(|l| serial_lt(l, snd_delivery_count))
+                {
+                    log::warn!(
+                        "{}: Receiver link {:?} flow delivery count {:?} is beyond delivery limit {:?}",
+                        self.session.tag(),
+                        self.name,
+                        snd_delivery_count,
+                        limit
+                    );
+                }
                 self.credit = 0;
             } else {
                 self.credit = credit;
             }
             self.delivery_count = snd_delivery_count;
         }
+    }
+
+    /// Check if next delivery was sent with credit advertised before credit reduction
+    fn is_in_flight(&self) -> bool {
+        self.in_flight_limit
+            .is_some_and(|l| serial_lt(self.delivery_count, l))
     }
 
     pub(crate) fn name(&self) -> &ByteString {
@@ -407,7 +434,32 @@ impl ReceiverLinkInner {
         if self.closed {
             return;
         }
-        self.credit = self.credit.saturating_add(credit);
+        self.update_credit(self.credit.saturating_add(credit));
+    }
+
+    pub(crate) fn reset_link_credit(&mut self, credit: u32) {
+        // link handle could be reused by another link
+        if self.closed {
+            return;
+        }
+        // remote sender knows credit only after link confirmation
+        if !self.opening {
+            let limit = self.delivery_count.wrapping_add(self.credit);
+            if self.in_flight_limit.is_none_or(|l| serial_lt(l, limit)) {
+                self.in_flight_limit = Some(limit);
+            }
+        }
+        self.update_credit(credit);
+    }
+
+    fn update_credit(&mut self, credit: u32) {
+        self.credit = credit;
+
+        // previous delivery-limit is covered by new one
+        let limit = self.delivery_count.wrapping_add(credit);
+        if self.in_flight_limit.is_some_and(|l| !serial_lt(limit, l)) {
+            self.in_flight_limit = None;
+        }
 
         // credit is sent after link confirmation
         if !self.opening {
@@ -435,7 +487,7 @@ impl ReceiverLinkInner {
         mut transfer: Transfer,
         inner: &Cell<ReceiverLinkInner>,
     ) -> TransferResult {
-        if self.credit == 0 {
+        if self.credit == 0 && !self.is_in_flight() {
             // check link credit
             let err = Error(Box::new(codec::ErrorInner {
                 condition: LinkError::TransferLimitExceeded.into(),
@@ -448,7 +500,7 @@ impl ReceiverLinkInner {
             // credit used by aborted delivery is returned to the sender
             let aborted = transfer.0.aborted;
             if !transfer.0.more && !aborted {
-                self.credit -= 1;
+                self.credit = self.credit.saturating_sub(1);
             }
 
             // handle batched transfer
@@ -745,4 +797,10 @@ fn append_body(body: &mut BytePages, data: TransferBody) {
         TransferBody::Data(data) if data.len() <= BODY_COPY_LIMIT => body.extend_from_slice(&data),
         data => data.encode(body),
     }
+}
+
+/// Serial number comparison `a < b` (RFC-1982)
+fn serial_lt(a: SequenceNo, b: SequenceNo) -> bool {
+    let diff = b.wrapping_sub(a);
+    diff != 0 && i32::try_from(diff).is_ok()
 }
