@@ -2,6 +2,9 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix duplicate delivery-id of unsettled delivery left original delivery without disposition,
+  receiver link is detached
+
 * Fix receiver link unsettled deliveries were not failed when remote peer confirmed local link detach
 
 * Add `ReceiverLink::reset_link_credit()`, it can reduce link credit, transfers in flight under

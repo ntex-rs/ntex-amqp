@@ -4,9 +4,9 @@ use std::{
 };
 
 use ntex_amqp_codec::protocol::{
-    self as codec, Attach, Disposition, Error, Flow, Handle, LinkError, ReceiverSettleMode, Role,
-    SenderSettleMode, SequenceNo, Source, Symbols, TerminusDurability, TerminusExpiryPolicy,
-    Transfer, TransferBody,
+    self as codec, Attach, DeliveryNumber, Disposition, Error, Flow, Handle, LinkError,
+    ReceiverSettleMode, Role, SenderSettleMode, SequenceNo, Source, Symbols, TerminusDurability,
+    TerminusExpiryPolicy, Transfer, TransferBody,
 };
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 use ntex_bytes::{BytePages, ByteString, Bytes};
@@ -420,6 +420,24 @@ impl ReceiverLinkInner {
         TransferResult::Detach(err)
     }
 
+    /// Delivery-id of an unsettled delivery cannot be reused within the session
+    fn is_duplicate(&self, id: DeliveryNumber) -> bool {
+        self.session
+            .inner
+            .get_ref()
+            .unsettled_rcv_deliveries
+            .contains_key(&id)
+    }
+
+    fn close_duplicate() -> TransferResult {
+        let err = Error(Box::new(codec::ErrorInner {
+            condition: LinkError::DetachForced.into(),
+            description: Some(ByteString::from_static("duplicate delivery_id")),
+            info: None,
+        }));
+        TransferResult::Detach(err)
+    }
+
     /// Aborted delivery is implicitly settled and its payload is ignored.
     ///
     /// Application never sees aborted delivery, so its credit is returned
@@ -569,6 +587,9 @@ impl ReceiverLinkInner {
             } else if transfer.more() {
                 // handle first transfer in batch
                 if let Some(id) = transfer.delivery_id() {
+                    if self.is_duplicate(id) {
+                        return Self::close_duplicate();
+                    }
                     if size_exceeded(self.max_message_size, body_len(&transfer)) {
                         return Self::close_size_exceeded();
                     }
@@ -605,6 +626,9 @@ impl ReceiverLinkInner {
                     TransferResult::Detach(err)
                 }
             } else if let Some(id) = transfer.delivery_id() {
+                if self.is_duplicate(id) {
+                    return Self::close_duplicate();
+                }
                 if size_exceeded(self.max_message_size, body_len(&transfer)) {
                     return Self::close_size_exceeded();
                 }

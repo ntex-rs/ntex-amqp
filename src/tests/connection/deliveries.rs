@@ -634,3 +634,55 @@ async fn link_detach_confirmed_before_timeout() {
     timeout(Millis(10), &mut close).await.unwrap().unwrap();
     sleep(Millis(10)).await;
 }
+
+#[ntex::test]
+async fn duplicate_delivery_id_detaches_link() {
+    use ntex::time::{Millis, sleep};
+
+    // second transfer is single frame or first frame of multi-frame delivery
+    for more in [false, true] {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let s = session(&conn);
+        let fut = ntex::rt::spawn({
+            let s = s.clone();
+            async move { s.build_receiver_link("r", "r").attach().await }
+        });
+        sleep(Millis(10)).await;
+        let _ = handle_frame(&conn, named_attach(Role::Sender, "r", "r", 0));
+        let link = fut.await.unwrap().unwrap();
+        link.set_link_credit(10);
+        handle_frame(&conn, transfer(5, false, None, 1)).unwrap();
+        sleep(Millis(50)).await;
+        frame_names(&client);
+
+        handle_frame(&conn, transfer(5, more, None, 2)).unwrap();
+        sleep(Millis(50)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut detached = false;
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Detach(detach) = frame.into_parts().1 {
+                let err = detach.error().unwrap();
+                detached = *err.condition() == LinkError::DetachForced.into()
+                    && err.description()
+                        == Some(&ntex_bytes::ByteString::from_static(
+                            "duplicate delivery_id",
+                        ));
+            }
+        }
+        assert!(detached);
+
+        // original delivery is settled, duplicate is dropped
+        let mut d = link.get_delivery().unwrap().0;
+        assert!(link.get_delivery().is_none());
+        assert_eq!(s.inner.get_ref().unsettled_rcv_deliveries.len(), 1);
+        d.settle(DeliveryState::Accepted(Accepted {}));
+        drop(d);
+        sleep(Millis(50)).await;
+        assert_eq!(
+            dispositions(&client),
+            ["Receiver 5 true Some(Accepted(Accepted))"]
+        );
+    }
+}
