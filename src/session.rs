@@ -1855,7 +1855,13 @@ impl SessionInner {
                         true
                     }
                     ReceiverLinkState::Closing(tx) => {
-                        // detach confirmation
+                        // detach confirmation, unsettled deliveries cannot be settled
+                        let err = AmqpProtocolError::LinkDetached(frame.0.error.clone());
+                        for delivery in self.unsettled_rcv_deliveries.values_mut() {
+                            if delivery.handle() == idx as Handle {
+                                delivery.set_error(err.clone());
+                            }
+                        }
                         if let Some(tx) = tx.take() {
                             if let Some(err) = frame.0.error {
                                 let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));

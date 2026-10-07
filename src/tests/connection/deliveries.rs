@@ -572,6 +572,48 @@ async fn link_detach_timeout() {
 }
 
 #[ntex::test]
+async fn link_detach_confirmation_fails_deliveries() {
+    use ntex::time::{Millis, timeout};
+
+    for sender in [true, false] {
+        for error in [None, Some(LinkError::DetachForced)] {
+            let ctx = format!("sender: {sender} error: {error:?}");
+            let (_io, conn, _client) = connection();
+            handle_frame(&conn, begin()).unwrap();
+            let (d, mut close) = link_with_delivery(&conn, sender).await;
+            let mut wait = Box::pin(d.wait());
+            let remote = if sender { 4 } else { 0 };
+
+            assert!(timeout(Millis(10), &mut close).await.is_err(), "{ctx}");
+            assert!(timeout(Millis(10), &mut wait).await.is_err(), "{ctx}");
+
+            let err = error.map(|c| {
+                Error(Box::new(codec::ErrorInner {
+                    condition: c.into(),
+                    description: None,
+                    info: None,
+                }))
+            });
+            let detach: Frame = Detach(Box::new(DetachInner {
+                handle: remote,
+                closed: true,
+                error: err.clone(),
+            }))
+            .into();
+            handle_frame(&conn, detach).unwrap();
+
+            let res = timeout(Millis(10), &mut close).await.expect(&ctx);
+            assert_eq!(res.is_ok(), err.is_none(), "{ctx}: {res:?}");
+            let res = timeout(Millis(10), &mut wait).await.expect(&ctx);
+            assert!(
+                matches!(&res, Err(AmqpProtocolError::LinkDetached(e)) if *e == err),
+                "{ctx}: {res:?}"
+            );
+        }
+    }
+}
+
+#[ntex::test]
 async fn link_detach_confirmed_before_timeout() {
     use ntex::time::{Millis, sleep, timeout};
 
