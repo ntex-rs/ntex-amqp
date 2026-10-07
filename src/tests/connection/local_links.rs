@@ -18,10 +18,7 @@ async fn cancelled_local_attach_detached() {
             };
             {
                 let mut fut = std::pin::pin!(attach(s.clone()));
-                let pending =
-                    std::future::poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending()))
-                        .await;
-                assert!(pending);
+                assert!(pending(fut.as_mut()).await);
                 if delivered {
                     let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0))
                     else {
@@ -34,7 +31,7 @@ async fn cancelled_local_attach_detached() {
                     panic!()
                 };
             }
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             let ctx = format!("sender: {sender} delivered: {delivered}");
             assert_eq!(
                 frame_names(&client),
@@ -50,15 +47,11 @@ async fn cancelled_local_attach_detached() {
                 panic!()
             };
             let fut = ntex::rt::spawn(attach(s.clone()));
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0)) else {
                 panic!()
             };
-            ntex::time::timeout(ntex::time::Millis(1000), fut)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+            timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
             assert_eq!(frame_names(&client), ["Attach l 0"], "{ctx}");
         }
     }
@@ -80,9 +73,7 @@ async fn cancelled_local_attach_slot_reused() {
         };
         {
             let mut fut = std::pin::pin!(attach(s.clone(), "l"));
-            let pending =
-                std::future::poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await;
-            assert!(pending);
+            assert!(pending(fut.as_mut()).await);
             let Ok(Action::None) = handle_frame(&conn, named_attach(role, "l", "l", 0)) else {
                 panic!()
             };
@@ -90,17 +81,13 @@ async fn cancelled_local_attach_slot_reused() {
             // remote detach releases slot, new link reuses it
             handle_frame(&conn, peer_detach(0)).unwrap();
             let new = ntex::rt::spawn(attach(s.clone(), "m"));
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             let Ok(Action::None) = handle_frame(&conn, named_attach(role, "m", "l", 1)) else {
                 panic!()
             };
-            ntex::time::timeout(ntex::time::Millis(1000), new)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+            timeout(Millis(1000), new).await.unwrap().unwrap().unwrap();
         }
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         assert_eq!(
             frame_names(&client),
             ["Begin", "Attach l 0", "Detach 0", "Attach m 0"],
@@ -156,12 +143,9 @@ async fn duplicate_local_link_name() {
         let role = if sender { Role::Receiver } else { Role::Sender };
         let other = if sender { Role::Sender } else { Role::Receiver };
         let in_use = async |sender| {
-            let res = ntex::time::timeout(
-                ntex::time::Millis(1000),
-                TestLink::attach(s.clone(), sender, "x"),
-            )
-            .await
-            .unwrap();
+            let res = timeout(Millis(1000), TestLink::attach(s.clone(), sender, "x"))
+                .await
+                .unwrap();
             assert!(
                 matches!(res, Err(AmqpProtocolError::LinkNameInUse)),
                 "{ctx}"
@@ -170,13 +154,13 @@ async fn duplicate_local_link_name() {
 
         // name is used by opening link
         let first = ntex::rt::spawn(TestLink::attach(s.clone(), sender, "x"));
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         in_use(sender).await;
 
         let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 0)) else {
             panic!("{ctx}")
         };
-        let first = ntex::time::timeout(ntex::time::Millis(1000), first)
+        let first = timeout(Millis(1000), first)
             .await
             .unwrap()
             .unwrap()
@@ -187,16 +171,16 @@ async fn duplicate_local_link_name() {
 
         // same name in other direction is a different link
         let opposite = ntex::rt::spawn(TestLink::attach(s.clone(), !sender, "x"));
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         let Ok(Action::None) = handle_frame(&conn, named_attach(other, "x", "l", 1)) else {
             panic!("{ctx}")
         };
-        ntex::time::timeout(ntex::time::Millis(1000), opposite)
+        timeout(Millis(1000), opposite)
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         assert_eq!(
             frame_names(&client),
             ["Begin", "Attach x 0", "Attach x 1"],
@@ -205,24 +189,24 @@ async fn duplicate_local_link_name() {
 
         // name of closing link can be reused
         let closed = ntex::rt::spawn(first.close());
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         let second = ntex::rt::spawn(TestLink::attach(s.clone(), sender, "x"));
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         handle_frame(&conn, peer_detach(0)).unwrap();
         let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 2)) else {
             panic!("{ctx}")
         };
-        ntex::time::timeout(ntex::time::Millis(1000), closed)
+        timeout(Millis(1000), closed)
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        ntex::time::timeout(ntex::time::Millis(1000), second)
+        timeout(Millis(1000), second)
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         assert_eq!(frame_names(&client), ["Detach 0", "Attach x 2"], "{ctx}");
         if sender {
             assert_eq!(s.get_sender_link("x").unwrap().remote_handle(), 2, "{ctx}");
@@ -248,17 +232,14 @@ async fn local_link_name_used_by_remote_link() {
             Ok(Action::AttachReceiver(..)) if !sender => (),
             _ => panic!("{ctx}"),
         }
-        let res = ntex::time::timeout(
-            ntex::time::Millis(1000),
-            TestLink::attach(s.clone(), sender, "x"),
-        )
-        .await
-        .unwrap();
+        let res = timeout(Millis(1000), TestLink::attach(s.clone(), sender, "x"))
+            .await
+            .unwrap();
         assert!(
             matches!(res, Err(AmqpProtocolError::LinkNameInUse)),
             "{ctx}"
         );
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         assert_eq!(frame_names(&client), ["Begin"], "{ctx}");
     }
 }
@@ -276,8 +257,8 @@ async fn link_attach_timeout() {
             let s = session(&conn);
             let role = if sender { Role::Receiver } else { Role::Sender };
 
-            let res = ntex::time::timeout(
-                ntex::time::Millis(3000),
+            let res = timeout(
+                Millis(3000),
                 attach_with_timeout(s.clone(), sender, builder),
             )
             .await
@@ -291,7 +272,7 @@ async fn link_attach_timeout() {
             let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 0)) else {
                 panic!("{ctx}")
             };
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             assert_eq!(
                 frame_names(&client),
                 ["Begin", "Attach x 0", "Detach 0"],
@@ -301,15 +282,11 @@ async fn link_attach_timeout() {
 
             // name is released
             let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, builder));
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 1)) else {
                 panic!("{ctx}")
             };
-            ntex::time::timeout(ntex::time::Millis(1000), fut)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+            timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
         }
     }
 }
@@ -325,16 +302,12 @@ async fn link_attached_before_timeout() {
         let role = if sender { Role::Receiver } else { Role::Sender };
 
         let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
         let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 0)) else {
             panic!("{ctx}")
         };
-        ntex::time::timeout(ntex::time::Millis(1000), fut)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        ntex::time::sleep(ntex::time::Millis(1500)).await;
+        timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
+        sleep(Millis(1500)).await;
         assert_eq!(frame_names(&client), ["Begin", "Attach x 0"], "{ctx}");
         if sender {
             assert!(s.get_sender_link("x").is_some(), "{ctx}");
@@ -361,7 +334,7 @@ async fn refused_local_attach() {
                 let role = if sender { Role::Receiver } else { Role::Sender };
 
                 let mut fut = Some(Box::pin(attach_with_timeout(s.clone(), sender, None)));
-                let mut cx = Context::from_waker(std::task::Waker::noop());
+                let mut cx = Context::from_waker(Waker::noop());
                 assert!(
                     fut.as_mut().unwrap().as_mut().poll(&mut cx).is_pending(),
                     "{ctx}"
@@ -403,7 +376,7 @@ async fn refused_local_attach() {
                     };
                     assert_eq!(err, error, "{ctx}");
                 }
-                ntex::time::sleep(ntex::time::Millis(10)).await;
+                sleep(Millis(10)).await;
                 assert_eq!(
                     frame_names(&client),
                     ["Begin", "Attach x 0", "Detach 0"],
@@ -412,15 +385,11 @@ async fn refused_local_attach() {
 
                 // name and handle are released
                 let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
-                ntex::time::sleep(ntex::time::Millis(10)).await;
+                sleep(Millis(10)).await;
                 let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 3)) else {
                     panic!("{ctx}")
                 };
-                ntex::time::timeout(ntex::time::Millis(1000), fut)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap();
+                timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
                 assert_eq!(frame_names(&client), ["Attach x 0"], "{ctx}");
             }
         }
@@ -450,15 +419,12 @@ async fn detach_opening_local_link() {
         let role = if sender { Role::Receiver } else { Role::Sender };
 
         let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
 
         // attach response is not received
-        let res = ntex::time::timeout(
-            ntex::time::Millis(1000),
-            detach_by_handle(&s, sender, 0, None),
-        )
-        .await
-        .expect(&ctx);
+        let res = timeout(Millis(1000), detach_by_handle(&s, sender, 0, None))
+            .await
+            .expect(&ctx);
         assert!(
             matches!(res, Err(AmqpProtocolError::LinkNotAttached)),
             "{ctx}"
@@ -468,12 +434,8 @@ async fn detach_opening_local_link() {
         let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 3)) else {
             panic!("{ctx}")
         };
-        ntex::time::timeout(ntex::time::Millis(1000), fut)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
+        sleep(Millis(10)).await;
         assert_eq!(frame_names(&client), ["Begin", "Attach x 0"], "{ctx}");
         if sender {
             assert!(s.get_sender_link("x").is_some(), "{ctx}");
@@ -497,7 +459,7 @@ async fn detach_refused_local_link() {
             handle_frame(&conn, begin()).unwrap();
             let s = session(&conn);
             let role = if sender { Role::Receiver } else { Role::Sender };
-            let mut cx = Context::from_waker(std::task::Waker::noop());
+            let mut cx = Context::from_waker(Waker::noop());
 
             let mut fut = Box::pin(attach_with_timeout(s.clone(), sender, None));
             assert!(fut.as_mut().poll(&mut cx).is_pending(), "{ctx}");
@@ -529,7 +491,7 @@ async fn detach_refused_local_link() {
             let Poll::Ready(Ok(())) = detach.as_mut().poll(&mut cx) else {
                 panic!("{ctx}")
             };
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             assert_eq!(
                 frame_names(&client),
                 ["Begin", "Attach x 0", "Detach 0"],
@@ -538,15 +500,11 @@ async fn detach_refused_local_link() {
 
             // name and handle are released
             let fut = ntex::rt::spawn(attach_with_timeout(s.clone(), sender, None));
-            ntex::time::sleep(ntex::time::Millis(10)).await;
+            sleep(Millis(10)).await;
             let Ok(Action::None) = handle_frame(&conn, named_attach(role, "x", "l", 3)) else {
                 panic!("{ctx}")
             };
-            ntex::time::timeout(ntex::time::Millis(1000), fut)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+            timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
             assert_eq!(frame_names(&client), ["Attach x 0"], "{ctx}");
         }
     }
@@ -574,11 +532,11 @@ async fn links_limited_by_remote_handle_max() {
     // locally opened links
     let s = session.clone();
     ntex::rt::spawn(async move { s.build_sender_link("s1", LONG).attach().await });
-    ntex::time::sleep(ntex::time::Millis(10)).await;
-    let ms = ntex::time::Millis(100);
-    let s2 = ntex::time::timeout(ms, session.build_sender_link("s2", LONG).attach());
+    sleep(Millis(10)).await;
+    let ms = Millis(100);
+    let s2 = timeout(ms, session.build_sender_link("s2", LONG).attach());
     assert!(matches!(s2.await, Ok(Err(AmqpProtocolError::TooManyLinks))));
-    let s3 = ntex::time::timeout(ms, session.build_receiver_link("s3", LONG).attach());
+    let s3 = timeout(ms, session.build_receiver_link("s3", LONG).attach());
     assert!(matches!(s3.await, Ok(Err(AmqpProtocolError::TooManyLinks))));
 
     // remotely opened link, no free local handles
@@ -589,20 +547,18 @@ async fn links_limited_by_remote_handle_max() {
         panic!()
     };
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut frames = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        match frame.into_parts().1 {
-            Frame::Attach(attach) => frames.push(format!("attach {}", attach.handle())),
-            Frame::End(end) => frames.push(format!(
+    sleep(Millis(50)).await;
+    let frames: Vec<_> = read_frames(&client)
+        .into_iter()
+        .filter_map(|frame| match frame {
+            Frame::Attach(attach) => Some(format!("attach {}", attach.handle())),
+            Frame::End(end) => Some(format!(
                 "end {}",
                 *end.error.unwrap().condition() == AmqpError::ResourceLimitExceeded.into()
             )),
-            _ => (),
-        }
-    }
+            _ => None,
+        })
+        .collect();
     assert_eq!(frames, ["attach 1", "end true"]);
 }
 
@@ -616,7 +572,7 @@ async fn local_link_names() {
 
     let s = session.clone();
     let fut = ntex::rt::spawn(async move { s.build_sender_link("x", "addr").attach().await });
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
 
     // peer opens link with the same name in other direction
     let Ok(Action::AttachReceiver(..)) = handle(named_attach(Role::Sender, "x", "x", 0)) else {
@@ -636,7 +592,7 @@ async fn local_link_names() {
     // name is removed after detach confirmation
     let l = link.clone();
     let fut = ntex::rt::spawn(async move { l.close().await });
-    ntex::time::sleep(ntex::time::Millis(10)).await;
+    sleep(Millis(10)).await;
     handle(peer_detach(1)).unwrap();
     fut.await.unwrap().unwrap();
     assert!(session.get_sender_link("x").is_none());

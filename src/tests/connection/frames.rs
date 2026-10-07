@@ -124,15 +124,11 @@ async fn transfers_advance_next_incoming_id() {
     }));
     handle(flow.into()).unwrap();
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
-    let codec = AmqpCodec::<AmqpFrame>::new();
-    let mut buf = BytesMut::from(&client.read_any()[..]);
-    let mut flows = Vec::new();
-    while let Some(frame) = codec.decode(&mut buf).unwrap() {
-        if let Frame::Flow(flow) = frame.into_parts().1 {
-            flows.push((flow.next_incoming_id(), flow.link_credit()));
-        }
-    }
+    sleep(Millis(50)).await;
+    let flows: Vec<_> = flows(&client)
+        .iter()
+        .map(|flow| (flow.next_incoming_id(), flow.link_credit()))
+        .collect();
     assert_eq!(
         flows,
         [(Some(1), Some(10)), (Some(5), Some(12)), (Some(5), None)]
@@ -172,7 +168,7 @@ async fn outbound_frames_limited_by_remote_max_frame_size() {
         ))
     ));
 
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     let codec = AmqpCodec::<AmqpFrame>::new();
     let mut buf = BytesMut::from(&client.read_any()[..]);
     assert!(matches!(

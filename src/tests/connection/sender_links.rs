@@ -21,16 +21,15 @@ async fn local_sender_initial_delivery_count() {
             }
             builder.attach().await
         });
-        ntex::time::sleep(ntex::time::Millis(10)).await;
+        sleep(Millis(10)).await;
 
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut counts = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            if let Frame::Attach(att) = frame.into_parts().1 {
-                counts.push(att.initial_delivery_count());
-            }
-        }
+        let counts: Vec<_> = read_frames(&client)
+            .into_iter()
+            .filter_map(|frame| match frame {
+                Frame::Attach(att) => Some(att.initial_delivery_count()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(counts, [Some(sent)], "{ctx}");
 
         // receiver initial delivery-count is ignored
@@ -41,11 +40,7 @@ async fn local_sender_initial_delivery_count() {
         let Ok(Action::None) = handle_frame(&conn, attach.into()) else {
             panic!("{ctx}")
         };
-        let link = ntex::time::timeout(ntex::time::Millis(1000), fut)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let link = timeout(Millis(1000), fut).await.unwrap().unwrap().unwrap();
 
         let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
             panic!()
@@ -55,8 +50,8 @@ async fn local_sender_initial_delivery_count() {
         assert_eq!(link.credit(), 10, "{ctx}");
 
         // delivery-count is advanced by transfer
-        ntex::time::timeout(
-            ntex::time::Millis(1000),
+        timeout(
+            Millis(1000),
             link.transfer(Bytes::from_static(b"1")).settled().send(),
         )
         .await
@@ -94,9 +89,6 @@ async fn sender_max_message_size() {
 
 #[ntex::test]
 async fn sender_link_drain() {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client) = connection();
     handle_frame(&conn, begin()).unwrap();
     let session = session(&conn);
@@ -109,24 +101,7 @@ async fn sender_link_drain() {
         flow.0.drain = drain;
         handle_frame(&conn, flow.into()).unwrap();
     };
-    let frames = || {
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            frames.push(match frame.into_parts().1 {
-                Frame::Flow(flow) => format!(
-                    "Flow {:?} {:?} {:?} {}",
-                    flow.handle(),
-                    flow.delivery_count(),
-                    flow.link_credit(),
-                    flow.drain()
-                ),
-                frame => frame.name().to_string(),
-            });
-        }
-        frames
-    };
+    let frames = || snd_frames(&client);
 
     let Ok(Action::AttachSender(snd, attach, response)) =
         handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
@@ -162,7 +137,7 @@ async fn sender_link_drain() {
 
     // woken transfer is dropped before it resumes
     let mut t3 = Box::pin(snd.transfer(Bytes::from_static(b"3")).settled().send());
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
     flow(2, 8, true);
     sleep(Millis(50)).await;
     assert!(frames().is_empty());
@@ -202,9 +177,6 @@ async fn sender_link_drain() {
 
 #[ntex::test]
 async fn sender_link_credit_on_window_wait() {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client) = connection();
     handle_frame(&conn, begin()).unwrap();
     let session = session(&conn);
@@ -218,24 +190,7 @@ async fn sender_link_credit_on_window_wait() {
         flow.0.incoming_window = window;
         handle_frame(&conn, flow.into()).unwrap();
     };
-    let frames = || {
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            frames.push(match frame.into_parts().1 {
-                Frame::Flow(flow) => format!(
-                    "Flow {:?} {:?} {:?} {}",
-                    flow.handle(),
-                    flow.delivery_count(),
-                    flow.link_credit(),
-                    flow.drain()
-                ),
-                frame => frame.name().to_string(),
-            });
-        }
-        frames
-    };
+    let frames = || snd_frames(&client);
 
     let Ok(Action::AttachSender(snd, attach, response)) =
         handle_frame(&conn, named_attach(Role::Receiver, "s", "s", 4))
@@ -253,14 +208,14 @@ async fn sender_link_credit_on_window_wait() {
     // transfer waits for session window, link credit is kept on cancel
     flow(0, 2, false, 0);
     let mut t1 = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
     assert_eq!(snd.credit(), 2);
     drop(t1);
     assert_eq!(snd.credit(), 2);
 
     // transfer blocked by session window does not delay drain
     let mut t2 = Box::pin(snd.transfer(Bytes::from_static(b"2")).settled().send());
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t2.as_mut()).await);
     flow(0, 2, true, 0);
     assert_eq!(snd.credit(), 0);
     sleep(Millis(50)).await;
@@ -315,24 +270,15 @@ async fn sender_link_credit_on_window_wait() {
 
 #[ntex::test]
 async fn sender_link_flow_wakes_by_credit() {
-    use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
-    use std::task::{Wake, Waker};
-
-    struct Counter(AtomicUsize);
-    impl Wake for Counter {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
     type Fut = Pin<Box<dyn Future<Output = Result<crate::Delivery, AmqpProtocolError>>>>;
-    struct Tr(Fut, Arc<Counter>);
+    struct Tr(Fut, Arc<WakeCounter>);
     impl Tr {
         fn poll(&mut self) -> Poll<Result<crate::Delivery, AmqpProtocolError>> {
             let waker = Waker::from(self.1.clone());
             self.0.as_mut().poll(&mut Context::from_waker(&waker))
         }
         fn woken(&self) -> usize {
-            self.1.0.load(Ordering::SeqCst)
+            self.1.count()
         }
     }
 
@@ -363,7 +309,7 @@ async fn sender_link_flow_wakes_by_credit() {
     let transfer = || {
         let mut tr = Tr(
             Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send()),
-            Arc::new(Counter(AtomicUsize::new(0))),
+            WakeCounter::new(),
         );
         assert!(tr.poll().is_pending());
         tr
@@ -416,10 +362,7 @@ async fn sender_link_flow_wakes_by_credit() {
     // waiters are not woken while delivery is partially sent
     let (_io, conn, _client, snd) = small_frames_sender();
     let transfer = |body: Bytes| {
-        let mut tr = Tr(
-            Box::pin(snd.transfer(body).send()),
-            Arc::new(Counter(AtomicUsize::new(0))),
-        );
+        let mut tr = Tr(Box::pin(snd.transfer(body).send()), WakeCounter::new());
         assert!(tr.poll().is_pending());
         tr
     };
@@ -439,9 +382,6 @@ async fn sender_link_flow_wakes_by_credit() {
 
 #[ntex::test]
 async fn sender_link_close_fails_waiting_transfers() {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client) = connection();
     handle_frame(&conn, begin()).unwrap();
     let session = session(&conn);
@@ -491,7 +431,7 @@ async fn sender_link_close_fails_waiting_transfers() {
     assert_eq!(frame_names(&client), ["Detach 0", "Detach 1", "Attach c 2"]);
     flow(6, 1, 10);
     let mut close = Box::pin(c.close());
-    assert!(poll_fn(|cx| Poll::Ready(close.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(close.as_mut()).await);
     assert!(timeout(Millis(500), t3).await.unwrap().unwrap().is_err());
 
     // no transfers after detach
@@ -501,8 +441,6 @@ async fn sender_link_close_fails_waiting_transfers() {
 
 #[ntex::test]
 async fn sender_link_detach_fails_waiting_transfers() {
-    use ntex::time::{Millis, sleep, timeout};
-
     let (_io, conn, client) = connection();
     handle_frame(&conn, begin()).unwrap();
     let session = session(&conn);
@@ -555,8 +493,6 @@ async fn sender_link_detach_fails_waiting_transfers() {
 
 #[ntex::test]
 async fn sender_link_detach_fails_partial_delivery() {
-    use ntex::time::{Millis, sleep, timeout};
-
     let (_io, conn, client, snd) = small_frames_sender();
     let session = session(&conn);
     sleep(Millis(50)).await;
@@ -589,19 +525,16 @@ async fn sender_link_detach_fails_partial_delivery() {
 
 #[ntex::test]
 async fn sender_link_detach_fails_unsettled() {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, _client, snd) = small_frames_sender();
     let session = session(&conn);
     let delivery = snd.transfer(Bytes::from_static(b"1")).send().await.unwrap();
     let mut wait = Box::pin(delivery.wait());
-    assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(wait.as_mut()).await);
 
     // disposition could be received before detach confirmation
     let _d = session.detach_sender_link(snd.inner.get_ref().id(), None);
     sleep(Millis(50)).await;
-    assert!(poll_fn(|cx| Poll::Ready(wait.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(wait.as_mut()).await);
 
     handle_frame(&conn, peer_detach(4)).unwrap();
     let res = timeout(Millis(500), wait).await.unwrap();
@@ -616,9 +549,6 @@ async fn sender_link_stale_flow() {
 }
 
 async fn sender_link_stale_flow_with(initial: u32) {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, _client) = connection();
     handle_frame(&conn, begin()).unwrap();
     let session = session(&conn);
@@ -659,7 +589,7 @@ async fn sender_link_stale_flow_with(initial: u32) {
     flow(Some(0), 2);
     assert_eq!(snd.credit(), 0);
     let mut t = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
-    assert!(poll_fn(|cx| Poll::Ready(t.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t.as_mut()).await);
     flow(Some(0), 5);
     assert!(timeout(Millis(500), t).await.unwrap().is_ok());
     assert_eq!(snd.credit(), 1);
@@ -672,9 +602,6 @@ async fn sender_link_stale_flow_with(initial: u32) {
 
 #[ntex::test]
 async fn sender_drain_with_partial_delivery() {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client, snd) = small_frames_sender();
     let flow = |delivery_count: u32, credit: u32, drain: bool, window: u32| {
         let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
@@ -688,11 +615,9 @@ async fn sender_drain_with_partial_delivery() {
         handle_frame(&conn, flow.into()).unwrap();
     };
     let link_flows = || {
-        let codec = AmqpCodec::<AmqpFrame>::new();
-        let mut buf = BytesMut::from(&client.read_any()[..]);
-        let mut frames = Vec::new();
-        while let Some(frame) = codec.decode(&mut buf).unwrap() {
-            frames.push(match frame.into_parts().1 {
+        read_frames(&client)
+            .into_iter()
+            .map(|frame| match frame {
                 Frame::Flow(flow) => format!(
                     "Flow {:?} {:?} {}",
                     flow.delivery_count(),
@@ -700,16 +625,15 @@ async fn sender_drain_with_partial_delivery() {
                     flow.drain()
                 ),
                 frame => frame.name().to_string(),
-            });
-        }
-        frames
+            })
+            .collect::<Vec<_>>()
     };
     sleep(Millis(50)).await;
     link_flows();
 
     // partial delivery waits for session window, next transfer is queued
     let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).settled().send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
     let t2 = ntex::rt::spawn(snd.transfer(Bytes::from_static(b"2")).settled().send());
     sleep(Millis(50)).await;
     assert_eq!(snd.credit(), 9);
@@ -734,9 +658,6 @@ async fn sender_drain_with_partial_delivery() {
 
 #[ntex::test]
 async fn sender_multi_frame_delivery_window() {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client, snd) = small_frames_sender();
     sleep(Millis(50)).await;
     transfer_frames(&client);
@@ -744,8 +665,8 @@ async fn sender_multi_frame_delivery_window() {
     // each transfer frame consumes session window
     let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
     let mut t2 = Box::pin(snd.transfer(Bytes::from_static(b"2")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
+    assert!(pending(t2.as_mut()).await);
     assert_eq!(snd.credit(), 9);
     sleep(Millis(50)).await;
     assert_eq!(
@@ -758,14 +679,14 @@ async fn sender_multi_frame_delivery_window() {
 
     // frames of the delivery are not interleaved with next delivery
     session_window(&conn, 3, 1);
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t2.as_mut()).await);
     sleep(Millis(50)).await;
     assert!(transfer_frames(&client).is_empty());
     let Poll::Ready(Ok(d1)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
         panic!()
     };
     assert_eq!(d1.id(), 0);
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t2.as_mut()).await);
     sleep(Millis(50)).await;
     assert_eq!(
         transfer_frames(&client),
@@ -796,22 +717,13 @@ async fn sender_multi_frame_delivery_window() {
 
 #[ntex::test]
 async fn sender_cancelled_delivery_aborted() {
-    use ntex::time::{Millis, sleep, timeout};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client, snd) = small_frames_sender();
     let body = Bytes::from(vec![b'a'; 1200]);
-    let unsettled = || {
-        session(&conn)
-            .inner
-            .get_ref()
-            .unsettled_snd_deliveries
-            .len()
-    };
+    let unsettled = || unsettled(&conn).0;
 
     // delivery is cancelled while it waits for session window
     let mut t1 = Box::pin(snd.transfer(body.clone()).send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
     assert_eq!(unsettled(), 1);
     drop(t1);
     assert_eq!(unsettled(), 0);
@@ -844,7 +756,7 @@ async fn sender_cancelled_delivery_aborted() {
     // abort is sent if session window is available
     session_window(&conn, 5, 2);
     let mut t3 = Box::pin(snd.transfer(body).send());
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
     session_window(&conn, 7, 5);
     drop(t3);
     assert_eq!(unsettled(), 0);
@@ -862,25 +774,22 @@ async fn sender_cancelled_delivery_aborted() {
 
 #[ntex::test]
 async fn sender_woken_transfer_keeps_link_credit() {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client, snd) = small_frames_sender();
     link_flow(&conn, 4, (0, 0, false), 1, 10);
     sleep(Millis(50)).await;
     transfer_frames(&client);
     let mut t1 = Box::pin(snd.transfer(Bytes::from_static(b"1")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
 
     // new transfer does not take credit of woken transfer
     link_flow(&conn, 4, (0, 1, false), 1, 10);
     let mut t2 = Box::pin(snd.transfer(Bytes::from_static(b"2")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t2.as_mut()).await);
     let Poll::Ready(Ok(d1)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
         panic!()
     };
     assert_eq!(d1.id(), 0);
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t2.as_mut()).await);
     assert_eq!(snd.credit(), 0);
 
     link_flow(&conn, 4, (1, 1, false), 2, 10);
@@ -900,9 +809,6 @@ async fn sender_woken_transfer_keeps_link_credit() {
 
 #[ntex::test]
 async fn sender_abort_does_not_take_claimed_window() {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client, snd) = small_frames_sender();
     let snd2 = add_sender(&conn, "s2", 5, 1);
     sleep(Millis(50)).await;
@@ -910,8 +816,8 @@ async fn sender_abort_does_not_take_claimed_window() {
 
     let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
     let mut t2 = Box::pin(snd2.transfer(Bytes::from_static(b"2")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx).is_pending())).await);
-    assert!(poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t1.as_mut()).await);
+    assert!(pending(t2.as_mut()).await);
 
     // abort of cancelled delivery is queued behind next waiter
     session_window(&conn, 2, 1);
@@ -924,11 +830,11 @@ async fn sender_abort_does_not_take_claimed_window() {
     // queued abort is sent by session flow, before new transfers
     let mut t3 = Box::pin(snd.transfer(Bytes::from_static(b"3")).send());
     let mut t4 = Box::pin(snd2.transfer(Bytes::from_static(b"4")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
-    assert!(poll_fn(|cx| Poll::Ready(t4.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
+    assert!(pending(t4.as_mut()).await);
     session_window(&conn, 3, 1);
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
-    assert!(poll_fn(|cx| Poll::Ready(t4.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
+    assert!(pending(t4.as_mut()).await);
     session_window(&conn, 4, 2);
     let Poll::Ready(Ok(d4)) = poll_fn(|cx| Poll::Ready(t4.as_mut().poll(cx))).await else {
         panic!()
@@ -952,21 +858,18 @@ async fn sender_abort_does_not_take_claimed_window() {
 
 #[ntex::test]
 async fn sender_queued_abort_keeps_order() {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     let (_io, conn, client, snd, mut t2) = queued_abort_sender().await;
 
     // new delivery on the same link waits behind its abort
     let mut t3 = Box::pin(snd.transfer(Bytes::from_static(b"3")).send());
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
 
     session_window(&conn, 2, 1);
     let Poll::Ready(Ok(d2)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
         panic!()
     };
     assert_eq!(d2.id(), 1);
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
     sleep(Millis(50)).await;
     assert_eq!(
         transfer_frames(&client),
@@ -974,7 +877,7 @@ async fn sender_queued_abort_keeps_order() {
     );
 
     session_window(&conn, 3, 1);
-    assert!(poll_fn(|cx| Poll::Ready(t3.as_mut().poll(cx).is_pending())).await);
+    assert!(pending(t3.as_mut()).await);
     sleep(Millis(50)).await;
     assert_eq!(
         transfer_frames(&client),
@@ -995,14 +898,11 @@ async fn sender_queued_abort_keeps_order() {
 
 #[ntex::test]
 async fn sender_detach_drops_queued_abort() {
-    use ntex::time::{Millis, sleep};
-    use std::{future::poll_fn, task::Poll};
-
     for local in [false, true] {
         let (_io, conn, client, snd, mut t2) = queued_abort_sender().await;
         if local {
             let mut fut = Box::pin(snd.close());
-            assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await);
+            assert!(pending(fut.as_mut()).await);
         } else {
             handle_frame(&conn, peer_detach(4)).unwrap();
         }
@@ -1031,10 +931,7 @@ async fn sender_ready_waits_for_session_window() {
     handle_frame(&conn, begin()).unwrap();
     let snd = add_sender(&conn, "s", 4, 0);
     assert_eq!(snd.credit(), 10);
-    let poll = |fut: &mut Pin<Box<dyn Future<Output = bool> + '_>>| {
-        fut.as_mut()
-            .poll(&mut Context::from_waker(std::task::Waker::noop()))
-    };
+    let poll = |fut: &mut Pin<Box<dyn Future<Output = bool> + '_>>| poll_once(fut.as_mut());
 
     // link credit is available, remote session window is not
     let mut ready: Pin<Box<dyn Future<Output = bool>>> = Box::pin(snd.ready());
@@ -1046,11 +943,7 @@ async fn sender_ready_waits_for_session_window() {
     // window claimed by woken transfer is not available
     session_window(&conn, 1, 0);
     let mut tr = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
-    assert!(
-        tr.as_mut()
-            .poll(&mut Context::from_waker(std::task::Waker::noop()))
-            .is_pending()
-    );
+    assert!(poll_once(tr.as_mut()).is_pending());
     let mut ready: Pin<Box<dyn Future<Output = bool>>> = Box::pin(snd.ready());
     assert!(poll(&mut ready).is_pending());
     session_window(&conn, 1, 1);
@@ -1078,18 +971,12 @@ async fn sender_ready_waits_for_session_window() {
 
 #[ntex::test]
 async fn sender_cancelled_waiters_leave_queue() {
-    fn poll<F: Future + ?Sized>(fut: &mut Pin<Box<F>>) -> Poll<F::Output> {
-        fut.as_mut()
-            .poll(&mut Context::from_waker(std::task::Waker::noop()))
-    }
-    use std::task::Poll;
-
     let (_io, conn, client) = connection();
     handle_frame(&conn, begin()).unwrap();
     let snd = add_sender(&conn, "s", 4, 0);
     let send = |body: &'static [u8]| {
         let mut fut = Box::pin(snd.transfer(Bytes::from_static(body)).settled().send());
-        assert!(poll(&mut fut).is_pending());
+        assert!(poll_once(fut.as_mut()).is_pending());
         fut
     };
     // (link credit waiters, session window waiters)
@@ -1123,10 +1010,10 @@ async fn sender_cancelled_waiters_leave_queue() {
 
     // remaining waiters are served
     link_flow(&conn, 4, (0, 2, false), 1, 2);
-    assert!(matches!(poll(&mut t2), Poll::Ready(Ok(_))));
-    assert!(matches!(poll(&mut t4), Poll::Ready(Ok(_))));
+    assert!(matches!(poll_once(t2.as_mut()), Poll::Ready(Ok(_))));
+    assert!(matches!(poll_once(t4.as_mut()), Poll::Ready(Ok(_))));
     assert_eq!(pending(), (0, 0));
-    ntex::time::sleep(ntex::time::Millis(50)).await;
+    sleep(Millis(50)).await;
     assert_eq!(
         transfer_frames(&client)
             .into_iter()
@@ -1141,8 +1028,6 @@ async fn sender_cancelled_waiters_leave_queue() {
 
 #[ntex::test]
 async fn sender_cancelled_waiter_keeps_queued_abort() {
-    use ntex::time::{Millis, sleep};
-
     let (_io, conn, client, _snd, t2) = queued_abort_sender().await;
     let s = session(&conn);
 
@@ -1156,4 +1041,21 @@ async fn sender_cancelled_waiter_keeps_queued_abort() {
         transfer_frames(&client),
         ["Transfer Some(0) more:false aborted:true"]
     );
+}
+
+/// Frame names, flow frames with (handle, delivery-count, link-credit, drain)
+fn snd_frames(client: &IoTest) -> Vec<String> {
+    read_frames(client)
+        .into_iter()
+        .map(|frame| match frame {
+            Frame::Flow(flow) => format!(
+                "Flow {:?} {:?} {:?} {}",
+                flow.handle(),
+                flow.delivery_count(),
+                flow.link_credit(),
+                flow.drain()
+            ),
+            frame => frame.name().to_string(),
+        })
+        .collect()
 }
