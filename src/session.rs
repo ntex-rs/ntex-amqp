@@ -3,7 +3,8 @@ use std::{cmp, collections::VecDeque, fmt, future::Future, mem, pin::Pin, ptr};
 
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
-use ntex_util::{HashMap, future::Either, time::Seconds};
+use ntex_util::time::{Seconds, timeout_checked};
+use ntex_util::{HashMap, future::Either};
 use slab::Slab;
 
 use ntex_amqp_codec::protocol::{
@@ -265,7 +266,7 @@ enum SenderLinkState {
         Option<oneshot::Sender<Result<Cell<SenderLinkInner>, AmqpProtocolError>>>,
         SequenceNo,
     ),
-    Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
+    Closing(Option<DetachTx>),
 }
 
 #[derive(Debug)]
@@ -283,7 +284,35 @@ enum ReceiverLinkState {
         )>,
     ),
     Established(EstablishedReceiverLink),
-    Closing(Option<oneshot::Sender<Result<(), AmqpProtocolError>>>),
+    Closing(Option<DetachTx>),
+}
+
+/// Local detach confirmation, send or drop stops detach timeout watcher
+#[derive(Debug)]
+struct DetachTx {
+    tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
+    watcher: Option<oneshot::Sender<()>>,
+}
+
+impl DetachTx {
+    fn watch(&mut self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.watcher = Some(tx);
+        rx
+    }
+
+    fn send(self, res: Result<(), AmqpProtocolError>) -> Result<(), Result<(), AmqpProtocolError>> {
+        if let Some(watcher) = self.watcher {
+            let _ = watcher.send(());
+        }
+        self.tx.send(res)
+    }
+}
+
+impl From<oneshot::Sender<Result<(), AmqpProtocolError>>> for DetachTx {
+    fn from(tx: oneshot::Sender<Result<(), AmqpProtocolError>>) -> Self {
+        DetachTx { tx, watcher: None }
+    }
 }
 
 impl SenderLinkState {
@@ -461,6 +490,22 @@ async fn detach_response(
         log::trace!("Cannot complete link detach: {e:?}");
     }
     res
+}
+
+/// Expire closing link if remote detach is not received in time
+async fn detach_watcher(
+    sink: ConnectionRef,
+    session_id: usize,
+    id: Handle,
+    timeout: Seconds,
+    done: oneshot::Receiver<()>,
+) {
+    // closing session fails deliveries on end
+    if timeout_checked(timeout, done).await.is_err()
+        && let Some(session) = sink.get_session_by_local_id(session_id as u16)
+    {
+        session.inner.get_mut().detach_timed_out(id);
+    }
 }
 
 fn detach_closed(idx: usize) -> Detach {
@@ -897,8 +942,55 @@ impl SessionInner {
             let _ = tx.send(Ok(()));
         } else {
             self.detach_sender_link_inner(id, closed, error, tx);
+            self.watch_detach(id);
         }
         detach_response(rx)
+    }
+
+    /// Start detach timeout if link waits for remote detach
+    fn watch_detach(&mut self, id: Handle) {
+        let timeout = self.link_attach_timeout();
+        if timeout.is_zero() {
+            return;
+        }
+        if let Some(
+            Either::Left(SenderLinkState::Closing(Some(tx)))
+            | Either::Right(ReceiverLinkState::Closing(Some(tx))),
+        ) = self.links.get_mut(id as usize)
+        {
+            let done = tx.watch();
+            ntex_rt::spawn(detach_watcher(
+                self.sink.clone(),
+                self.id,
+                id,
+                timeout,
+                done,
+            ));
+        }
+    }
+
+    /// Remote detach is not received in time, link deliveries cannot be settled
+    fn detach_timed_out(&mut self, id: Handle) {
+        let (tx, deliveries) = match self.links.get_mut(id as usize) {
+            Some(Either::Left(SenderLinkState::Closing(tx))) => {
+                (tx.take(), &mut self.unsettled_snd_deliveries)
+            }
+            Some(Either::Right(ReceiverLinkState::Closing(tx))) => {
+                (tx.take(), &mut self.unsettled_rcv_deliveries)
+            }
+            _ => return,
+        };
+        log::warn!("{}: Link detach timeout - {id}", self.sink.tag());
+
+        let err = AmqpProtocolError::LinkDetached(None);
+        for delivery in deliveries.values_mut() {
+            if delivery.handle() == id {
+                delivery.set_error(err.clone());
+            }
+        }
+        if let Some(tx) = tx {
+            let _ = tx.send(Err(err));
+        }
     }
 
     fn detach_sender_link_inner(
@@ -925,7 +1017,7 @@ impl SessionInner {
                         closed,
                         error,
                     }));
-                    *link = SenderLinkState::Closing(Some(tx));
+                    *link = SenderLinkState::Closing(Some(tx.into()));
                     self.post_frame(detach.into());
                 }
                 SenderLinkState::Established(sender_link) => {
@@ -941,7 +1033,7 @@ impl SessionInner {
                         error,
                     }));
 
-                    *link = SenderLinkState::Closing(Some(tx));
+                    *link = SenderLinkState::Closing(Some(tx.into()));
                     self.post_frame(detach.clone().into());
                     self.sink
                         .get_control_queue()
@@ -1233,6 +1325,7 @@ impl SessionInner {
             let _ = tx.send(Ok(()));
         } else {
             self.detach_receiver_link_inner(id, closed, error, tx);
+            self.watch_detach(id);
         }
         detach_response(rx)
     }
@@ -1254,7 +1347,7 @@ impl SessionInner {
                         let _ = tx.send(Ok(()));
                     } else {
                         // handles are in use until remote detach
-                        *link = ReceiverLinkState::Closing(Some(tx));
+                        *link = ReceiverLinkState::Closing(Some(tx.into()));
                     }
                     if let Some((inner, source)) = inner {
                         let attach = Attach(Box::new(codec::AttachInner {
@@ -1296,7 +1389,7 @@ impl SessionInner {
                         closed,
                         error,
                     }));
-                    *link = ReceiverLinkState::Closing(Some(tx));
+                    *link = ReceiverLinkState::Closing(Some(tx.into()));
                     self.post_frame(detach.clone().into());
                     self.sink
                         .get_control_queue()
@@ -1324,7 +1417,7 @@ impl SessionInner {
                         closed,
                         error,
                     }));
-                    *link = ReceiverLinkState::Closing(Some(tx));
+                    *link = ReceiverLinkState::Closing(Some(tx.into()));
                     self.post_frame(detach.into());
                 }
             }

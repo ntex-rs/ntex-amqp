@@ -486,3 +486,109 @@ async fn delivery_no_disposition_after_link_detach() {
         );
     }
 }
+
+type CloseFuture = Pin<Box<dyn Future<Output = Result<(), AmqpProtocolError>>>>;
+
+/// Established link with unsettled delivery
+async fn link_with_delivery(conn: &Connection, sender: bool) -> (crate::Delivery, CloseFuture) {
+    if sender {
+        let snd = add_sender(conn, "s", 4, 10);
+        let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        (d, Box::pin(async move { snd.close().await }))
+    } else {
+        let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(conn, attach()) else {
+            panic!()
+        };
+        link.confirm_receiver_link(response);
+        link.set_link_credit(1);
+        handle_frame(conn, transfer(0, false, None, 0)).unwrap();
+        let (d, _) = link.get_delivery().unwrap();
+        (d, Box::pin(async move { link.close().await }))
+    }
+}
+
+/// Local handle of new link
+fn new_link_handle(conn: &Connection, sender: bool, remote: u32) -> u32 {
+    if sender {
+        add_sender(conn, "s2", remote, 10).id()
+    } else {
+        let Ok(Action::AttachReceiver(link, _, _)) =
+            handle_frame(conn, named_attach(Role::Sender, "r2", "r2", remote))
+        else {
+            panic!()
+        };
+        link.handle()
+    }
+}
+
+#[ntex::test]
+async fn link_detach_timeout() {
+    use ntex::time::{Millis, sleep, timeout};
+
+    for sender in [true, false] {
+        for cfg in [Seconds(1), Seconds::ZERO] {
+            let ctx = format!("sender: {sender} timeout: {cfg:?}");
+            let (_io, conn, client) =
+                connection_with(AmqpServiceConfig::new().set_link_attach_timeout(cfg));
+            handle_frame(&conn, begin()).unwrap();
+            let (d, mut close) = link_with_delivery(&conn, sender).await;
+            let mut wait = Box::pin(d.wait());
+            let remote = if sender { 4 } else { 0 };
+
+            // remote does not respond to detach
+            assert!(timeout(Millis(500), &mut close).await.is_err(), "{ctx}");
+            assert!(timeout(Millis(10), &mut wait).await.is_err(), "{ctx}");
+            assert!(
+                frame_names(&client).ends_with(&["Detach 0".to_string()]),
+                "{ctx}"
+            );
+            if cfg.is_zero() {
+                sleep(Millis(1000)).await;
+                assert!(timeout(Millis(10), &mut close).await.is_err(), "{ctx}");
+                assert!(timeout(Millis(10), &mut wait).await.is_err(), "{ctx}");
+                continue;
+            }
+
+            let res = timeout(Millis(1500), &mut close).await.expect(&ctx);
+            assert!(
+                matches!(res, Err(AmqpProtocolError::LinkDetached(None))),
+                "{ctx}: {res:?}"
+            );
+            let res = timeout(Millis(10), &mut wait).await.expect(&ctx);
+            assert!(
+                matches!(res, Err(AmqpProtocolError::LinkDetached(None))),
+                "{ctx}: {res:?}"
+            );
+
+            // handle is in use until remote detach
+            assert_eq!(new_link_handle(&conn, sender, 5), 1, "{ctx}");
+            handle_frame(&conn, peer_detach(5)).unwrap();
+            let Ok(Action::None) = handle_frame(&conn, peer_detach(remote)) else {
+                panic!("{ctx}")
+            };
+            assert_eq!(new_link_handle(&conn, sender, 6), 0, "{ctx}");
+        }
+    }
+}
+
+#[ntex::test]
+async fn link_detach_confirmed_before_timeout() {
+    use ntex::time::{Millis, sleep, timeout};
+
+    let (_io, conn, _client) =
+        connection_with(AmqpServiceConfig::new().set_link_attach_timeout(Seconds(1)));
+    handle_frame(&conn, begin()).unwrap();
+    let (_d, mut close) = link_with_delivery(&conn, true).await;
+    assert!(timeout(Millis(900), &mut close).await.is_err());
+    handle_frame(&conn, peer_detach(4)).unwrap();
+    timeout(Millis(10), &mut close).await.unwrap().unwrap();
+
+    // confirmed detach does not expire link that reuses handle
+    let snd = add_sender(&conn, "s2", 5, 10);
+    assert_eq!(snd.id(), 0);
+    let mut close = Box::pin(async move { snd.close().await });
+    assert!(timeout(Millis(600), &mut close).await.is_err());
+    handle_frame(&conn, peer_detach(5)).unwrap();
+    timeout(Millis(10), &mut close).await.unwrap().unwrap();
+    sleep(Millis(10)).await;
+}
