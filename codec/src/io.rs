@@ -229,4 +229,140 @@ mod tests {
             .unwrap();
         assert_eq!(buf.len(), size);
     }
+
+    fn amqp_frame() -> AmqpFrame {
+        use crate::protocol::{Begin, BeginInner, Frame};
+
+        AmqpFrame::new(
+            3,
+            Frame::Begin(Begin(Box::new(BeginInner {
+                remote_channel: Some(1),
+                next_outgoing_id: 2,
+                incoming_window: 3,
+                outgoing_window: 4,
+                ..Default::default()
+            }))),
+        )
+    }
+
+    fn encode_frame(frame: &AmqpFrame) -> BytesMut {
+        let mut buf = BytePages::default();
+        AmqpCodec::<AmqpFrame>::new()
+            .encode(frame.clone(), &mut buf)
+            .unwrap();
+        BytesMut::from(&buf.freeze()[..])
+    }
+
+    #[test]
+    fn amqp_codec_roundtrip() {
+        let frame = amqp_frame();
+        let mut data = encode_frame(&frame);
+        assert_eq!(data.len(), frame.encoded_size());
+
+        let codec = AmqpCodec::<AmqpFrame>::default();
+        assert_eq!(codec.decode(&mut data).unwrap(), Some(frame));
+        assert!(data.is_empty());
+        // the codec is reusable after a complete frame
+        assert_eq!(codec.decode(&mut data).unwrap(), None);
+    }
+
+    #[test]
+    fn amqp_codec_partial_frames() {
+        let frame = amqp_frame();
+        let data = encode_frame(&frame);
+        let codec = AmqpCodec::<AmqpFrame>::new();
+
+        // not even a full header
+        let mut buf = BytesMut::from(&data[..4]);
+        assert_eq!(codec.decode(&mut buf).unwrap(), None);
+
+        // header is complete, body is not: the header is consumed and state kept
+        let mut buf = BytesMut::from(&data[..HEADER_LEN]);
+        assert_eq!(codec.decode(&mut buf).unwrap(), None);
+        assert_eq!(codec.decode(&mut buf).unwrap(), None);
+
+        // feed the rest
+        buf.extend_from_slice(&data[HEADER_LEN..]);
+        assert_eq!(codec.decode(&mut buf).unwrap(), Some(frame));
+    }
+
+    #[test]
+    fn amqp_codec_max_size() {
+        let data = encode_frame(&amqp_frame());
+
+        let codec = AmqpCodec::<AmqpFrame>::new().max_size(data.len() - 1);
+        let mut buf = data.clone();
+        assert!(matches!(
+            codec.decode(&mut buf),
+            Err(AmqpCodecError::MaxSizeExceeded)
+        ));
+
+        let mut codec = AmqpCodec::<AmqpFrame>::new();
+        codec.set_max_size(data.len());
+        let mut buf = data.clone();
+        assert!(codec.decode(&mut buf).unwrap().is_some());
+    }
+
+    #[test]
+    fn amqp_codec_unparsed_bytes_left() {
+        let frame = amqp_frame();
+        let mut data = encode_frame(&frame).to_vec();
+        data.push(0x42);
+        let size = data.len() as u32;
+        data[..4].copy_from_slice(&size.to_be_bytes());
+
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&data[..]);
+        assert!(matches!(
+            codec.decode(&mut buf),
+            Err(AmqpCodecError::UnparsedBytesLeft)
+        ));
+    }
+
+    #[test]
+    fn protocol_id_roundtrip() {
+        let codec = ProtocolIdCodec;
+        for (id, byte) in [
+            (ProtocolId::Amqp, 0u8),
+            (ProtocolId::AmqpTls, 2),
+            (ProtocolId::AmqpSasl, 3),
+        ] {
+            let mut buf = BytePages::default();
+            codec.encode(id, &mut buf).unwrap();
+            let encoded = buf.freeze();
+            assert_eq!(encoded.as_ref(), &[b'A', b'M', b'Q', b'P', byte, 1, 0, 0]);
+
+            let mut src = BytesMut::from(&encoded[..]);
+            assert_eq!(codec.decode(&mut src).unwrap(), Some(id));
+            assert!(src.is_empty());
+        }
+    }
+
+    #[test]
+    fn protocol_id_decode_errors() {
+        let codec = ProtocolIdCodec;
+
+        // short buffer, nothing consumed
+        let mut src = BytesMut::from(b"AMQP\x00\x01\x00".as_ref());
+        assert_eq!(codec.decode(&mut src).unwrap(), None);
+        assert_eq!(src.len(), 7);
+
+        let cases: Vec<(&[u8], ProtocolIdError)> = vec![
+            (b"XMQP\x00\x01\x00\x00", ProtocolIdError::InvalidHeader),
+            (b"AMQP\x00\x02\x00\x00", ProtocolIdError::Incompatible),
+            (b"AMQP\x01\x01\x00\x00", ProtocolIdError::Unknown),
+            (b"AMQP\x04\x01\x00\x00", ProtocolIdError::Unknown),
+        ];
+        for (input, expected) in cases {
+            let mut src = BytesMut::from(input);
+            let err = codec.decode(&mut src).unwrap_err();
+            assert_eq!(
+                std::mem::discriminant(&err),
+                std::mem::discriminant(&expected),
+                "input {input:?}"
+            );
+            // the header is always consumed before validation
+            assert!(src.is_empty());
+        }
+    }
 }

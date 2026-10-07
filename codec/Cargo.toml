@@ -11,9 +11,9 @@ rust-version = "1.97"
 workspace = true
 
 [dependencies]
-ntex-bytes = "1.10"
+ntex-bytes = "1.11"
 ntex-codec = "2.0"
-ntex-util = "4.2"
+ntex-util = "4.3"
 byteorder = "1"
 chrono = { version = "0.4", default-features = false }
 derive_more = { version = "2", features = ["from"] }

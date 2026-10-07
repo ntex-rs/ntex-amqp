@@ -30,16 +30,20 @@ use crate::sndlink::SenderLink;
 use crate::types::Action;
 use crate::{AmqpServiceConfig, RemoteServiceConfig};
 
+mod conn;
 mod deliveries;
+mod dispatcher;
 mod frames;
+mod links;
 mod local_links;
 mod receiver_links;
 mod remote_links;
 mod sender_links;
+mod session_frames;
 mod sessions;
 
 const LONG: &str = "value-that-does-not-fit-into-inline-storage";
-const ACCEPTED: DeliveryState = DeliveryState::Accepted(Accepted {});
+pub(crate) const ACCEPTED: DeliveryState = DeliveryState::Accepted(Accepted {});
 
 fn symbols() -> Multiple<Symbol> {
     Multiple(vec![Symbol::from(LONG)])
@@ -69,7 +73,7 @@ pub(crate) fn begin() -> Frame {
     .into()
 }
 
-fn attach() -> Frame {
+pub(crate) fn attach() -> Frame {
     Attach(Box::new(AttachInner {
         name: LONG.into(),
         handle: 0,
@@ -163,8 +167,11 @@ fn connection_with(cfg: AmqpServiceConfig) -> (Io, Connection, IoTest) {
     (io, conn, client)
 }
 
-fn session(conn: &Connection) -> Session {
-    let inner = conn.get_ref();
+pub(crate) fn session(conn: &Connection) -> Session {
+    session_ref(conn.as_ref())
+}
+
+fn session_ref(inner: &ConnectionRef) -> Session {
     let SessionState::Established(session) =
         &inner.0.get_ref().sessions[inner.0.get_ref().sessions_map[&0]]
     else {
@@ -292,7 +299,7 @@ fn peer_detach(handle: u32) -> Frame {
 }
 
 /// Decode frames written to the peer, returns (channel, frame)
-fn read_channel_frames(client: &IoTest) -> Vec<(u16, Frame)> {
+pub(crate) fn read_channel_frames(client: &IoTest) -> Vec<(u16, Frame)> {
     let codec = AmqpCodec::<AmqpFrame>::new();
     let mut buf = BytesMut::from(&client.read_any()[..]);
     let mut frames = Vec::new();
@@ -303,7 +310,7 @@ fn read_channel_frames(client: &IoTest) -> Vec<(u16, Frame)> {
 }
 
 /// Decode frames written to the peer
-fn read_frames(client: &IoTest) -> Vec<Frame> {
+pub(crate) fn read_frames(client: &IoTest) -> Vec<Frame> {
     read_channel_frames(client)
         .into_iter()
         .map(|(_, frame)| frame)
@@ -311,7 +318,7 @@ fn read_frames(client: &IoTest) -> Vec<Frame> {
 }
 
 /// Detach frames written to the peer, (handle, closed, error)
-fn detaches(client: &IoTest) -> Vec<(u32, bool, Option<Error>)> {
+pub(crate) fn detaches(client: &IoTest) -> Vec<(u32, bool, Option<Error>)> {
     read_frames(client)
         .into_iter()
         .filter_map(|frame| match frame {

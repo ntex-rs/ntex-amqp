@@ -36,26 +36,25 @@ frame-trace = []
 [dependencies]
 ntex-amqp-codec = "3.2.0"
 
-ntex-bytes = "1.10"
+ntex-bytes = "1.11"
 ntex-error = "3.0"
 ntex-router = "2.0"
-ntex-dispatcher = "4.2"
-ntex-io = "4.2"
-ntex-net = "4.2"
-ntex-util = "4.2"
-ntex-service = "5.1"
+ntex-dispatcher = "4.3"
+ntex-io = "4.3"
+ntex-net = "4.3"
+ntex-util = "4.3"
+ntex-service = "5.2"
 ntex-rt = "4.1"
 
 bitflags = "2"
 derive_more = { version = "2", features = ["from"] }
 log = "0.4"
-pin-project-lite = "0.2"
 slab = "0.4"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-ntex = "4.0.0-beta.16"
+ntex = "4.0.0-beta.18"
 ntex-server = "4.2"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
 

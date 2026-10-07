@@ -87,3 +87,131 @@ impl Encode for MessageBody {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message::Message;
+    use crate::types::Str;
+
+    fn encoded(body: &MessageBody) -> Bytes {
+        let mut buf = BytePages::default();
+        body.encode(&mut buf);
+        let buf = buf.freeze();
+        assert_eq!(body.encoded_size(), buf.len(), "encoded_size mismatch");
+        buf
+    }
+
+    #[test]
+    fn empty_body() {
+        let body = MessageBody::default();
+        assert_eq!(body.data(), None);
+        assert_eq!(body.value(), None);
+        assert_eq!(encoded(&body).len(), 0);
+    }
+
+    #[test]
+    fn data_sections() {
+        let mut body = MessageBody::default();
+        body.set_data(Bytes::from_static(b"one"));
+        assert_eq!(body.data(), Some(&Bytes::from_static(b"one")));
+
+        // set_data replaces, it does not append
+        body.set_data(Bytes::from_static(b"two"));
+        assert_eq!(body.data, vec![Bytes::from_static(b"two")]);
+        assert_eq!(encoded(&body).as_ref(), b"\x00\x53\x75\xa0\x03two");
+
+        body.data.push(Bytes::from_static(b"three"));
+        assert_eq!(body.data(), Some(&Bytes::from_static(b"two")));
+        assert_eq!(
+            encoded(&body).as_ref(),
+            b"\x00\x53\x75\xa0\x03two\x00\x53\x75\xa0\x05three"
+        );
+    }
+
+    #[test]
+    fn long_data_section() {
+        let mut body = MessageBody::default();
+        body.set_data(Bytes::from(vec![7u8; 300]));
+        let buf = encoded(&body);
+        assert_eq!(buf[..4], [0x00, 0x53, 0x75, 0xb0]);
+        assert_eq!(buf[4..8], 300u32.to_be_bytes());
+        assert_eq!(buf.len(), 3 + 5 + 300);
+    }
+
+    #[test]
+    fn value_section() {
+        let body = MessageBody {
+            value: Some(Variant::String(Str::from("v"))),
+            ..Default::default()
+        };
+        assert_eq!(body.value(), Some(&Variant::String(Str::from("v"))));
+        assert_eq!(encoded(&body).as_ref(), b"\x00\x53\x77\xa1\x01v");
+    }
+
+    #[test]
+    fn sequence_section() {
+        let body = MessageBody {
+            sequence: vec![
+                List(vec![Variant::Ubyte(1), Variant::Null]),
+                List(vec![Variant::Ubyte(2)]),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            encoded(&body).as_ref(),
+            b"\x00\x53\x76\xc0\x04\x02\x50\x01\x40\x00\x53\x76\xc0\x03\x01\x50\x02"
+        );
+    }
+
+    #[test]
+    fn nested_messages() {
+        let mut inner = Message::default();
+        inner.set_body(|b| b.set_data(Bytes::from_static(b"nested")));
+        let inner_size = inner.encoded_size();
+        assert!(inner_size <= u8::MAX as usize);
+
+        let body = MessageBody {
+            messages: vec![TransferBody::Message(inner)],
+            ..Default::default()
+        };
+        let buf = encoded(&body);
+        // descriptor + binary8 prefix + nested message
+        assert_eq!(buf[..3], [0x00, 0x53, 0x75]);
+        assert_eq!(buf[3], FORMATCODE_BINARY8);
+        assert_eq!(buf[4] as usize, inner_size);
+        assert_eq!(buf.len(), 3 + 2 + inner_size);
+    }
+
+    #[test]
+    fn nested_large_message() {
+        let mut inner = Message::default();
+        inner.set_body(|b| b.set_data(Bytes::from(vec![0u8; 300])));
+        let inner_size = inner.encoded_size();
+        assert!(inner_size > u8::MAX as usize);
+
+        let body = MessageBody {
+            messages: vec![TransferBody::Message(inner)],
+            ..Default::default()
+        };
+        let buf = encoded(&body);
+        assert_eq!(buf[3], FORMATCODE_BINARY32);
+        assert_eq!(buf[4..8], (inner_size as u32).to_be_bytes());
+        assert_eq!(buf.len(), 3 + 5 + inner_size);
+    }
+
+    #[test]
+    fn all_sections_combined() {
+        let mut body = MessageBody {
+            sequence: vec![List(vec![Variant::Ubyte(1)])],
+            value: Some(Variant::Ubyte(9)),
+            ..Default::default()
+        };
+        body.set_data(Bytes::from_static(b"d"));
+        // data, then sequence, then value
+        assert_eq!(
+            encoded(&body).as_ref(),
+            b"\x00\x53\x75\xa0\x01d\x00\x53\x76\xc0\x03\x01\x50\x01\x00\x53\x77\x50\x09"
+        );
+    }
+}

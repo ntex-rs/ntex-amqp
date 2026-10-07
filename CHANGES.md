@@ -2,6 +2,12 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix server sasl challenge/response handshake, `SaslResponse::outcome()` waited for an extra sasl frame
+
+* Fix codec failed to decode `ulong0` encoded descriptor
+
+* Fix `AmqpParseError`, `ServerError` and `HandshakeError` display messages did not include error details
+
 * Abort multi-frame delivery if receiver settled it before last frame is sent
 
 * Fix router added link credit to link paused by `ReceiverLink::reset_link_credit(0)`

@@ -43,3 +43,19 @@ impl<T> Cell<T> {
         unsafe { &mut *self.inner.as_ref().get() }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_shares_state() {
+        let cell = Cell::new(vec![1_u8]);
+        let cell2 = cell.clone();
+        cell2.get_mut().push(2);
+
+        assert_eq!(*cell.get_ref(), [1, 2]);
+        assert_eq!(cell.len(), 2);
+        assert_eq!(format!("{cell:?}"), "[1, 2]");
+    }
+}

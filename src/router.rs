@@ -308,11 +308,31 @@ where
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use ntex_amqp_codec::protocol::Role;
+    use ntex::time::{Millis, sleep};
+    use ntex_amqp_codec::protocol::{Frame, Role};
 
     use super::*;
-    use crate::tests::connection::{begin, connection, handle_frame, named_attach, transfer};
+    use crate::tests::connection::{
+        ACCEPTED, begin, connection, detaches, handle_frame, named_attach, read_frames, session,
+        transfer,
+    };
     use crate::types::Action;
+
+    fn router_service(
+        router: Router<()>,
+    ) -> (Cell<RouterServiceInner<()>>, Pipeline<Message, (), Error>) {
+        let mut patterns = PatternRouter::builder();
+        for (addr, hnd) in router.0 {
+            patterns.path(addr, hnd);
+        }
+        let inner = Cell::new(RouterServiceInner {
+            state: State::new(()),
+            router: Rc::new(patterns.build()),
+            handlers: HashMap::default(),
+        });
+        let srv = Pipeline::new(State::new(()), RouterService(inner.clone()));
+        (inner, srv)
+    }
 
     struct Srv(Rc<AtomicUsize>);
 
@@ -462,5 +482,242 @@ mod tests {
         link.set_link_credit(1);
         transfer(2).await;
         assert_eq!(link.credit(), 50);
+    }
+
+    /// Error that cannot be converted into an `Outcome`
+    #[derive(Debug)]
+    struct Fatal;
+
+    impl From<Fatal> for Error {
+        fn from(_: Fatal) -> Error {
+            LinkError::force_detach().description("fatal").into()
+        }
+    }
+
+    impl TryFrom<Fatal> for Outcome {
+        type Error = Error;
+
+        fn try_from(err: Fatal) -> Result<Self, Error> {
+            Err(err.into())
+        }
+    }
+
+    struct FatalSrv(bool);
+
+    impl Service<Link<()>, Transfer> for FatalSrv {
+        type Res = Outcome;
+        type Error = Fatal;
+
+        async fn ready(&self, _: Ctx<'_, Self, Link<()>>) -> Result<(), Fatal> {
+            if self.0 { Err(Fatal) } else { Ok(()) }
+        }
+
+        async fn call(&self, _: Transfer, _: Ctx<'_, Self, Link<()>>) -> Result<Outcome, Fatal> {
+            Err(Fatal)
+        }
+    }
+
+    #[ntex::test]
+    async fn unroutable_target_address() {
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let (inner, srv) =
+            router_service(Router::<()>::builder().service("ok", async |_: &Link<()>| {
+                Ok::<_, LinkError>(Srv(Rc::default()))
+            }));
+
+        // (target address, expected error description)
+        let cases = [
+            (Some("nope"), "Target address is not supported: nope"),
+            (None, "Target address is required"),
+        ];
+        for (handle, (address, expected)) in cases.into_iter().enumerate() {
+            let handle = handle as u32;
+            let Ok(Action::AttachReceiver(link, mut frm, _)) =
+                handle_frame(&conn, named_attach(Role::Sender, "x", "nope", handle))
+            else {
+                panic!()
+            };
+            if address.is_none() {
+                frm.0.target = None;
+            }
+            let err = srv.call(Message::Attached(frm, link)).await.err().unwrap();
+            assert_eq!(
+                err.description().map(ntex_bytes::ByteString::as_str),
+                Some(expected)
+            );
+        }
+        assert!(inner.get_ref().handlers.is_empty());
+    }
+
+    #[ntex::test]
+    async fn detached_all_releases_handlers() {
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+
+        let shutdowns = Rc::new(AtomicUsize::new(0));
+        let cnt = shutdowns.clone();
+        let (inner, srv) = router_service(
+            Router::<()>::builder().service("ok", async move |_: &Link<()>| {
+                Ok::<_, LinkError>(Srv(cnt.clone()))
+            }),
+        );
+
+        let mut links = Vec::new();
+        for handle in 0..2 {
+            let Ok(Action::AttachReceiver(link, frm, _)) =
+                handle_frame(&conn, named_attach(Role::Sender, "ok", "ok", handle))
+            else {
+                panic!()
+            };
+            srv.call(Message::Attached(frm, link.clone()))
+                .await
+                .unwrap();
+            links.push(link);
+        }
+        assert_eq!(inner.get_ref().handlers.len(), 2);
+
+        // unknown links are ignored, known links are released and shut down
+        let Ok(Action::AttachReceiver(unknown, ..)) =
+            handle_frame(&conn, named_attach(Role::Sender, "other", "other", 2))
+        else {
+            panic!()
+        };
+        links.push(unknown);
+        srv.call(Message::DetachedAll(links)).await.unwrap();
+        assert!(inner.get_ref().handlers.is_empty());
+        ntex::time::sleep(ntex::time::Millis(50)).await;
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 2);
+    }
+
+    #[ntex::test]
+    async fn service_error_rejects_delivery() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, frm, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "f", "f", 0))
+        else {
+            panic!()
+        };
+        let (_inner, srv) =
+            router_service(Router::<()>::builder().service("f", async |_: &Link<()>| {
+                Ok::<_, LinkError>(FatalSrv(false))
+            }));
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(2);
+
+        // service error that cannot be mapped to an outcome rejects the delivery
+        let Ok(Action::Transfer(link)) = handle_frame(&conn, transfer(0, false, None, 1)) else {
+            panic!()
+        };
+        srv.call(Message::Transfer(link)).await.unwrap();
+        ntex::time::sleep(ntex::time::Millis(25)).await;
+
+        let frames = read_frames(&client);
+        let Some(Frame::Disposition(disp)) = frames.last() else {
+            panic!()
+        };
+        let Some(DeliveryState::Rejected(Rejected { error: Some(err) })) = disp.state() else {
+            panic!()
+        };
+        assert_eq!(
+            err.description().map(ntex_bytes::ByteString::as_str),
+            Some("fatal")
+        );
+    }
+
+    #[ntex::test]
+    async fn readiness_failure_detaches_link() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, frm, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "f", "f", 0))
+        else {
+            panic!()
+        };
+        let (_inner, srv) = router_service(
+            Router::<()>::builder()
+                .service("f", async |_: &Link<()>| Ok::<_, LinkError>(FatalSrv(true))),
+        );
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(2);
+
+        let Ok(Action::Transfer(link)) = handle_frame(&conn, transfer(0, false, None, 1)) else {
+            panic!()
+        };
+        srv.call(Message::Transfer(link)).await.unwrap();
+        ntex::time::sleep(ntex::time::Millis(25)).await;
+
+        // link is detached instead of the delivery being settled
+        let detaches = detaches(&client);
+        assert_eq!(detaches.len(), 1);
+        let (_, closed, err) = &detaches[0];
+        assert!(closed);
+        assert_eq!(
+            err.as_ref()
+                .unwrap()
+                .description()
+                .map(ntex_bytes::ByteString::as_str),
+            Some(
+                "error: Error(ErrorInner { condition: LinkError(DetachForced), \
+                 description: Some(\"fatal\"), info: None })"
+            )
+        );
+    }
+
+    #[ntex::test]
+    async fn router_factory_dispatches_messages() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+
+        let shutdowns = Rc::new(AtomicUsize::new(0));
+        let factory = {
+            let shutdowns = shutdowns.clone();
+            Router::<()>::default()
+                .service("ok", move |_: &Link<()>| {
+                    let shutdowns = shutdowns.clone();
+                    async move { Ok::<_, LinkError>(Srv(shutdowns)) }
+                })
+                .build()
+        };
+        let state = State::new(());
+        let srv = Pipeline::new(state.clone(), factory.create(&state).await.unwrap());
+
+        let Ok(Action::AttachReceiver(link, frm, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "ok", "ok", 0))
+        else {
+            panic!()
+        };
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(1);
+
+        let Ok(Action::Transfer(link)) = handle_frame(&conn, transfer(0, false, None, 1)) else {
+            panic!()
+        };
+        srv.call(Message::Transfer(link)).await.unwrap();
+        sleep(Millis(25)).await;
+        assert!(
+            read_frames(&client)
+                .iter()
+                .any(|f| matches!(f, Frame::Disposition(d) if d.state() == Some(&ACCEPTED)))
+        );
+
+        // link service is dropped and shut down when the link detaches
+        let link = session(&conn)
+            .get_receiver_link_by_remote_handle(0)
+            .cloned()
+            .unwrap();
+        srv.call(Message::Detached(link)).await.unwrap();
+        sleep(Millis(50)).await;
+        assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
     }
 }

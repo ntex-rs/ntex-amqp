@@ -240,9 +240,6 @@ impl<St> SaslResponse<St> {
         }
         .into();
         io.send(frame, &codec).await.map_err(HandshakeError::from)?;
-        io.recv(&codec)
-            .await?
-            .ok_or(HandshakeError::Disconnected(None))?;
 
         Ok(SaslSuccess {
             st,

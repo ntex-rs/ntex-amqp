@@ -166,4 +166,66 @@ mod tests {
             check_header(buf, count);
         }
     }
+
+    #[test]
+    fn array_new_roundtrip() {
+        let items: Vec<u32> = vec![1, 2, 300];
+        let arr = Array::new(items.iter());
+
+        assert_eq!(arr.element_constructor(), &u32::ARRAY_CONSTRUCTOR);
+        assert_eq!(arr.decode::<u32>().unwrap(), items);
+
+        let mut buf = BytePages::default();
+        arr.encode(&mut buf);
+        let buf = buf.freeze();
+        assert_eq!(arr.encoded_size(), buf.len());
+        // array8, size, count, uint ctor, 3 * 4 bytes
+        assert_eq!(
+            buf[..4],
+            [codec::FORMATCODE_ARRAY8, 14, 3, codec::FORMATCODE_UINT]
+        );
+
+        let decoded = <Array as Decode>::decode(&mut buf.clone()).unwrap();
+        assert_eq!(decoded, arr);
+        assert_eq!(decoded.decode::<u32>().unwrap(), items);
+    }
+
+    #[test]
+    fn array_from_vec_empty() {
+        let arr = Array::from(Vec::<u64>::new());
+        assert_eq!(arr.decode::<u64>().unwrap(), Vec::<u64>::new());
+
+        let mut buf = BytePages::default();
+        arr.encode(&mut buf);
+        let buf = buf.freeze();
+        assert_eq!(arr.encoded_size(), buf.len());
+        assert_eq!(
+            buf.as_ref(),
+            &[codec::FORMATCODE_ARRAY8, 2, 0, codec::FORMATCODE_ULONG]
+        );
+        assert_eq!(<Array as Decode>::decode(&mut buf.clone()).unwrap(), arr);
+    }
+
+    #[test]
+    fn array_decode_wrong_element_type() {
+        let arr = Array::from(vec![1u32, 2]);
+        // uint payload is not a valid ubyte sequence of the same length
+        assert!(matches!(
+            arr.decode::<bool>(),
+            Err(AmqpParseError::InvalidFormatCode(codec::FORMATCODE_UINT))
+        ));
+    }
+
+    #[test]
+    fn array_decode_truncated_payload() {
+        let arr = Array {
+            count: 2,
+            element_constructor: Constructor::FormatCode(codec::FORMATCODE_UINT),
+            payload: Bytes::from_static(b"\x00\x00\x00\x01"),
+        };
+        assert!(matches!(
+            arr.decode::<u32>(),
+            Err(AmqpParseError::Incomplete(_))
+        ));
+    }
 }
