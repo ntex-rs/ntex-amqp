@@ -498,7 +498,8 @@ async fn session_end_drops_queued_abort() {
 
     let (_io, conn, client, _snd, mut t2) = queued_abort_sender().await;
     let s = session(&conn);
-    assert_eq!(s.inner.get_ref().pending_transfers(), 3);
+    // next transfer and abort of cancelled delivery
+    assert_eq!(s.inner.get_ref().pending_transfers(), 2);
     handle_frame(&conn, End { error: None }.into()).unwrap();
     assert_eq!(s.inner.get_ref().pending_transfers(), 0);
     let Poll::Ready(Err(_)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {

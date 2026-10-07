@@ -383,11 +383,12 @@ fn drop_pending_transfers(
 
 /// Waits for session window
 ///
-/// Woken waiter claims window until it sends transfer or gets dropped
+/// Woken waiter claims window until it sends transfer or gets dropped,
+/// cancelled waiter leaves the queue
 pub(crate) struct WindowWaiter {
-    rx: pool::Receiver<Result<(), AmqpProtocolError>>,
+    // `None` after completion
+    rx: Option<pool::Receiver<Result<(), AmqpProtocolError>>>,
     session: Cell<SessionInner>,
-    done: bool,
 }
 
 impl WindowWaiter {
@@ -396,9 +397,8 @@ impl WindowWaiter {
         session: Cell<SessionInner>,
     ) -> Self {
         WindowWaiter {
-            rx,
+            rx: Some(rx),
             session,
-            done: false,
         }
     }
 }
@@ -407,8 +407,11 @@ impl Future for WindowWaiter {
     type Output = Result<WindowClaim, AmqpProtocolError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let result = ready!(self.rx.poll_recv(cx));
-        self.done = true;
+        let Some(rx) = self.rx.as_ref() else {
+            return Poll::Ready(Err(AmqpProtocolError::ConnectionDropped));
+        };
+        let result = ready!(rx.poll_recv(cx));
+        self.rx = None;
         Poll::Ready(match result {
             Ok(Ok(())) => Ok(WindowClaim(Some(self.session.clone()))),
             Ok(Err(err)) => Err(err),
@@ -419,12 +422,20 @@ impl Future for WindowWaiter {
 
 impl Drop for WindowWaiter {
     fn drop(&mut self) {
-        // waiter is dropped after wake up
-        if !self.done
-            && let Poll::Ready(Ok(Ok(()))) =
-                self.rx.poll_recv(&mut Context::from_waker(Waker::noop()))
-        {
-            drop(WindowClaim(Some(self.session.clone())));
+        if let Some(rx) = self.rx.take() {
+            match rx.poll_recv(&mut Context::from_waker(Waker::noop())) {
+                // waiter is dropped after wake up
+                Poll::Ready(Ok(Ok(()))) => drop(WindowClaim(Some(self.session.clone()))),
+                // cancelled waiter leaves the queue, queued aborts are kept
+                Poll::Pending => {
+                    drop(rx);
+                    self.session
+                        .get_mut()
+                        .pending_transfers
+                        .retain(|tr| !matches!(&tr.kind, Pending::Wake(tx) if tx.is_canceled()));
+                }
+                Poll::Ready(_) => (),
+            }
         }
     }
 }
