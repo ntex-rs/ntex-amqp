@@ -1075,3 +1075,85 @@ async fn sender_ready_waits_for_session_window() {
     handle_frame(&conn, peer_detach(4)).unwrap();
     assert_eq!(poll(&mut ready), Poll::Ready(false));
 }
+
+#[ntex::test]
+async fn sender_cancelled_waiters_leave_queue() {
+    fn poll<F: Future + ?Sized>(fut: &mut Pin<Box<F>>) -> Poll<F::Output> {
+        fut.as_mut()
+            .poll(&mut Context::from_waker(std::task::Waker::noop()))
+    }
+    use std::task::Poll;
+
+    let (_io, conn, client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let snd = add_sender(&conn, "s", 4, 0);
+    let send = |body: &'static [u8]| {
+        let mut fut = Box::pin(snd.transfer(Bytes::from_static(body)).settled().send());
+        assert!(poll(&mut fut).is_pending());
+        fut
+    };
+    // (link credit waiters, session window waiters)
+    let pending = || {
+        (
+            snd.inner.get_ref().pending_transfers(),
+            session(&conn).inner.get_ref().pending_transfers(),
+        )
+    };
+
+    // transfers wait for session window
+    let t1 = send(b"1");
+    let mut t2 = send(b"2");
+    assert_eq!(pending(), (0, 2));
+    drop(t1);
+    assert_eq!(pending(), (0, 1));
+
+    // transfers wait for link credit
+    link_flow(&conn, 4, (0, 0, false), 1, 0);
+    let t3 = send(b"3");
+    let mut t4 = send(b"4");
+    assert_eq!(pending(), (2, 1));
+    drop(t3);
+    assert_eq!(pending(), (1, 1));
+
+    // repeatedly cancelled transfers do not accumulate
+    for _ in 0..10 {
+        drop(send(b"5"));
+    }
+    assert_eq!(pending(), (1, 1));
+
+    // remaining waiters are served
+    link_flow(&conn, 4, (0, 2, false), 1, 2);
+    assert!(matches!(poll(&mut t2), Poll::Ready(Ok(_))));
+    assert!(matches!(poll(&mut t4), Poll::Ready(Ok(_))));
+    assert_eq!(pending(), (0, 0));
+    ntex::time::sleep(ntex::time::Millis(50)).await;
+    assert_eq!(
+        transfer_frames(&client)
+            .into_iter()
+            .filter(|f| f.starts_with("Transfer"))
+            .collect::<Vec<_>>(),
+        [
+            "Transfer Some(0) more:false aborted:false",
+            "Transfer Some(1) more:false aborted:false"
+        ]
+    );
+}
+
+#[ntex::test]
+async fn sender_cancelled_waiter_keeps_queued_abort() {
+    use ntex::time::{Millis, sleep};
+
+    let (_io, conn, client, _snd, t2) = queued_abort_sender().await;
+    let s = session(&conn);
+
+    // waiter leaves the queue, abort of cancelled delivery stays
+    drop(t2);
+    assert_eq!(s.inner.get_ref().pending_transfers(), 1);
+    session_window(&conn, 2, 1);
+    assert_eq!(s.inner.get_ref().pending_transfers(), 0);
+    sleep(Millis(50)).await;
+    assert_eq!(
+        transfer_frames(&client),
+        ["Transfer Some(0) more:false aborted:true"]
+    );
+}

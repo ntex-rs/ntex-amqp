@@ -278,6 +278,11 @@ impl SenderLinkInner {
         self.id as u32
     }
 
+    #[cfg(test)]
+    pub(crate) fn pending_transfers(&self) -> usize {
+        self.pending_transfers.len()
+    }
+
     pub(crate) fn remote_detached(&mut self, err: AmqpProtocolError) {
         log::trace!(
             "{}: Detaching sender link {:?} with error {:?}",
@@ -478,9 +483,8 @@ impl SenderLinkInner {
                 let (tx, rx) = inner.session.inner.get_ref().pool_credit.channel();
                 inner.pending_transfers.push_back(tx);
                 CreditWaiter {
-                    rx,
+                    rx: Some(rx),
                     link: link.clone(),
-                    done: false,
                 }
                 .await?;
                 woken = true;
@@ -585,19 +589,23 @@ impl SenderLinkInner {
 
 /// Waits for link credit
 ///
-/// Woken waiter is counted as active until it resumes or gets dropped
+/// Woken waiter is counted as active until it resumes or gets dropped,
+/// cancelled waiter leaves the queue
 struct CreditWaiter {
-    rx: pool::Receiver<Result<(), AmqpProtocolError>>,
+    // `None` after completion
+    rx: Option<pool::Receiver<Result<(), AmqpProtocolError>>>,
     link: Cell<SenderLinkInner>,
-    done: bool,
 }
 
 impl Future for CreditWaiter {
     type Output = Result<(), AmqpProtocolError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let result = ready!(self.rx.poll_recv(cx));
-        self.done = true;
+        let Some(rx) = self.rx.as_ref() else {
+            return Poll::Ready(Err(AmqpProtocolError::ConnectionDropped));
+        };
+        let result = ready!(rx.poll_recv(cx));
+        self.rx = None;
         Poll::Ready(match result {
             Ok(Ok(())) => {
                 self.link.get_mut().active -= 1;
@@ -611,15 +619,22 @@ impl Future for CreditWaiter {
 
 impl Drop for CreditWaiter {
     fn drop(&mut self) {
-        // waiter is dropped after wake up
-        if !self.done
-            && let Poll::Ready(Ok(Ok(()))) =
-                self.rx.poll_recv(&mut Context::from_waker(Waker::noop()))
-        {
+        if let Some(rx) = self.rx.take() {
             let link = self.link.get_mut();
-            link.active -= 1;
-            link.wake_pending();
-            link.drain_and_post();
+            match rx.poll_recv(&mut Context::from_waker(Waker::noop())) {
+                // waiter is dropped after wake up
+                Poll::Ready(Ok(Ok(()))) => {
+                    link.active -= 1;
+                    link.wake_pending();
+                    link.drain_and_post();
+                }
+                // waiter is still queued
+                Poll::Pending => {
+                    drop(rx);
+                    link.pending_transfers.retain(|tx| !tx.is_canceled());
+                }
+                Poll::Ready(_) => (),
+            }
         }
     }
 }

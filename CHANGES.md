@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix cancelled sender link transfers stayed in credit and session window queues
+
 * Fix local link detach waited forever if remote peer did not confirm it, use link attach timeout
 
 * Fix receiver link transfer errors re-entered session state while it was borrowed
