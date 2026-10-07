@@ -505,12 +505,24 @@ async fn service_readiness_errors() {
         let err = h.disp.ready().await.err().unwrap();
         assert!(matches!(err, AmqpDispatcherError::Service));
 
-        // BUG: `Dispatcher::ready` drops the future returned by
-        // `ConnectionRef::close_with_error`, so the connection is never closed
-        // and the `Close` frame carrying the service error is never sent.
+        // connection is closed with the readiness error
         sleep(Millis(25)).await;
-        assert!(read_frames(&h.client).is_empty());
-        assert!(h.conn.is_opened());
+        let [Frame::Close(close)] = &read_frames(&h.client)[..] else {
+            panic!("expected Close frame, publish: {publish}");
+        };
+        assert_eq!(
+            close
+                .error
+                .as_ref()
+                .and_then(|e| e.description())
+                .map(ntex_bytes::ByteString::as_str),
+            Some(if publish {
+                "publish is not ready"
+            } else {
+                "control is not ready"
+            })
+        );
+        assert!(!h.conn.is_opened());
     }
 }
 
@@ -601,6 +613,12 @@ async fn control_error_on_protocol_error_stops_dispatcher() {
         h.conn.get_error(),
         Some(AmqpProtocolError::KeepAliveTimeout)
     ));
+    // connection is closed
+    sleep(Millis(25)).await;
+    let [Frame::Close(close)] = &read_frames(&h.client)[..] else {
+        panic!("expected Close frame");
+    };
+    assert!(close.error.is_none());
 }
 
 #[ntex::test]
