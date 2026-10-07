@@ -97,7 +97,12 @@ fn attach() -> Frame {
     .into()
 }
 
-fn transfer(delivery_id: u32, more: bool, state: Option<DeliveryState>, body: u8) -> Frame {
+pub(crate) fn transfer(
+    delivery_id: u32,
+    more: bool,
+    state: Option<DeliveryState>,
+    body: u8,
+) -> Frame {
     Transfer(Box::new(TransferInner {
         handle: 0,
         delivery_id: Some(delivery_id),

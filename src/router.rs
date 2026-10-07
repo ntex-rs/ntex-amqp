@@ -215,8 +215,7 @@ async fn service_call<S>(
             return Ok(());
         }
 
-        if link.credit() == 0 {
-            // self.has_credit = self.link.credit() != 0;
+        if link.needs_credit() {
             link.set_link_credit(50);
         }
 
@@ -312,7 +311,7 @@ mod tests {
     use ntex_amqp_codec::protocol::Role;
 
     use super::*;
-    use crate::tests::connection::{begin, connection, handle_frame, named_attach};
+    use crate::tests::connection::{begin, connection, handle_frame, named_attach, transfer};
     use crate::types::Action;
 
     struct Srv(Rc<AtomicUsize>);
@@ -393,5 +392,75 @@ mod tests {
         srv.shutdown().await;
         assert!(inner.get_ref().handlers.is_empty());
         assert_eq!(shutdowns.load(Ordering::Relaxed), 3);
+    }
+
+    /// Pauses link on first transfer
+    struct PauseSrv(ReceiverLink, std::cell::Cell<bool>);
+
+    impl Service<Link<()>, Transfer> for PauseSrv {
+        type Res = Outcome;
+        type Error = LinkError;
+
+        async fn call(
+            &self,
+            _: Transfer,
+            _: Ctx<'_, Self, Link<()>>,
+        ) -> Result<Outcome, LinkError> {
+            if !self.1.replace(true) {
+                self.0.reset_link_credit(0);
+            }
+            Ok(Outcome::Accept)
+        }
+    }
+
+    #[ntex::test]
+    async fn paused_link_credit() {
+        let (_io, conn, _client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, frm, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "p", "p", 0))
+        else {
+            panic!()
+        };
+
+        let router = Router::<()>::builder().service("p", async |link: &Link<()>| {
+            Ok::<_, LinkError>(PauseSrv(
+                link.receiver().clone(),
+                std::cell::Cell::new(false),
+            ))
+        });
+        let mut patterns = PatternRouter::builder();
+        for (addr, hnd) in router.0 {
+            patterns.path(addr, hnd);
+        }
+        let inner = Cell::new(RouterServiceInner {
+            state: State::new(()),
+            router: Rc::new(patterns.build()),
+            handlers: HashMap::default(),
+        });
+        let srv = Pipeline::new(State::new(()), RouterService(inner.clone()));
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(2);
+
+        let transfer = async |id| {
+            let Ok(Action::Transfer(link)) = handle_frame(&conn, transfer(id, false, None, 1))
+            else {
+                panic!()
+            };
+            srv.call(Message::Transfer(link)).await.unwrap();
+        };
+
+        // handler pauses link, in-flight transfer does not restore credit
+        transfer(0).await;
+        transfer(1).await;
+        assert_eq!(link.credit(), 0);
+
+        // added credit resumes router credit management
+        link.set_link_credit(1);
+        transfer(2).await;
+        assert_eq!(link.credit(), 50);
     }
 }

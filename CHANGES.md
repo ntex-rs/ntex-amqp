@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix router added link credit to link paused by `ReceiverLink::reset_link_credit(0)`
+
 * Fix receiver ignored `settled` flag on continuation transfers, dropped delivery was rejected
 
 * Fix duplicate delivery-id of unsettled delivery left original delivery without disposition,
