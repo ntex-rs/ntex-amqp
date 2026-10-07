@@ -547,6 +547,19 @@ impl ReceiverLinkInner {
                     return self.delivery_aborted();
                 }
 
+                // sender could settle delivery on any continuation transfer
+                if transfer.settled() == Some(true)
+                    && let Some((delivery, _)) = self.queue.back()
+                    && let Some(inner) = self
+                        .session
+                        .inner
+                        .get_mut()
+                        .unsettled_rcv_deliveries
+                        .get_mut(&delivery.id())
+                {
+                    inner.handle_disposition(true, None);
+                }
+
                 // merge transfer data and check size
                 if let Some(transfer_body) = transfer.0.body.take() {
                     if size_exceeded(self.max_message_size, body.len() + transfer_body.len()) {
