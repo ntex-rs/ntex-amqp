@@ -312,7 +312,7 @@ mod tests {
     use ntex_amqp_codec::protocol::Role;
 
     use super::*;
-    use crate::connection::tests::{begin, connection, handle_frame, named_attach};
+    use crate::tests::connection::{begin, connection, handle_frame, named_attach};
     use crate::types::Action;
 
     struct Srv(Rc<AtomicUsize>);

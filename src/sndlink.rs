@@ -6,7 +6,7 @@ use ntex_amqp_codec::protocol::{
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
 use ntex_bytes::{BufMut, ByteString, Bytes};
-use ntex_util::channel::{condition, oneshot, pool};
+use ntex_util::channel::{condition, pool};
 use ntex_util::time::{Seconds, timeout_checked};
 
 use crate::delivery::TransferBuilder;
@@ -66,40 +66,40 @@ impl SenderLink {
         SenderLink { inner }
     }
 
-    #[inline]
     /// Id of the sender link
+    #[inline]
     pub fn id(&self) -> u32 {
-        self.inner.id as u32
+        self.inner.get_ref().id()
     }
 
-    #[inline]
     /// Name of the sender link
+    #[inline]
     pub fn name(&self) -> &ByteString {
-        &self.inner.name
+        &self.inner.get_ref().name
     }
 
-    #[inline]
     /// Address of the node the link is attached to
     ///
     /// Source address for remotely opened links, target address for locally opened links.
+    #[inline]
     pub fn address(&self) -> Option<&ByteString> {
-        self.inner.address.as_ref()
+        self.inner.get_ref().address.as_ref()
     }
 
-    #[inline]
     /// Remote handle
+    #[inline]
     pub fn remote_handle(&self) -> Handle {
-        self.inner.remote_handle
+        self.inner.get_ref().remote_handle
     }
 
-    #[inline]
     /// Reference to session
+    #[inline]
     pub fn session(&self) -> &Session {
         &self.inner.get_ref().session
     }
 
-    #[inline]
     /// Returns available send credit
+    #[inline]
     pub fn credit(&self) -> u32 {
         self.inner.get_ref().link_credit
     }
@@ -123,26 +123,26 @@ impl SenderLink {
         }
     }
 
+    /// Check if link is closed
     #[inline]
-    /// Check is link is closed
     pub fn is_closed(&self) -> bool {
-        self.inner.closed
+        self.inner.get_ref().closed
     }
 
+    /// Check if link is opened
     #[inline]
-    /// Check link state
     pub fn is_opened(&self) -> bool {
-        !self.inner.closed
+        !self.is_closed()
     }
 
-    /// Check link error
+    /// Link error
     pub fn error(&self) -> Option<&AmqpProtocolError> {
         self.inner.get_ref().error.as_ref()
     }
 
+    /// Start delivery process
     #[doc(hidden)]
     #[deprecated]
-    /// Start delivery process
     pub fn delivery<T>(&self, body: T) -> TransferBuilder
     where
         T: Into<TransferBody>,
@@ -174,6 +174,7 @@ impl SenderLink {
         self.inner.get_mut().close(Some(error.into()))
     }
 
+    /// Notify when link is closed
     pub fn on_close(&self) -> condition::Waiter {
         self.inner.get_ref().on_close.wait()
     }
@@ -186,6 +187,7 @@ impl SenderLink {
         self.inner.get_ref().on_credit.wait()
     }
 
+    /// Max message size, `None` means unlimited
     pub fn max_message_size(&self) -> Option<u32> {
         self.inner.get_ref().max_message_size
     }
@@ -259,10 +261,6 @@ impl SenderLinkInner {
         self.id as u32
     }
 
-    pub(crate) fn max_message_size(&self) -> Option<u32> {
-        self.max_message_size
-    }
-
     pub(crate) fn remote_detached(&mut self, err: AmqpProtocolError) {
         log::trace!(
             "{}: Detaching sender link {:?} with error {:?}",
@@ -301,23 +299,11 @@ impl SenderLinkInner {
             // fail transfers waiting for link credit or session window
             let err = AmqpProtocolError::Disconnected;
             self.local_detached(&err);
-            self.session
-                .inner
-                .get_mut()
-                .drop_link_transfers(self.id as Handle, &err);
-
-            let (tx, rx) = oneshot::channel();
-
-            self.session
-                .inner
-                .get_mut()
-                .detach_sender_link(self.id as Handle, true, error, tx);
-
-            match rx.await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(AmqpProtocolError::Disconnected),
-            }
+            let session = self.session.inner.get_mut();
+            session.drop_link_transfers(self.id as Handle, &err);
+            session
+                .detach_sender_link(self.id as Handle, true, error)
+                .await
         }
     }
 
@@ -742,25 +728,25 @@ impl SenderLinkBuilder {
         }
     }
 
-    #[must_use]
     /// Set max message size
+    #[must_use]
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
     }
 
-    #[must_use]
     /// Set link attach timeout
     ///
     /// By default connection's link attach timeout is used.
     /// Use `Seconds::ZERO` to disable timeout.
+    #[must_use]
     pub fn attach_timeout(mut self, timeout: Seconds) -> Self {
         self.timeout = timeout;
         self
     }
 
-    #[must_use]
     /// Modify attach frame
+    #[must_use]
     pub fn with_frame<F>(mut self, f: F) -> Self
     where
         F: FnOnce(&mut Attach),
@@ -775,6 +761,6 @@ impl SenderLinkBuilder {
         let inner = timeout_checked(self.timeout, rx.recv())
             .await
             .map_err(|()| AmqpProtocolError::LinkAttachTimeout)??;
-        Ok(SenderLink { inner })
+        Ok(SenderLink::new(inner))
     }
 }

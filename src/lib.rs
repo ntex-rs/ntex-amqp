@@ -327,3 +327,6 @@ pub(crate) fn detach<T: Encode + Decode + Clone>(val: &T) -> T {
     buf.trimdown();
     T::decode(&mut buf).unwrap_or_else(|_| val.clone())
 }
+
+#[cfg(test)]
+mod tests;
