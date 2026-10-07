@@ -1,5 +1,5 @@
 use std::task::{Context, Poll, Waker, ready};
-use std::{collections::VecDeque, future::Future, pin::Pin};
+use std::{collections::VecDeque, future::Future, future::poll_fn, pin::Pin};
 
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
@@ -106,20 +106,37 @@ impl SenderLink {
 
     /// Get notification when packet could be send to the peer.
     ///
-    /// Result indicates if connection is alive
+    /// Packet could be sent if link has credit and remote session
+    /// incoming window is available. Result indicates if link is alive
     pub async fn ready(&self) -> bool {
         loop {
-            let waiter = {
+            let (credit, window) = {
                 let inner = self.inner.get_ref();
                 if inner.closed {
                     return false;
                 }
-                if inner.link_credit > 0 {
-                    return true;
+                // closed link notifies credit waiters
+                let credit = inner.on_credit.wait();
+                if inner.link_credit == 0 {
+                    (credit, None)
+                } else {
+                    let session = inner.session.inner.get_ref();
+                    if session.has_window() {
+                        return true;
+                    }
+                    (credit, Some(session.on_window.wait()))
                 }
-                inner.on_credit.wait()
             };
-            waiter.await;
+            poll_fn(|cx| {
+                if credit.poll_ready(cx).is_ready()
+                    || window.as_ref().is_some_and(|w| w.poll_ready(cx).is_ready())
+                {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            })
+            .await;
         }
     }
 

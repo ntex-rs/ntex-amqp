@@ -49,6 +49,8 @@ pub(crate) struct SessionInner {
     remote_incoming_window: u32,
     // window claimed by woken transfers that have not sent their frame yet
     pub(crate) window_woken: u32,
+    // notified if remote incoming window becomes available
+    pub(crate) on_window: condition::Condition,
 
     links: Slab<Either<SenderLinkState, ReceiverLinkState>>,
     // link names by direction, and names of links by index
@@ -503,6 +505,7 @@ impl SessionInner {
             next_incoming_id: begin.next_outgoing_id(),
             remote_incoming_window: begin.incoming_window(),
             window_woken: 0,
+            on_window: condition::Condition::new(),
             remote_outgoing_window: begin.outgoing_window(),
             flags: if local { Flags::LOCAL } else { Flags::empty() },
             next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
@@ -1820,7 +1823,7 @@ impl SessionInner {
     ///
     /// Number of woken transfers is limited by window not claimed by woken transfers
     fn wake_window_waiters(&mut self) {
-        while self.remote_incoming_window > self.window_woken
+        while self.has_window()
             && let Some(tr) = self.pending_transfers.pop_front()
         {
             match tr.kind {
@@ -1832,6 +1835,16 @@ impl SessionInner {
                 Pending::Abort(id) => self.post_abort(tr.link_handle, id),
             }
         }
+        if self.has_window() {
+            self.on_window.notify(());
+        }
+    }
+
+    /// Remote incoming window not claimed by woken transfers is available
+    ///
+    /// Queued transfers and aborts leave no window
+    pub(crate) fn has_window(&self) -> bool {
+        self.remote_incoming_window > self.window_woken
     }
 
     pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
@@ -2017,7 +2030,7 @@ impl SessionInner {
     /// Abort waits in order with transfers if remote incoming window
     /// not claimed by woken transfers is not available
     pub(crate) fn abort_transfer(&mut self, link_handle: Handle, delivery_id: DeliveryNumber) {
-        if self.remote_incoming_window > self.window_woken {
+        if self.has_window() {
             self.post_abort(link_handle, delivery_id);
         } else {
             log::trace!(

@@ -1024,3 +1024,54 @@ async fn sender_detach_drops_queued_abort() {
         assert_eq!(session(&conn).inner.get_ref().pending_transfers(), 0);
     }
 }
+
+#[ntex::test]
+async fn sender_ready_waits_for_session_window() {
+    let (_io, conn, _client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let snd = add_sender(&conn, "s", 4, 0);
+    assert_eq!(snd.credit(), 10);
+    let poll = |fut: &mut Pin<Box<dyn Future<Output = bool> + '_>>| {
+        fut.as_mut()
+            .poll(&mut Context::from_waker(std::task::Waker::noop()))
+    };
+
+    // link credit is available, remote session window is not
+    let mut ready: Pin<Box<dyn Future<Output = bool>>> = Box::pin(snd.ready());
+    assert!(poll(&mut ready).is_pending());
+    session_window(&conn, 1, 1);
+    assert_eq!(poll(&mut ready), Poll::Ready(true));
+    assert!(snd.ready().await);
+
+    // window claimed by woken transfer is not available
+    session_window(&conn, 1, 0);
+    let mut tr = Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send());
+    assert!(
+        tr.as_mut()
+            .poll(&mut Context::from_waker(std::task::Waker::noop()))
+            .is_pending()
+    );
+    let mut ready: Pin<Box<dyn Future<Output = bool>>> = Box::pin(snd.ready());
+    assert!(poll(&mut ready).is_pending());
+    session_window(&conn, 1, 1);
+    assert!(poll(&mut ready).is_pending());
+
+    // released claim makes window available
+    drop(tr);
+    assert_eq!(poll(&mut ready), Poll::Ready(true));
+
+    // window is available, link credit is not
+    link_flow(&conn, 4, (0, 0, false), 1, 1);
+    assert_eq!(snd.credit(), 0);
+    let mut ready: Pin<Box<dyn Future<Output = bool>>> = Box::pin(snd.ready());
+    assert!(poll(&mut ready).is_pending());
+    link_flow(&conn, 4, (0, 5, false), 1, 1);
+    assert_eq!(poll(&mut ready), Poll::Ready(true));
+
+    // detached link wakes window waiter
+    session_window(&conn, 1, 0);
+    let mut ready: Pin<Box<dyn Future<Output = bool>>> = Box::pin(snd.ready());
+    assert!(poll(&mut ready).is_pending());
+    handle_frame(&conn, peer_detach(4)).unwrap();
+    assert_eq!(poll(&mut ready), Poll::Ready(false));
+}

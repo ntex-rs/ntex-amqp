@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix `SenderLink::ready()` did not wait for remote session incoming window
+
 * `ReceiverLink` debug output contains link name only, same as `SenderLink`
 
 * `Session::detach_sender_link()`/`detach_receiver_link()` futures do not borrow `Session`, `Session` debug output includes channel ids
