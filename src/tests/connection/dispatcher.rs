@@ -552,28 +552,27 @@ async fn control_error_closes_established_links() {
         let ctx = format!("detach: {detach}");
         assert_eq!(
             h.control.take(),
-            [if detach {
-                "RemoteDetachSender"
+            if detach {
+                vec!["RemoteDetachSender"]
             } else {
-                "Flow Some(5)"
-            }],
+                vec!["Flow Some(5)", "LocalDetachSender"]
+            },
             "{ctx}"
         );
-        // BUG: `ControlState::handle_control_frame` (dispatcher.rs:325, :334) calls
-        // `link.close_with_error(err)` which returns a future, and drops it. The link
-        // is not closed and the error is never sent to the peer. Expected: a `Detach`
-        // carrying "call failed" in both cases, and a closed link.
-        assert_eq!(snd.is_closed(), detach, "{ctx}");
+        // remotely detached link is already closed, detach response carries no error
+        assert!(snd.is_closed(), "{ctx}");
         assert_eq!(
             detaches(&h.client)
                 .iter()
                 .map(|d| (
                     d.0,
                     d.1,
-                    d.2.as_ref().and_then(|e| e.description().cloned())
+                    d.2.as_ref()
+                        .and_then(|e| e.description())
+                        .map(|s| s.as_str().to_string())
                 ))
                 .collect::<Vec<_>>(),
-            if detach { vec![(0, true, None)] } else { vec![] },
+            vec![(0, true, (!detach).then(|| "call failed".to_string()))],
             "{ctx}"
         );
     }

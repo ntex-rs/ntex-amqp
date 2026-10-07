@@ -1,6 +1,9 @@
 # Changes
 
-## [6.2.0] - Unreleased
+## [6.2.0] - 2026-10-07
+
+* Fix `SenderLink::close()` did nothing until returned future was polled, control service error
+  on `Flow` did not detach sender link
 
 * Fix server sasl challenge/response handshake, `SaslResponse::outcome()` waited for an extra sasl frame
 
