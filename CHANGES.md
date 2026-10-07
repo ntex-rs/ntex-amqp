@@ -2,6 +2,10 @@
 
 ## [6.2.0] - Unreleased
 
+* `ReceiverLink` debug output contains link name only, same as `SenderLink`
+
+* `Session::detach_sender_link()`/`detach_receiver_link()` futures do not borrow `Session`, `Session` debug output includes channel ids
+
 * Fix dispositions were sent for unsettled deliveries of detached links
 
 * Fix `Delivery::wait()` returned on non-terminal disposition (no state or `Received`), consumed `Modified` outcome, and failed concurrent waiters with `ConnectionDropped`

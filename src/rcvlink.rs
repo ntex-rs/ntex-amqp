@@ -11,17 +11,16 @@ use ntex_amqp_codec::protocol::{
 use ntex_amqp_codec::{Encode, types::Symbol, types::Variant};
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::time::{Seconds, timeout_checked};
-use ntex_util::{Stream, channel::oneshot, task::LocalWaker};
+use ntex_util::{Stream, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
 use crate::{Delivery, cell::Cell, detach, error::AmqpProtocolError, types::Action};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ReceiverLink {
     pub(crate) inner: Cell<ReceiverLinkInner>,
 }
 
-#[derive(Debug)]
 pub(crate) struct ReceiverLinkInner {
     name: ByteString,
     handle: Handle,
@@ -37,6 +36,22 @@ pub(crate) struct ReceiverLinkInner {
     error: Option<AmqpProtocolError>,
     partial_body: Option<BytePages>,
     max_message_size: u64,
+}
+
+impl std::fmt::Debug for ReceiverLink {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_tuple("ReceiverLink")
+            .field(&self.inner.get_ref().name)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for ReceiverLinkInner {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_tuple("ReceiverLinkInner")
+            .field(&&*self.name)
+            .finish()
+    }
 }
 
 impl Eq for ReceiverLink {}
@@ -58,26 +73,38 @@ impl ReceiverLink {
         ReceiverLink { inner }
     }
 
+    /// Name of the receiver link
+    #[inline]
     pub fn name(&self) -> &ByteString {
         &self.inner.get_ref().name
     }
 
+    /// Local handle
+    #[inline]
     pub fn handle(&self) -> Handle {
-        self.inner.get_ref().handle as Handle
+        self.inner.get_ref().handle
     }
 
+    /// Remote handle
+    #[inline]
     pub fn remote_handle(&self) -> Handle {
-        self.inner.get_ref().remote_handle as Handle
+        self.inner.get_ref().remote_handle
     }
 
+    /// Returns available link credit
+    #[inline]
     pub fn credit(&self) -> u32 {
         self.inner.get_ref().credit
     }
 
+    /// Reference to session
+    #[inline]
     pub fn session(&self) -> &Session {
         &self.inner.get_ref().session
     }
 
+    /// Check if link is closed
+    #[inline]
     pub fn is_closed(&self) -> bool {
         self.inner.get_ref().closed
     }
@@ -119,20 +146,15 @@ impl ReceiverLink {
         self.inner.get_mut().max_message_size = size;
     }
 
-    /// Check deliveries
+    /// Check if link has completely received deliveries
     pub fn has_deliveries(&self) -> bool {
-        let inner = self.inner.get_ref();
-        if inner.partial_body.is_none() {
-            !inner.queue.is_empty()
-        } else {
-            inner.queue.len() > 1
-        }
+        self.inner.get_ref().ready_deliveries() > 0
     }
 
-    /// Get delivery
+    /// Get completely received delivery
     pub fn get_delivery(&self) -> Option<(Delivery, Transfer)> {
         let inner = self.inner.get_mut();
-        if inner.partial_body.is_none() || inner.queue.len() > 1 {
+        if inner.ready_deliveries() > 0 {
             inner.queue.pop_front()
         } else {
             None
@@ -142,17 +164,19 @@ impl ReceiverLink {
     /// Send disposition frame
     pub fn send_disposition(&self, disp: Disposition) {
         self.inner
-            .get_mut()
+            .get_ref()
             .session
             .inner
             .get_mut()
             .post_frame(disp.into());
     }
 
+    /// Close receiver link
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         self.inner.get_mut().close(None)
     }
 
+    /// Close receiver link with error
     pub fn close_with_error<E>(
         &self,
         error: E,
@@ -161,43 +185,6 @@ impl ReceiverLink {
         Error: From<E>,
     {
         self.inner.get_mut().close(Some(error.into()))
-    }
-
-    pub(crate) fn remote_detached(&self, error: Option<Error>) {
-        let inner = self.inner.get_mut();
-        if let Some(ref error) = error {
-            log::warn!(
-                "{}: Receiver link has been closed remotely handle: {:?} name: {:?} error: {:?}",
-                inner.session.tag(),
-                inner.remote_handle,
-                inner.name,
-                error
-            );
-        } else {
-            log::trace!(
-                "{}: Receiver link has been closed remotely handle: {:?} name: {:?}",
-                inner.session.tag(),
-                inner.remote_handle,
-                inner.name
-            );
-        }
-        inner.closed = true;
-        inner.error = error.map(|err| AmqpProtocolError::LinkDetached(Some(err)));
-        inner.wake();
-    }
-
-    /// Session is ended or connection is closed
-    pub(crate) fn session_ended(&self, err: AmqpProtocolError) {
-        let inner = self.inner.get_mut();
-        log::trace!(
-            "{}: Receiver link is closed by session error handle: {:?} name: {:?} error: {err:?}",
-            inner.session.tag(),
-            inner.remote_handle,
-            inner.name,
-        );
-        inner.closed = true;
-        inner.error = Some(err);
-        inner.wake();
     }
 
     /// Attempt to pull out the next value of this receiver, registering
@@ -214,27 +201,13 @@ impl ReceiverLink {
         &self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<(Delivery, Transfer), AmqpProtocolError>>> {
-        let inner = self.inner.get_mut();
+        if let Some(tr) = self.get_delivery() {
+            return Poll::Ready(Some(Ok(tr)));
+        }
 
-        if inner.partial_body.is_some() && inner.queue.len() == 1 {
-            if inner.closed {
-                if let Some(err) = inner.error.take() {
-                    Poll::Ready(Some(Err(err)))
-                } else {
-                    Poll::Ready(None)
-                }
-            } else {
-                inner.reader_task.register(cx.waker());
-                Poll::Pending
-            }
-        } else if let Some(tr) = inner.queue.pop_front() {
-            Poll::Ready(Some(Ok(tr)))
-        } else if inner.closed {
-            if let Some(err) = inner.error.take() {
-                Poll::Ready(Some(Err(err)))
-            } else {
-                Poll::Ready(None)
-            }
+        let inner = self.inner.get_mut();
+        if inner.closed {
+            Poll::Ready(inner.error.take().map(Err))
         } else {
             inner.reader_task.register(cx.waker());
             Poll::Pending
@@ -283,6 +256,51 @@ impl ReceiverLinkInner {
         self.reader_task.wake();
     }
 
+    /// Number of completely received deliveries
+    fn ready_deliveries(&self) -> usize {
+        self.queue
+            .len()
+            .saturating_sub(usize::from(self.partial_body.is_some()))
+    }
+
+    /// Link is detached by peer
+    pub(crate) fn remote_detached(&mut self, error: Option<Error>) {
+        if let Some(ref error) = error {
+            log::warn!(
+                "{}: Receiver link has been closed remotely handle: {:?} name: {:?} error: {:?}",
+                self.session.tag(),
+                self.remote_handle,
+                self.name,
+                error
+            );
+        } else {
+            log::trace!(
+                "{}: Receiver link has been closed remotely handle: {:?} name: {:?}",
+                self.session.tag(),
+                self.remote_handle,
+                self.name
+            );
+        }
+        self.set_closed(error.map(|err| AmqpProtocolError::LinkDetached(Some(err))));
+    }
+
+    /// Session is ended or connection is closed
+    pub(crate) fn session_ended(&mut self, err: AmqpProtocolError) {
+        log::trace!(
+            "{}: Receiver link is closed by session error handle: {:?} name: {:?} error: {err:?}",
+            self.session.tag(),
+            self.remote_handle,
+            self.name,
+        );
+        self.set_closed(Some(err));
+    }
+
+    fn set_closed(&mut self, error: Option<AmqpProtocolError>) {
+        self.closed = true;
+        self.error = error;
+        self.wake();
+    }
+
     /// Link flow state `(handle, delivery-count, link-credit, drain)`
     pub(crate) fn flow_state(&self) -> (Handle, SequenceNo, u32, bool) {
         (self.handle, self.delivery_count, self.credit, false)
@@ -316,22 +334,18 @@ impl ReceiverLinkInner {
         &mut self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        let (tx, rx) = oneshot::channel();
-        if self.closed {
-            let _ = tx.send(Ok(()));
-        } else {
+        let detach = (!self.closed).then(|| {
             self.session
                 .inner
                 .get_mut()
-                .detach_receiver_link(self.handle, true, error, tx);
-        }
+                .detach_receiver_link(self.handle, true, error)
+        });
         self.local_detached();
 
         async move {
-            match rx.await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(AmqpProtocolError::Disconnected),
+            match detach {
+                Some(detach) => detach.await,
+                None => Ok(()),
             }
         }
     }
@@ -615,18 +629,18 @@ impl ReceiverLinkBuilder {
         }
     }
 
-    #[must_use]
     /// Set max message size
     ///
     /// Larger messages detach the link with `message-size-exceeded` error.
     /// If max size is set to `0`, size is unlimited.
+    #[must_use]
     pub fn max_message_size(mut self, size: u64) -> Self {
         self.frame.0.max_message_size = Some(size);
         self
     }
 
-    #[must_use]
     /// Set or reset a receive link property
+    #[must_use]
     pub fn property<K, V>(mut self, key: K, value: Option<V>) -> Self
     where
         Symbol: From<K>,
@@ -642,26 +656,26 @@ impl ReceiverLinkBuilder {
         self
     }
 
+    /// Set link capabilities
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    /// Set link capabilities
     pub fn capabilities(mut self, caps: Symbols) -> Self {
         self.frame.source_mut().as_mut().unwrap().capabilities = Some(caps);
         self
     }
 
-    #[must_use]
     /// Set link attach timeout
     ///
     /// By default connection's link attach timeout is used.
     /// Use `Seconds::ZERO` to disable timeout.
+    #[must_use]
     pub fn attach_timeout(mut self, timeout: Seconds) -> Self {
         self.timeout = timeout;
         self
     }
 
-    #[must_use]
     /// Modify attach frame
+    #[must_use]
     pub fn with_frame<F>(mut self, f: F) -> Self
     where
         F: FnOnce(&mut Attach),

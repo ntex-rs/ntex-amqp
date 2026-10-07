@@ -69,7 +69,11 @@ pub(crate) struct SessionInner {
 
 impl fmt::Debug for Session {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.debug_struct("Session").finish()
+        let inner = self.inner.get_ref();
+        fmt.debug_struct("Session")
+            .field("local_channel_id", &inner.id())
+            .field("remote_channel_id", &inner.remote_channel_id)
+            .finish()
     }
 }
 
@@ -78,68 +82,72 @@ impl Session {
         Session { inner }
     }
 
-    #[inline]
     /// Get begin frame reference
+    #[inline]
     pub fn frame(&self) -> &Begin {
         &self.inner.get_ref().begin
     }
 
-    #[inline]
     /// Get io tag for current connection
+    #[inline]
     pub fn tag(&self) -> &'static str {
         self.inner.get_ref().sink.tag()
     }
 
+    /// Get connection reference
     #[inline]
     pub fn connection(&self) -> &ConnectionRef {
         &self.inner.get_ref().sink
     }
 
+    /// Get local channel id
     #[inline]
     pub fn local_channel_id(&self) -> u16 {
         self.inner.get_ref().id()
     }
 
+    /// Get remote channel id
     #[inline]
     pub fn remote_channel_id(&self) -> u16 {
         self.inner.get_ref().remote_channel_id
     }
 
+    /// Get remote incoming window size
     #[inline]
-    /// Get remote window size
     pub fn remote_window_size(&self) -> u32 {
         self.inner.get_ref().remote_incoming_window
     }
 
+    /// End session
+    ///
+    /// Sends `End` frame and waits for peer's `End`. Returns error if
+    /// peer ended session with an error.
     pub async fn end(&self) -> Result<(), AmqpProtocolError> {
-        {
-            let inner = self.inner.get_mut();
+        let inner = self.inner.get_mut();
+        if inner.flags.contains(Flags::ENDED) {
+            return Ok(());
+        }
 
-            if inner.flags.contains(Flags::ENDED) {
-                return Ok(());
-            }
+        if !inner.flags.contains(Flags::ENDING) {
+            inner.sink.close_session(inner.id);
+            inner.post_frame(Frame::End(End { error: None }));
+            inner.flags.insert(Flags::ENDING);
+            inner
+                .sink
+                .get_control_queue()
+                .enqueue_frame(ControlFrame::new_kind(
+                    crate::ControlFrameKind::LocalSessionEnded(inner.get_all_links()),
+                ));
+        }
 
-            if !inner.flags.contains(Flags::ENDING) {
-                inner.sink.close_session(inner.id);
-                inner.post_frame(Frame::End(End { error: None }));
-                inner.flags.insert(Flags::ENDING);
-                inner
-                    .sink
-                    .get_control_queue()
-                    .enqueue_frame(ControlFrame::new_kind(
-                        crate::ControlFrameKind::LocalSessionEnded(inner.get_all_links()),
-                    ));
-            }
-
-            self.inner.closed.wait().await;
-            if let Some(err @ AmqpProtocolError::SessionEnded(Some(_))) = self.inner.error.clone() {
-                Err(err)
-            } else {
-                Ok(())
-            }
+        self.inner.closed.wait().await;
+        match self.inner.error.clone() {
+            Some(err @ AmqpProtocolError::SessionEnded(Some(_))) => Err(err),
+            _ => Ok(()),
         }
     }
 
+    /// Find established sender link by name
     pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
         let inner = self.inner.get_ref();
 
@@ -169,21 +177,25 @@ impl Session {
             })
     }
 
+    /// Find established sender link by local handle
     #[inline]
     pub fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
         self.inner.get_ref().get_sender_link_by_local_handle(hnd)
     }
 
+    /// Find established sender link by remote handle
     #[inline]
     pub fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
         self.inner.get_ref().get_sender_link_by_remote_handle(hnd)
     }
 
+    /// Find established receiver link by local handle
     #[inline]
     pub fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
         self.inner.get_ref().get_receiver_link_by_local_handle(hnd)
     }
 
+    /// Find established receiver link by remote handle
     #[inline]
     pub fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
         self.inner.get_ref().get_receiver_link_by_remote_handle(hnd)
@@ -195,9 +207,7 @@ impl Session {
         name: U,
         address: T,
     ) -> SenderLinkBuilder {
-        let name = name.into();
-        let address = address.into();
-        SenderLinkBuilder::new(name, address, self.inner.clone())
+        SenderLinkBuilder::new(name.into(), address.into(), self.inner.clone())
     }
 
     /// Open receiver link
@@ -206,9 +216,7 @@ impl Session {
         name: U,
         address: T,
     ) -> ReceiverLinkBuilder {
-        let name = name.into();
-        let address = address.into();
-        ReceiverLinkBuilder::new(name, address, self.inner.clone())
+        ReceiverLinkBuilder::new(name.into(), address.into(), self.inner.clone())
     }
 
     /// Detach receiver link
@@ -219,26 +227,10 @@ impl Session {
         &self,
         handle: Handle,
         error: Option<Error>,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        let (tx, rx) = oneshot::channel();
-
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
         self.inner
             .get_mut()
-            .detach_receiver_link(handle, false, error, tx);
-
-        async move {
-            match rx.await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => {
-                    log::trace!("Cannot complete detach receiver link {e:?}");
-                    Err(e)
-                }
-                Err(_) => {
-                    log::trace!("Cannot complete detach receiver link, connection is gone");
-                    Err(AmqpProtocolError::Disconnected)
-                }
-            }
-        }
+            .detach_receiver_link(handle, false, error)
     }
 
     /// Detach sender link
@@ -249,26 +241,10 @@ impl Session {
         &self,
         handle: Handle,
         error: Option<Error>,
-    ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        let (tx, rx) = oneshot::channel();
-
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
         self.inner
             .get_mut()
-            .detach_sender_link(handle, false, error, tx);
-
-        async move {
-            match rx.await {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => {
-                    log::trace!("Cannot complete detach sender link {e:?}");
-                    Err(e)
-                }
-                Err(_) => {
-                    log::trace!("Cannot complete detach sender link, connection is gone");
-                    Err(AmqpProtocolError::Disconnected)
-                }
-            }
-        }
+            .detach_sender_link(handle, false, error)
     }
 }
 
@@ -474,6 +450,17 @@ impl<T> Drop for AttachReceiver<T> {
     }
 }
 
+/// Wait for link detach confirmation
+async fn detach_response(
+    rx: oneshot::Receiver<Result<(), AmqpProtocolError>>,
+) -> Result<(), AmqpProtocolError> {
+    let res = rx.await.unwrap_or(Err(AmqpProtocolError::Disconnected));
+    if let Err(ref e) = res {
+        log::trace!("Cannot complete link detach: {e:?}");
+    }
+    res
+}
+
 fn detach_closed(idx: usize) -> Detach {
     Detach(Box::new(codec::DetachInner {
         handle: idx as Handle,
@@ -607,11 +594,11 @@ impl SessionInner {
                     }
                 }
                 Either::Right(ReceiverLinkState::Established(link)) => {
-                    link.session_ended(err.clone());
+                    link.inner.get_mut().session_ended(err.clone());
                 }
                 Either::Right(ReceiverLinkState::Opening(link, _)) => {
                     if let Some((link, _)) = link.as_ref() {
-                        ReceiverLink::new(link.clone()).session_ended(err.clone());
+                        link.get_mut().session_ended(err.clone());
                     }
                 }
                 Either::Right(ReceiverLinkState::OpeningLocal(item)) => {
@@ -847,7 +834,7 @@ impl SessionInner {
         let (flow, detach) = (flow.take(), detach.take());
 
         *response.handle_mut() = token as Handle;
-        *response.max_message_size_mut() = link.max_message_size().map(u64::from);
+        *response.max_message_size_mut() = link.max_message_size.map(u64::from);
         self.post_frame(response.into());
 
         // remote detached link before confirmation
@@ -894,19 +881,30 @@ impl SessionInner {
         SenderLink::new(link)
     }
 
-    /// Detach sender link
+    /// Detach sender link, returns detach confirmation future
     pub(crate) fn detach_sender_link(
+        &mut self,
+        id: Handle,
+        closed: bool,
+        error: Option<Error>,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
+        let (tx, rx) = oneshot::channel();
+        // session is ending, links are removed on session end
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            let _ = tx.send(Ok(()));
+        } else {
+            self.detach_sender_link_inner(id, closed, error, tx);
+        }
+        detach_response(rx)
+    }
+
+    fn detach_sender_link_inner(
         &mut self,
         id: Handle,
         closed: bool,
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
-        // session is ending, links are removed on session end
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
-            let _ = tx.send(Ok(()));
-            return;
-        }
         let has_remote_handle = self.has_remote_handle(id as usize);
         if let Some(Either::Left(link)) = self.links.get_mut(id as usize) {
             match link {
@@ -1198,8 +1196,8 @@ impl SessionInner {
                 .into(),
             );
 
+            link.get_mut().remote_detached(detach.0.error.clone());
             let link = ReceiverLink::new(link);
-            link.remote_detached(detach.0.error.clone());
             self.sink
                 .get_control_queue()
                 .enqueue_frame(ControlFrame::new(
@@ -1219,19 +1217,30 @@ impl SessionInner {
         true
     }
 
-    /// Detach receiver link
+    /// Detach receiver link, returns detach confirmation future
     pub(crate) fn detach_receiver_link(
+        &mut self,
+        id: Handle,
+        closed: bool,
+        error: Option<Error>,
+    ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
+        let (tx, rx) = oneshot::channel();
+        // session is ending, links are removed on session end
+        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+            let _ = tx.send(Ok(()));
+        } else {
+            self.detach_receiver_link_inner(id, closed, error, tx);
+        }
+        detach_response(rx)
+    }
+
+    fn detach_receiver_link_inner(
         &mut self,
         id: Handle,
         closed: bool,
         error: Option<Error>,
         tx: oneshot::Sender<Result<(), AmqpProtocolError>>,
     ) {
-        // session is ending, links are removed on session end
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
-            let _ = tx.send(Ok(()));
-            return;
-        }
         let has_remote_handle = self.has_remote_handle(id as usize);
         if let Some(Either::Right(link)) = self.links.get_mut(id as usize) {
             match link {
@@ -1712,7 +1721,7 @@ impl SessionInner {
                             .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
 
                         // detach rcv link
-                        link.remote_detached(error);
+                        link.inner.get_mut().remote_detached(error);
                         action = Action::DetachReceiver(link.clone(), frame);
                         true
                     }
