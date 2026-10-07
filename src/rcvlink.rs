@@ -36,6 +36,8 @@ pub(crate) struct ReceiverLinkInner {
     // delivery-limit advertised before credit was reduced, transfers
     // sent by peer before it received reduced credit are accepted (#2.6.7)
     in_flight_limit: Option<SequenceNo>,
+    // credit is reset to `0` by application, router does not add credit
+    paused: bool,
     error: Option<AmqpProtocolError>,
     partial_body: Option<BytePages>,
     max_message_size: u64,
@@ -148,8 +150,17 @@ impl ReceiverLink {
     ///
     /// Transfers sent by the remote sender before it received reduced
     /// credit are still accepted.
+    ///
+    /// Router does not add credit to the link reset to `0`, non-zero
+    /// credit resumes the link.
     pub fn reset_link_credit(&self, credit: u32) {
         self.inner.get_mut().reset_link_credit(credit);
+    }
+
+    /// Link credit is used up, and link is not paused by application
+    pub(crate) fn needs_credit(&self) -> bool {
+        let inner = self.inner.get_ref();
+        inner.credit == 0 && !inner.paused
     }
 
     /// Set max message size.
@@ -268,6 +279,7 @@ impl ReceiverLinkInner {
             queue: VecDeque::with_capacity(4),
             credit: 0,
             in_flight_limit: None,
+            paused: false,
             error: None,
             partial_body: None,
             delivery_count: frame.initial_delivery_count().unwrap_or(0),
@@ -452,6 +464,9 @@ impl ReceiverLinkInner {
         if self.closed {
             return;
         }
+        if credit > 0 {
+            self.paused = false;
+        }
         self.update_credit(self.credit.saturating_add(credit));
     }
 
@@ -467,6 +482,7 @@ impl ReceiverLinkInner {
                 self.in_flight_limit = Some(limit);
             }
         }
+        self.paused = credit == 0;
         self.update_credit(credit);
     }
 
