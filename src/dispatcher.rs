@@ -1,5 +1,5 @@
 use std::task::{Context, Poll, ready};
-use std::{cell, cmp, future::Future, future::poll_fn, marker, pin::Pin, rc::Rc};
+use std::{cell, cmp, future::poll_fn, rc::Rc};
 
 use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
@@ -12,7 +12,7 @@ use ntex_util::time::{Millis, Sleep, sleep};
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
 use crate::connection::{Connection, ConnectionRef};
 use crate::error::{AmqpDispatcherError, AmqpProtocolError, Error};
-use crate::{ControlFrame, ControlFrameKind, ReceiverLink, types};
+use crate::{ControlFrame, ControlFrameKind, types};
 
 /// Amqp server dispatcher service.
 pub(crate) struct Dispatcher {
@@ -398,37 +398,5 @@ impl ControlState {
             }
         }
         Ok(())
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub struct ServiceResult<'f, F, E>
-    where F: 'f
-    {
-        #[pin]
-        fut: F,
-        link: ReceiverLink,
-        _t: marker::PhantomData<&'f E>,
-    }
-}
-
-impl<F, E> Future for ServiceResult<'_, F, E>
-where
-    F: Future<Output = Result<(), E>>,
-    E: Into<Error>,
-{
-    type Output = Result<Option<AmqpFrame>, AmqpDispatcherError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-
-        if let Err(e) = ready!(this.fut.poll(cx)) {
-            let e = e.into();
-            log::trace!("Service error {e:?}");
-            let _ = this.link.close_with_error(e);
-            Poll::Ready(Ok::<_, AmqpDispatcherError>(None))
-        } else {
-            Poll::Ready(Ok(None))
-        }
     }
 }

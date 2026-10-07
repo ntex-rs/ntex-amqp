@@ -499,4 +499,118 @@ mod tests {
         };
         assert_eq!(decoded_list, custom_list);
     }
+
+    #[test]
+    fn variant_from_conversions() {
+        let expected = Variant::String(Str::from("v"));
+        assert_eq!(Variant::from(ByteString::from("v")), expected);
+        assert_eq!(Variant::from(String::from("v")), expected);
+        assert_eq!(Variant::from("v"), expected);
+        assert_eq!(Variant::from(Str::from("v")), expected);
+
+        let mut map = HashMap::default();
+        map.insert(Variant::from("k"), Variant::Ubyte(1));
+        let variant = Variant::from(map.clone());
+        assert_eq!(variant, Variant::Map(VariantMap::new(map)));
+    }
+
+    #[test]
+    fn variant_string_accessors() {
+        let string = Variant::String(Str::from("abc"));
+        let symbol = Variant::Symbol(Symbol::from("abc"));
+
+        for v in [&string, &symbol] {
+            assert_eq!(v.as_str(), Some("abc"));
+            assert_eq!(v.to_bytes_str(), Some(ByteString::from("abc")));
+            assert!(*v == *"abc");
+            assert!(*v != *"abd");
+        }
+
+        assert_eq!(Variant::Ubyte(1).as_str(), None);
+        assert_eq!(Variant::Ubyte(1).to_bytes_str(), None);
+        assert!(Variant::Ubyte(1) != *"abc");
+    }
+
+    #[test]
+    fn variant_integer_accessors() {
+        let cases: Vec<(Variant, Option<i64>, Option<u64>)> = vec![
+            (Variant::Ubyte(1), Some(1), Some(1)),
+            (Variant::Ushort(2), Some(2), Some(2)),
+            (Variant::Uint(3), Some(3), Some(3)),
+            (Variant::Ulong(4), None, Some(4)),
+            (Variant::Byte(-1), Some(-1), None),
+            (Variant::Short(-2), Some(-2), None),
+            (Variant::Int(-3), Some(-3), None),
+            (Variant::Long(-4), Some(-4), None),
+            (Variant::Null, None, None),
+            (Variant::Boolean(true), None, None),
+        ];
+
+        for (variant, long, ulong) in cases {
+            assert_eq!(variant.as_long(), long, "as_long for {variant:?}");
+            assert_eq!(variant.as_ulong(), ulong, "as_ulong for {variant:?}");
+        }
+
+        // `as_long` deliberately does not narrow ulong values
+        assert_eq!(Variant::Ulong(u64::MAX).as_long(), None);
+        assert_eq!(Variant::Uint(u32::MAX).as_long(), Some(i64::from(u32::MAX)));
+    }
+
+    #[test]
+    fn described_compound_create_and_decode() {
+        let descriptor = Descriptor::Symbol(Symbol::from("contoso:test"));
+        let list = List(vec![Variant::Ubyte(3)]);
+        let compound = DescribedCompound::create(descriptor.clone(), list.clone());
+
+        assert_eq!(compound.descriptor(), &descriptor);
+        assert_eq!(compound.decode::<List>().unwrap(), list);
+
+        let mut buf = BytePages::default();
+        compound.encode(&mut buf);
+        let buf = buf.freeze();
+        assert_eq!(compound.encoded_size(), buf.len());
+        assert_eq!(
+            buf.as_ref(),
+            &b"\x00\xa3\x0ccontoso:test\xc0\x03\x01\x50\x03"[..]
+        );
+
+        // trailing bytes in the described payload are rejected
+        let bad = DescribedCompound::new(descriptor, Bytes::from_static(b"\x50\x03\x50\x04"));
+        assert!(matches!(
+            bad.decode::<u8>(),
+            Err(AmqpParseError::InvalidSize)
+        ));
+    }
+
+    #[test]
+    fn vec_symbol_map() {
+        assert!(VecSymbolMap::default().is_empty());
+
+        let entries = vec![(Symbol::from("a"), Variant::Ubyte(1))];
+        let mut map = VecSymbolMap::from(entries.clone());
+        assert_eq!(map.len(), 1);
+        assert_eq!(map[0], entries[0]);
+        map.push((Symbol::from("b"), Variant::Null));
+        assert_eq!(map.len(), 2);
+
+        let mut anns = Annotations::default();
+        anns.insert(Symbol::from("a"), Variant::Ubyte(1));
+        assert_eq!(VecSymbolMap::from(anns).0, entries);
+    }
+
+    #[test]
+    fn vec_string_map() {
+        assert!(VecStringMap::default().is_empty());
+
+        let entries = vec![(Str::from("a"), Variant::Ubyte(1))];
+        let mut map = VecStringMap::from(entries.clone());
+        assert_eq!(map.len(), 1);
+        assert_eq!(map[0], entries[0]);
+        map.push((Str::from("b"), Variant::Null));
+        assert_eq!(map.len(), 2);
+
+        let mut hm: HashMap<Str, Variant> = HashMap::default();
+        hm.insert(Str::from("a"), Variant::Ubyte(1));
+        assert_eq!(VecStringMap::from(hm).0, entries);
+    }
 }

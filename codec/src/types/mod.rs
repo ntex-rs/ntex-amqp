@@ -223,3 +223,144 @@ impl fmt::Debug for Str {
         self.0.fmt(f)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Borrow;
+    use std::collections::HashMap;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+
+    use super::*;
+
+    fn hash_of<T: hash::Hash>(v: &T) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        v.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn constructor_accessors() {
+        let plain = Constructor::FormatCode(0xc0);
+        assert_eq!(plain.format_code(), 0xc0);
+        assert_eq!(plain.descriptor(), None);
+
+        let descriptor = Descriptor::Ulong(0x23);
+        let described = Constructor::Described {
+            descriptor: descriptor.clone(),
+            format_code: 0xc0,
+        };
+        assert_eq!(described.format_code(), 0xc0);
+        assert_eq!(described.descriptor(), Some(&descriptor));
+    }
+
+    #[test]
+    fn constructor_ensure_described() {
+        let descriptor = Descriptor::Ulong(0x23);
+        let other = Descriptor::Symbol(Symbol::from("a:b"));
+        let described = Constructor::Described {
+            descriptor: descriptor.clone(),
+            format_code: 0xc0,
+        };
+
+        assert!(described.ensure_described(&descriptor).is_ok());
+
+        match described.ensure_described(&other) {
+            Err(AmqpParseError::InvalidDescriptor(d)) => assert_eq!(*d, descriptor),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        match Constructor::FormatCode(0xc0).ensure_described(&descriptor) {
+            Err(AmqpParseError::InvalidFormatCode(code)) => assert_eq!(code, 0xc0),
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multiple_collection() {
+        let empty: Multiple<u32> = Multiple::default();
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+        assert_eq!(empty.iter().count(), 0);
+
+        let mut multiple = Multiple::from(vec![1u32, 2, 3]);
+        assert_eq!(multiple.len(), 3);
+        assert!(!multiple.is_empty());
+        assert_eq!(multiple.iter().copied().sum::<u32>(), 6);
+
+        // `Deref` / `DerefMut` expose the underlying vector
+        assert_eq!(multiple.first(), Some(&1));
+        multiple.push(4);
+        assert_eq!(multiple.len(), 4);
+        assert_eq!(*multiple, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn list_collection() {
+        let empty = List::from(vec![]);
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+
+        let list = List::from(vec![Variant::Ubyte(1), Variant::Null]);
+        assert_eq!(list.len(), 2);
+        assert!(!list.is_empty());
+        assert_eq!(list.iter().next(), Some(&Variant::Ubyte(1)));
+        assert_eq!(list.0[1], Variant::Null);
+    }
+
+    #[test]
+    fn list_described_collection() {
+        let empty: ListDescribed<u32> = ListDescribed::default();
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+
+        let list = ListDescribed::new(vec![1u32, 2]);
+        assert_eq!(list.len(), 2);
+        assert!(!list.is_empty());
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(ListDescribed::from(vec![1u32, 2]), list);
+    }
+
+    #[test]
+    fn str_constructors() {
+        let expected = Str::from_static("hello");
+
+        assert_eq!(Str::from_str("hello"), expected);
+        assert_eq!(Str::from("hello"), expected);
+        assert_eq!(Str::from(String::from("hello")), expected);
+        assert_eq!(Str::from(ByteString::from("hello")), expected);
+        assert_eq!(Str::from(&ByteString::from("hello")), expected);
+
+        assert_eq!(expected.as_str(), "hello");
+        assert_eq!(expected.as_bytes(), b"hello");
+        assert_eq!(expected.to_bytes_str(), ByteString::from("hello"));
+        assert_eq!(expected.len(), 5);
+    }
+
+    #[test]
+    fn str_lookup_and_compare() {
+        // `Borrow<str>` allows `&str` lookups in maps keyed by `Str`
+        let mut map = HashMap::new();
+        map.insert(Str::from("key"), 1u8);
+        assert_eq!(map.get("key"), Some(&1));
+        assert_eq!(map.get("other"), None);
+
+        let s = Str::from("key");
+        assert!(s == *"key");
+        assert!(s != *"other");
+        assert_eq!(Borrow::<str>::borrow(&s), "key");
+
+        // `Hash` must agree with the underlying `ByteString`
+        assert_eq!(hash_of(&s), hash_of(&ByteString::from("key")));
+        let (a, b) = (Str::from("a"), Str::from("b"));
+        assert!(a < b);
+    }
+
+    #[test]
+    fn str_debug_delegates_to_inner() {
+        assert_eq!(
+            format!("{:?}", Str::from("hi")),
+            format!("{:?}", ByteString::from("hi"))
+        );
+    }
+}

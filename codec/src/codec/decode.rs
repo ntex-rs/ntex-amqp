@@ -559,6 +559,7 @@ impl DecodeFormatted for Descriptor {
                 u64::decode_with_format(input, fmt).map(Descriptor::Ulong)
             }
             codec::FORMATCODE_ULONG => u64::decode_with_format(input, fmt).map(Descriptor::Ulong),
+            codec::FORMATCODE_ULONG_0 => Ok(Descriptor::Ulong(0)),
             codec::FORMATCODE_SYMBOL8 => {
                 Symbol::decode_with_format(input, fmt).map(Descriptor::Symbol)
             }
@@ -1262,5 +1263,422 @@ mod tests {
             None,
             unwrap_value(Option::<ByteString>::decode(&mut b2.freeze()))
         );
+    }
+
+    macro_rules! assert_decode_err {
+        ($ty:ty, $input:expr, $pat:pat) => {{
+            let mut buf = Bytes::from_static($input);
+            let res = <$ty as Decode>::decode(&mut buf);
+            assert!(
+                matches!(res, Err($pat)),
+                "unexpected result for {}: {:?}",
+                stringify!($ty),
+                res
+            );
+        }};
+    }
+
+    #[test]
+    fn invalid_format_codes() {
+        // 0x50 is UBYTE, which none of these types accept
+        assert_decode_err!(bool, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(u8, b"\x51\x00", AmqpParseError::InvalidFormatCode(0x51));
+        assert_decode_err!(u16, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(u32, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(u64, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(i8, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(i16, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(i32, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(i64, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(f32, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(f64, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(char, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(Uuid, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(Bytes, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(
+            ByteString,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        assert_decode_err!(Str, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(Symbol, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(
+            DateTime<Utc>,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        assert_decode_err!(
+            Descriptor,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        assert_decode_err!(List, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(Array, b"\x50\x00", AmqpParseError::InvalidFormatCode(0x50));
+        assert_decode_err!(
+            Vec<u8>,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        assert_decode_err!(
+            VecSymbolMap,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        assert_decode_err!(
+            VecStringMap,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        assert_decode_err!(
+            HashMapUtil<Variant, Variant>,
+            b"\x50\x00",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+        // 0x3f is not a defined format code
+        assert_decode_err!(Variant, b"\x3f", AmqpParseError::InvalidFormatCode(0x3f));
+        // empty input has no format code at all
+        assert_decode_err!(Variant, b"", AmqpParseError::Incomplete(1));
+    }
+
+    #[test]
+    fn truncated_fixed_width() {
+        assert_decode_err!(u8, b"\x50", AmqpParseError::Incomplete(1));
+        assert_decode_err!(u16, b"\x60\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(u32, b"\x70\x00\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(u32, b"\x52", AmqpParseError::Incomplete(_));
+        assert_decode_err!(u64, b"\x80\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(u64, b"\x53", AmqpParseError::Incomplete(_));
+        assert_decode_err!(i8, b"\x51", AmqpParseError::Incomplete(_));
+        assert_decode_err!(i16, b"\x61\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(i32, b"\x71\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(i32, b"\x54", AmqpParseError::Incomplete(_));
+        assert_decode_err!(i64, b"\x81\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(i64, b"\x55", AmqpParseError::Incomplete(_));
+        assert_decode_err!(f32, b"\x72\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(f64, b"\x82\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(char, b"\x73\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(DateTime<Utc>, b"\x83\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(Uuid, b"\x98\x00\x01\x02", AmqpParseError::Incomplete(_));
+    }
+
+    #[test]
+    fn truncated_variable_width() {
+        // binary8/binary32 with a length larger than the remaining input
+        assert_decode_err!(Bytes, b"\xa0\x05ab", AmqpParseError::Incomplete(_));
+        assert_decode_err!(Bytes, b"\xa0", AmqpParseError::Incomplete(_));
+        assert_decode_err!(
+            Bytes,
+            b"\xb0\x00\x00\x00\x05ab",
+            AmqpParseError::Incomplete(_)
+        );
+        assert_decode_err!(Bytes, b"\xb0\x00\x00", AmqpParseError::Incomplete(_));
+        assert_decode_err!(ByteString, b"\xa1\x05ab", AmqpParseError::Incomplete(_));
+        assert_decode_err!(
+            ByteString,
+            b"\xb1\x00\x00\x00\x05ab",
+            AmqpParseError::Incomplete(_)
+        );
+        assert_decode_err!(Symbol, b"\xa3\x05ab", AmqpParseError::Incomplete(_));
+        assert_decode_err!(
+            Symbol,
+            b"\xb3\x00\x00\x00\x05ab",
+            AmqpParseError::Incomplete(_)
+        );
+    }
+
+    #[test]
+    fn invalid_utf8() {
+        assert_decode_err!(ByteString, b"\xa1\x01\xff", AmqpParseError::Utf8Error);
+        assert_decode_err!(
+            ByteString,
+            b"\xb1\x00\x00\x00\x01\xff",
+            AmqpParseError::Utf8Error
+        );
+        assert_decode_err!(Str, b"\xa1\x01\xff", AmqpParseError::Utf8Error);
+        assert_decode_err!(Symbol, b"\xa3\x01\xff", AmqpParseError::Utf8Error);
+        assert_decode_err!(
+            Symbol,
+            b"\xb3\x00\x00\x00\x01\xff",
+            AmqpParseError::Utf8Error
+        );
+        assert_decode_err!(Variant, b"\xa1\x01\xff", AmqpParseError::Utf8Error);
+    }
+
+    #[test]
+    fn invalid_char() {
+        // 0x110000 is beyond the unicode range, 0xd800 is a surrogate
+        assert_decode_err!(
+            char,
+            b"\x73\x00\x11\x00\x00",
+            AmqpParseError::InvalidChar(0x11_0000)
+        );
+        assert_decode_err!(
+            char,
+            b"\x73\x00\x00\xd8\x00",
+            AmqpParseError::InvalidChar(0xd800)
+        );
+        assert_decode_err!(
+            Variant,
+            b"\x73\x00\x11\x00\x00",
+            AmqpParseError::InvalidChar(0x11_0000)
+        );
+        // the largest valid code point still decodes
+        let mut buf = Bytes::from_static(b"\x73\x00\x10\xff\xff");
+        assert_eq!(char::decode(&mut buf).unwrap(), '\u{10ffff}');
+    }
+
+    #[test]
+    fn datetime_out_of_range() {
+        let mut input = Bytes::from_static(b"\x83\x7f\xff\xff\xff\xff\xff\xff\xff");
+        assert!(matches!(
+            DateTime::<Utc>::decode(&mut input),
+            Err(AmqpParseError::DatetimeParseError)
+        ));
+    }
+
+    #[test]
+    fn decimals() {
+        let cases: Vec<(&[u8], Variant)> = vec![
+            (b"\x74\x01\x02\x03\x04", Variant::Decimal32([1, 2, 3, 4])),
+            (
+                b"\x84\x01\x02\x03\x04\x05\x06\x07\x08",
+                Variant::Decimal64([1, 2, 3, 4, 5, 6, 7, 8]),
+            ),
+            (
+                b"\x94\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
+                Variant::Decimal128([
+                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+                ]),
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let mut buf = Bytes::from_static(input);
+            assert_eq!(Variant::decode(&mut buf).unwrap(), expected);
+            assert!(buf.is_empty());
+        }
+
+        // truncated decimal payloads
+        assert_decode_err!(Variant, b"\x74\x01\x02", AmqpParseError::Incomplete(_));
+        assert_decode_err!(Variant, b"\x84\x01\x02", AmqpParseError::Incomplete(_));
+        assert_decode_err!(Variant, b"\x94\x01\x02", AmqpParseError::Incomplete(_));
+    }
+
+    #[test]
+    fn list0_decoding() {
+        let mut buf = Bytes::from_static(b"\x45");
+        assert_eq!(List::decode(&mut buf).unwrap(), List(vec![]));
+
+        let mut buf = Bytes::from_static(b"\x45");
+        assert_eq!(
+            Variant::decode(&mut buf).unwrap(),
+            Variant::List(List(vec![]))
+        );
+    }
+
+    #[test]
+    fn array_with_described_element_constructor() {
+        // array8 holding a described element constructor is not supported
+        let mut buf = Bytes::from_static(b"\xe0\x05\x01\x00\x53\x23\x50\x01");
+        assert!(matches!(
+            Vec::<u8>::decode(&mut buf),
+            Err(AmqpParseError::InvalidDescriptor(_))
+        ));
+    }
+
+    #[test]
+    fn described_variant_truncated() {
+        // descriptor parses, but the described value's format code is missing
+        assert_decode_err!(Variant, b"\x00\x53\x23", AmqpParseError::Incomplete(1));
+        // described list8 with a truncated payload
+        assert_decode_err!(
+            Variant,
+            b"\x00\x53\x23\xc0\x05\x01",
+            AmqpParseError::Incomplete(_)
+        );
+        // described list32 with a truncated payload
+        assert_decode_err!(
+            Variant,
+            b"\x00\x53\x23\xd0\x00\x00\x00\x05",
+            AmqpParseError::Incomplete(_)
+        );
+    }
+
+    #[test]
+    fn descriptor_symbol_decoding() {
+        let mut buf = Bytes::from_static(b"\xa3\x03foo");
+        assert_eq!(
+            Descriptor::decode(&mut buf).unwrap(),
+            Descriptor::Symbol(Symbol::from("foo"))
+        );
+
+        let mut buf = Bytes::from_static(b"\xb3\x00\x00\x00\x03foo");
+        assert_eq!(
+            Descriptor::decode(&mut buf).unwrap(),
+            Descriptor::Symbol(Symbol::from("foo"))
+        );
+
+        let mut buf = Bytes::from_static(b"\x80\x00\x00\x00\x00\x00\x00\x00\x23");
+        assert_eq!(
+            Descriptor::decode(&mut buf).unwrap(),
+            Descriptor::Ulong(0x23)
+        );
+    }
+
+    #[test]
+    fn constructor_decoding() {
+        let mut buf = Bytes::from_static(b"\x50");
+        assert_eq!(
+            Constructor::decode(&mut buf).unwrap(),
+            Constructor::FormatCode(codec::FORMATCODE_UBYTE)
+        );
+
+        let mut buf = Bytes::from_static(b"\x00\x53\x23\xc0");
+        assert_eq!(
+            Constructor::decode(&mut buf).unwrap(),
+            Constructor::Described {
+                descriptor: Descriptor::Ulong(0x23),
+                format_code: codec::FORMATCODE_LIST8,
+            }
+        );
+        assert!(buf.is_empty());
+
+        // described constructor without a trailing format code
+        assert_decode_err!(Constructor, b"\x00\x53\x23", AmqpParseError::Incomplete(1));
+        // described constructor with an invalid descriptor
+        assert_decode_err!(
+            Constructor,
+            b"\x00\x50\x01",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Pair(u8, u8);
+
+    impl Composite for Pair {
+        fn descriptor() -> Descriptor {
+            Descriptor::Ulong(0x77)
+        }
+    }
+
+    impl Encode for Pair {
+        fn encoded_size(&self) -> usize {
+            7
+        }
+
+        fn encode(&self, buf: &mut BytePages) {
+            buf.put_u8(codec::FORMATCODE_LIST8);
+            buf.put_u8(5);
+            buf.put_u8(2);
+            self.0.encode(buf);
+            self.1.encode(buf);
+        }
+    }
+
+    impl DecodeFormatted for Pair {
+        fn decode_with_format(input: &mut Bytes, fmt: u8) -> Result<Self, AmqpParseError> {
+            let header = ListHeader::decode_with_format(input, fmt)?;
+            assert_eq!(header.count, 2);
+            Ok(Pair(u8::decode(input)?, u8::decode(input)?))
+        }
+    }
+
+    fn described_pair(descriptor: u8, a: u8, b: u8) -> Vec<u8> {
+        vec![
+            0x00,
+            codec::FORMATCODE_SMALLULONG,
+            descriptor,
+            codec::FORMATCODE_LIST8,
+            5,
+            2,
+            codec::FORMATCODE_UBYTE,
+            a,
+            codec::FORMATCODE_UBYTE,
+            b,
+        ]
+    }
+
+    #[test]
+    fn list_described_decoding() {
+        let mut payload = described_pair(0x77, 1, 2);
+        payload.extend(described_pair(0x77, 3, 4));
+
+        let mut data = vec![codec::FORMATCODE_LIST8, (payload.len() + 1) as u8, 2];
+        data.extend(payload);
+
+        let mut buf = Bytes::from(data);
+        let decoded = <ListDescribed<Pair> as Decode>::decode(&mut buf).unwrap();
+        assert_eq!(decoded.0, vec![Pair(1, 2), Pair(3, 4)]);
+
+        // empty list
+        let mut buf = Bytes::from_static(b"\xc0\x01\x00");
+        let decoded = <ListDescribed<Pair> as Decode>::decode(&mut buf).unwrap();
+        assert!(decoded.0.is_empty());
+    }
+
+    #[test]
+    fn list_described_errors() {
+        // wrong descriptor
+        let payload = described_pair(0x78, 1, 2);
+        let mut data = vec![codec::FORMATCODE_LIST8, (payload.len() + 1) as u8, 1];
+        data.extend(payload);
+        let mut buf = Bytes::from(data);
+        assert!(matches!(
+            <ListDescribed<Pair> as Decode>::decode(&mut buf),
+            Err(AmqpParseError::UnexpectedType("Unexpected descriptor"))
+        ));
+
+        // element is not a described compound
+        let mut buf = Bytes::from_static(b"\xc0\x03\x01\x50\x01");
+        assert!(matches!(
+            <ListDescribed<Pair> as Decode>::decode(&mut buf),
+            Err(AmqpParseError::UnexpectedType("Expected compound type"))
+        ));
+
+        // not a list at all
+        assert_decode_err!(
+            ListDescribed<Pair>,
+            b"\x50\x01",
+            AmqpParseError::InvalidFormatCode(0x50)
+        );
+    }
+
+    #[test]
+    fn frame_header_errors() {
+        // sasl frame type where an amqp frame is expected
+        let mut buf = Bytes::from_static(b"\x02\x01\x00\x00");
+        assert!(matches!(
+            AmqpFrame::decode(&mut buf),
+            Err(AmqpParseError::UnexpectedFrameType(1))
+        ));
+
+        // amqp frame type where a sasl frame is expected
+        let mut buf = Bytes::from_static(b"\x02\x00\x00\x00");
+        assert!(matches!(
+            SaslFrame::decode(&mut buf),
+            Err(AmqpParseError::UnexpectedFrameType(0))
+        ));
+
+        // doff of 1 means a 4 byte header, which is smaller than the fixed header
+        let mut buf = Bytes::from_static(b"\x01\x00\x00\x00");
+        assert!(matches!(
+            AmqpFrame::decode(&mut buf),
+            Err(AmqpParseError::InvalidSize)
+        ));
+
+        // header is truncated
+        let mut buf = Bytes::from_static(b"\x02\x00\x00");
+        assert!(matches!(
+            AmqpFrame::decode(&mut buf),
+            Err(AmqpParseError::Incomplete(_))
+        ));
+
+        // extended header announced by doff is missing
+        let mut buf = Bytes::from_static(b"\x03\x00\x00\x00\x00\x00");
+        assert!(matches!(
+            AmqpFrame::decode(&mut buf),
+            Err(AmqpParseError::Incomplete(_))
+        ));
     }
 }

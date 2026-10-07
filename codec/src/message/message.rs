@@ -139,9 +139,9 @@ impl Message {
 
     #[inline]
     /// Mut ref tp application property
-    pub fn app_properties_mut(&mut self) -> Option<&mut VecStringMap> {
+    pub fn app_properties_mut(&mut self) -> &mut Option<VecStringMap> {
         self.0.size.set(0);
-        self.0.application_properties.as_mut()
+        &mut self.0.application_properties
     }
 
     #[inline]
@@ -212,9 +212,9 @@ impl Message {
 
     #[inline]
     /// Mut reference to message annotations
-    pub fn message_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
+    pub fn message_annotations_mut(&mut self) -> &mut Option<VecSymbolMap> {
         self.0.size.set(0);
-        self.0.message_annotations.as_mut()
+        &mut self.0.message_annotations
     }
 
     #[inline]
@@ -225,9 +225,9 @@ impl Message {
 
     #[inline]
     /// Mut reference to delivery annotations
-    pub fn delivery_annotations_mut(&mut self) -> Option<&mut VecSymbolMap> {
+    pub fn delivery_annotations_mut(&mut self) -> &mut Option<VecSymbolMap> {
         self.0.size.set(0);
-        self.0.delivery_annotations.as_mut()
+        &mut self.0.delivery_annotations
     }
 
     #[inline]
@@ -268,9 +268,9 @@ impl Message {
 
     #[inline]
     /// Mut reference to message footer
-    pub fn footer_mut(&mut self) -> Option<&mut Annotations> {
+    pub fn footer_mut(&mut self) -> &mut Option<Annotations> {
         self.0.size.set(0);
-        self.0.footer.as_mut()
+        &mut self.0.footer
     }
 
     #[inline]
@@ -594,15 +594,15 @@ mod tests {
             m.body_mut().set_data(Bytes::from_static(b"data"))
         });
         check(&mut msg, |m| {
-            let p = m.app_properties_mut().unwrap();
+            let p = m.app_properties_mut().as_mut().unwrap();
             p.push(("c".into(), "app property".into()));
         });
         check(&mut msg, |m| {
-            let a = m.message_annotations_mut().unwrap();
+            let a = m.message_annotations_mut().as_mut().unwrap();
             a.push(("d".into(), "message annotation".into()));
         });
         check(&mut msg, |m| {
-            let a = m.delivery_annotations_mut().unwrap();
+            let a = m.delivery_annotations_mut().as_mut().unwrap();
             a.push(("e".into(), "delivery annotation".into()));
         });
         check(&mut msg, |m| m.properties_mut().message_id = Some(1.into()));
@@ -610,7 +610,7 @@ mod tests {
             m.set_footer(Default::default());
         });
         check(&mut msg, |m| {
-            let f = m.footer_mut().unwrap();
+            let f = m.footer_mut().as_mut().unwrap();
             f.insert("f".into(), "footer".into());
         });
 
@@ -634,5 +634,220 @@ mod tests {
         let msg2 = Message::decode(&mut buf.freeze())?;
         assert_eq!(msg.properties(), msg2.properties());
         Ok(())
+    }
+
+    #[test]
+    fn message_format_and_cached_size() {
+        let mut msg = Message::default();
+        assert_eq!(msg.message_format(), None);
+        msg.set_format(42);
+        assert_eq!(msg.message_format(), Some(42));
+
+        // size is cached and invalidated on mutation
+        msg.set_value("a");
+        let size = msg.encoded_size();
+        assert_eq!(msg.encoded_size(), size);
+        msg.set_value("much longer value");
+        let new_size = msg.encoded_size();
+        assert!(new_size > size);
+
+        let mut buf = BytePages::default();
+        msg.encode(&mut buf);
+        assert_eq!(buf.len(), new_size);
+    }
+
+    #[test]
+    fn app_properties_lookup() {
+        let mut msg = Message::default();
+        assert!(msg.app_property("a").is_none());
+        assert!(msg.app_properties().is_none());
+        assert!(msg.app_properties_mut().is_none());
+
+        msg.set_app_property("a", 1);
+        // second insert takes the "existing vec" branch
+        msg.set_app_property("b", 2);
+        assert_eq!(msg.app_property("a"), Some(&Variant::from(1)));
+        assert_eq!(msg.app_property("b"), Some(&Variant::from(2)));
+        assert_eq!(msg.app_property("c"), None);
+        assert_eq!(msg.app_properties().unwrap().len(), 2);
+
+        msg.app_properties_mut().as_mut().unwrap().clear();
+        assert_eq!(msg.app_property("a"), None);
+    }
+
+    #[test]
+    fn message_annotations_lookup() {
+        let mut msg = Message::default();
+        assert!(msg.message_annotation("a").is_none());
+        assert!(msg.message_annotations().is_none());
+        assert!(msg.message_annotations_mut().is_none());
+
+        msg.add_message_annotation("a", 1);
+        msg.add_message_annotation("b", 2);
+        assert_eq!(msg.message_annotation("a"), Some(&Variant::from(1)));
+        assert_eq!(msg.message_annotation("c"), None);
+        assert_eq!(msg.message_annotations().unwrap().len(), 2);
+
+        msg.message_annotations_mut().as_mut().unwrap().clear();
+        assert_eq!(msg.message_annotation("a"), None);
+    }
+
+    #[test]
+    fn delivery_annotations_lookup() {
+        let mut msg = Message::default();
+        assert!(msg.delivery_annotation("a").is_none());
+        assert!(msg.delivery_annotations().is_none());
+        assert!(msg.delivery_annotations_mut().is_none());
+
+        msg.add_delivery_annotation("a", 1);
+        msg.add_delivery_annotation("b", 2);
+        assert_eq!(msg.delivery_annotation("a"), Some(&Variant::from(1)));
+        assert_eq!(msg.delivery_annotation("c"), None);
+        assert_eq!(msg.delivery_annotations().unwrap().len(), 2);
+
+        msg.delivery_annotations_mut().as_mut().unwrap().clear();
+        assert_eq!(msg.delivery_annotation("a"), None);
+    }
+
+    #[test]
+    fn properties_mut_creates_and_reuses() {
+        let mut msg = Message::default();
+        assert!(msg.properties().is_none());
+
+        msg.properties_mut().subject = Some(ByteString::from("s"));
+        assert_eq!(
+            msg.properties().unwrap().subject,
+            Some(ByteString::from("s"))
+        );
+
+        // second call reuses the existing properties
+        msg.properties_mut().group_id = Some(ByteString::from("g"));
+        let props = msg.properties().unwrap();
+        assert_eq!(props.subject, Some(ByteString::from("s")));
+        assert_eq!(props.group_id, Some(ByteString::from("g")));
+
+        // set_properties also takes the existing branch
+        msg.set_properties(|p| p.subject = Some(ByteString::from("s2")));
+        assert_eq!(
+            msg.properties().unwrap().subject,
+            Some(ByteString::from("s2"))
+        );
+    }
+
+    #[test]
+    fn footer_roundtrip() {
+        use crate::types::Symbol;
+
+        let mut msg = Message::default();
+        assert!(msg.footer().is_none());
+        assert!(msg.footer_mut().is_none());
+
+        let mut footer = crate::protocol::Annotations::default();
+        footer.insert(Symbol::from("f"), Variant::from(1));
+        msg.set_footer(footer);
+        assert_eq!(msg.footer().unwrap().len(), 1);
+        msg.footer_mut().as_mut().unwrap().clear();
+        assert!(msg.footer().unwrap().is_empty());
+    }
+
+    #[test]
+    fn update_and_if_some() {
+        let msg = Message::default().update(|mut m| {
+            m.set_value("v");
+            m
+        });
+        assert_eq!(msg.value(), Some(&Variant::from("v")));
+
+        // `if_some` with Some runs the closure
+        let msg = msg.if_some(&Some(7u8), |mut m, v| {
+            m.set_app_property("n", *v);
+            m
+        });
+        assert_eq!(msg.app_property("n"), Some(&Variant::Ubyte(7)));
+
+        // `if_some` with None leaves the message untouched
+        let none: Option<u8> = None;
+        let msg2 = msg.clone().if_some(&none, |mut m, v| {
+            m.set_app_property("other", *v);
+            m
+        });
+        assert_eq!(msg2, msg);
+    }
+
+    #[test]
+    fn reply_message_copies_correlation_id() {
+        // no properties -> nothing to copy
+        let plain = Message::default();
+        assert!(plain.reply_message().properties().is_none());
+
+        let mut msg = Message::default();
+        msg.set_properties(|p| p.message_id = Some(7.into()));
+        let reply = msg.reply_message();
+        assert_eq!(reply.properties().unwrap().correlation_id, Some(7.into()));
+        assert_eq!(reply.properties().unwrap().message_id, None);
+    }
+
+    #[test]
+    fn body_accessors() {
+        let mut msg = Message::default();
+        assert!(msg.body().data().is_none());
+        assert!(msg.value().is_none());
+
+        msg.body_mut().set_data(Bytes::from_static(b"d"));
+        assert_eq!(msg.body().data(), Some(&Bytes::from_static(b"d")));
+
+        msg.set_body(|b| b.sequence.push(crate::types::List(vec![Variant::Ubyte(1)])));
+        assert_eq!(msg.body().sequence.len(), 1);
+    }
+
+    #[test]
+    fn full_message_roundtrip() {
+        use crate::types::Symbol;
+
+        let mut footer = crate::protocol::Annotations::default();
+        footer.insert(Symbol::from("f"), Variant::from(1));
+
+        let mut msg = Message::default();
+        msg.set_header(Header {
+            durable: true,
+            priority: 2,
+            ttl: Some(100),
+            first_acquirer: true,
+            delivery_count: 3,
+        })
+        .set_properties(|p| {
+            p.message_id = Some(Uuid::from_u128(1).into());
+            p.subject = Some(ByteString::from("subj"));
+        })
+        .set_app_property("ap", 1)
+        .add_message_annotation("ma", 2)
+        .add_delivery_annotation("da", 3)
+        .set_footer(footer)
+        .set_body(|b| {
+            b.set_data(Bytes::from_static(b"payload"));
+            b.sequence.push(crate::types::List(vec![Variant::Ubyte(9)]));
+            b.value = Some(Variant::from("v"));
+        });
+
+        let mut buf = BytePages::default();
+        msg.encode(&mut buf);
+        let buf = buf.freeze();
+        assert_eq!(msg.encoded_size(), buf.len());
+
+        let msg2 = Message::decode(&mut buf.clone()).unwrap();
+        assert_eq!(msg2.header(), msg.header());
+        assert_eq!(msg2.properties(), msg.properties());
+        assert_eq!(msg2.app_property("ap"), Some(&Variant::from(1)));
+        assert_eq!(msg2.message_annotation("ma"), Some(&Variant::from(2)));
+        assert_eq!(msg2.delivery_annotation("da"), Some(&Variant::from(3)));
+        assert_eq!(msg2.footer(), msg.footer());
+        assert_eq!(msg2.body(), msg.body());
+        assert_eq!(msg2.encoded_size(), buf.len());
+    }
+
+    #[test]
+    fn decode_empty_input() {
+        let msg = Message::decode(&mut Bytes::new()).unwrap();
+        assert_eq!(msg, Message::default());
     }
 }

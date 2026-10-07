@@ -5,7 +5,7 @@ use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Target, TerminusDurability, TerminusExpiryPolicy, TransferBody,
 };
-use ntex_bytes::{BufMut, ByteString, Bytes};
+use ntex_bytes::{ByteString, Bytes};
 use ntex_util::channel::{condition, pool};
 use ntex_util::time::{Seconds, timeout_checked};
 
@@ -586,14 +586,7 @@ impl SenderLinkInner {
             let delivery_tag = self.delivery_tag;
             self.delivery_tag = delivery_tag.wrapping_add(1);
 
-            let mut buf = self
-                .session
-                .connection()
-                .config()
-                .read_buf()
-                .buf_with_capacity(16);
-            buf.put_u32(delivery_tag);
-            buf.freeze()
+            Bytes::copy_from_slice(&delivery_tag.to_be_bytes())
         })
     }
 }

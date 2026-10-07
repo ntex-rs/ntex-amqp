@@ -360,4 +360,201 @@ mod tests {
         assert_eq!(props, props2);
         Ok(())
     }
+
+    fn encoded<T: Encode>(value: &T) -> Bytes {
+        let mut buf = BytePages::default();
+        value.encode(&mut buf);
+        let buf = buf.freeze();
+        assert_eq!(value.encoded_size(), buf.len(), "encoded_size mismatch");
+        buf
+    }
+
+    #[test]
+    fn message_id_roundtrip() {
+        let ids = vec![
+            MessageId::Ulong(0),
+            MessageId::Ulong(42),
+            MessageId::Ulong(u64::MAX),
+            MessageId::Uuid(Uuid::from_u128(0x1234_5678_90ab_cdef_1234_5678_90ab_cdef)),
+            MessageId::Binary(Bytes::from_static(b"binary-id")),
+            MessageId::String(ByteString::from("string-id")),
+        ];
+
+        for id in ids {
+            let buf = encoded(&id);
+            assert_eq!(MessageId::decode(&mut buf.clone()).unwrap(), id);
+        }
+    }
+
+    #[test]
+    fn message_id_conversions() {
+        assert_eq!(MessageId::from(7usize), MessageId::Ulong(7));
+        assert_eq!(MessageId::from(7i32), MessageId::Ulong(7));
+        // negative ids are sign-extended rather than rejected
+        assert_eq!(MessageId::from(-1i32), MessageId::Ulong(u64::MAX));
+        assert_eq!(MessageId::from(7u64), MessageId::Ulong(7));
+        assert_eq!(
+            MessageId::from(ByteString::from("s")),
+            MessageId::String(ByteString::from("s"))
+        );
+        assert_eq!(
+            MessageId::from(Bytes::from_static(b"b")),
+            MessageId::Binary(Bytes::from_static(b"b"))
+        );
+    }
+
+    #[test]
+    fn message_id_rejects_other_types() {
+        // boolean true
+        let res = MessageId::decode(&mut Bytes::from_static(b"\x41"));
+        assert!(matches!(res, Err(AmqpParseError::InvalidFormatCode(0x41))));
+    }
+
+    #[test]
+    fn error_condition_roundtrip() {
+        let conditions = vec![
+            ErrorCondition::AmqpError(AmqpError::NotFound),
+            ErrorCondition::ConnectionError(ConnectionError::ConnectionForced),
+            ErrorCondition::SessionError(SessionError::WindowViolation),
+            ErrorCondition::LinkError(LinkError::DetachForced),
+            ErrorCondition::Custom(Symbol::from("vendor:custom")),
+        ];
+
+        for cond in conditions {
+            let buf = encoded(&cond);
+            assert_eq!(ErrorCondition::decode(&mut buf.clone()).unwrap(), cond);
+        }
+
+        assert_eq!(
+            ErrorCondition::default(),
+            ErrorCondition::Custom(Symbol::from("Unknown"))
+        );
+        assert_eq!(
+            ErrorCondition::from(AmqpError::NotFound),
+            ErrorCondition::AmqpError(AmqpError::NotFound)
+        );
+    }
+
+    #[test]
+    fn error_display_matches_debug() {
+        let err = Error::build()
+            .condition(ErrorCondition::AmqpError(AmqpError::NotFound))
+            .description(ByteString::from("missing"))
+            .finish();
+        assert_eq!(err.to_string(), format!("{err:?}"));
+        assert!(err.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn distribution_mode_roundtrip() {
+        let modes = vec![
+            DistributionMode::Move,
+            DistributionMode::Copy,
+            DistributionMode::Custom(Symbol::from("vendor:mode")),
+        ];
+        for mode in modes {
+            let buf = encoded(&mode);
+            assert_eq!(DistributionMode::decode(&mut buf.clone()).unwrap(), mode);
+        }
+
+        assert_eq!(encoded(&DistributionMode::Move).as_ref(), b"\xa3\x04move");
+        assert_eq!(encoded(&DistributionMode::Copy).as_ref(), b"\xa3\x04copy");
+    }
+
+    #[test]
+    fn sasl_init_prepare_response() {
+        assert_eq!(
+            SaslInit::prepare_response("", "user", "pass"),
+            Bytes::from_static(b"\x00user\x00pass")
+        );
+        assert_eq!(
+            SaslInit::prepare_response("authz", "user", ""),
+            Bytes::from_static(b"authz\x00user\x00")
+        );
+    }
+
+    #[test]
+    fn transfer_body_data() {
+        let data = Bytes::from_static(b"hello");
+        let body = TransferBody::from(data.clone());
+
+        assert_eq!(body.len(), 5);
+        assert_eq!(body.message_format(), None);
+        assert_eq!(encoded(&body).as_ref(), b"hello");
+        assert_eq!(body, TransferBody::Data(data.clone()));
+        assert_ne!(body, TransferBody::Data(Bytes::from_static(b"other")));
+        assert_ne!(body, TransferBody::Message(Message::default()));
+    }
+
+    #[test]
+    fn transfer_body_pages() {
+        let mut pages = BytePages::default();
+        pages.extend_from_slice(b"hello");
+        let body = TransferBody::from(pages);
+
+        assert_eq!(body.len(), 5);
+        assert_eq!(body.message_format(), None);
+        assert_eq!(encoded(&body).as_ref(), b"hello");
+        // pages bodies never compare equal, not even to an identical one
+        let mut other = BytePages::default();
+        other.extend_from_slice(b"hello");
+        assert_ne!(body, TransferBody::from(other));
+        assert_ne!(TransferBody::Data(Bytes::from_static(b"hello")), body);
+    }
+
+    #[test]
+    fn transfer_body_message() {
+        let mut msg = Message::default();
+        msg.set_body(|b| b.set_data(Bytes::from_static(b"hello")));
+        msg.set_format(7);
+
+        let body = TransferBody::from(msg.clone());
+        assert_eq!(body.message_format(), Some(7));
+        assert_eq!(body.len(), msg.encoded_size());
+        assert_eq!(encoded(&body), encoded(&msg));
+        assert_eq!(body, TransferBody::Message(msg));
+        assert_ne!(body, TransferBody::Data(Bytes::from_static(b"hello")));
+    }
+
+    #[test]
+    fn transfer_get_body_and_load_message() {
+        let payload = encoded(&Variant::from("payload"));
+        let transfer = Transfer::build()
+            .handle(1)
+            .body(TransferBody::Data(payload.clone()))
+            .finish();
+
+        assert_eq!(transfer.get_body(), Some(&payload));
+        assert_eq!(
+            transfer.load_message::<Variant>().unwrap(),
+            Variant::from("payload")
+        );
+
+        let empty = Transfer::build().handle(1).finish();
+        assert_eq!(empty.get_body(), None);
+        assert!(matches!(
+            empty.load_message::<Variant>(),
+            Err(AmqpParseError::UnexpectedType("body"))
+        ));
+
+        let msg_body = Transfer::build()
+            .handle(1)
+            .body(TransferBody::Message(Message::default()))
+            .finish();
+        assert_eq!(msg_body.get_body(), None);
+        assert!(msg_body.load_message::<Variant>().is_err());
+    }
+
+    #[test]
+    fn protocol_defaults() {
+        assert_eq!(Role::default(), Role::Sender);
+        assert_eq!(SenderSettleMode::default(), SenderSettleMode::Mixed);
+        assert_eq!(ReceiverSettleMode::default(), ReceiverSettleMode::First);
+        assert_eq!(TerminusDurability::default(), TerminusDurability::None);
+        assert_eq!(
+            TerminusExpiryPolicy::default(),
+            TerminusExpiryPolicy::LinkDetach
+        );
+        assert_eq!(SaslCode::default(), SaslCode::Ok);
+    }
 }

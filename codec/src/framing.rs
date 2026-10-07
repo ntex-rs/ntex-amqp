@@ -78,3 +78,71 @@ impl From<protocol::SaslOutcome> for SaslFrame {
         SaslFrame::new(protocol::SaslFrameBody::SaslOutcome(item))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ntex_bytes::Bytes;
+
+    use super::*;
+    use crate::types::Symbol;
+
+    #[test]
+    fn amqp_frame_parts() {
+        let performative = protocol::Frame::Close(protocol::Close { error: None });
+        let frame = AmqpFrame::new(42, performative.clone());
+
+        assert_eq!(frame.channel_id(), 42);
+        assert_eq!(frame.performative(), &performative);
+        assert_eq!(frame.clone().into_parts(), (42, performative));
+    }
+
+    #[test]
+    fn sasl_frame_conversions() {
+        let mechanisms = protocol::SaslMechanisms {
+            sasl_server_mechanisms: protocol::Symbols::default(),
+        };
+        assert_eq!(
+            SaslFrame::from(mechanisms.clone()).body,
+            protocol::SaslFrameBody::SaslMechanisms(mechanisms)
+        );
+
+        let init = protocol::SaslInit {
+            mechanism: Symbol::from("PLAIN"),
+            initial_response: None,
+            hostname: None,
+        };
+        assert_eq!(
+            SaslFrame::from(init.clone()).body,
+            protocol::SaslFrameBody::SaslInit(init)
+        );
+
+        let challenge = protocol::SaslChallenge {
+            challenge: Bytes::from_static(b"c"),
+        };
+        assert_eq!(
+            SaslFrame::from(challenge.clone()).body,
+            protocol::SaslFrameBody::SaslChallenge(challenge)
+        );
+
+        let response = protocol::SaslResponse {
+            response: Bytes::from_static(b"r"),
+        };
+        assert_eq!(
+            SaslFrame::from(response.clone()).body,
+            protocol::SaslFrameBody::SaslResponse(response)
+        );
+
+        let outcome = protocol::SaslOutcome {
+            code: protocol::SaslCode::Auth,
+            additional_data: None,
+        };
+        assert_eq!(
+            SaslFrame::from(outcome.clone()).body,
+            protocol::SaslFrameBody::SaslOutcome(outcome.clone())
+        );
+        assert_eq!(
+            SaslFrame::new(protocol::SaslFrameBody::SaslOutcome(outcome.clone())),
+            SaslFrame::from(outcome)
+        );
+    }
+}
