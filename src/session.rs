@@ -1379,8 +1379,11 @@ impl SessionInner {
                         })) if flow.link_credit().is_some() => {
                             *pending = Some(flow.clone());
                         }
+                        // sender's delivery-count is authoritative
                         Some(Either::Right(ReceiverLinkState::Established(link))) => {
-                            receiver = Some(link.inner.get_ref().flow_state());
+                            let inner = link.inner.get_mut();
+                            inner.apply_flow(&flow);
+                            receiver = Some(inner.flow_state());
                         }
                         _ => (),
                     }

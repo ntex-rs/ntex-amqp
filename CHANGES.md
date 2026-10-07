@@ -2,6 +2,8 @@
 
 ## [6.2.0] - Unreleased
 
+* Fix receiver link did not apply sender's delivery-count from flow
+
 * Fix `SenderLink::ready()` did not wait for remote session incoming window
 
 * `ReceiverLink` debug output contains link name only, same as `SenderLink`

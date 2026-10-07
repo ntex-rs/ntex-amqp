@@ -4,7 +4,7 @@ use std::{
 };
 
 use ntex_amqp_codec::protocol::{
-    self as codec, Attach, Disposition, Error, Handle, LinkError, ReceiverSettleMode, Role,
+    self as codec, Attach, Disposition, Error, Flow, Handle, LinkError, ReceiverSettleMode, Role,
     SenderSettleMode, SequenceNo, Source, Symbols, TerminusDurability, TerminusExpiryPolicy,
     Transfer, TransferBody,
 };
@@ -312,6 +312,31 @@ impl ReceiverLinkInner {
 
     pub(crate) fn set_delivery_count(&mut self, delivery_count: SequenceNo) {
         self.delivery_count = delivery_count;
+    }
+
+    /// Apply sender's delivery-count, delivery-limit is preserved (#2.6.7)
+    pub(crate) fn apply_flow(&mut self, flow: &Flow) {
+        // sender counts multi-frame delivery at first frame, receiver at last frame
+        if self.partial_body.is_some() {
+            return;
+        }
+        if let Some(snd_delivery_count) = flow.delivery_count() {
+            let limit = self.delivery_count.wrapping_add(self.credit);
+            let credit = limit.wrapping_sub(snd_delivery_count);
+            if credit > i32::MAX as u32 {
+                log::warn!(
+                    "{}: Receiver link {:?} flow delivery count {:?} is beyond delivery limit {:?}",
+                    self.session.tag(),
+                    self.name,
+                    snd_delivery_count,
+                    limit
+                );
+                self.credit = 0;
+            } else {
+                self.credit = credit;
+            }
+            self.delivery_count = snd_delivery_count;
+        }
     }
 
     pub(crate) fn name(&self) -> &ByteString {
