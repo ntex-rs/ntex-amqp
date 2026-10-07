@@ -400,3 +400,56 @@ async fn receiver_applies_sender_flow() {
         ]
     );
 }
+
+#[ntex::test]
+async fn receiver_transfer_error_detaches_link() {
+    let no_id = |more: bool| {
+        let Frame::Transfer(mut tr) = transfer(0, more, None, 0) else {
+            panic!()
+        };
+        tr.0.delivery_id = None;
+        Frame::from(tr)
+    };
+    let cases = [
+        (
+            0,
+            transfer(0, false, None, 0),
+            LinkError::TransferLimitExceeded,
+        ),
+        (1, no_id(false), LinkError::DetachForced),
+        (1, no_id(true), LinkError::DetachForced),
+    ];
+    for (credit, frame, condition) in cases {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, _, response)) = handle_frame(&conn, attach()) else {
+            panic!()
+        };
+        link.confirm_receiver_link(response);
+        link.set_link_credit(credit);
+
+        assert!(matches!(handle_frame(&conn, frame), Ok(Action::None)));
+        assert!(link.is_closed());
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        assert!(matches!(link.poll_recv(&mut cx), Poll::Ready(None)));
+        // link is closing, transfers are ignored
+        assert!(matches!(
+            handle_frame(&conn, transfer(1, false, None, 0)),
+            Ok(Action::None)
+        ));
+
+        ntex::time::sleep(ntex::time::Millis(10)).await;
+        let codec = AmqpCodec::<AmqpFrame>::new();
+        let mut buf = BytesMut::from(&client.read_any()[..]);
+        let mut detaches = Vec::new();
+        while let Some(frame) = codec.decode(&mut buf).unwrap() {
+            if let Frame::Detach(det) = frame.into_parts().1 {
+                detaches.push((det.handle(), det.closed(), det.error().cloned()));
+            }
+        }
+        let [(0, true, Some(err))] = &detaches[..] else {
+            panic!("{detaches:?}")
+        };
+        assert_eq!(err.condition(), &condition.into());
+    }
+}

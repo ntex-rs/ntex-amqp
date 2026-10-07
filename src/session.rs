@@ -17,7 +17,7 @@ use crate::delivery::DeliveryInner;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::{
     DEFAULT_MAX_MESSAGE_SIZE, EstablishedReceiverLink, ReceiverLink, ReceiverLinkBuilder,
-    ReceiverLinkInner,
+    ReceiverLinkInner, TransferResult,
 };
 use crate::sndlink::{
     EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner, remote_max_message_size,
@@ -1337,6 +1337,21 @@ impl SessionInner {
         }
     }
 
+    fn apply_transfer_result(&mut self, link: &ReceiverLink, result: TransferResult) -> Action {
+        match result {
+            TransferResult::Action(action) => action,
+            TransferResult::Flow => {
+                let (handle, delivery_count, credit, _) = link.inner.get_ref().flow_state();
+                self.rcv_link_flow(handle, delivery_count, credit);
+                Action::None
+            }
+            TransferResult::Detach(err) => {
+                let _ = self.detach_receiver_link(link.handle(), true, Some(err));
+                Action::None
+            }
+        }
+    }
+
     pub(crate) fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
         if let Some(Either::Right(ReceiverLinkState::Established(link))) =
             self.links.get(hnd as usize)
@@ -1449,7 +1464,11 @@ impl SessionInner {
                                     )))
                                 }
                                 ReceiverLinkState::Established(link) => {
-                                    Ok(link.inner.get_mut().handle_transfer(transfer, &link.inner))
+                                    // link must not be borrowed while session updates its state
+                                    let link = link.clone();
+                                    let result =
+                                        link.inner.get_mut().handle_transfer(transfer, &link.inner);
+                                    Ok(self.apply_transfer_result(&link, result))
                                 }
                                 ReceiverLinkState::Closing(_) => Ok(Action::None),
                             },
