@@ -150,14 +150,16 @@ impl Session {
         }
     }
 
-    /// Find established sender link by name
-    pub fn get_sender_link(&self, name: &str) -> Option<&SenderLink> {
+    /// Find established sender link by name.
+    ///
+    /// Returns an owned handle sharing the link's state.
+    pub fn get_sender_link(&self, name: &str) -> Option<SenderLink> {
         let inner = self.inner.get_ref();
 
         if let Some(id) = inner.sender_names.get(name)
             && let Some(Either::Left(SenderLinkState::Established(link))) = inner.links.get(*id)
         {
-            return Some(link);
+            return Some(SenderLink::clone(link));
         }
         None
     }
@@ -165,7 +167,8 @@ impl Session {
     /// Find established sender link by address
     ///
     /// Multiple links could be attached to the same address, first found link is returned.
-    pub fn get_sender_link_by_address(&self, address: &str) -> Option<&SenderLink> {
+    /// Returns an owned handle sharing the link's state.
+    pub fn get_sender_link_by_address(&self, address: &str) -> Option<SenderLink> {
         self.inner
             .get_ref()
             .links
@@ -174,33 +177,41 @@ impl Session {
                 Either::Left(SenderLinkState::Established(link))
                     if link.address().is_some_and(|addr| addr == address) =>
                 {
-                    Some(&**link)
+                    Some(SenderLink::clone(link))
                 }
                 _ => None,
             })
     }
 
-    /// Find established sender link by local handle
+    /// Find established sender link by local handle.
+    ///
+    /// Returns an owned handle sharing the link's state.
     #[inline]
-    pub fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+    pub fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<SenderLink> {
         self.inner.get_ref().get_sender_link_by_local_handle(hnd)
     }
 
-    /// Find established sender link by remote handle
+    /// Find established sender link by remote handle.
+    ///
+    /// Returns an owned handle sharing the link's state.
     #[inline]
-    pub fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+    pub fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<SenderLink> {
         self.inner.get_ref().get_sender_link_by_remote_handle(hnd)
     }
 
-    /// Find established receiver link by local handle
+    /// Find established receiver link by local handle.
+    ///
+    /// Returns an owned handle sharing the link's state.
     #[inline]
-    pub fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+    pub fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<ReceiverLink> {
         self.inner.get_ref().get_receiver_link_by_local_handle(hnd)
     }
 
-    /// Find established receiver link by remote handle
+    /// Find established receiver link by remote handle.
+    ///
+    /// Returns an owned handle sharing the link's state.
     #[inline]
-    pub fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+    pub fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<ReceiverLink> {
         self.inner.get_ref().get_receiver_link_by_remote_handle(hnd)
     }
 
@@ -1142,20 +1153,20 @@ impl SessionInner {
         self.remote_handles.contains_key(&hnd)
     }
 
-    pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+    pub(crate) fn get_sender_link_by_local_handle(&self, hnd: Handle) -> Option<SenderLink> {
         if let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(hnd as usize)
         {
-            Some(link)
+            Some(SenderLink::clone(link))
         } else {
             None
         }
     }
 
-    pub(crate) fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<&SenderLink> {
+    pub(crate) fn get_sender_link_by_remote_handle(&self, hnd: Handle) -> Option<SenderLink> {
         if let Some(id) = self.remote_handles.get(&hnd)
             && let Some(Either::Left(SenderLinkState::Established(link))) = self.links.get(*id)
         {
-            return Some(link);
+            return Some(SenderLink::clone(link));
         }
         None
     }
@@ -1456,21 +1467,21 @@ impl SessionInner {
         }
     }
 
-    pub(crate) fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+    pub(crate) fn get_receiver_link_by_local_handle(&self, hnd: Handle) -> Option<ReceiverLink> {
         if let Some(Either::Right(ReceiverLinkState::Established(link))) =
             self.links.get(hnd as usize)
         {
-            Some(link)
+            Some(ReceiverLink::clone(link))
         } else {
             None
         }
     }
 
-    pub(crate) fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<&ReceiverLink> {
+    pub(crate) fn get_receiver_link_by_remote_handle(&self, hnd: Handle) -> Option<ReceiverLink> {
         if let Some(id) = self.remote_handles.get(&hnd)
             && let Some(Either::Right(ReceiverLinkState::Established(link))) = self.links.get(*id)
         {
-            return Some(link);
+            return Some(ReceiverLink::clone(link));
         }
         None
     }

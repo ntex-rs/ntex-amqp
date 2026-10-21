@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Breaking: `Session::get_sender_link*` and `Session::get_receiver_link*` now return
+  owned, reference-counted link handles instead of references into session storage.
+  Handles remain valid when links detach or sessions close. Remove `.cloned()` from
+  lookup calls; link state is still shared, including closed state.
+
 * Update ntex dependencies and propagate readiness notifications through connectors,
   handshakes, router handlers, and the AMQP dispatcher.
 
