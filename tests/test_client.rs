@@ -5,7 +5,7 @@ use ntex::io::Io;
 use ntex::server::{TestServer, TestServerBuilder, test_server};
 use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
 use ntex::util::{ByteString, Bytes, Either};
-use ntex::{SharedCfg, rt, time::Millis, time::Seconds, time::timeout, url::Url};
+use ntex::{SharedCfg, rt, time::Millis, time::Seconds, time::timeout};
 use ntex_amqp::codec::types::Symbol;
 use ntex_amqp::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 use ntex_amqp::codec::{AmqpCodecError, ProtocolIdError, protocol, protocol::ProtocolId};
@@ -14,6 +14,7 @@ use ntex_amqp::{
     AmqpServiceConfig, ControlFrame, ControlFrameKind, client, client::ConnectError, server, types,
 };
 use ntex_error::ErrorDiagnostic;
+use urly::Url;
 
 type Log = Arc<Mutex<Vec<String>>>;
 
