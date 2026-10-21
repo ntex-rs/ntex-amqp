@@ -526,8 +526,9 @@ fn decode_variant(input: &mut Bytes, fmt: u8, depth: u32) -> Result<Variant, Amq
                 codec::FORMATCODE_LIST32 | codec::FORMATCODE_MAP32 | codec::FORMATCODE_ARRAY32 => {
                     decode_check_len!(input, 5);
                     let size = u32::from_be_bytes(input[1..5].try_into().unwrap()) as usize;
-                    decode_check_len!(input, 5 + size);
-                    let data = input.split_to(5 + size);
+                    let size = size.checked_add(5).ok_or(AmqpParseError::InvalidSize)?;
+                    decode_check_len!(input, size);
+                    let data = input.split_to(size);
                     Ok(Variant::DescribedCompound(DescribedCompound::new(
                         descriptor, data,
                     )))
@@ -1033,6 +1034,12 @@ mod tests {
         Constructor::FormatCode(codec::FORMATCODE_UBYTE),
         vec![Variant::Ubyte(1), Variant::Ubyte(2), Variant::Ubyte(3)];
         "described 'foo:bar', array8 w/3 u8 elements: 1, 2, 3")]
+    #[test_case(
+        b"\x00\x53\x23\xf0\x00\x00\x00\x08\x00\x00\x00\x03\x50\x01\x02\x03",
+        Descriptor::Ulong(0x23),
+        Constructor::FormatCode(codec::FORMATCODE_UBYTE),
+        vec![Variant::Ubyte(1), Variant::Ubyte(2), Variant::Ubyte(3)];
+        "described 35, array32 w/3 u8 elements: 1, 2, 3")]
     fn decode_described_array(
         input: &'static [u8],
         expected_descriptor: Descriptor,
@@ -1484,6 +1491,35 @@ mod tests {
             Vec::<u8>::decode(&mut buf),
             Err(AmqpParseError::InvalidDescriptor(_))
         ));
+    }
+
+    #[test]
+    fn described_variant_size_overflow() {
+        for format in [
+            codec::FORMATCODE_LIST32,
+            codec::FORMATCODE_MAP32,
+            codec::FORMATCODE_ARRAY32,
+        ] {
+            for size in [u32::MAX - 5, u32::MAX - 4, u32::MAX] {
+                let mut data = vec![
+                    codec::FORMATCODE_DESCRIBED,
+                    codec::FORMATCODE_ULONG_0,
+                    format,
+                ];
+                data.extend_from_slice(&size.to_be_bytes());
+                let mut input = Bytes::from(data);
+                let needed = u64::from(size) + 5;
+                match Variant::decode(&mut input) {
+                    Err(AmqpParseError::Incomplete(actual)) => {
+                        assert_eq!(actual as u64, needed);
+                    }
+                    Err(AmqpParseError::InvalidSize) => {
+                        assert!(needed > usize::MAX as u64);
+                    }
+                    result => panic!("format {format:#x}, size {size}: {result:?}"),
+                }
+            }
+        }
     }
 
     #[test]

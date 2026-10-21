@@ -1,5 +1,10 @@
 # Changes
 
+## Unreleased
+
+* Reject overflowing described LIST32, MAP32 and ARRAY32 lengths on 32-bit targets
+  instead of panicking or accepting truncated values.
+
 ## [6.3.0] - 2026-10-21
 
 * Release queued control frames when connections terminate or dispatchers shut down,
