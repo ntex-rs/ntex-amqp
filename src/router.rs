@@ -289,6 +289,7 @@ where
     type Res = Outcome;
     type Error = Error;
 
+    ntex_service::forward_bind!(Link<S>, service);
     ntex_service::forward_ready!(Link<S>, service);
     ntex_service::forward_shutdown!(Link<S>, service);
 

@@ -1404,11 +1404,15 @@ async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     Ok(())
 }
 
-struct GatedPublish(Rc<Cell<bool>>);
+struct GatedPublish(Rc<Cell<bool>>, Rc<ntex_service::ReadyNotifier>);
 
 impl Service<server::State<()>, types::Message> for GatedPublish {
     type Res = ();
     type Error = LinkError;
+
+    fn bind(&self, ctx: ntex_service::BindCtx<'_>) {
+        ctx.subscribe(&self.1);
+    }
 
     async fn ready(&self, _: Ctx<'_, Self, server::State<()>>) -> Result<(), LinkError> {
         while self.0.get() {
@@ -1432,6 +1436,8 @@ async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
         // publish service is not ready while the control service is processing a frame
         let blocked = Rc::new(Cell::new(false));
         let blocked2 = blocked.clone();
+        let changed = Rc::new(ntex_service::ReadyNotifier::new());
+        let changed2 = changed.clone();
 
         server::Server::builder(async move |con: server::Handshake| match con {
             server::Handshake::Amqp(con) => {
@@ -1443,13 +1449,15 @@ async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
         .control(async move |frm: ControlFrame| {
             if let ControlFrameKind::AttachSender(..) = frm.kind() {
                 blocked.set(true);
+                changed.notify();
                 sleep(Millis(50)).await;
                 blocked.set(false);
+                changed.notify();
             }
             Ok::<_, ()>(())
         })
         .build(fn_factory(async move |_: &server::State<()>| {
-            Ok::<_, std::convert::Infallible>(GatedPublish(blocked2.clone()))
+            Ok::<_, std::convert::Infallible>(GatedPublish(blocked2.clone(), changed2.clone()))
         }))
     });
 

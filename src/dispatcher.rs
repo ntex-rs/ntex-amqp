@@ -1,13 +1,13 @@
-use std::task::{Context, Poll, ready};
+use std::task::{Poll, ready};
 use std::{cell, cmp, future::poll_fn, rc::Rc};
 
 use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
 use ntex_service::pipeline::{Pipeline, PipelineBinding};
-use ntex_service::{Ctx, Service};
+use ntex_service::{BindCtx, Ctx, Service};
 use ntex_util::channel::condition::Condition;
 use ntex_util::future::{Either, select};
-use ntex_util::time::{Millis, Sleep, sleep};
+use ntex_util::time::{CallbackTimer, Millis};
 
 use crate::codec::{AmqpCodec, AmqpFrame, protocol::Frame};
 use crate::connection::{Connection, ConnectionRef};
@@ -20,8 +20,6 @@ pub(crate) struct Dispatcher {
     service: Pipeline<types::Message, (), Error>,
     ctl_service: Pipeline<ControlFrame, (), Error>,
     ctl_state: Rc<ControlState>,
-    idle_sleep: Sleep,
-    idle_timeout: Millis,
 }
 
 /// State shared with spawned control service calls
@@ -29,6 +27,7 @@ struct ControlState {
     sink: ConnectionRef,
     service: PipelineBinding<types::Message, (), Error>,
     error: cell::Cell<Option<AmqpDispatcherError>>,
+    idle_timer: Option<CallbackTimer>,
     // cancels in-flight control service calls
     stop: Condition,
 }
@@ -42,24 +41,42 @@ impl Dispatcher {
     ) -> Self {
         let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
         Dispatcher {
-            ctl_state: Rc::new(ControlState {
-                sink: sink.clone(),
-                service: service.bind(),
-                error: cell::Cell::new(None),
-                stop: Condition::new(),
+            ctl_state: Rc::new_cyclic(|weak: &std::rc::Weak<ControlState>| {
+                let weak = weak.clone();
+                ControlState {
+                    sink: sink.clone(),
+                    service: service.bind(),
+                    error: cell::Cell::new(None),
+                    idle_timer: idle_timeout.non_zero().then(|| {
+                        CallbackTimer::new(idle_timeout, move || {
+                            if let Some(state) = weak.upgrade()
+                                && state.sink.is_opened()
+                            {
+                                log::trace!(
+                                    "{}: Send keep-alive ping, timeout: {:?}",
+                                    state.sink.tag(),
+                                    idle_timeout
+                                );
+                                if let Some(timer) = &state.idle_timer {
+                                    timer.reset(idle_timeout);
+                                }
+                                state.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
+                            }
+                        })
+                    }),
+                    stop: Condition::new(),
+                }
             }),
             sink,
-            idle_timeout,
             service,
             ctl_service,
-            idle_sleep: sleep(idle_timeout),
         }
     }
 }
 
 impl Drop for Dispatcher {
     fn drop(&mut self) {
-        self.ctl_state.stop.notify_and_lock(());
+        self.ctl_state.stop();
     }
 }
 
@@ -67,11 +84,16 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
     type Res = Option<AmqpFrame>;
     type Error = AmqpDispatcherError;
 
+    fn bind(&self, ctx: BindCtx<'_>) {
+        self.service.bind_to(&ctx);
+        self.ctl_service.bind_to(&ctx);
+        ctx.subscribe(&self.sink.get_control_queue().changed);
+    }
+
     async fn ready(&self, _: Ctx<'_, Self, ()>) -> Result<(), Self::Error> {
         poll_fn(|cx| {
-            // control frames and keep-alive pings must progress
-            // while the publish service applies backpressure
-            self.poll_dispatcher(cx);
+            // Process queue notifications even while the publish service is pending.
+            self.dispatch_control_queue();
 
             if let Some(err) = self.ctl_state.error.take() {
                 log::error!("{}: Control service failed: {:?}", self.sink.tag(), err);
@@ -105,7 +127,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
     }
 
     async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
-        self.ctl_state.stop.notify_and_lock(());
+        self.ctl_state.stop();
         self.sink
             .0
             .get_mut()
@@ -242,13 +264,15 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
 }
 
 impl Dispatcher {
-    fn poll_dispatcher(&self, cx: &mut Context<'_>) {
+    fn dispatch_control_queue(&self) {
         let queue = self.sink.get_control_queue();
-        queue.waker.register(cx.waker());
 
         // enqueue pending control frames
-        let frames: Vec<_> = queue.pending.borrow_mut().drain(..).collect();
-        for frame in frames {
+        loop {
+            let frame = queue.pending.borrow_mut().pop_front();
+            let Some(frame) = frame else {
+                break;
+            };
             // release publish service resources of locally detached links
             match frame.kind() {
                 ControlFrameKind::LocalDetachReceiver(_, link) => {
@@ -267,17 +291,6 @@ impl Dispatcher {
                 _ => (),
             }
             self.spawn_control_call(frame);
-        }
-
-        // handle idle timeout
-        if self.idle_timeout.non_zero() && self.idle_sleep.poll_elapsed(cx).is_ready() {
-            log::trace!(
-                "{}: Send keep-alive ping, timeout: {:?} secs",
-                self.sink.tag(),
-                self.idle_timeout
-            );
-            self.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
-            self.idle_sleep.reset(self.idle_timeout);
         }
     }
 
@@ -306,13 +319,20 @@ impl Dispatcher {
                 && let Err(err) = state.handle_control_frame(&frame, res.err())
             {
                 state.error.set(Some(err));
-                state.sink.get_control_queue().waker.wake();
+                state.sink.get_control_queue().changed.notify();
             }
         });
     }
 }
 
 impl ControlState {
+    fn stop(&self) {
+        if let Some(timer) = &self.idle_timer {
+            timer.cancel();
+        }
+        self.stop.notify_and_lock(());
+    }
+
     fn handle_control_frame(
         &self,
         frame: &ControlFrame,

@@ -1,7 +1,8 @@
 use std::{cell::RefCell, collections::VecDeque, fmt, io};
 
 use ntex_amqp_codec::protocol;
-use ntex_util::{future::Either, task::LocalWaker};
+use ntex_service::ReadyNotifier;
+use ntex_util::future::Either;
 
 use crate::cell::Cell;
 use crate::error::AmqpProtocolError;
@@ -78,12 +79,12 @@ impl ControlFrame {
 #[derive(Default, Debug)]
 pub(crate) struct ControlQueue {
     pub(crate) pending: RefCell<VecDeque<ControlFrame>>,
-    pub(crate) waker: LocalWaker,
+    pub(crate) changed: ReadyNotifier,
 }
 
 impl ControlQueue {
     pub(crate) fn enqueue_frame(&self, frame: ControlFrame) {
         self.pending.borrow_mut().push_back(frame);
-        self.waker.wake();
+        self.changed.notify();
     }
 }

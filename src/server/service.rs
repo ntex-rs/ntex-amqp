@@ -140,6 +140,8 @@ where
     type Res = ();
     type Error = ServerError<Err>;
 
+    ntex_service::forward_pl_bind!(St, handshake);
+
     #[inline]
     async fn ready(&self, ctx: Ctx<'_, Self, St>) -> Result<(), Self::Error> {
         self.handshake
