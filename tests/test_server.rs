@@ -4,13 +4,14 @@ use std::{cell::Cell, rc::Rc};
 use ntex::server::{TestServerBuilder, test_server};
 use ntex::service::{Ctx, Pipeline, Service, boxed, boxed::BoxService, fn_factory, fn_service};
 use ntex::util::{Bytes, Either};
-use ntex::{SharedCfg, rt, time::Millis, time::sleep, time::timeout, url::Url};
+use ntex::{SharedCfg, rt, time::Millis, time::sleep, time::timeout};
 use ntex_amqp::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, protocol::ProtocolId};
 use ntex_amqp::{
     AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
     server, types,
 };
 use rand::{Rng, distr::Alphanumeric};
+use urly::Url;
 
 async fn server(
     _link: &types::Link<()>,

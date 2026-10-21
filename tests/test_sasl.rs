@@ -6,12 +6,13 @@ use ntex::server::{TestServer, TestServerBuilder, test_server};
 use ntex::service::{Pipeline, boxed, boxed::BoxService, fn_service};
 use ntex::time::{Millis, Seconds, sleep, timeout};
 use ntex::util::{ByteString, Bytes};
-use ntex::{SharedCfg, io::Io, url::Url};
+use ntex::{SharedCfg, io::Io};
 use ntex_amqp::codec::protocol::{self, ProtocolId, SaslCode, SaslFrameBody, SaslOutcome};
 use ntex_amqp::codec::types::Symbol;
 use ntex_amqp::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, SaslFrame};
 use ntex_amqp::error::LinkError;
 use ntex_amqp::{AmqpServiceConfig, ControlFrame, client, server, types};
+use urly::Url;
 
 // ======================= helpers =======================
 
