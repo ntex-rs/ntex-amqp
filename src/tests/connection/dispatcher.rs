@@ -490,7 +490,7 @@ async fn local_detach_control_frames() {
 
 #[ntex::test]
 async fn idle_timeout_ping() {
-    // ping interval is half of the idle timeout, capped at a second
+    // Activity is checked at half of the idle timeout budget.
     let h = Harness::new(Millis(100));
     h.disp.ready().await.unwrap();
     assert!(read_frames(&h.client).is_empty());
@@ -528,6 +528,109 @@ async fn idle_timeout_ping() {
     for frame in bytes.chunks(8) {
         assert_eq!(frame, b"\0\0\0\x08\x02\0\0\0");
     }
+}
+
+#[ntex::test]
+async fn idle_timeout_negotiated_interval() {
+    let h = Harness::new(Millis(4_000));
+    let long = Harness::new(Millis(3_221_225_471));
+    sleep(Millis(1_300)).await;
+    assert!(read_frames(&h.client).is_empty());
+    assert!(read_frames(&long.client).is_empty());
+
+    let bytes = timeout(Millis(1_500), h.client.read())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&bytes[..], b"\0\0\0\x08\x02\0\0\0");
+}
+
+#[ntex::test]
+async fn idle_timeout_outgoing_activity() {
+    for path in 0..3 {
+        let h = Harness::new(Millis(400));
+        for channel in 0..6 {
+            let last_write = std::time::Instant::now();
+            match path {
+                0 => h.conn.post_frame(AmqpFrame::new(0, peer_flow(None))),
+                1 => h
+                    .conn
+                    .0
+                    .get_mut()
+                    .post_frame(AmqpFrame::new(0, peer_flow(None))),
+                _ => {
+                    // The Begin reply uses the fallible encoding path.
+                    h.conn
+                        .handle_frame(AmqpFrame::new(channel, begin()))
+                        .unwrap();
+                }
+            }
+            sleep(Millis(80)).await;
+            let frames = read_frames(&h.client);
+            assert_eq!(frames.len(), 1, "write path {path}: {frames:?}");
+            assert!(!matches!(frames[0], Frame::Empty));
+
+            if channel == 5 {
+                let bytes = timeout(Millis(400), h.client.read())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(&bytes[..], b"\0\0\0\x08\x02\0\0\0");
+                assert!(last_write.elapsed() < std::time::Duration::from_millis(500));
+            }
+        }
+    }
+}
+
+#[ntex::test]
+async fn idle_timeout_incoming_only() {
+    let h = Harness::new(Millis(400));
+    let mut pings = 0;
+    for _ in 0..6 {
+        h.frame(Frame::Empty).await.unwrap();
+        sleep(Millis(80)).await;
+        for frame in read_frames(&h.client) {
+            assert!(matches!(frame, Frame::Empty));
+            pings += 1;
+        }
+    }
+    assert!(pings > 0);
+}
+
+#[ntex::test]
+async fn idle_timeout_delayed_activity_check() {
+    for delay in [340, 400] {
+        let h = Harness::new(Millis(400));
+        h.conn.post_frame(AmqpFrame::new(0, peer_flow(None)));
+        sleep(Millis(20)).await;
+        assert!(matches!(&read_frames(&h.client)[..], [Frame::Flow(_)]));
+
+        // An overdue callback must not treat an old write as fresh activity.
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+        let bytes = timeout(Millis(100), h.client.read())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes[..], b"\0\0\0\x08\x02\0\0\0");
+    }
+}
+
+#[ntex::test]
+async fn idle_timeout_activity_before_start() {
+    let (_io, conn, client) = connection();
+    conn.post_frame(AmqpFrame::new(0, peer_flow(None)));
+    sleep(Millis(20)).await;
+    assert!(matches!(&read_frames(&client)[..], [Frame::Flow(_)]));
+
+    let flags = Flags::new();
+    let _dispatcher = Dispatcher::new(
+        conn,
+        Pipeline::new((), Svc::<Message>::new(&flags)),
+        Pipeline::new((), Svc::<ControlFrame>::new(&flags)),
+        Millis(400),
+    );
+    let bytes = timeout(Millis(300), client.read()).await.unwrap().unwrap();
+    assert_eq!(&bytes[..], b"\0\0\0\x08\x02\0\0\0");
 }
 
 #[ntex::test]
