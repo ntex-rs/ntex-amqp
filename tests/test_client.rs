@@ -172,6 +172,74 @@ async fn test_client_connect_session_and_transfer() {
 }
 
 #[ntex::test]
+async fn test_client_short_remote_idle_timeout() {
+    for custom_control in [false, true] {
+        let log = log();
+        let log2 = log.clone();
+        let srv = raw_server(move |io: Io| {
+            let log = log2.clone();
+            async move {
+                let mut open = server_open();
+                open.0.idle_time_out = Some(1_000);
+                negotiate_plain(&io, open).await;
+                let frame = timeout(Millis(900), io.recv(&amqp_codec()))
+                    .await
+                    .expect("no keepalive before the peer idle deadline")
+                    .unwrap()
+                    .unwrap();
+                assert!(matches!(frame.performative(), protocol::Frame::Empty));
+                push(&log, "ping");
+            }
+        });
+
+        let client = connect(&srv).await.unwrap();
+        let _ = timeout(Millis(2_000), async move {
+            if custom_control {
+                client
+                    .start(fn_service(async |_: ControlFrame| Ok::<_, LinkError>(())))
+                    .await
+            } else {
+                client.start_default().await
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(*log.lock().unwrap(), ["ping"]);
+    }
+}
+
+#[ntex::test]
+async fn test_server_short_remote_idle_timeout() {
+    let srv = amqp_server(AmqpServiceConfig::new());
+    let io = ntex::connect::connect(uri(&srv)).await.unwrap();
+    io.send(ProtocolId::Amqp, &ProtocolIdCodec).await.unwrap();
+    assert_eq!(
+        io.recv(&ProtocolIdCodec).await.unwrap(),
+        Some(ProtocolId::Amqp)
+    );
+    let mut open = AmqpServiceConfig::new().to_open();
+    open.0.idle_time_out = Some(1_000);
+    io.send(AmqpFrame::new(0, open.into()), &amqp_codec())
+        .await
+        .unwrap();
+    assert!(matches!(
+        io.recv(&amqp_codec())
+            .await
+            .unwrap()
+            .unwrap()
+            .performative(),
+        protocol::Frame::Open(_)
+    ));
+
+    let frame = timeout(Millis(900), io.recv(&amqp_codec()))
+        .await
+        .expect("no keepalive before the peer idle deadline")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame.performative(), protocol::Frame::Empty));
+}
+
+#[ntex::test]
 async fn test_client_close_with_error() {
     let srv = amqp_server(AmqpServiceConfig::new());
 

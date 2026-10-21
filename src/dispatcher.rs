@@ -1,5 +1,5 @@
 use std::task::{Poll, ready};
-use std::{cell, cmp, future::poll_fn, rc::Rc};
+use std::{cell, future::poll_fn, rc::Rc};
 
 use ntex_dispatcher::{DispatchItem, Reason};
 use ntex_rt::spawn;
@@ -39,7 +39,11 @@ impl Dispatcher {
         ctl_service: Pipeline<ControlFrame, (), Error>,
         idle_timeout: Millis,
     ) -> Self {
-        let idle_timeout = Millis(cmp::min(idle_timeout.0 >> 1, 1000));
+        let idle_timeout = Millis(if idle_timeout.non_zero() {
+            (idle_timeout.0 >> 1).clamp(1, 1000)
+        } else {
+            0
+        });
         Dispatcher {
             ctl_state: Rc::new_cyclic(|weak: &std::rc::Weak<ControlState>| {
                 let weak = weak.clone();

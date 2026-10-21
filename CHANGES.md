@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Preserve peer idle timeout precision in client/server handshakes and keepalive
+  timers. Short positive timeouts no longer round down to zero and disable pings.
+
 * Reject overflowing described LIST32, MAP32 and ARRAY32 lengths on 32-bit targets
   instead of panicking or accepting truncated values.
 
