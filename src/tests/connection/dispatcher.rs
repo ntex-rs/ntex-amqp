@@ -244,7 +244,7 @@ async fn stop_reasons_map_to_control_frames() {
         assert!(h.disp.call(item()).await.unwrap().is_none());
         sleep(Millis(25)).await;
         assert_eq!(h.control.take(), [expected]);
-        assert!(h.publish.take().is_empty());
+        assert_eq!(h.publish.take(), Vec::<String>::new());
     }
 
     // these are not reported to the control service
@@ -257,7 +257,7 @@ async fn stop_reasons_map_to_control_frames() {
             .is_none()
     );
     sleep(Millis(25)).await;
-    assert!(h.control.take().is_empty());
+    assert_eq!(h.control.take(), Vec::<String>::new());
 }
 
 #[ntex::test]
@@ -379,7 +379,7 @@ async fn control_error_closes_receiver() {
     h.settle().await;
 
     // link is never confirmed, publish service is not involved
-    assert!(h.publish.take().is_empty());
+    assert_eq!(h.publish.take(), Vec::<String>::new());
     let names = frame_names(&h.client);
     assert_eq!(names[0], "Begin");
     assert_eq!(detaches(&h.client).len(), 0);
@@ -415,7 +415,7 @@ async fn attach_sender_and_flow() {
     h.frame(peer_detach(2)).await.unwrap();
     h.settle().await;
     assert_eq!(h.control.take(), ["RemoteDetachSender"]);
-    assert!(h.publish.take().is_empty());
+    assert_eq!(h.publish.take(), Vec::<String>::new());
 }
 
 #[ntex::test]
@@ -493,7 +493,7 @@ async fn idle_timeout_ping() {
     // Activity is checked at half of the idle timeout budget.
     let h = Harness::new(Millis(100));
     h.disp.ready().await.unwrap();
-    assert!(read_frames(&h.client).is_empty());
+    assert_eq!(read_frames(&h.client), Vec::<Frame>::new());
 
     // Pings continue without further readiness checks.
     for _ in 0..2 {
@@ -516,7 +516,7 @@ async fn idle_timeout_ping() {
     h.disp.ready().await.unwrap();
     sleep(Millis(80)).await;
     h.disp.ready().await.unwrap();
-    assert!(read_frames(&h.client).is_empty());
+    assert_eq!(read_frames(&h.client), Vec::<Frame>::new());
 
     // A positive timeout must not disable the timer when the interval is halved.
     let h = Harness::new(Millis(1));
@@ -535,8 +535,8 @@ async fn idle_timeout_negotiated_interval() {
     let h = Harness::new(Millis(4_000));
     let long = Harness::new(Millis(3_221_225_471));
     sleep(Millis(1_300)).await;
-    assert!(read_frames(&h.client).is_empty());
-    assert!(read_frames(&long.client).is_empty());
+    assert_eq!(read_frames(&h.client), Vec::<Frame>::new());
+    assert_eq!(read_frames(&long.client), Vec::<Frame>::new());
 
     let bytes = timeout(Millis(1_500), h.client.read())
         .await

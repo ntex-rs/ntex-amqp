@@ -465,8 +465,8 @@ fn service_config_getters() {
 
     // capabilities are not set by default
     let cfg = AmqpServiceConfig::default();
-    assert!(cfg.get_offered_capabilities().is_empty());
-    assert!(cfg.get_desired_capabilities().is_empty());
+    assert_eq!(cfg.get_offered_capabilities(), Vec::<Symbol>::new());
+    assert_eq!(cfg.get_desired_capabilities(), Vec::<Symbol>::new());
     assert_eq!(cfg.get_max_frame_size(), 16 * 1024);
 
     // generated container-id is a simple uuid, idle timeout is advertised
