@@ -137,7 +137,7 @@ async fn receiver_delivery_remote_settled() {
     drop(d0);
     drop(d1);
     sleep(Millis(50)).await;
-    assert!(frame_names(&client).is_empty());
+    assert_eq!(frame_names(&client), Vec::<String>::new());
 
     // not settled by remote
     assert!(!d2.is_remote_settled());
@@ -590,7 +590,7 @@ async fn continuation_transfer_settles_delivery() {
         drop(d);
         assert_eq!(unsettled(&conn), (0, 0));
         sleep(Millis(50)).await;
-        assert!(dispositions(&client).is_empty());
+        assert_eq!(dispositions(&client), Vec::<String>::new());
     }
 }
 

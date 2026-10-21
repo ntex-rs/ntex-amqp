@@ -494,7 +494,10 @@ async fn delivery_accessors_and_discard() {
     delivery.settle(ACCEPTED);
     delivery.update_state(ACCEPTED);
     sleep(Millis(25)).await;
-    assert!(dispositions(&client).is_empty());
+    assert_eq!(
+        dispositions(&client),
+        Vec::<(bool, Option<DeliveryState>)>::new()
+    );
 
     // discarded delivery is removed from the unsettled map
     let delivery = link

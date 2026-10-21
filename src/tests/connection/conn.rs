@@ -123,7 +123,7 @@ async fn close_confirmation() {
         Some(AmqpProtocolError::Disconnected)
     ));
     sleep(Millis(25)).await;
-    assert!(read_frames(&client).is_empty());
+    assert_eq!(read_frames(&client), Vec::<Frame>::new());
 }
 
 #[ntex::test]

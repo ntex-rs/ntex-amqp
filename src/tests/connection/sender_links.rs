@@ -140,7 +140,7 @@ async fn sender_link_drain() {
     assert!(pending(t3.as_mut()).await);
     flow(2, 8, true);
     sleep(Millis(50)).await;
-    assert!(frames().is_empty());
+    assert_eq!(frames(), Vec::<String>::new());
     assert_eq!(snd.credit(), 2);
     drop(t3);
     assert_eq!(snd.credit(), 0);
@@ -151,7 +151,7 @@ async fn sender_link_drain() {
     flow(2, 10, false);
     assert_eq!(snd.credit(), 2);
     sleep(Millis(50)).await;
-    assert!(frames().is_empty());
+    assert_eq!(frames(), Vec::<String>::new());
 
     // drain flow received before link confirmation
     let Ok(Action::AttachSender(lnk, attach, response)) =
@@ -222,7 +222,7 @@ async fn sender_link_credit_on_window_wait() {
     assert_eq!(frames(), ["Flow Some(0) Some(2) Some(0) true"]);
     drop(t2);
     sleep(Millis(50)).await;
-    assert!(frames().is_empty());
+    assert_eq!(frames(), Vec::<String>::new());
 
     // woken transfer delays drain until it gets blocked by session window,
     // then it waits for new credit
@@ -681,7 +681,7 @@ async fn sender_multi_frame_delivery_window() {
     session_window(&conn, 3, 1);
     assert!(pending(t2.as_mut()).await);
     sleep(Millis(50)).await;
-    assert!(transfer_frames(&client).is_empty());
+    assert_eq!(transfer_frames(&client), Vec::<String>::new());
     let Poll::Ready(Ok(d1)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
         panic!()
     };
