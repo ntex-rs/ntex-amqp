@@ -22,7 +22,7 @@ use ntex_amqp_codec::types::Symbol;
 use ntex_amqp_codec::{Decode, Encode};
 use ntex_bytes::{BytePages, ByteString};
 use ntex_service::cfg::{CfgContext, Configuration as SvcConfiguration};
-use ntex_util::time::Seconds;
+use ntex_util::time::{Millis, Seconds};
 use uuid::Uuid;
 
 mod cell;
@@ -80,6 +80,7 @@ pub struct AmqpServiceConfig {
 pub struct RemoteServiceConfig {
     pub max_frame_size: u32,
     pub channel_max: u16,
+    /// Peer idle timeout in milliseconds; zero disables keepalive pings.
     pub idle_time_out: Milliseconds,
     pub hostname: Option<ByteString>,
     pub offered_capabilities: Option<Symbols>,
@@ -313,12 +314,11 @@ impl RemoteServiceConfig {
         }
     }
 
-    #[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
-    pub(crate) fn timeout_remote_secs(&self) -> Seconds {
+    pub(crate) fn timeout_remote_millis(&self) -> Millis {
         if self.idle_time_out > 0 {
-            Seconds::checked_new(((self.idle_time_out as f32) * 0.75 / 1000.0) as usize)
+            Millis(((u64::from(self.idle_time_out) * 3 / 4) as u32).max(1))
         } else {
-            Seconds::ZERO
+            Millis::ZERO
         }
     }
 }

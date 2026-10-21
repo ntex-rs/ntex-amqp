@@ -222,7 +222,7 @@ where
                 .await
                 .map_err(HandshakeError::from)?;
 
-            Ok((io, codec, sink, State::new(st), Millis::from(idle_timeout)))
+            Ok((io, codec, sink, State::new(st), idle_timeout))
         }
         ProtocolId::AmqpTls => Err(ServerError::Handshake(HandshakeError::from(
             ProtocolIdError::Unexpected {

@@ -1,6 +1,6 @@
 use ntex_io::IoBoxed;
 use ntex_service::cfg::Cfg;
-use ntex_util::time::Seconds;
+use ntex_util::time::Millis;
 
 use crate::codec::{
     AmqpCodec, AmqpFrame, protocol::Frame, protocol::MIN_MAX_FRAME_SIZE, protocol::Open,
@@ -167,7 +167,7 @@ impl<St> HandshakeAmqpOpened<St> {
             st,
             io: self.io,
             sink: self.sink,
-            idle_timeout: self.remote_config.timeout_remote_secs(),
+            idle_timeout: self.remote_config.timeout_remote_millis(),
         }
     }
 }
@@ -177,11 +177,11 @@ pub struct HandshakeAck<AppSt> {
     st: AppSt,
     io: IoBoxed,
     sink: Connection,
-    idle_timeout: Seconds,
+    idle_timeout: Millis,
 }
 
 impl<AppSt> HandshakeAck<AppSt> {
-    pub(crate) fn into_inner(self) -> (AppSt, Connection, Seconds, IoBoxed) {
+    pub(crate) fn into_inner(self) -> (AppSt, Connection, Millis, IoBoxed) {
         (self.st, self.sink, self.idle_timeout, self.io)
     }
 }

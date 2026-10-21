@@ -11,7 +11,7 @@ use ntex_amqp_codec::{AmqpCodecError, AmqpParseError, Decode, Encode};
 use ntex_bytes::BytePages;
 use ntex_error::ErrorDiagnostic;
 use ntex_service::{Pipeline, ServiceFactory};
-use ntex_util::time::Seconds;
+use ntex_util::time::{Millis, Seconds};
 
 use crate::control::{ControlFrame, ControlFrameKind};
 use crate::default::{DefaultControlService, DefaultPublishService};
@@ -519,15 +519,39 @@ fn remote_config() {
         cfg.desired_capabilities,
         Some(Multiple(vec![Symbol::from("rd")]))
     );
-    // keep-alive is sent at 75% of the remote idle timeout
-    assert_eq!(cfg.timeout_remote_secs(), Seconds(6));
+    // Keepalive budget retains 75% of the peer's idle timeout.
+    assert_eq!(cfg.timeout_remote_millis(), Millis(6_000));
 
     // no idle timeout disables keep-alive
     let cfg = RemoteServiceConfig::new(&Open(Box::default()));
     assert_eq!(cfg.idle_time_out, 0);
     assert!(cfg.hostname.is_none());
     assert!(cfg.offered_capabilities.is_none());
-    assert_eq!(cfg.timeout_remote_secs(), Seconds::ZERO);
+    assert_eq!(cfg.timeout_remote_millis(), Millis::ZERO);
+}
+
+#[test]
+fn remote_idle_timeout_precision() {
+    for (peer, expected) in [
+        (0, 0),
+        (1, 1),
+        (2, 1),
+        (999, 749),
+        (1_000, 750),
+        (1_333, 999),
+        (u32::MAX, 3_221_225_471),
+    ] {
+        let open = Open(Box::new(OpenInner {
+            idle_time_out: Some(peer),
+            ..Default::default()
+        }));
+        let cfg = RemoteServiceConfig::new(&open);
+        assert_eq!(
+            cfg.timeout_remote_millis(),
+            Millis(expected),
+            "peer timeout: {peer}"
+        );
+    }
 }
 
 #[test]

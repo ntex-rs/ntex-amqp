@@ -65,7 +65,7 @@ where
             self.connection,
             Pipeline::new((), fn_service(async |_| Ok::<_, Error>(()))),
             Pipeline::new((), fn_service(async |_| Ok::<_, Error>(()))),
-            self.remote_config.timeout_remote_secs().into(),
+            self.remote_config.timeout_remote_millis(),
         );
 
         IoDispatcher::new(self.io, self.codec, Pipeline::new((), dispatcher)).await
@@ -82,7 +82,7 @@ where
             self.connection,
             Pipeline::new((), fn_service(async |_| Ok::<_, Error>(()))),
             Pipeline::new((), f.into_service().map_err(Into::into)),
-            self.remote_config.timeout_remote_secs().into(),
+            self.remote_config.timeout_remote_millis(),
         );
 
         IoDispatcher::new(self.io, self.codec, Pipeline::new((), dispatcher)).await

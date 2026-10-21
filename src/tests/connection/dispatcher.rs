@@ -517,6 +517,17 @@ async fn idle_timeout_ping() {
     sleep(Millis(80)).await;
     h.disp.ready().await.unwrap();
     assert!(read_frames(&h.client).is_empty());
+
+    // A positive timeout must not disable the timer when the interval is halved.
+    let h = Harness::new(Millis(1));
+    let bytes = timeout(Millis(500), h.client.read())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!bytes.is_empty());
+    for frame in bytes.chunks(8) {
+        assert_eq!(frame, b"\0\0\0\x08\x02\0\0\0");
+    }
 }
 
 #[ntex::test]
