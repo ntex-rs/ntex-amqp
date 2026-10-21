@@ -1,4 +1,4 @@
-use std::{fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll};
+use std::{cell, fmt, future::Future, ops, pin::Pin, rc::Rc, task::Context, task::Poll};
 
 use ntex_io::{IoConfig, IoRef};
 use ntex_service::cfg::Cfg;
@@ -26,6 +26,7 @@ pub(crate) struct ConnectionInner {
     io: IoRef,
     state: ConnectionState,
     codec: AmqpCodec<AmqpFrame>,
+    write_activity: cell::Cell<bool>,
     control_queue: Rc<ControlQueue>,
     pub(crate) sessions: slab::Slab<SessionState>,
     pub(crate) sessions_map: HashMap<u16, usize>,
@@ -67,6 +68,7 @@ impl Connection {
         Connection(ConnectionRef(Cell::new(ConnectionInner {
             io,
             codec: AmqpCodec::new().max_encode_size(remote_config.max_frame_size as usize),
+            write_activity: cell::Cell::new(false),
             state: ConnectionState::Normal,
             sessions: slab::Slab::with_capacity(8),
             sessions_map: HashMap::default(),
@@ -204,14 +206,11 @@ impl ConnectionRef {
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
-        let inner = self.0.get_mut();
+        self.0.get_mut().post_frame(frame);
+    }
 
-        #[cfg(feature = "frame-trace")]
-        log::trace!("{}: outgoing: {:#?}", inner.io.tag(), frame);
-
-        if let Err(e) = inner.io.encode(frame, &inner.codec) {
-            inner.set_error(e.into());
-        }
+    pub(crate) fn take_write_activity(&self) -> bool {
+        self.0.get_ref().write_activity.take()
     }
 
     pub(crate) fn set_error(&self, err: AmqpProtocolError) {
@@ -264,9 +263,15 @@ impl ConnectionInner {
         #[cfg(feature = "frame-trace")]
         log::trace!("{}: outgoing: {:#?}", self.io.tag(), frame);
 
-        if let Err(e) = self.io.encode(frame, &self.codec) {
-            self.set_error(e.into());
+        if let Err(e) = self.encode_frame(frame) {
+            self.set_error(e);
         }
+    }
+
+    fn encode_frame(&mut self, frame: AmqpFrame) -> Result<(), AmqpProtocolError> {
+        self.io.encode(frame, &self.codec)?;
+        self.write_activity.set(true);
+        Ok(())
     }
 
     pub(crate) fn register_remote_session(
@@ -311,12 +316,7 @@ impl ConnectionInner {
             properties: None,
         }));
 
-        self.io
-            .encode(
-                AmqpFrame::new(local_token as u16, begin.into()),
-                &self.codec,
-            )
-            .map_err(AmqpProtocolError::Codec)
+        self.encode_frame(AmqpFrame::new(local_token as u16, begin.into()))
     }
 
     pub(crate) fn complete_session_creation(

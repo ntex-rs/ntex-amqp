@@ -150,6 +150,7 @@ async fn outbound_frames_limited_by_remote_max_frame_size() {
     // fits
     conn.get_ref().post_frame(AmqpFrame::new(0, attach()));
     assert!(conn.get_error().is_none());
+    assert!(conn.take_write_activity());
 
     // properties do not fit into remote max frame size
     let Frame::Attach(mut attach) = attach() else {
@@ -167,6 +168,7 @@ async fn outbound_frames_limited_by_remote_max_frame_size() {
             AmqpCodecError::MaxOutboundSizeExceeded
         ))
     ));
+    assert!(!conn.take_write_activity());
 
     sleep(Millis(50)).await;
     let codec = AmqpCodec::<AmqpFrame>::new();

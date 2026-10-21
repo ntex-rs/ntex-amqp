@@ -1,4 +1,5 @@
 use std::task::{Poll, ready};
+use std::time::{Duration, Instant};
 use std::{cell, future::poll_fn, rc::Rc};
 
 use ntex_dispatcher::{DispatchItem, Reason};
@@ -39,11 +40,12 @@ impl Dispatcher {
         ctl_service: Pipeline<ControlFrame, (), Error>,
         idle_timeout: Millis,
     ) -> Self {
-        let idle_timeout = Millis(if idle_timeout.non_zero() {
-            (idle_timeout.0 >> 1).clamp(1, 1000)
+        let interval = Millis(if idle_timeout.non_zero() {
+            (idle_timeout.0 >> 1).max(1)
         } else {
             0
         });
+        sink.take_write_activity();
         Dispatcher {
             ctl_state: Rc::new_cyclic(|weak: &std::rc::Weak<ControlState>| {
                 let weak = weak.clone();
@@ -51,20 +53,34 @@ impl Dispatcher {
                     sink: sink.clone(),
                     service: service.bind(),
                     error: cell::Cell::new(None),
-                    idle_timer: idle_timeout.non_zero().then(|| {
-                        CallbackTimer::new(idle_timeout, move || {
+                    idle_timer: interval.non_zero().then(|| {
+                        let last_check = cell::Cell::new(Instant::now());
+                        CallbackTimer::new(interval, move || {
                             if let Some(state) = weak.upgrade()
                                 && state.sink.is_opened()
                             {
-                                log::trace!(
-                                    "{}: Send keep-alive ping, timeout: {:?}",
-                                    state.sink.tag(),
-                                    idle_timeout
-                                );
+                                let now = Instant::now();
+                                let elapsed = now.duration_since(last_check.replace(now));
+                                // A write may be as old as the previous check. Charge
+                                // delayed callbacks against the full keepalive budget.
+                                let remaining =
+                                    Duration::from(idle_timeout).saturating_sub(elapsed);
+                                let delay = Millis::from(remaining).min(interval);
+                                let delay = if state.sink.take_write_activity() && delay.non_zero()
+                                {
+                                    delay
+                                } else {
+                                    log::trace!(
+                                        "{}: Send keep-alive ping, timeout: {:?}",
+                                        state.sink.tag(),
+                                        idle_timeout
+                                    );
+                                    state.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
+                                    interval
+                                };
                                 if let Some(timer) = &state.idle_timer {
-                                    timer.reset(idle_timeout);
+                                    timer.reset(delay);
                                 }
-                                state.sink.post_frame(AmqpFrame::new(0, Frame::Empty));
                             }
                         })
                     }),

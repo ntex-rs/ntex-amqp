@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Schedule keepalives from the peer idle timeout instead of a one-second cap.
+  Successful outgoing frames suppress redundant pings without per-frame clock
+  reads or timer resets; delayed callbacks retain the negotiated timeout margin.
+
 * Preserve peer idle timeout precision in client/server handshakes and keepalive
   timers. Short positive timeouts no longer round down to zero and disable pings.
 
