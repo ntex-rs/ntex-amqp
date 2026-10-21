@@ -38,6 +38,11 @@ impl<T> Cell<T> {
         unsafe { &*self.inner.as_ref().get() }
     }
 
+    #[cfg(test)]
+    pub(crate) fn downgrade(&self) -> std::rc::Weak<UnsafeCell<T>> {
+        Rc::downgrade(&self.inner)
+    }
+
     #[allow(clippy::mut_from_ref)]
     pub(crate) fn get_mut(&self) -> &mut T {
         unsafe { &mut *self.inner.as_ref().get() }

@@ -128,10 +128,7 @@ impl Service<(), DispatchItem<AmqpCodec<AmqpFrame>>> for Dispatcher {
 
     async fn shutdown(&self, _: Ctx<'_, Self, ()>) {
         self.ctl_state.stop();
-        self.sink
-            .0
-            .get_mut()
-            .set_error(AmqpProtocolError::Disconnected);
+        self.sink.set_error(AmqpProtocolError::Disconnected);
         let _ = self
             .ctl_service
             .call(ControlFrame::new_kind(ControlFrameKind::Closed))

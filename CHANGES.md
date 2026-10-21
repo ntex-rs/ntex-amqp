@@ -1,6 +1,10 @@
 # Changes
 
-## Unreleased
+## [6.3.0] - 2026-10-21
+
+* Release queued control frames when connections terminate or dispatchers shut down,
+  breaking ownership cycles that retained closed connections. Ignore new queued
+  notifications after terminal cleanup begins.
 
 * Breaking: `Session::get_sender_link*` and `Session::get_receiver_link*` now return
   owned, reference-counted link handles instead of references into session storage.

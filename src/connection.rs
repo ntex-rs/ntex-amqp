@@ -127,6 +127,7 @@ impl ConnectionRef {
         inner.state = ConnectionState::Drop;
         inner.io.terminate();
         inner.set_error(AmqpProtocolError::ConnectionDropped);
+        self.clear_control_queue();
     }
 
     #[inline]
@@ -215,6 +216,7 @@ impl ConnectionRef {
 
     pub(crate) fn set_error(&self, err: AmqpProtocolError) {
         self.0.get_mut().set_error(err);
+        self.clear_control_queue();
     }
 
     pub(crate) fn get_control_queue(&self) -> &Rc<ControlQueue> {
@@ -222,13 +224,24 @@ impl ConnectionRef {
     }
 
     pub(crate) fn handle_frame(&self, frame: AmqpFrame) -> Result<Action, AmqpProtocolError> {
-        self.0.get_mut().handle_frame(frame, &self.0)
+        let result = self.0.get_mut().handle_frame(frame, &self.0);
+        if self.0.get_ref().error.is_some() {
+            self.clear_control_queue();
+        }
+        result
+    }
+
+    fn clear_control_queue(&self) {
+        // Frame destructors may access session state; release them outside state borrows.
+        let queue = self.0.get_ref().control_queue.clone();
+        queue.clear();
     }
 }
 
 impl ConnectionInner {
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         log::trace!("{}: Set connection error: {:?}", self.io.tag(), err);
+        self.control_queue.close();
         for (_, channel) in &mut self.sessions {
             match channel {
                 SessionState::Opening(_, _) => (),

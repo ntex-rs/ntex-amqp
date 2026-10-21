@@ -5,6 +5,7 @@ use ntex_bytes::ByteString;
 use ntex_util::Stream;
 
 use super::*;
+use crate::{ControlFrame, ControlFrameKind};
 
 const RECEIVED: DeliveryState = DeliveryState::Received(Received {
     section_number: 0,
@@ -97,6 +98,121 @@ async fn check_lookup_handles_after_shutdown(end_session: bool) {
     }
     assert!(matches!(receivers[0].recv().await, Some(Err(_))));
     assert!(receivers[1].recv().await.is_none());
+}
+
+#[ntex::test]
+async fn pending_controls_release_connection() {
+    for notification in ["sender", "receiver", "session"] {
+        for termination in ["drop", "force", "error", "remote"] {
+            // Detach watchers own separate connection handles until the executor runs.
+            let (_io, conn, _client) =
+                connection_with(AmqpServiceConfig::new().set_link_attach_timeout(Seconds::ZERO));
+            handle_frame(&conn, begin()).unwrap();
+            let sender = remote_sender(&conn, "s", 3);
+            let Ok(Action::AttachReceiver(receiver, _, response)) =
+                handle_frame(&conn, named_attach(Role::Sender, "r", "r", 4))
+            else {
+                panic!()
+            };
+            assert!(receiver.confirm_receiver_link(response));
+            let session = session(&conn);
+            let connection_weak = conn.0.downgrade();
+            let session_weak = session.inner.downgrade();
+            let sender_weak = sender.inner.downgrade();
+            let receiver_weak = receiver.inner.downgrade();
+            let queue = conn.get_control_queue().clone();
+
+            if notification != "sender" {
+                receiver.set_link_credit(1);
+                let Frame::Transfer(mut frame) = transfer(1, false, None, 1) else {
+                    panic!()
+                };
+                frame.0.handle = receiver.handle();
+                // Isolate cleanup from the connection/session frame-dispatch borrows.
+                assert!(matches!(
+                    receiver
+                        .inner
+                        .get_mut()
+                        .handle_transfer(frame, &receiver.inner),
+                    crate::rcvlink::TransferResult::Action(Action::Transfer(_))
+                ));
+                assert!(receiver.has_deliveries());
+            }
+
+            match notification {
+                "sender" => drop(session.detach_sender_link(sender.id(), None)),
+                "receiver" => drop(session.detach_receiver_link(receiver.handle(), None)),
+                _ => {
+                    let mut end = std::pin::pin!(session.end());
+                    assert!(pending(end.as_mut()).await);
+                }
+            }
+            assert_eq!(
+                queue.pending.borrow().len(),
+                1,
+                "{notification}/{termination}"
+            );
+            drop(sender);
+            drop(receiver);
+            drop(session);
+
+            match termination {
+                "force" => conn.force_close(),
+                "error" => conn.set_error(AmqpProtocolError::Disconnected),
+                "remote" => {
+                    handle_frame(&conn, Close { error: None }.into()).unwrap();
+                }
+                _ => (),
+            }
+            if termination != "drop" {
+                assert!(
+                    queue.pending.borrow().is_empty(),
+                    "{notification}/{termination}"
+                );
+            }
+            drop(conn);
+
+            assert!(
+                queue.pending.borrow().is_empty(),
+                "{notification}/{termination}"
+            );
+            assert!(
+                connection_weak.upgrade().is_none(),
+                "{notification}/{termination}"
+            );
+            assert!(
+                session_weak.upgrade().is_none(),
+                "{notification}/{termination}"
+            );
+            assert!(
+                sender_weak.upgrade().is_none(),
+                "{notification}/{termination}"
+            );
+            assert!(
+                receiver_weak.upgrade().is_none(),
+                "{notification}/{termination}"
+            );
+        }
+    }
+}
+
+#[ntex::test]
+async fn closed_control_queue_rejects_retaining_frames() {
+    let (_io, conn, _client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let sender = remote_sender(&conn, "s", 3);
+    let frame = ControlFrame::new_kind(ControlFrameKind::LocalSessionEnded(vec![
+        ntex_util::future::Either::Left(sender),
+    ]));
+    let weak = conn.0.downgrade();
+    let queue = conn.get_control_queue().clone();
+    conn.force_close();
+    drop(conn);
+    assert!(weak.upgrade().is_some());
+
+    queue.enqueue_frame(frame);
+    assert!(queue.pending.borrow().is_empty());
+    assert!(weak.upgrade().is_none());
 }
 
 #[ntex::test]

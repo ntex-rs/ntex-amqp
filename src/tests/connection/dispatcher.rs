@@ -585,6 +585,41 @@ async fn service_readiness_errors() {
 }
 
 #[ntex::test]
+async fn pending_controls_release_on_dispatcher_stop() {
+    for shutdown in [false, true] {
+        let h = Harness::new(Millis::ZERO);
+        h.frame(begin()).await.unwrap();
+        h.frame(named_attach(Role::Sender, "r", "r", 0))
+            .await
+            .unwrap();
+        h.settle().await;
+        let _ = (h.control.take(), h.publish.take());
+
+        let session = session_ref(&h.conn);
+        let receiver = session.get_receiver_link_by_remote_handle(0).unwrap();
+        let weak = h.conn.0.downgrade();
+        let receiver_weak = receiver.inner.downgrade();
+        let queue = h.conn.get_control_queue().clone();
+        drop(session.detach_receiver_link(receiver.handle(), None));
+        assert_eq!(queue.pending.borrow().len(), 1);
+        drop(receiver);
+        drop(session);
+
+        if shutdown {
+            h.disp.shutdown().await;
+            assert!(queue.pending.borrow().is_empty());
+            assert_eq!(h.control.take(), ["Closed"]);
+            assert_eq!(h.publish.shutdown.get(), 1);
+        }
+        drop(h);
+        sleep(Millis(10)).await;
+        assert!(queue.pending.borrow().is_empty());
+        assert!(receiver_weak.upgrade().is_none());
+        assert!(weak.upgrade().is_none());
+    }
+}
+
+#[ntex::test]
 async fn shutdown_notifies_services() {
     let h = Harness::new(Millis::ZERO);
     h.frame(begin()).await.unwrap();

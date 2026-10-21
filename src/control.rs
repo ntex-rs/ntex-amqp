@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::VecDeque, fmt, io};
+use std::{cell::Cell as StdCell, cell::RefCell, collections::VecDeque, fmt, io};
 
 use ntex_amqp_codec::protocol;
 use ntex_service::ReadyNotifier;
@@ -80,11 +80,24 @@ impl ControlFrame {
 pub(crate) struct ControlQueue {
     pub(crate) pending: RefCell<VecDeque<ControlFrame>>,
     pub(crate) changed: ReadyNotifier,
+    closed: StdCell<bool>,
 }
 
 impl ControlQueue {
     pub(crate) fn enqueue_frame(&self, frame: ControlFrame) {
-        self.pending.borrow_mut().push_back(frame);
-        self.changed.notify();
+        if self.closed.get() {
+            log::trace!("Control queue is closed, discarding frame");
+        } else {
+            self.pending.borrow_mut().push_back(frame);
+            self.changed.notify();
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        self.closed.set(true);
+    }
+
+    pub(crate) fn clear(&self) {
+        drop(self.pending.take());
     }
 }
