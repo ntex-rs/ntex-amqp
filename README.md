@@ -76,6 +76,11 @@ For more control over connection and link lifecycle events, add a control
 service with `ServerBuilder::control()`. The same `AmqpServiceConfig` can be
 used by clients by adding it to the `SharedCfg` passed to `client::Connector`.
 
+Custom services with changing readiness must subscribe to a `ReadyNotifier`
+in `Service::bind()` and call `notify()` when readiness changes. Wrappers must
+forward binding as well as readiness to their inner services. Successful
+readiness is cached; waking a task alone does not invalidate it.
+
 ### Sending a message
 
 The client connection is driven in a background task. After opening a session

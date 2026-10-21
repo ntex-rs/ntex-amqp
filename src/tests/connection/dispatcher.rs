@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::{io, marker::PhantomData};
 
 use ntex_dispatcher::{DispatchItem, Reason};
-use ntex_service::{Ctx, Service, pipeline::Pipeline};
+use ntex_service::{BindCtx, Ctx, ReadyNotifier, Service, pipeline::Pipeline};
 
 use super::*;
 use crate::dispatcher::Dispatcher;
@@ -49,6 +49,8 @@ struct Flags {
     log: Rc<RefCell<Vec<String>>>,
     call_err: Rc<StdCell<bool>>,
     ready_err: Rc<StdCell<bool>>,
+    ready_pending: Rc<StdCell<bool>>,
+    changed: Rc<ReadyNotifier>,
     shutdown: Rc<StdCell<usize>>,
 }
 
@@ -58,6 +60,8 @@ impl Flags {
             log: Rc::new(RefCell::new(Vec::new())),
             call_err: Rc::new(StdCell::new(false)),
             ready_err: Rc::new(StdCell::new(false)),
+            ready_pending: Rc::new(StdCell::new(false)),
+            changed: Rc::new(ReadyNotifier::new()),
             shutdown: Rc::new(StdCell::new(0)),
         }
     }
@@ -98,6 +102,10 @@ impl Service<(), Message> for Svc<Message> {
     type Res = ();
     type Error = ProtoError;
 
+    fn bind(&self, ctx: BindCtx<'_>) {
+        ctx.subscribe(&self.flags.changed);
+    }
+
     async fn call(&self, req: Message, _: Ctx<'_, Self, ()>) -> Result<(), ProtoError> {
         self.record(match req {
             Message::Attached(..) => "Attached".into(),
@@ -108,6 +116,14 @@ impl Service<(), Message> for Svc<Message> {
     }
 
     async fn ready(&self, _: Ctx<'_, Self, ()>) -> Result<(), ProtoError> {
+        poll_fn(|_| {
+            if self.flags.ready_pending.get() {
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
         if self.flags.ready_err.get() {
             Err(Flags::error("publish is not ready"))
         } else {
@@ -123,6 +139,10 @@ impl Service<(), Message> for Svc<Message> {
 impl Service<(), ControlFrame> for Svc<ControlFrame> {
     type Res = ();
     type Error = ProtoError;
+
+    fn bind(&self, ctx: BindCtx<'_>) {
+        ctx.subscribe(&self.flags.changed);
+    }
 
     async fn call(&self, req: ControlFrame, _: Ctx<'_, Self, ()>) -> Result<(), ProtoError> {
         self.record(kind_name(req.kind()))
@@ -476,16 +496,21 @@ async fn idle_timeout_ping() {
     h.disp.ready().await.unwrap();
     assert!(read_frames(&h.client).is_empty());
 
-    sleep(Millis(80)).await;
-    h.disp.ready().await.unwrap();
-    sleep(Millis(10)).await;
-    assert_eq!(frame_names(&h.client), ["Empty"]);
+    // Pings continue without further readiness checks.
+    for _ in 0..2 {
+        let bytes = timeout(Millis(500), h.client.read())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!bytes.is_empty());
+        for frame in bytes.chunks(8) {
+            assert_eq!(frame, b"\0\0\0\x08\x02\0\0\0");
+        }
+    }
 
-    // and keeps pinging
-    sleep(Millis(80)).await;
-    h.disp.ready().await.unwrap();
-    sleep(Millis(10)).await;
-    assert_eq!(frame_names(&h.client), ["Empty"]);
+    h.disp.shutdown().await;
+    sleep(Millis(100)).await;
+    assert_eq!(read_frames(&h.client), Vec::<Frame>::new());
 
     // zero timeout disables the ping
     let h = Harness::new(Millis::ZERO);
@@ -496,11 +521,46 @@ async fn idle_timeout_ping() {
 }
 
 #[ntex::test]
+async fn queued_control_frames_invalidate_pending_readiness() {
+    let h = Harness::new(Millis::ZERO);
+    h.frame(begin()).await.unwrap();
+    h.frame(named_attach(Role::Sender, "r", "r", 0))
+        .await
+        .unwrap();
+    h.settle().await;
+    let _ = (h.control.take(), h.publish.take());
+
+    h.publish.ready_pending.set(true);
+    h.publish.changed.notify();
+    let mut readiness = Box::pin(h.disp.ready());
+    assert!(poll_fn(|cx| Poll::Ready(readiness.as_mut().poll(cx).is_pending())).await);
+
+    let link = session_ref(&h.conn)
+        .get_receiver_link_by_remote_handle(0)
+        .cloned()
+        .unwrap();
+    let _ = link.close();
+
+    // Keep readiness pending while the local detach reaches the control service.
+    assert!(timeout(Millis(50), readiness.as_mut()).await.is_err());
+    assert_eq!(h.control.take(), ["LocalDetachReceiver"]);
+    assert_eq!(h.publish.take(), Vec::<String>::new());
+
+    h.publish.ready_pending.set(false);
+    h.publish.changed.notify();
+    timeout(Millis(500), readiness).await.unwrap().unwrap();
+    sleep(Millis(25)).await;
+    assert_eq!(h.publish.take(), ["Detached"]);
+}
+
+#[ntex::test]
 async fn service_readiness_errors() {
     for publish in [true, false] {
         let h = Harness::new(Millis::ZERO);
+        h.disp.ready().await.unwrap();
         let flags = if publish { &h.publish } else { &h.control };
         flags.ready_err.set(true);
+        flags.changed.notify();
 
         let err = h.disp.ready().await.err().unwrap();
         assert!(matches!(err, AmqpDispatcherError::Service));

@@ -1,5 +1,15 @@
 # Changes
 
+## Unreleased
+
+* Update ntex dependencies and propagate readiness notifications through connectors,
+  handshakes, router handlers, and the AMQP dispatcher.
+
+* Invalidate cached readiness for queued control frames and asynchronous control errors.
+  Send keep-alive pings using cancellable timer callbacks, independent of service readiness.
+
+* Drain queued control frames without allocating a temporary frame vector.
+
 ## [6.2.0] - 2026-10-07
 
 * Fix peer's `Close` reply to local `ConnectionRef::close()` was handled as remote close
