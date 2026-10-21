@@ -51,6 +51,112 @@ fn dispositions(client: &IoTest) -> Vec<(bool, Option<DeliveryState>)> {
         .collect()
 }
 
+async fn check_lookup_handles_after_shutdown(end_session: bool) {
+    let (_io, conn, _client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    remote_sender(&conn, "s", 3);
+    let Ok(Action::AttachReceiver(receiver, _, response)) =
+        handle_frame(&conn, named_attach(Role::Sender, "r", "r", 4))
+    else {
+        panic!()
+    };
+    assert!(receiver.confirm_receiver_link(response));
+    drop(receiver);
+
+    let session = session(&conn);
+    let senders = [
+        session.get_sender_link("s").unwrap(),
+        session.get_sender_link_by_address("s").unwrap(),
+        session.get_sender_link_by_local_handle(0).unwrap(),
+        session.get_sender_link_by_remote_handle(3).unwrap(),
+    ];
+    let receivers = [
+        session.get_receiver_link_by_local_handle(1).unwrap(),
+        session.get_receiver_link_by_remote_handle(4).unwrap(),
+    ];
+
+    if end_session {
+        handle_frame(&conn, End { error: None }.into()).unwrap();
+    } else {
+        conn.force_close();
+    }
+    assert!(session.get_sender_link("s").is_none());
+    assert!(session.get_receiver_link_by_remote_handle(4).is_none());
+    drop(session);
+    drop(conn);
+
+    for sender in senders {
+        assert_eq!(sender.name(), "s");
+        assert!(sender.is_closed());
+        assert!(!sender.ready().await);
+        assert!(sender.transfer(Bytes::new()).send().await.is_err());
+    }
+    for receiver in &receivers {
+        assert_eq!(receiver.name(), "r");
+        assert!(receiver.is_closed());
+    }
+    assert!(matches!(receivers[0].recv().await, Some(Err(_))));
+    assert!(receivers[1].recv().await.is_none());
+}
+
+#[ntex::test]
+async fn lookup_handles_survive_connection_close() {
+    check_lookup_handles_after_shutdown(false).await;
+}
+
+#[ntex::test]
+async fn lookup_handles_survive_session_end() {
+    check_lookup_handles_after_shutdown(true).await;
+}
+
+#[ntex::test]
+async fn lookup_handles_survive_growth_and_detach() {
+    let (_io, conn, _client) = connection();
+    let Frame::Begin(mut frame) = begin() else { panic!() };
+    frame.0.handle_max = 64;
+    handle_frame(&conn, frame.into()).unwrap();
+    remote_sender(&conn, "s", 3);
+    let Ok(Action::AttachReceiver(receiver, _, response)) =
+        handle_frame(&conn, named_attach(Role::Sender, "r", "r", 4))
+    else {
+        panic!()
+    };
+    assert!(receiver.confirm_receiver_link(response));
+    drop(receiver);
+
+    let session = session(&conn);
+    let sender = session.get_sender_link("s").unwrap();
+    let receiver = session.get_receiver_link_by_remote_handle(4).unwrap();
+    for handle in 5..21 {
+        remote_sender(&conn, &format!("extra-{handle}"), handle);
+    }
+    assert_eq!(sender.name(), "s");
+    assert_eq!(receiver.name(), "r");
+    assert!(!sender.is_closed());
+    assert!(!receiver.is_closed());
+
+    handle_frame(&conn, peer_detach(3)).unwrap();
+    let replacement = remote_sender(&conn, "replacement", 3);
+    assert_eq!(replacement.id(), sender.id());
+    assert_eq!(sender.name(), "s");
+    assert!(sender.is_closed());
+    assert!(!replacement.is_closed());
+    assert!(!sender.ready().await);
+
+    handle_frame(&conn, peer_detach(4)).unwrap();
+    let Ok(Action::AttachReceiver(replacement, _, response)) =
+        handle_frame(&conn, named_attach(Role::Sender, "replacement", "r", 4))
+    else {
+        panic!()
+    };
+    assert!(replacement.confirm_receiver_link(response));
+    assert_eq!(replacement.handle(), receiver.handle());
+    assert_eq!(receiver.name(), "r");
+    assert!(receiver.is_closed());
+    assert!(!replacement.is_closed());
+    assert!(receiver.recv().await.is_none());
+}
+
 #[ntex::test]
 async fn sender_link_accessors() {
     let (_io, conn, _client) = connection();

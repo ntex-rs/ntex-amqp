@@ -715,7 +715,6 @@ mod tests {
         // link service is dropped and shut down when the link detaches
         let link = session(&conn)
             .get_receiver_link_by_remote_handle(0)
-            .cloned()
             .unwrap();
         srv.call(Message::Detached(link)).await.unwrap();
         sleep(Millis(50)).await;

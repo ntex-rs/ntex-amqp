@@ -397,7 +397,7 @@ async fn attach_sender_and_flow() {
     assert_eq!(h.control.take(), ["AttachSender"]);
 
     // sender link is attached by the control service
-    let snd = session_ref(&h.conn).get_sender_link("s").cloned().unwrap();
+    let snd = session_ref(&h.conn).get_sender_link("s").unwrap();
     assert!(snd.is_opened());
     assert!(frame_names(&h.client).iter().any(|n| n == "Attach s 0"));
 
@@ -477,7 +477,6 @@ async fn local_detach_control_frames() {
     // locally closed link is queued as a control frame
     let link = session_ref(&h.conn)
         .get_receiver_link_by_remote_handle(0)
-        .cloned()
         .unwrap();
     let fut = ntex::rt::spawn(async move { link.close().await });
     sleep(Millis(10)).await;
@@ -537,7 +536,6 @@ async fn queued_control_frames_invalidate_pending_readiness() {
 
     let link = session_ref(&h.conn)
         .get_receiver_link_by_remote_handle(0)
-        .cloned()
         .unwrap();
     let _ = link.close();
 
@@ -609,7 +607,7 @@ async fn control_error_closes_established_links() {
             .await
             .unwrap();
         h.settle().await;
-        let snd = session_ref(&h.conn).get_sender_link("s").cloned().unwrap();
+        let snd = session_ref(&h.conn).get_sender_link("s").unwrap();
         let _ = (h.control.take(), read_frames(&h.client));
 
         h.control.call_err.set(true);
