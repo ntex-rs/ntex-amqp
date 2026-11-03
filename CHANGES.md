@@ -1,6 +1,12 @@
 # Changes
 
-## Unreleased
+## [6.3.1] - 2026-11-04
+
+* Implement `bind`, `ready`, and `shutdown` forwarding manually instead of
+  using `ntex_service` forwarding macros; the server handshake uses
+  `Pipeline::bind_to()` instead of the removed `forward_pl_bind!`
+
+## [6.3.0] - 2026-10-21
 
 * Schedule keepalives from the peer idle timeout instead of a one-second cap.
   Successful outgoing frames suppress redundant pings without per-frame clock
@@ -11,8 +17,6 @@
 
 * Reject overflowing described LIST32, MAP32 and ARRAY32 lengths on 32-bit targets
   instead of panicking or accepting truncated values.
-
-## [6.3.0] - 2026-10-21
 
 * Release queued control frames when connections terminate or dispatchers shut down,
   breaking ownership cycles that retained closed connections. Ignore new queued

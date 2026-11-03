@@ -158,16 +158,6 @@ impl SenderLink {
     }
 
     /// Start delivery process
-    #[doc(hidden)]
-    #[deprecated]
-    pub fn delivery<T>(&self, body: T) -> TransferBuilder
-    where
-        T: Into<TransferBody>,
-    {
-        self.transfer(body)
-    }
-
-    /// Start delivery process
     pub fn transfer<T>(&self, body: T) -> TransferBuilder
     where
         T: Into<TransferBody>,
