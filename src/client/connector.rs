@@ -4,7 +4,7 @@ use ntex_bytes::ByteString;
 use ntex_error::Error;
 use ntex_io::IoBoxed;
 use ntex_net::connect::{self, Address};
-use ntex_service::{Ctx, IntoService, Service, cfg::Cfg, cfg::SharedCfg};
+use ntex_service::{BindCtx, Ctx, IntoService, Service, cfg::Cfg, cfg::SharedCfg};
 use ntex_util::time::timeout_checked;
 
 use crate::codec::protocol::{
@@ -103,9 +103,20 @@ where
             .map_err(|e| e.with_service(cfg.service()))
     }
 
-    ntex_service::forward_bind!(SharedCfg, connector);
-    ntex_service::forward_ready!(SharedCfg, connector, Error::map_err);
-    ntex_service::forward_shutdown!(SharedCfg, connector);
+    #[inline]
+    fn bind(&self, ctx: BindCtx<'_>) {
+        ctx.bind::<_, SharedCfg, _>(&self.connector);
+    }
+
+    #[inline]
+    async fn ready(&self, ctx: Ctx<'_, Self, SharedCfg>) -> Result<(), Self::Error> {
+        ctx.ready(&self.connector).await.map_err(Error::map_err)
+    }
+
+    #[inline]
+    async fn shutdown(&self, ctx: Ctx<'_, Self, SharedCfg>) {
+        ctx.shutdown(&self.connector).await;
+    }
 }
 
 impl<A, S> Connector<A, S>

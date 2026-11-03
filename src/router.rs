@@ -1,7 +1,9 @@
 use std::{marker, rc::Rc};
 
 use ntex_router::{IntoPattern, Router as PatternRouter};
-use ntex_service::{Ctx, IntoServiceFactory, Pipeline, Service, ServiceFactory, boxed, factory};
+use ntex_service::{
+    BindCtx, Ctx, IntoServiceFactory, Pipeline, Service, ServiceFactory, boxed, factory,
+};
 use ntex_util::{HashMap, future::join_all};
 
 use crate::codec::protocol::{DeliveryState, Error, Rejected, Transfer};
@@ -289,9 +291,20 @@ where
     type Res = Outcome;
     type Error = Error;
 
-    ntex_service::forward_bind!(Link<S>, service);
-    ntex_service::forward_ready!(Link<S>, service);
-    ntex_service::forward_shutdown!(Link<S>, service);
+    #[inline]
+    fn bind(&self, ctx: BindCtx<'_>) {
+        ctx.bind::<_, Link<S>, _>(&self.service);
+    }
+
+    #[inline]
+    async fn ready(&self, ctx: Ctx<'_, Self, Link<S>>) -> Result<(), Self::Error> {
+        ctx.ready(&self.service).await.map_err(Into::into)
+    }
+
+    #[inline]
+    async fn shutdown(&self, ctx: Ctx<'_, Self, Link<S>>) {
+        ctx.shutdown(&self.service).await;
+    }
 
     async fn call(
         &self,

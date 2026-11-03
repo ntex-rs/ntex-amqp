@@ -3,7 +3,9 @@ use ntex_error::IntoFailure;
 use ntex_io::IoBoxed;
 use ntex_service::cfg::{Cfg, Configuration};
 use ntex_service::pipeline::{Pipeline, PipelineFactory, PipelineState};
-use ntex_service::{Ctx, IntoService, IntoServiceFactory, RequestState, Service, ServiceFactory};
+use ntex_service::{
+    BindCtx, Ctx, IntoService, IntoServiceFactory, RequestState, Service, ServiceFactory,
+};
 use ntex_util::time::{Millis, timeout_checked};
 
 use crate::codec::{AmqpCodec, AmqpFrame, ProtocolIdCodec, ProtocolIdError, protocol::ProtocolId};
@@ -140,7 +142,10 @@ where
     type Res = ();
     type Error = ServerError<Err>;
 
-    ntex_service::forward_pl_bind!(St, handshake);
+    #[inline]
+    fn bind(&self, ctx: BindCtx<'_>) {
+        self.handshake.bind_to(&ctx);
+    }
 
     #[inline]
     async fn ready(&self, ctx: Ctx<'_, Self, St>) -> Result<(), Self::Error> {
