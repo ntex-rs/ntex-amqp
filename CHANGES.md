@@ -1,5 +1,14 @@
 # Changes
 
+## [6.3.2] - Unreleased
+
+* Fix use-after-free when an outgoing frame fails to encode, for example a
+  detach reply that echoes a remote error larger than the remote max frame
+  size. The connection is closed and session state is dropped after frame
+  handling instead of while session and link state is borrowed.
+
+* Update ntex dependencies
+
 ## [6.3.1] - 2026-11-04
 
 * Implement `bind`, `ready`, and `shutdown` forwarding manually instead of

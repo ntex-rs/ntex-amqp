@@ -293,7 +293,7 @@ where
 
     #[inline]
     fn bind(&self, ctx: BindCtx<'_>) {
-        ctx.bind::<_, Link<S>, _>(&self.service);
+        ctx.bind(&self.service);
     }
 
     #[inline]

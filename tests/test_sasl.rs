@@ -56,7 +56,7 @@ where
     F: Fn(server::Handshake) -> Fut + Send + Clone + 'static,
     Fut: Future<Output = Result<server::HandshakeAck<()>, server::HandshakeError>> + 'static,
 {
-    TestServerBuilder::new(async move || {
+    TestServerBuilder::new(async move |_| {
         let f = f.clone();
         server::Server::builder(async move |conn: server::Handshake| {
             assert!(!conn.io().tag().is_empty());
@@ -985,7 +985,7 @@ async fn test_server_control_service() {
     let log = log();
     let log2 = log.clone();
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let log = log2.clone();
         server::Server::builder(async move |conn: server::Handshake| {
             accept_all(conn).await.map_err(|_| ())

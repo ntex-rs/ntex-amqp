@@ -36,15 +36,15 @@ frame-trace = []
 [dependencies]
 ntex-amqp-codec = "3.2.0"
 
-ntex-bytes = "1.14"
+ntex-bytes = "1.15"
 ntex-error = "3.1"
-ntex-router = "2.1"
+ntex-router = "2.3"
 ntex-dispatcher = "4.4"
-ntex-io = "4.5"
-ntex-net = "4.6"
-ntex-util = "4.4"
-ntex-service = "5.3"
-ntex-rt = "4.3"
+ntex-io = "4.7"
+ntex-net = "4.12"
+ntex-util = "4.11"
+ntex-service = "5.7"
+ntex-rt = "4.9"
 
 bitflags = "2"
 derive_more = { version = "2", features = ["from"] }
@@ -54,13 +54,13 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-ntex = "4.4"
-ntex-server = "4.3"
+ntex = "4.9"
+ntex-server = "4.6"
 ntex-amqp = { path = ".", features = ["frame-trace"] }
 
 env_logger = "0.11"
-rand = "0.9"
-urly = "1.1"
+rand = "0.10"
+urly = "1.4"
 
 [patch.crates-io]
 ntex-amqp = { path = "." }
