@@ -1,5 +1,13 @@
 use super::*;
 
+/// STATEMENT: Detaching a remote sender link before it is confirmed fails with
+/// `LinkNotAttached` and leaves the link confirmable.
+///
+/// HOW:
+/// - Receive a remote attach and call `detach_sender_link` before confirming;
+///   assert `LinkNotAttached`.
+/// - Confirm the link and assert it is found by name and only `Begin` and
+///   `Attach n 0` are written.
 #[ntex::test]
 async fn detach_unconfirmed_remote_sender_link() {
     let (_io, conn, client) = connection();
@@ -24,6 +32,13 @@ async fn detach_unconfirmed_remote_sender_link() {
     assert_eq!(frame_names(&client), ["Begin", "Attach n 0"]);
 }
 
+/// STATEMENT: Link flows received before a remote sender is confirmed are applied on
+/// confirmation, using the last flow that carried link credit.
+///
+/// HOW:
+/// - Deliver flows with credit 5, 10 and none before confirming; assert credit is 0.
+/// - Confirm with `attach_remote_sender_link` and assert credit is 10 and `ready`
+///   returns `true`.
 #[ntex::test]
 async fn remote_sender_flow_before_confirm() {
     let (_io, conn, _client) = connection();
@@ -55,6 +70,15 @@ async fn remote_sender_flow_before_confirm() {
     assert!(link.ready().await);
 }
 
+/// STATEMENT: Remote sender links are indexed by name and address, a newer duplicate
+/// name wins, and names are removed on detach.
+///
+/// HOW:
+/// - Confirm link `n` at address `a`; assert lookups by name and address only match
+///   the right key.
+/// - Confirm link `a`, then another `a`; assert the newer one owns the name even
+///   after the older one is detached.
+/// - Detach all links and assert the name maps are empty.
 #[ntex::test]
 async fn remote_sender_link_names() {
     let (_io, conn, _client) = connection();
@@ -109,6 +133,14 @@ async fn remote_sender_link_names() {
     assert!(inner.sender_names.is_empty() && inner.link_names.is_empty());
 }
 
+/// STATEMENT: Session and link state from flow frames is applied in frame order before
+/// the control service is notified.
+///
+/// HOW:
+/// - Deliver a flow with credit 10 and window 50 and assert `Action::Flow` and
+///   credit 10.
+/// - Deliver a flow with credit 3 and window 80 and assert the remote window grew
+///   by 30 and credit is 3.
 #[ntex::test]
 async fn remote_sender_flow_order() {
     let (_io, conn, _client) = connection();
@@ -150,6 +182,15 @@ async fn remote_sender_flow_order() {
     assert_eq!(link.credit(), 3);
 }
 
+/// STATEMENT: A remote sender detached before confirmation is closed and releases its
+/// handle and name whether it is then accepted or rejected.
+///
+/// HOW:
+/// - Deliver a peer detach and a later flow (ignored) before confirming.
+/// - If accepted, assert the link is closed, has no credit, is not ready and a
+///   `RemoteDetachSender` control frame is queued; if rejected, assert it is closed.
+/// - Assert the same attach is accepted again and frames are `attach 0 Sender`,
+///   `detach 0 true`.
 #[ntex::test]
 async fn remote_sender_detach_before_confirm() {
     for accept in [true, false] {
@@ -212,6 +253,15 @@ async fn remote_sender_detach_before_confirm() {
     }
 }
 
+/// STATEMENT: A rejected remote receiver keeps its remote handle until the peer
+/// detaches, without affecting other links.
+///
+/// HOW:
+/// - Reject receiver `r` on remote handle 5 with `close_with_error`; assert the
+///   handle is in use and the next link gets local handle 1.
+/// - Deliver a peer detach for 5 and assert the close completes, the other link
+///   stays open and handle 5 is free.
+/// - Attach a new receiver on handle 5 and assert it reuses local handle 0.
 #[ntex::test]
 async fn remote_receiver_reject_detach() {
     let (_io, conn, _client) = connection();
@@ -251,6 +301,15 @@ async fn remote_receiver_reject_detach() {
     assert_eq!(link3.handle(), 0);
 }
 
+/// STATEMENT: Flow echo replies carry link state for established links and only
+/// session state for opening or unknown links.
+///
+/// HOW:
+/// - Establish receiver `r` with credit 10 and sender `s`, and leave sender `o`
+///   opening.
+/// - Deliver echo flows for `s`, `r`, `o` and an unknown handle.
+/// - Assert replies `Flow Some(1) Some(7)`, `Flow Some(0) Some(10)` and two
+///   `Flow None None`.
 #[ntex::test]
 async fn flow_echo_link_state() {
     let (_io, conn, client) = connection();
@@ -311,6 +370,14 @@ async fn flow_echo_link_state() {
     );
 }
 
+/// STATEMENT: Confirmation and credit for a closed remote receiver are ignored once its
+/// handle is reused by a new link.
+///
+/// HOW:
+/// - Close receiver `a` and attach `b`, which reuses the same local handle.
+/// - Assert both confirm paths for `a` return `false` and setting its credit keeps 0.
+/// - Confirm `b` with credit 5 and assert only `b`'s attach and flow follow `a`'s
+///   attach and detach.
 #[ntex::test]
 async fn remote_receiver_stale_confirm() {
     let (_io, conn, client) = connection();
@@ -362,6 +429,13 @@ async fn remote_receiver_stale_confirm() {
     );
 }
 
+/// STATEMENT: Receiver credit set before a remote link is confirmed is sent only after
+/// the attach response.
+///
+/// HOW:
+/// - Set credit 10 on an unconfirmed remote receiver and assert only `Begin` is
+///   written.
+/// - Confirm and add 5 credit; assert `Attach a 0`, then flows with credit 10 and 15.
 #[ntex::test]
 async fn remote_receiver_credit_before_confirm() {
     let (_io, conn, client) = connection();
@@ -394,6 +468,15 @@ async fn remote_receiver_credit_before_confirm() {
     );
 }
 
+/// STATEMENT: A rejected remote sender keeps its remote handle until the peer detaches,
+/// without affecting an established link sharing that handle value locally.
+///
+/// HOW:
+/// - Reject sender `s` on remote handle 1 and assert the handle stays in use;
+///   confirm `s2`, which gets local id 1.
+/// - Deliver a peer detach for 1 twice and assert `s2` stays open and the handle is
+///   released; the second detach is ignored.
+/// - Attach `s3` on remote handle 1 and assert it gets local id 0.
 #[ntex::test]
 async fn remote_sender_reject_detach() {
     let (_io, conn, _client) = connection();
@@ -447,6 +530,15 @@ async fn remote_sender_reject_detach() {
     assert_eq!(link3.id(), 0);
 }
 
+/// STATEMENT: A remote receiver detached before confirmation is closed and releases its
+/// handle whether it is then accepted or rejected.
+///
+/// HOW:
+/// - Deliver a peer detach before confirming and assert the link is still open.
+/// - If accepted, assert confirm returns `false`, the link is closed and a
+///   `RemoteDetachReceiver` control frame is queued; otherwise close it with error.
+/// - Assert the handle is free, a re-attach gets handle 0, and frames are
+///   `attach 0 Receiver`, `detach 0 true`.
 #[ntex::test]
 async fn remote_receiver_detach_before_confirm() {
     for accept in [true, false] {
@@ -496,6 +588,15 @@ async fn remote_receiver_detach_before_confirm() {
     }
 }
 
+/// STATEMENT: Confirming or rejecting a remote sender after its session ends sends no
+/// link frames.
+///
+/// HOW:
+/// - End the session locally (asserting a queued `LocalSessionEnded` with the open
+///   link) or remotely (asserting the link is closed and not ready).
+/// - Accept or reject the pending sender; for local end, deliver the peer `End`
+///   and assert the link is closed.
+/// - Assert only `Begin` and `End` are written.
 #[ntex::test]
 async fn remote_sender_end_before_confirm() {
     for (local, accept) in [(false, true), (false, false), (true, true), (true, false)] {
@@ -563,6 +664,15 @@ async fn remote_sender_end_before_confirm() {
     }
 }
 
+/// STATEMENT: Confirming or rejecting a remote receiver after its session ends sends no
+/// link frames.
+///
+/// HOW:
+/// - End the session locally (asserting a queued `LocalSessionEnded` with the open
+///   link) or remotely (asserting `SessionEnded` holds the closed link).
+/// - Accept (confirm returns `false`) or close with error; for local end, deliver
+///   the peer `End` and assert the link is closed.
+/// - Assert only `Begin` and `End` are written.
 #[ntex::test]
 async fn remote_receiver_end_before_confirm() {
     for (local, accept) in [(false, true), (false, false), (true, true), (true, false)] {
@@ -639,19 +749,19 @@ fn link_frames(client: &IoTest) -> Vec<String> {
         .collect()
 }
 
+/// STATEMENT: A detach reply that exceeds the peer frame size fails the connection
+/// without dropping link or session state during detach handling.
+///
+/// HOW:
+/// - With a 512-byte peer frame limit, confirm a remote sender and drop all external
+///   handles to it.
+/// - Deliver a peer detach with a 1024-byte error description; assert
+///   `DetachSender` returns the closed link.
+/// - Assert `MaxOutboundSizeExceeded`, the connection is not open and the session is
+///   removed.
 #[ntex::test]
 async fn remote_sender_detach_reply_exceeds_frame_size() {
-    // remote accepts frames up to 512 bytes
-    let open = OpenInner {
-        max_frame_size: 512,
-        ..Default::default()
-    };
-    let remote = RemoteServiceConfig::new(&Open(Box::new(open)));
-    let (server, _client) = IoTest::create();
-    let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
-    let io = Io::new(server, cfg.clone());
-    let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
-
+    let (_io, conn, _client) = small_frame_connection();
     handle_frame(&conn, begin()).unwrap();
     let Ok(Action::AttachSender(link, attach, response)) =
         handle_frame(&conn, named_attach(Role::Receiver, "n", "a", 3))
@@ -692,4 +802,62 @@ async fn remote_sender_detach_reply_exceeds_frame_size() {
     assert!(!conn.is_opened());
     assert!(conn.get_ref().0.get_ref().sessions.is_empty());
     assert!(conn.get_session_by_local_id(0).is_none());
+}
+
+/// STATEMENT: An attach reply that exceeds the peer frame size fails the connection
+/// without dropping link state during attach confirmation.
+///
+/// HOW:
+/// - With a 512-byte peer frame limit, attach sender and receiver links with
+///   1024-byte names and confirm them.
+/// - Assert confirmation succeeds and the error is `MaxOutboundSizeExceeded`.
+/// - Handle another frame and assert the session is removed.
+#[ntex::test]
+async fn remote_link_attach_reply_exceeds_frame_size() {
+    for role in [Role::Receiver, Role::Sender] {
+        let (_io, conn, _client) = small_frame_connection();
+        handle_frame(&conn, begin()).unwrap();
+
+        // attach reply echoes the remote link name and fails to encode,
+        // link state must outlive attach confirmation
+        let name = "n".repeat(1024);
+        match handle_frame(&conn, named_attach(role, &name, "a", 3)) {
+            Ok(Action::AttachSender(link, attach, response)) => {
+                let link = session(&conn).inner.get_mut().attach_remote_sender_link(
+                    &attach,
+                    response,
+                    link.inner.clone(),
+                );
+                assert_eq!(link.name(), &name);
+            }
+            Ok(Action::AttachReceiver(link, _, response)) => {
+                assert!(link.confirm_receiver_link(response));
+            }
+            _ => panic!(),
+        }
+        assert!(matches!(
+            conn.get_error(),
+            Some(AmqpProtocolError::Codec(
+                AmqpCodecError::MaxOutboundSizeExceeded
+            ))
+        ));
+
+        // session state is dropped with the next frame
+        handle_frame(&conn, Frame::Empty).unwrap();
+        assert!(conn.get_session_by_local_id(0).is_none());
+    }
+}
+
+/// Connection to a remote that accepts frames up to 512 bytes
+fn small_frame_connection() -> (Io, Connection, IoTest) {
+    let open = OpenInner {
+        max_frame_size: 512,
+        ..Default::default()
+    };
+    let remote = RemoteServiceConfig::new(&Open(Box::new(open)));
+    let (server, client) = IoTest::create();
+    let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+    let io = Io::new(server, cfg.clone());
+    let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+    (io, conn, client)
 }

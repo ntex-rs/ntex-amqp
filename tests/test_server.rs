@@ -31,6 +31,14 @@ async fn server_count(
     })))
 }
 
+/// STATEMENT: A client sender link delivers unsettled and settled transfers to the server
+/// link service.
+///
+/// HOW:
+/// - Attach a sender link to a router `test` service that counts transfers.
+/// - Send an unsettled transfer and check its delivery state is `Accepted`.
+/// - Send a settled transfer and check `wait()` returns `None`.
+/// - Check the link service handled both transfers.
 #[ntex::test]
 async fn test_simple() -> std::io::Result<()> {
     let count = Arc::new(AtomicUsize::new(0));
@@ -97,6 +105,15 @@ async fn test_simple() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Messages larger than the max frame size are transferred, and session window
+/// refreshes keep later transfers flowing.
+///
+/// HOW:
+/// - The server uses a 1024 byte `max_frame_size` and a 10 KiB receiver max message size.
+/// - Send a 2048 byte message and check it is `Accepted`.
+/// - Send 60 small transfers, each within a one second timeout, and check each is
+///   `Accepted`.
+/// - Check the link service handled all 61 transfers.
 #[ntex::test]
 async fn test_large_transfer() -> std::io::Result<()> {
     let mut rng = rand::rng();
@@ -203,6 +220,12 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
     Ok(succ.open().await?.ack(()))
 }
 
+/// STATEMENT: A client sasl `PLAIN` connect to a server with a sasl handshake handler
+/// completes without panicking or hanging.
+///
+/// HOW:
+/// - The server offers several mechanisms and accepts `PLAIN` with `user1`/`password1`.
+/// - Connect with matching `sasl_auth` credentials; the connect result is not asserted.
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
     let srv = test_server(async |_| {
@@ -229,6 +252,13 @@ async fn test_sasl() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: The server rejects handshake frames larger than its 512 byte
+/// `max_frame_size` for plain and sasl connects.
+///
+/// HOW:
+/// - Start a server with a `max_frame_size` of 512.
+/// - Check a default plain connect succeeds and one with a 1024 byte container id fails.
+/// - Check a sasl connect succeeds and one with a 1024 byte password fails.
 #[ntex::test]
 async fn test_handshake_max_frame_size() -> std::io::Result<()> {
     let srv = TestServerBuilder::new(async |_| {
@@ -319,6 +349,16 @@ fn max_frame_size_server(
     .start()
 }
 
+/// STATEMENT: A `max_frame_size` below 512 is rejected by the config setter and by both
+/// peers during the handshake, while `0` means unlimited.
+///
+/// HOW:
+/// - Check `set_max_frame_size` panics for 0 and 511.
+/// - Check the server rejects a client `Open` with 511 for plain and sasl connects with
+///   `InvalidMaxFrameSize(511)` and accepts 512.
+/// - Check the client fails with `ConnectError::InvalidMaxFrameSize(511)` against a
+///   server advertising 511.
+/// - Check a server configured with `0` accepts a default client.
 #[ntex::test]
 async fn test_remote_max_frame_size() -> std::io::Result<()> {
     for size in [0, 511] {
@@ -428,6 +468,15 @@ async fn raw_begin(io: &ntex::io::Io, channels: &[u16]) -> usize {
     count
 }
 
+/// STATEMENT: The server enforces `channel_max` and channel reuse for remote `Begin`
+/// frames, and the client limits local sessions to its `channel_max`.
+///
+/// HOW:
+/// - Start a server with a `channel_max` of 2 and send raw `Begin` frames.
+/// - Check channels 0, 0 get one reply, channel 3 gets none and channels 0, 1, 2, 1 get
+///   three.
+/// - Check a client with a `channel_max` of 1 opens two sessions and the third fails with
+///   `TooManyChannels`.
 #[ntex::test]
 async fn test_remote_begin_channels() -> std::io::Result<()> {
     let srv = TestServerBuilder::new(async |_| {
@@ -554,6 +603,16 @@ async fn raw_end(io: &ntex::io::Io) -> protocol::ErrorCondition {
     }
 }
 
+/// STATEMENT: The server ends the session when a remote `Attach` reuses an active handle
+/// or exceeds `handle_max`, and keeps the connection open.
+///
+/// HOW:
+/// - Start a server with a `handle_max` of 2 and check the `Begin` reply advertises it.
+/// - Attach handle 0 twice and check the session ends with `HandleInUse`.
+/// - In a new session attach handle 2, then 3, and check it ends with
+///   `ResourceLimitExceeded`.
+/// - Reuse a handle whose attach is still unconfirmed, check `HandleInUse`, then begin
+///   again.
 #[ntex::test]
 async fn test_remote_attach_handles() -> std::io::Result<()> {
     let srv = TestServerBuilder::new(async |_| {
@@ -611,6 +670,18 @@ async fn test_remote_attach_handles() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: A remote detach while the server receiver link is still being created
+/// releases the link service and the handle.
+///
+/// HOW:
+/// - The link service factory sleeps 50ms before returning a service holding a
+///   `CountGuard`.
+/// - Send `Attach` and `Detach` for handle 0 and check the server replies with `Attach`
+///   and a closed `Detach`.
+/// - Check the service was dropped and `RemoteDetachReceiver` reached the control service
+///   once.
+/// - Attach handle 0 again and check the replies are `Attach` and a `Flow` with credit
+///   50.
 #[ntex::test]
 async fn test_remote_receiver_detach_before_confirm() -> std::io::Result<()> {
     let released = Arc::new(AtomicUsize::new(0));
@@ -678,6 +749,17 @@ async fn test_remote_receiver_detach_before_confirm() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: A remote `End` while a receiver link is pending in the control service or
+/// link service creation sends no further frames for that link.
+///
+/// HOW:
+/// - Block either the control service on `AttachReceiver` or the link service factory
+///   behind a gate.
+/// - Attach a link, send `End` once blocked, check the server replies with `End`, then
+///   open the gate.
+/// - Check no more frames arrive and `RemoteSessionEnded` reports one link.
+/// - With a slow control service check the link service is never created, otherwise check
+///   it is created and released.
 #[ntex::test]
 async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
     // session ends during control service call or link service creation
@@ -776,6 +858,12 @@ async fn wait_for(f: impl Fn() -> bool) {
     panic!("condition is not met");
 }
 
+/// STATEMENT: A pending link service creation is cancelled when the connection is closed.
+///
+/// HOW:
+/// - The link service factory holds a `CountGuard` and sleeps for 10 seconds.
+/// - Attach a link and check the factory started and the guard is still alive.
+/// - Close the connection and check the guard is dropped.
 #[ntex::test]
 async fn test_remote_receiver_attach_disconnect() -> std::io::Result<()> {
     // link service creation is cancelled on disconnect
@@ -824,6 +912,14 @@ async fn test_remote_receiver_attach_disconnect() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Pending `Detached` and `DetachedAll` publish service calls are cancelled
+/// when the connection is closed.
+///
+/// HOW:
+/// - The publish service holds a `CountGuard` and sleeps on `Detached` and `DetachedAll`
+///   messages.
+/// - Attach a link, then send a `Detach` or an `End` and check the call started.
+/// - Close the connection and check the guard is dropped in both cases.
 #[ntex::test]
 async fn test_remote_receiver_detached_disconnect() -> std::io::Result<()> {
     // pending Detached and DetachedAll publish calls are cancelled on disconnect
@@ -883,6 +979,12 @@ async fn test_remote_receiver_detached_disconnect() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Router link services are shut down when the connection is closed.
+///
+/// HOW:
+/// - Route `test` to a service that counts `shutdown` calls.
+/// - Attach a link over a raw connection and check no shutdown happened yet.
+/// - Close the connection and check `shutdown` was called once.
 #[ntex::test]
 async fn test_router_link_service_shutdown_on_disconnect() -> std::io::Result<()> {
     struct Srv(Arc<AtomicUsize>);
@@ -947,6 +1049,16 @@ enum LocalDetach {
     SessionEnd,
 }
 
+/// STATEMENT: Router link services are shut down when the server closes the link or ends
+/// the session, while the connection stays open.
+///
+/// HOW:
+/// - The link service factory closes the receiver or ends the session 50ms after attach.
+/// - For `CloseInFlight`, send a transfer so a service call is in progress during the
+///   detach.
+/// - Wait for the client link to close and check `shutdown` ran once and only the
+///   in-flight call completed.
+/// - Check the client sink is still opened.
 #[ntex::test]
 async fn test_router_link_service_shutdown_on_local_detach() -> std::io::Result<()> {
     struct Srv(Arc<AtomicUsize>, Arc<AtomicUsize>);
@@ -1056,6 +1168,13 @@ fn raw_detach(handle: u32) -> protocol::Frame {
     .into()
 }
 
+/// STATEMENT: A remote `Disposition` covering every delivery id does not stall the
+/// connection.
+///
+/// HOW:
+/// - Begin a raw session and send settled dispositions for `0..=u32::MAX` with both
+///   roles.
+/// - Send `End` and check the server replies with `End`.
 #[ntex::test]
 async fn test_remote_disposition_range() -> std::io::Result<()> {
     let srv = TestServerBuilder::new(async |_| {
@@ -1095,6 +1214,13 @@ async fn test_remote_disposition_range() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Ending a session from the client reports its links in `RemoteSessionEnded`
+/// and keeps the connection open.
+///
+/// HOW:
+/// - Attach a sender link, send a transfer, then call `session.end()`.
+/// - Check the control service recorded the `test` link name.
+/// - Check the client sink is still opened.
 #[ntex::test]
 async fn test_session_end() -> std::io::Result<()> {
     let link_names = Arc::new(Mutex::new(Vec::new()));
@@ -1160,6 +1286,15 @@ async fn test_session_end() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Server-initiated closes of sender and receiver links are observed by the
+/// client links.
+///
+/// HOW:
+/// - The server closes its receiver links from the link service and its sender links from
+///   the control service after 150ms.
+/// - Attach a client sender link, wait for `on_close()` and check it is closed and not
+///   opened.
+/// - Attach a client receiver link and check it is closed after 350ms.
 #[ntex::test]
 async fn test_link_detach() -> std::io::Result<()> {
     let srv = test_server(async move |_| {
@@ -1231,6 +1366,12 @@ async fn test_link_detach() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: A server-side session end closes the client's sender link.
+///
+/// HOW:
+/// - The link service ends its session 150ms after attach.
+/// - Attach a client sender link, wait for `on_close()` and check it is closed and not
+///   opened.
 #[ntex::test]
 async fn test_link_detach_on_session_end() -> std::io::Result<()> {
     let srv = test_server(async move |_| {
@@ -1285,6 +1426,12 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: A server-side connection close closes the client's sender link.
+///
+/// HOW:
+/// - The link service closes the connection 150ms after attach.
+/// - Attach a client sender link, wait for `on_close()` and check it is closed and not
+///   opened.
 #[ntex::test]
 async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
     let srv = test_server(async move |_| {
@@ -1339,6 +1486,14 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Pending deliveries fail when the server closes the link before settling
+/// them.
+///
+/// HOW:
+/// - The link service never completes transfers and the server closes the receiver after
+///   150ms.
+/// - Send a transfer and check `wait()` returns an error, also on a second call.
+/// - Check the client link is closed.
 #[ntex::test]
 async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
     let srv = test_server(async move |_| {
@@ -1431,6 +1586,12 @@ impl Service<server::State<()>, types::Message> for GatedPublish {
     }
 }
 
+/// STATEMENT: Control frames are processed while the publish service is not ready.
+///
+/// HOW:
+/// - The control service makes `GatedPublish` not ready while handling `AttachSender` and
+///   notifies readiness changes.
+/// - Attach a client receiver link and check the attach completes within two seconds.
 #[ntex::test]
 async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
     let srv = test_server(async move |_| {
@@ -1484,6 +1645,15 @@ async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
     Ok(())
 }
 
+/// STATEMENT: Remote `Flow` frames reach the control service in order, and the link
+/// credit reflects the latest flow.
+///
+/// HOW:
+/// - The control service records each flow's link credit and delays the first one.
+/// - The client calls `set_link_credit(5)` and then `set_link_credit(10)` on a receiver
+///   link.
+/// - Check the recorded credits are `[5, 15]` and the server link credit is 15
+///   afterwards.
 #[ntex::test]
 async fn test_control_flow_order() -> std::io::Result<()> {
     let credits = Arc::new(Mutex::new(Vec::new()));
@@ -1559,6 +1729,14 @@ impl Drop for DropGuard {
     }
 }
 
+/// STATEMENT: An in-progress control service call is cancelled when the connection is
+/// closed.
+///
+/// HOW:
+/// - The control service holds a `DropGuard` and sleeps on `Flow` frames.
+/// - Set link credit on a client receiver link and check the call started and was not
+///   dropped.
+/// - Close the client sink and check the guard is dropped.
 #[ntex::test]
 async fn test_control_call_cancelled_on_disconnect() -> std::io::Result<()> {
     let started = Arc::new(std::sync::atomic::AtomicBool::new(false));

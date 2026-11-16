@@ -341,6 +341,11 @@ mod tests {
 
     use super::*;
 
+    /// STATEMENT: `Variant::Binary` values compare by byte content.
+    ///
+    /// HOW:
+    /// - Assert two binaries holding `hello` are equal.
+    /// - Assert `hello` and `world` binaries are unequal.
     #[test]
     fn bytes_eq() {
         let bytes1 = Variant::Binary(Bytes::from(&b"hello"[..]));
@@ -351,6 +356,11 @@ mod tests {
         assert!(bytes1 != bytes3);
     }
 
+    /// STATEMENT: `Variant::String` values compare by string content.
+    ///
+    /// HOW:
+    /// - Assert a freshly built `hello` string equals an existing `hello` variant.
+    /// - Assert `hello` and `world!` strings are unequal.
     #[test]
     fn string_eq() {
         let a = Variant::String(ByteString::from("hello").into());
@@ -360,6 +370,14 @@ mod tests {
         assert!(a != b);
     }
 
+    /// STATEMENT: Maps can be used as map keys, and `VariantMap` equality and hashing
+    /// are independent of insertion order.
+    ///
+    /// HOW:
+    /// - Decode `map8 { map8 {}: null }` and look up the entry by an empty map key.
+    /// - Build two 32-entry maps inserted in opposite orders and assert they are equal
+    ///   and hash identically.
+    /// - Assert an empty map hashes differently from the populated one.
     #[test]
     fn map_key_map() {
         use std::hash::BuildHasher;
@@ -386,6 +404,11 @@ mod tests {
         assert_ne!(s.hash_one(&m1), s.hash_one(&m3));
     }
 
+    /// STATEMENT: `Variant::Symbol` values compare by symbol content.
+    ///
+    /// HOW:
+    /// - Assert a freshly built `hello` symbol equals an existing `hello` variant.
+    /// - Assert `hello` and `world!` symbols are unequal.
     #[test]
     fn symbol_eq() {
         let a = Variant::Symbol(Symbol::from("hello"));
@@ -472,6 +495,15 @@ mod tests {
         }
     }
 
+    /// STATEMENT: A described compound wrapping a custom list type encodes to the
+    /// expected wire bytes and decodes back to the same list.
+    ///
+    /// HOW:
+    /// - Wrap a three-field `CustomList` in a `contoso:test` `DescribedCompound`
+    ///   variant and encode it.
+    /// - Assert the exact descriptor and `list8` bytes.
+    /// - Decode the bytes, assert the variant is unchanged and its payload decodes to
+    ///   the original `CustomList`.
     #[test]
     fn described_custom_list_recoding() {
         let custom_list = CustomList {
@@ -500,6 +532,12 @@ mod tests {
         assert_eq!(decoded_list, custom_list);
     }
 
+    /// STATEMENT: `Variant::from` maps string types to `String` and hash maps to `Map`.
+    ///
+    /// HOW:
+    /// - Convert `ByteString`, `String`, `&str` and `Str` and assert each equals
+    ///   `Variant::String`.
+    /// - Convert a `HashMap` and assert it equals `Variant::Map` over the same map.
     #[test]
     fn variant_from_conversions() {
         let expected = Variant::String(Str::from("v"));
@@ -514,6 +552,13 @@ mod tests {
         assert_eq!(variant, Variant::Map(VariantMap::new(map)));
     }
 
+    /// STATEMENT: String accessors and `str` comparison work for both `String` and
+    /// `Symbol` variants and yield nothing for other variants.
+    ///
+    /// HOW:
+    /// - For `String` and `Symbol` variants of `abc`, check `as_str`, `to_bytes_str`
+    ///   and `==`/`!=` against `str`.
+    /// - Assert a `Ubyte` returns `None` from both accessors and is unequal to `abc`.
     #[test]
     fn variant_string_accessors() {
         let string = Variant::String(Str::from("abc"));
@@ -531,6 +576,13 @@ mod tests {
         assert!(Variant::Ubyte(1) != *"abc");
     }
 
+    /// STATEMENT: `as_long` and `as_ulong` widen only integer variants that fit the
+    /// target sign.
+    ///
+    /// HOW:
+    /// - Check `as_long`/`as_ulong` for every integer width, `Null` and `Boolean`.
+    /// - Assert `Ulong` never converts via `as_long`, even for `u64::MAX`.
+    /// - Assert `Uint(u32::MAX)` widens to `i64` without loss.
     #[test]
     fn variant_integer_accessors() {
         let cases: Vec<(Variant, Option<i64>, Option<u64>)> = vec![
@@ -556,6 +608,14 @@ mod tests {
         assert_eq!(Variant::Uint(u32::MAX).as_long(), Some(i64::from(u32::MAX)));
     }
 
+    /// STATEMENT: `DescribedCompound::create` encodes its value with the descriptor, and
+    /// `decode` rejects payloads with trailing bytes.
+    ///
+    /// HOW:
+    /// - Create a compound from a one-element `List` and check `descriptor` and
+    ///   `decode::<List>()`.
+    /// - Encode it and assert `encoded_size` and the exact wire bytes.
+    /// - Decode a payload with an extra `ubyte` as `u8` and assert `InvalidSize`.
     #[test]
     fn described_compound_create_and_decode() {
         let descriptor = Descriptor::Symbol(Symbol::from("contoso:test"));
@@ -582,6 +642,13 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: `VecSymbolMap` behaves as a vector of entries and converts from
+    /// `Annotations`.
+    ///
+    /// HOW:
+    /// - Assert the default map is empty.
+    /// - Build one from entries and check `len`, indexing and `push`.
+    /// - Convert a one-entry `Annotations` and assert the same entries result.
     #[test]
     fn vec_symbol_map() {
         assert!(VecSymbolMap::default().is_empty());
@@ -598,6 +665,13 @@ mod tests {
         assert_eq!(VecSymbolMap::from(anns).0, entries);
     }
 
+    /// STATEMENT: `VecStringMap` behaves as a vector of entries and converts from a
+    /// `HashMap` keyed by `Str`.
+    ///
+    /// HOW:
+    /// - Assert the default map is empty.
+    /// - Build one from entries and check `len`, indexing and `push`.
+    /// - Convert a one-entry `HashMap<Str, Variant>` and assert the same entries result.
     #[test]
     fn vec_string_map() {
         assert!(VecStringMap::default().is_empty());

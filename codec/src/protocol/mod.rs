@@ -333,6 +333,11 @@ mod tests {
     use crate::codec::{Decode, Encode};
     use crate::error::AmqpCodecError;
 
+    /// STATEMENT: A UUID `MessageId` survives an encode/decode round trip unchanged.
+    ///
+    /// HOW:
+    /// - Encode a random `MessageId::Uuid` into `BytePages`.
+    /// - Decode the frozen bytes and assert the result equals the original id.
     #[test]
     fn test_message_id() -> Result<(), AmqpCodecError> {
         let id = MessageId::Uuid(Uuid::new_v4());
@@ -345,6 +350,12 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: `Properties` with a UUID correlation id survive an encode/decode
+    /// round trip unchanged.
+    ///
+    /// HOW:
+    /// - Build default `Properties` with `correlation_id` set to a random UUID.
+    /// - Encode, decode the frozen bytes and assert equality with the original.
     #[test]
     fn test_properties() -> Result<(), AmqpCodecError> {
         let id = Uuid::new_v4();
@@ -369,6 +380,13 @@ mod tests {
         buf
     }
 
+    /// STATEMENT: Every `MessageId` variant round-trips and reports an accurate
+    /// `encoded_size`.
+    ///
+    /// HOW:
+    /// - Encode `Ulong` (0, 42, `u64::MAX`), `Uuid`, `Binary` and `String` ids via
+    ///   `encoded`, which checks `encoded_size` against the output length.
+    /// - Decode each buffer and assert it equals the original id.
     #[test]
     fn message_id_roundtrip() {
         let ids = vec![
@@ -386,6 +404,13 @@ mod tests {
         }
     }
 
+    /// STATEMENT: `From` conversions map integers, strings and bytes onto the matching
+    /// `MessageId` variants.
+    ///
+    /// HOW:
+    /// - Convert `usize`, `i32` and `u64` values and assert they become `Ulong`.
+    /// - Assert `-1i32` is sign-extended to `Ulong(u64::MAX)` rather than rejected.
+    /// - Assert `ByteString` maps to `String` and `Bytes` maps to `Binary`.
     #[test]
     fn message_id_conversions() {
         assert_eq!(MessageId::from(7usize), MessageId::Ulong(7));
@@ -403,6 +428,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Decoding a `MessageId` from a non-id AMQP type fails with
+    /// `InvalidFormatCode`.
+    ///
+    /// HOW:
+    /// - Decode the boolean-true format code `0x41`.
+    /// - Assert the error is `AmqpParseError::InvalidFormatCode(0x41)`.
     #[test]
     fn message_id_rejects_other_types() {
         // boolean true
@@ -410,6 +441,14 @@ mod tests {
         assert!(matches!(res, Err(AmqpParseError::InvalidFormatCode(0x41))));
     }
 
+    /// STATEMENT: Every `ErrorCondition` category round-trips, and the default and
+    /// `From` conversions produce the expected variants.
+    ///
+    /// HOW:
+    /// - Encode and decode AMQP, connection, session, link and custom conditions and
+    ///   assert each equals the original.
+    /// - Assert `ErrorCondition::default()` is `Custom("Unknown")`.
+    /// - Assert `From<AmqpError>` wraps the value in `ErrorCondition::AmqpError`.
     #[test]
     fn error_condition_roundtrip() {
         let conditions = vec![
@@ -435,6 +474,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: The `Display` output of an `Error` matches its `Debug` output and
+    /// includes the description.
+    ///
+    /// HOW:
+    /// - Build an `Error` with a `NotFound` condition and description `missing`.
+    /// - Assert `to_string()` equals `{err:?}` and contains `missing`.
     #[test]
     fn error_display_matches_debug() {
         let err = Error::build()
@@ -445,6 +490,12 @@ mod tests {
         assert!(err.to_string().contains("missing"));
     }
 
+    /// STATEMENT: `DistributionMode` values round-trip and the standard modes encode as
+    /// the AMQP symbols `move` and `copy`.
+    ///
+    /// HOW:
+    /// - Encode and decode `Move`, `Copy` and a `Custom` mode and assert equality.
+    /// - Assert `Move` and `Copy` encode to the exact `sym8` bytes for `move`/`copy`.
     #[test]
     fn distribution_mode_roundtrip() {
         let modes = vec![
@@ -461,6 +512,12 @@ mod tests {
         assert_eq!(encoded(&DistributionMode::Copy).as_ref(), b"\xa3\x04copy");
     }
 
+    /// STATEMENT: `SaslInit::prepare_response` builds a NUL-separated PLAIN response of
+    /// authzid, username and password.
+    ///
+    /// HOW:
+    /// - Assert an empty authzid yields `\0user\0pass`.
+    /// - Assert an empty password yields `authz\0user\0`.
     #[test]
     fn sasl_init_prepare_response() {
         assert_eq!(
@@ -473,6 +530,13 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A `TransferBody::Data` encodes its raw bytes, has no message format,
+    /// and compares equal only to identical data.
+    ///
+    /// HOW:
+    /// - Build a body from `Bytes` and check `len`, `message_format` and encoded bytes.
+    /// - Assert equality with the same data and inequality with other data or a
+    ///   `Message` body.
     #[test]
     fn transfer_body_data() {
         let data = Bytes::from_static(b"hello");
@@ -486,6 +550,12 @@ mod tests {
         assert_ne!(body, TransferBody::Message(Message::default()));
     }
 
+    /// STATEMENT: A `BytePages` transfer body encodes its raw bytes but never compares
+    /// equal to another body.
+    ///
+    /// HOW:
+    /// - Build a body from `BytePages` and check `len`, `message_format` and encoding.
+    /// - Assert it differs from an identical pages body and from equal `Data` bytes.
     #[test]
     fn transfer_body_pages() {
         let mut pages = BytePages::default();
@@ -502,6 +572,13 @@ mod tests {
         assert_ne!(TransferBody::Data(Bytes::from_static(b"hello")), body);
     }
 
+    /// STATEMENT: A `TransferBody::Message` exposes the message format and encodes
+    /// exactly like the wrapped `Message`.
+    ///
+    /// HOW:
+    /// - Wrap a `Message` with a data body and format 7.
+    /// - Assert `message_format`, `len` and encoded bytes match the message.
+    /// - Assert equality with the same message and inequality with a `Data` body.
     #[test]
     fn transfer_body_message() {
         let mut msg = Message::default();
@@ -516,6 +593,14 @@ mod tests {
         assert_ne!(body, TransferBody::Data(Bytes::from_static(b"hello")));
     }
 
+    /// STATEMENT: `Transfer::get_body` and `load_message` only succeed for raw `Data`
+    /// bodies.
+    ///
+    /// HOW:
+    /// - With an encoded `Variant` data body, assert the body is returned and decodes
+    ///   back to the variant.
+    /// - Without a body, assert `None` and an `UnexpectedType("body")` error.
+    /// - With a `Message` body, assert `None` and that `load_message` fails.
     #[test]
     fn transfer_get_body_and_load_message() {
         let payload = encoded(&Variant::from("payload"));
@@ -545,6 +630,11 @@ mod tests {
         assert!(msg_body.load_message::<Variant>().is_err());
     }
 
+    /// STATEMENT: Protocol enums default to the values mandated by the AMQP 1.0 spec.
+    ///
+    /// HOW:
+    /// - Assert defaults for `Role`, `SenderSettleMode`, `ReceiverSettleMode`,
+    ///   `TerminusDurability`, `TerminusExpiryPolicy` and `SaslCode`.
     #[test]
     fn protocol_defaults() {
         assert_eq!(Role::default(), Role::Sender);

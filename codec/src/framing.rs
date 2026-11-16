@@ -86,6 +86,11 @@ mod tests {
     use super::*;
     use crate::types::Symbol;
 
+    /// STATEMENT: `AmqpFrame` exposes the channel and performative it was built with.
+    ///
+    /// HOW:
+    /// - Build an `AmqpFrame` on channel 42 carrying a `Close` performative.
+    /// - Assert `channel_id()`, `performative()` and `into_parts()` return those values.
     #[test]
     fn amqp_frame_parts() {
         let performative = protocol::Frame::Close(protocol::Close { error: None });
@@ -96,6 +101,14 @@ mod tests {
         assert_eq!(frame.clone().into_parts(), (42, performative));
     }
 
+    /// STATEMENT: Each SASL performative converts into a `SaslFrame` with the matching
+    /// body.
+    ///
+    /// HOW:
+    /// - Convert `SaslMechanisms`, `SaslInit`, `SaslChallenge`, `SaslResponse` and
+    ///   `SaslOutcome` with `SaslFrame::from`.
+    /// - Assert each frame body is the matching `SaslFrameBody` variant.
+    /// - Assert `SaslFrame::new` with an outcome body equals the converted frame.
     #[test]
     fn sasl_frame_conversions() {
         let mechanisms = protocol::SaslMechanisms {

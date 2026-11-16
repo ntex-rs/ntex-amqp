@@ -12,6 +12,14 @@ fn read(frame: Frame) -> (Frame, BytesMut) {
     (frame.into_parts().1, buf)
 }
 
+/// STATEMENT: Decoded frames and the state built from them do not keep references into
+/// the read buffer.
+///
+/// HOW:
+/// - Decode `Open`, `Begin`, `Attach`, three partial `Transfer` and a `Disposition` frame
+///   from separate buffers and handle them on a connection.
+/// - After each, confirm the read buffer is unique again.
+/// - Confirm the assembled delivery has the long tag and the concatenated body.
 #[ntex::test]
 async fn frames_detached_from_read_buffer() {
     // remote open
@@ -89,6 +97,14 @@ async fn frames_detached_from_read_buffer() {
     assert!(buf.is_unique(), "disposition");
 }
 
+/// STATEMENT: Incoming transfers, including partial ones, advance the session
+/// `next-incoming-id` reported in outgoing flows.
+///
+/// HOW:
+/// - Attach a receiver with credit 10, handle three complete and one partial transfer,
+///   call `set_link_credit(5)` and confirm link credit is 12.
+/// - Handle a session `Flow` with `echo` set.
+/// - Confirm written flows are `(1, 10)`, `(5, 12)` and the echo reply `(5, None)`.
 #[ntex::test]
 async fn transfers_advance_next_incoming_id() {
     let remote = RemoteServiceConfig::new(&Open(Box::default()));
@@ -135,6 +151,15 @@ async fn transfers_advance_next_incoming_id() {
     );
 }
 
+/// STATEMENT: An outgoing frame larger than the remote max frame size fails the
+/// connection and is not written.
+///
+/// HOW:
+/// - With a remote max frame size of 512, post an `Attach` and confirm no error and
+///   write activity.
+/// - Post an `Attach` with a 512 byte property; confirm `MaxOutboundSizeExceeded` and
+///   no write activity.
+/// - Confirm only the first `Attach` is written.
 #[ntex::test]
 async fn outbound_frames_limited_by_remote_max_frame_size() {
     let remote = RemoteServiceConfig::new(&Open(Box::new(OpenInner {

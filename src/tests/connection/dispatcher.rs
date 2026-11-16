@@ -209,6 +209,14 @@ impl Harness {
     }
 }
 
+/// STATEMENT: Dispatcher stop reasons are reported to the control service as
+/// `ProtocolError` or `Disconnected`, except `Reason::Service`.
+///
+/// HOW:
+/// - Dispatch each codec, timeout and I/O `Stop` reason on a fresh harness.
+/// - Confirm the call returns `None`, the control service logs the expected kind and the
+///   publish service logs nothing.
+/// - Dispatch `Stop(Reason::Service)` and confirm the control service logs nothing.
 #[ntex::test]
 async fn stop_reasons_map_to_control_frames() {
     let cases: Vec<(fn() -> Item, &str)> = vec![
@@ -260,6 +268,13 @@ async fn stop_reasons_map_to_control_frames() {
     assert_eq!(h.control.take(), Vec::<String>::new());
 }
 
+/// STATEMENT: A protocol stop reason fails dispatcher readiness and closes the
+/// connection with that error.
+///
+/// HOW:
+/// - Dispatch `Stop(Reason::KeepAlive)`.
+/// - Confirm `ready` fails with `Protocol(KeepAliveTimeout)`.
+/// - Confirm the connection is not opened and its error is `"Keep-alive timeout"`.
 #[ntex::test]
 async fn protocol_error_fails_dispatcher() {
     let h = Harness::new(Millis::ZERO);
@@ -282,6 +297,13 @@ async fn protocol_error_fails_dispatcher() {
     );
 }
 
+/// STATEMENT: A remote `Close` with an error is reported to the control service and
+/// fails dispatcher readiness.
+///
+/// HOW:
+/// - Dispatch a `Close` with an `InternalError` described as `"boom"`.
+/// - Confirm the control service logs a `ProtocolError` carrying that error.
+/// - Confirm `ready` fails.
 #[ntex::test]
 async fn remote_close_with_error() {
     let h = Harness::new(Millis::ZERO);
@@ -309,6 +331,14 @@ async fn remote_close_with_error() {
     assert!(h.disp.ready().await.is_err());
 }
 
+/// STATEMENT: A remote sender attach is confirmed through the control service, and its
+/// transfers and detach are routed to the publish service.
+///
+/// HOW:
+/// - Dispatch `Begin` and a sender `Attach`; confirm `AttachReceiver` and `Attached`
+///   are logged and `Begin`, `Attach r 0` and a 50-credit `Flow` are written.
+/// - Dispatch a `Transfer` and confirm the publish service logs `Transfer`.
+/// - Dispatch a peer `Detach` and confirm `Detached` and `RemoteDetachReceiver`.
 #[ntex::test]
 async fn attach_receiver_flow() {
     let h = Harness::new(Millis::ZERO);
@@ -339,6 +369,13 @@ async fn attach_receiver_flow() {
     assert_eq!(h.control.take(), ["RemoteDetachReceiver"]);
 }
 
+/// STATEMENT: A publish service error for a transfer detaches the receiver link with
+/// that error.
+///
+/// HOW:
+/// - Attach a receiver link, then make the publish service `call` fail.
+/// - Dispatch a `Transfer`.
+/// - Confirm one closing `Detach` for handle 0 described as `"call failed"`.
 #[ntex::test]
 async fn publish_error_closes_link() {
     let h = Harness::new(Millis::ZERO);
@@ -368,6 +405,14 @@ async fn publish_error_closes_link() {
     );
 }
 
+/// STATEMENT: A control service error for a remote sender attach rejects the receiver
+/// link without involving the publish service.
+///
+/// HOW:
+/// - Make the control service `call` fail and dispatch a sender `Attach` on handle 1.
+/// - Confirm the publish service logs nothing.
+/// - Confirm written frames start with `Begin` and include `Detach 0`, with no further
+///   detach left to read.
 #[ntex::test]
 async fn control_error_closes_receiver() {
     let h = Harness::new(Millis::ZERO);
@@ -386,6 +431,14 @@ async fn control_error_closes_receiver() {
     assert!(names.iter().any(|n| n == "Detach 0"));
 }
 
+/// STATEMENT: A remote receiver attach opens a sender link through the control service,
+/// and its flow and detach are reported to the control service only.
+///
+/// HOW:
+/// - Dispatch a receiver `Attach`; confirm `AttachSender`, an opened sender link `"s"`
+///   and a written `Attach s 0`.
+/// - Dispatch a link `Flow` with credit 7; confirm `Flow Some(7)` and credit 7.
+/// - Dispatch a peer `Detach`; confirm `RemoteDetachSender` and no publish calls.
 #[ntex::test]
 async fn attach_sender_and_flow() {
     let h = Harness::new(Millis::ZERO);
@@ -418,6 +471,13 @@ async fn attach_sender_and_flow() {
     assert_eq!(h.publish.take(), Vec::<String>::new());
 }
 
+/// STATEMENT: A control service error for a remote receiver attach detaches the
+/// unconfirmed sender link with that error.
+///
+/// HOW:
+/// - Make the control service `call` fail and dispatch a receiver `Attach`.
+/// - Confirm sender link `"s"` is not registered.
+/// - Confirm one `Detach` is written described as `"call failed"`.
 #[ntex::test]
 async fn attach_sender_control_error() {
     let h = Harness::new(Millis::ZERO);
@@ -443,6 +503,13 @@ async fn attach_sender_control_error() {
     );
 }
 
+/// STATEMENT: A remote `End` reports all session links to the control service and only
+/// receiver links to the publish service.
+///
+/// HOW:
+/// - Attach a receiver link and a sender link.
+/// - Dispatch `End`.
+/// - Confirm `RemoteSessionEnded 2` for control and `DetachedAll 1` for publish.
 #[ntex::test]
 async fn remote_session_ended() {
     let h = Harness::new(Millis::ZERO);
@@ -464,6 +531,13 @@ async fn remote_session_ended() {
     assert_eq!(h.publish.take(), ["DetachedAll 1"]);
 }
 
+/// STATEMENT: A locally closed receiver link is reported to the control and publish
+/// services once the peer confirms the detach.
+///
+/// HOW:
+/// - Attach a receiver link and start `close` on it.
+/// - Dispatch the peer `Detach` and confirm `close` succeeds.
+/// - Confirm `LocalDetachReceiver` for control and `Detached` for publish.
 #[ntex::test]
 async fn local_detach_control_frames() {
     let h = Harness::new(Millis::ZERO);
@@ -488,6 +562,14 @@ async fn local_detach_control_frames() {
     assert_eq!(h.publish.take(), ["Detached"]);
 }
 
+/// STATEMENT: A positive idle timeout sends periodic empty frames until shutdown, and a
+/// zero timeout disables them.
+///
+/// HOW:
+/// - With 100ms, confirm nothing is written at `ready`, then two reads contain only
+///   empty frames, and nothing is written after `shutdown`.
+/// - With a zero timeout, confirm nothing is written after 80ms.
+/// - With 1ms, confirm empty frames are still written after halving the interval.
 #[ntex::test]
 async fn idle_timeout_ping() {
     // Activity is checked at half of the idle timeout budget.
@@ -530,6 +612,13 @@ async fn idle_timeout_ping() {
     }
 }
 
+/// STATEMENT: Pings are sent at half the idle timeout, and a very large timeout does not
+/// cause early pings.
+///
+/// HOW:
+/// - Create harnesses with 4000ms and 3_221_225_471ms idle timeouts.
+/// - Confirm neither writes anything within 1300ms.
+/// - Confirm the 4000ms harness writes a single empty frame within the next 1500ms.
 #[ntex::test]
 async fn idle_timeout_negotiated_interval() {
     let h = Harness::new(Millis(4_000));
@@ -545,6 +634,14 @@ async fn idle_timeout_negotiated_interval() {
     assert_eq!(&bytes[..], b"\0\0\0\x08\x02\0\0\0");
 }
 
+/// STATEMENT: Outgoing frames from every write path count as idle activity, and the
+/// ping follows within the idle timeout of the last write.
+///
+/// HOW:
+/// - With 400ms, write a frame every 80ms six times via `ConnectionRef::post_frame`, the
+///   inner `post_frame`, or a `Begin` reply.
+/// - Confirm each interval holds exactly one non-empty frame.
+/// - After the last write, confirm an empty frame arrives within 500ms of it.
 #[ntex::test]
 async fn idle_timeout_outgoing_activity() {
     for path in 0..3 {
@@ -582,6 +679,11 @@ async fn idle_timeout_outgoing_activity() {
     }
 }
 
+/// STATEMENT: Incoming frames alone do not suppress outgoing idle pings.
+///
+/// HOW:
+/// - With 400ms, dispatch an incoming empty frame every 80ms six times.
+/// - Confirm every written frame is empty and at least one was written.
 #[ntex::test]
 async fn idle_timeout_incoming_only() {
     let h = Harness::new(Millis(400));
@@ -597,6 +699,13 @@ async fn idle_timeout_incoming_only() {
     assert!(pings > 0);
 }
 
+/// STATEMENT: An overdue idle timer callback does not treat an old write as fresh
+/// activity.
+///
+/// HOW:
+/// - With 400ms, post a `Flow` and read it back.
+/// - Block the thread for 340ms or 400ms.
+/// - Confirm an empty frame is written within the next 100ms.
 #[ntex::test]
 async fn idle_timeout_delayed_activity_check() {
     for delay in [340, 400] {
@@ -615,6 +724,13 @@ async fn idle_timeout_delayed_activity_check() {
     }
 }
 
+/// STATEMENT: Writes made before the dispatcher is created do not delay the first idle
+/// ping.
+///
+/// HOW:
+/// - Post a `Flow` on a connection and read it back.
+/// - Create a dispatcher with a 400ms idle timeout.
+/// - Confirm an empty frame is written within 300ms.
 #[ntex::test]
 async fn idle_timeout_activity_before_start() {
     let (_io, conn, client) = connection();
@@ -633,6 +749,14 @@ async fn idle_timeout_activity_before_start() {
     assert_eq!(&bytes[..], b"\0\0\0\x08\x02\0\0\0");
 }
 
+/// STATEMENT: A control frame queued while publish readiness is pending is handled by
+/// the control service, and the publish call waits until the publish service is ready.
+///
+/// HOW:
+/// - Attach a receiver link, make publish readiness pending and poll `ready` once.
+/// - Close the link; confirm `ready` stays pending, `LocalDetachReceiver` is logged and
+///   publish logs nothing.
+/// - Make publish ready; confirm `ready` completes and publish logs `Detached`.
 #[ntex::test]
 async fn queued_control_frames_invalidate_pending_readiness() {
     let h = Harness::new(Millis::ZERO);
@@ -665,6 +789,14 @@ async fn queued_control_frames_invalidate_pending_readiness() {
     assert_eq!(h.publish.take(), ["Detached"]);
 }
 
+/// STATEMENT: A publish or control service readiness error fails the dispatcher and
+/// closes the connection with that error.
+///
+/// HOW:
+/// - Make the publish or control service `ready` fail and notify the change.
+/// - Confirm `ready` fails with `AmqpDispatcherError::Service`.
+/// - Confirm a `Close` carrying the readiness error description is written and the
+///   connection is not opened.
 #[ntex::test]
 async fn service_readiness_errors() {
     for publish in [true, false] {
@@ -698,6 +830,14 @@ async fn service_readiness_errors() {
     }
 }
 
+/// STATEMENT: Queued control frames are released when the dispatcher shuts down or is
+/// dropped, so the connection and links are freed.
+///
+/// HOW:
+/// - Queue a local receiver detach and confirm one pending control frame.
+/// - Optionally `shutdown`: confirm an empty queue, `Closed` for control and one publish
+///   shutdown.
+/// - Drop the harness; confirm an empty queue and dead link and connection weak refs.
 #[ntex::test]
 async fn pending_controls_release_on_dispatcher_stop() {
     for shutdown in [false, true] {
@@ -733,6 +873,13 @@ async fn pending_controls_release_on_dispatcher_stop() {
     }
 }
 
+/// STATEMENT: Dispatcher shutdown reports `Closed`, shuts down both services and marks
+/// the connection disconnected.
+///
+/// HOW:
+/// - Dispatch `Begin`, then call `shutdown`.
+/// - Confirm control logs `Closed` and each service's `shutdown` ran once.
+/// - Confirm the connection error is `"Disconnected"`.
 #[ntex::test]
 async fn shutdown_notifies_services() {
     let h = Harness::new(Millis::ZERO);
@@ -746,6 +893,15 @@ async fn shutdown_notifies_services() {
     assert_eq!(h.conn.get_error().unwrap().to_string(), "Disconnected");
 }
 
+/// STATEMENT: A control service error for a sender link `Flow` or remote detach closes
+/// the link.
+///
+/// HOW:
+/// - Attach sender link `"s"`, make control `call` fail, and dispatch a `Flow` or peer
+///   `Detach`.
+/// - Confirm `Flow Some(5)` and `LocalDetachSender`, or `RemoteDetachSender`, are logged.
+/// - Confirm the link is closed and one closing `Detach 0` is written, described as
+///   `"call failed"` for `Flow` and without error for the remote detach.
 #[ntex::test]
 async fn control_error_closes_established_links() {
     // control service errors for `Flow` and `RemoteDetachSender` close the link
@@ -797,6 +953,14 @@ async fn control_error_closes_established_links() {
     }
 }
 
+/// STATEMENT: A control service error while handling a protocol error is ignored and
+/// the protocol error stops the dispatcher.
+///
+/// HOW:
+/// - Make control `call` fail and dispatch `Stop(Reason::KeepAlive)`.
+/// - Confirm `ready` fails with `Protocol(KeepAliveTimeout)` and the connection error is
+///   `KeepAliveTimeout`.
+/// - Confirm a `Close` without error is written.
 #[ntex::test]
 async fn control_error_on_protocol_error_stops_dispatcher() {
     let h = Harness::new(Millis::ZERO);
@@ -828,6 +992,12 @@ async fn control_error_on_protocol_error_stops_dispatcher() {
     assert!(close.error.is_none());
 }
 
+/// STATEMENT: A control service error on remote close or disconnect still records the
+/// matching connection error.
+///
+/// HOW:
+/// - Make control `call` fail and dispatch a remote `Close` or `Stop(Reason::Io(None))`.
+/// - Confirm the connection error is `Closed(None)` or `Disconnected`.
 #[ntex::test]
 async fn control_error_on_disconnect_marks_connection() {
     for closed in [false, true] {
@@ -855,6 +1025,13 @@ async fn control_error_on_disconnect_marks_connection() {
     }
 }
 
+/// STATEMENT: A locally ended session reports its receiver links to the control and
+/// publish services at once.
+///
+/// HOW:
+/// - Attach a receiver link and start `end` on the session.
+/// - Dispatch the peer `End` and confirm `end` succeeds.
+/// - Confirm `LocalSessionEnded 1` for control and `DetachedAll 1` for publish.
 #[ntex::test]
 async fn local_session_end_detaches_receivers() {
     let h = Harness::new(Millis::ZERO);

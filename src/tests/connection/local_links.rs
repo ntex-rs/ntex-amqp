@@ -1,5 +1,14 @@
 use super::*;
 
+/// STATEMENT: Dropping a pending local attach detaches the link once the peer attach
+/// arrives and releases its name and handle after the remote detach.
+///
+/// HOW:
+/// - For sender and receiver links, drop the attach future with the peer attach
+///   delivered before or after the drop.
+/// - Assert `Begin`, `Attach l 0`, `Detach 0` are written and lookups return `None`.
+/// - After a peer detach, attach the same name again and assert it succeeds on
+///   handle 0.
 #[ntex::test]
 async fn cancelled_local_attach_detached() {
     for sender in [true, false] {
@@ -57,6 +66,14 @@ async fn cancelled_local_attach_detached() {
     }
 }
 
+/// STATEMENT: A cancelled local attach frees its slot on remote detach so a new link
+/// can reuse the local handle.
+///
+/// HOW:
+/// - For sender and receiver links, start attach `l`, deliver the peer attach and
+///   a peer detach, then attach `m` while the `l` future is still alive.
+/// - Drop the `l` future and assert frames `Begin`, `Attach l 0`, `Detach 0`,
+///   `Attach m 0` and that `m` is found on local handle 0.
 #[ntex::test]
 async fn cancelled_local_attach_slot_reused() {
     for sender in [true, false] {
@@ -133,6 +150,15 @@ impl TestLink {
     }
 }
 
+/// STATEMENT: A local link name is reserved per direction while opening or
+/// established and is freed once the link starts closing.
+///
+/// HOW:
+/// - For sender and receiver links, assert attaching `x` again fails with
+///   `LinkNameInUse` while the first is opening and after it is established.
+/// - Attach `x` in the opposite direction and assert it succeeds.
+/// - Close the first link, attach `x` again and complete both with peer frames;
+///   assert `Detach 0`, `Attach x 2` and the new link has remote handle 2.
 #[ntex::test]
 async fn duplicate_local_link_name() {
     for sender in [true, false] {
@@ -217,6 +243,13 @@ async fn duplicate_local_link_name() {
     }
 }
 
+/// STATEMENT: A local attach fails with `LinkNameInUse` when a remotely opened link in
+/// the same direction already uses the name.
+///
+/// HOW:
+/// - For sender and receiver links, deliver a peer attach named `x`.
+/// - Attach `x` locally and assert `LinkNameInUse` and that only `Begin` was
+///   written.
 #[ntex::test]
 async fn local_link_name_used_by_remote_link() {
     for sender in [true, false] {
@@ -244,6 +277,14 @@ async fn local_link_name_used_by_remote_link() {
     }
 }
 
+/// STATEMENT: A local attach times out per the config or builder timeout, a late peer
+/// attach is detached, and the name is released.
+///
+/// HOW:
+/// - For sender and receiver links, use a 1s config timeout or a zero config
+///   timeout with a 1s builder timeout; assert `LinkAttachTimeout`.
+/// - Deliver the late peer attach and assert `Attach x 0` then `Detach 0` are sent.
+/// - After a peer detach, attach the same name again and assert it succeeds.
 #[ntex::test]
 async fn link_attach_timeout() {
     // (config timeout, builder timeout)
@@ -291,6 +332,14 @@ async fn link_attach_timeout() {
     }
 }
 
+/// STATEMENT: A link attached before the attach timeout is not detached when the
+/// timeout later elapses.
+///
+/// HOW:
+/// - With a 1s attach timeout, attach a sender or receiver and confirm it via a
+///   peer attach.
+/// - Wait 1.5s and assert only `Begin` and `Attach x 0` were written and the link
+///   is still found in the session.
 #[ntex::test]
 async fn link_attached_before_timeout() {
     for sender in [true, false] {
@@ -317,6 +366,15 @@ async fn link_attached_before_timeout() {
     }
 }
 
+/// STATEMENT: A refused local attach waits for the remote detach, fails with its error
+/// and releases the name and handle, even if the attach future was dropped.
+///
+/// HOW:
+/// - Deliver a peer attach without target or source and assert attach is still
+///   pending; optionally drop the future.
+/// - Deliver a peer detach with or without an error; assert `LinkDetached` carries
+///   that error and `Begin`, `Attach x 0`, `Detach 0` are written.
+/// - Attach the same name again and assert it succeeds on handle 0.
 #[ntex::test]
 async fn refused_local_attach() {
     let not_found = Error(Box::new(codec::ErrorInner {
@@ -409,6 +467,14 @@ async fn detach_by_handle(
     }
 }
 
+/// STATEMENT: Detaching a link whose attach response is not yet received fails with
+/// `LinkNotAttached` and does not affect the pending attach.
+///
+/// HOW:
+/// - Start a sender or receiver attach and call detach for handle 0 before the peer
+///   responds; assert `LinkNotAttached`.
+/// - Deliver the peer attach and assert attach succeeds, no `Detach` is written and
+///   the link is found in the session.
 #[ntex::test]
 async fn detach_opening_local_link() {
     for sender in [true, false] {
@@ -445,6 +511,15 @@ async fn detach_opening_local_link() {
     }
 }
 
+/// STATEMENT: A local detach of a refused link fails the pending attach with the
+/// detach error and completes when the peer detaches.
+///
+/// HOW:
+/// - Deliver a peer attach without target or source, then call detach with or
+///   without an error.
+/// - Assert attach fails with `LinkDetached` carrying that error and the detach
+///   stays pending until a peer detach completes it.
+/// - Assert `Detach 0` is written and the name and handle can be reused.
 #[ntex::test]
 async fn detach_refused_local_link() {
     let not_found = Error(Box::new(codec::ErrorInner {
@@ -510,6 +585,14 @@ async fn detach_refused_local_link() {
     }
 }
 
+/// STATEMENT: The number of links in a session is limited by the remote `handle-max`.
+///
+/// HOW:
+/// - Begin with remote `handle_max` 1, accept remote link `r0` and open local
+///   sender `s1`.
+/// - Assert further local sender and receiver attaches fail with `TooManyLinks`.
+/// - Assert another remote attach ends the session with `ResourceLimitExceeded`;
+///   written frames are `attach 1` and `end true`.
 #[ntex::test]
 async fn links_limited_by_remote_handle_max() {
     let (_io, conn, client) = connection();
@@ -562,6 +645,15 @@ async fn links_limited_by_remote_handle_max() {
     assert_eq!(frames, ["attach 1", "end true"]);
 }
 
+/// STATEMENT: Local sender link names are tracked independently of opposite-direction
+/// links and are removed after detach confirmation.
+///
+/// HOW:
+/// - Start local sender `x`, deliver a peer attach `x` in the other direction and
+///   assert the local attach is still pending.
+/// - Confirm the local link and check name, peer address and lookup by name.
+/// - Close it, deliver a peer detach and assert the name is removed and a remote
+///   attach with the same name is accepted.
 #[ntex::test]
 async fn local_link_names() {
     let (_io, conn, _client) = connection();

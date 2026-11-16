@@ -53,6 +53,11 @@ impl<T> Cell<T> {
 mod tests {
     use super::*;
 
+    /// STATEMENT: `Cell` clones share one value, and `Deref`/`Debug` expose that value.
+    ///
+    /// HOW:
+    /// - Clone a `Cell` holding `[1]` and push `2` through the clone's `get_mut`.
+    /// - Assert the original's `get_ref`, `len` and `Debug` output show `[1, 2]`.
     #[test]
     fn cell_shares_state() {
         let cell = Cell::new(vec![1_u8]);

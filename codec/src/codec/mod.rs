@@ -160,6 +160,14 @@ mod tests {
     use crate::framing::{AmqpFrame, SaslFrame};
     use crate::protocol::SaslFrameBody;
 
+    /// STATEMENT: A captured `sasl-mechanisms` frame decodes and re-encodes to identical
+    /// bytes.
+    ///
+    /// HOW:
+    /// - Decode a `SaslFrame` from raw bytes listing four mechanisms and assert all input
+    ///   is consumed.
+    /// - Assert the body is `SaslFrameBody::SaslMechanisms`.
+    /// - Encode the frame, skip the 4-byte size prefix and assert it equals the input.
     #[test]
     fn test_sasl_mechanisms() -> Result<(), AmqpCodecError> {
         let mut data = Bytes::from_static(
@@ -182,6 +190,13 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: A captured `disposition` frame decodes and re-encodes to identical
+    /// bytes.
+    ///
+    /// HOW:
+    /// - Decode an `AmqpFrame` from raw bytes and assert its performative name is
+    ///   `Disposition`.
+    /// - Encode the frame, skip the 4-byte size prefix and assert it equals the input.
     #[test]
     fn test_disposition() -> Result<(), AmqpCodecError> {
         let data = Bytes::from_static(b"\x02\0\0\0\0S\x15\xc0\x0c\x06AC@A\0S$\xc0\x01\0B");
@@ -198,6 +213,11 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: `size_u32` accepts lengths up to `u32::MAX` and panics on larger ones.
+    ///
+    /// HOW:
+    /// - Assert `size_u32(u32::MAX)` returns `u32::MAX`.
+    /// - On 64-bit targets, assert `size_u32(u32::MAX + 1)` panics.
     #[test]
     fn size_u32() {
         assert_eq!(super::size_u32(u32::MAX as usize), u32::MAX);
@@ -247,6 +267,14 @@ mod tests {
             assert!(msg.contains("exceeds u32::MAX"), "{msg}");
         }
 
+        /// STATEMENT: Encoding values or containers larger than `u32::MAX` bytes panics
+        /// instead of writing a truncated size.
+        ///
+        /// HOW:
+        /// - Encode 4 GiB `Bytes` (plain and array form), `ByteString` and `&str`.
+        /// - Encode a `List`, a `Vec<Bytes>` and `Properties` holding two 2 GiB values
+        ///   each.
+        /// - Assert every encode panics with a message containing `exceeds u32::MAX`.
         #[test]
         fn values() {
             assert_panics(|buf| huge().encode(buf));
@@ -268,6 +296,12 @@ mod tests {
             });
         }
 
+        /// STATEMENT: Encoding a `Message` whose body exceeds `u32::MAX` bytes panics.
+        ///
+        /// HOW:
+        /// - Encode a `Message` with a 4 GiB body.
+        /// - Encode a message wrapping a nested message with two 2 GiB data sections.
+        /// - Assert both panic with a message containing `exceeds u32::MAX`.
         #[test]
         fn messages() {
             assert_panics(|buf| Message::with_body(huge()).encode(buf));
@@ -279,6 +313,12 @@ mod tests {
             });
         }
 
+        /// STATEMENT: Encoding a frame whose payload exceeds `u32::MAX` bytes panics.
+        ///
+        /// HOW:
+        /// - Encode an `AmqpFrame` carrying a `Transfer` with 4 GiB of data.
+        /// - Encode a `SaslFrame` carrying a `SaslInit` with a 4 GiB initial response.
+        /// - Assert both panic with a message containing `exceeds u32::MAX`.
         #[test]
         fn frames() {
             assert_panics(|buf| {
