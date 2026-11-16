@@ -100,6 +100,15 @@ async fn check_lookup_handles_after_shutdown(end_session: bool) {
     assert!(receivers[1].recv().await.is_none());
 }
 
+/// STATEMENT: Control frames queued by link detach or session end do not keep the
+/// connection, session or links alive once the connection terminates.
+///
+/// HOW:
+/// - For sender detach, receiver detach (with a buffered delivery) and session end,
+///   queue one pending control frame.
+/// - Terminate by drop, `force_close`, `set_error` or a remote `Close`.
+/// - Assert the control queue is emptied and weak refs to connection, session and
+///   both links no longer upgrade.
 #[ntex::test]
 async fn pending_controls_release_connection() {
     for notification in ["sender", "receiver", "session"] {
@@ -196,6 +205,14 @@ async fn pending_controls_release_connection() {
     }
 }
 
+/// STATEMENT: A closed control queue drops newly enqueued frames instead of retaining
+/// the connection they reference.
+///
+/// HOW:
+/// - Build a `LocalSessionEnded` control frame holding a sender link, then
+///   `force_close` and drop the connection; the frame still keeps it alive.
+/// - Enqueue the frame and assert the queue stays empty and the weak connection
+///   ref no longer upgrades.
 #[ntex::test]
 async fn closed_control_queue_rejects_retaining_frames() {
     let (_io, conn, _client) = connection();
@@ -215,16 +232,41 @@ async fn closed_control_queue_rejects_retaining_frames() {
     assert!(weak.upgrade().is_none());
 }
 
+/// STATEMENT: Link handles obtained through session lookups remain usable and report
+/// closed after the connection is force-closed.
+///
+/// HOW:
+/// - Look up sender and receiver links by name, address and handles, then call
+///   `force_close`.
+/// - Assert lookups return `None`, the retained handles keep their names, are closed,
+///   are not ready, reject transfers and end their receive streams.
 #[ntex::test]
 async fn lookup_handles_survive_connection_close() {
     check_lookup_handles_after_shutdown(false).await;
 }
 
+/// STATEMENT: Link handles obtained through session lookups remain usable and report
+/// closed after the peer ends the session.
+///
+/// HOW:
+/// - Look up sender and receiver links by name, address and handles, then deliver
+///   a remote `End`.
+/// - Assert lookups return `None`, the retained handles keep their names, are closed,
+///   are not ready, reject transfers and end their receive streams.
 #[ntex::test]
 async fn lookup_handles_survive_session_end() {
     check_lookup_handles_after_shutdown(true).await;
 }
 
+/// STATEMENT: Looked-up link handles stay bound to their original link across link
+/// storage growth and handle reuse after detach.
+///
+/// HOW:
+/// - Look up sender `s` and receiver `r`, then attach 16 more senders and assert the
+///   handles are still open with the same names.
+/// - Detach each link and attach a replacement on the same remote handle.
+/// - Assert the replacement reuses the id but the old handle stays closed, is not
+///   ready, and its receive stream ends.
 #[ntex::test]
 async fn lookup_handles_survive_growth_and_detach() {
     let (_io, conn, _client) = connection();
@@ -273,6 +315,15 @@ async fn lookup_handles_survive_growth_and_detach() {
     assert!(receiver.recv().await.is_none());
 }
 
+/// STATEMENT: Sender link accessors report attach state and `ready` tracks peer
+/// credit and link closure.
+///
+/// HOW:
+/// - Check id, name, address, remote handle, channel, credit, max message size,
+///   error, closed state and `Debug` output of a remote-attached sender.
+/// - Assert `ready` is pending until a peer flow grants 5 credit.
+/// - After a peer detach assert `ready` returns `false` and the error is
+///   `LinkDetached(None)`.
 #[ntex::test]
 async fn sender_link_accessors() {
     let (_io, conn, _client) = connection();
@@ -314,6 +365,12 @@ async fn sender_link_accessors() {
     ));
 }
 
+/// STATEMENT: Closing a sender link wakes both credit-update and close waiters.
+///
+/// HOW:
+/// - Await `on_credit_update` and resolve it with a peer flow granting credit.
+/// - Spawn new `on_credit_update` and `on_close` waiters, deliver a peer detach,
+///   and assert both complete within the timeout.
 #[ntex::test]
 async fn sender_link_waiters_notified_on_close() {
     let (_io, conn, _client) = connection();
@@ -334,6 +391,13 @@ async fn sender_link_waiters_notified_on_close() {
     timeout(Millis(1000), closed).await.unwrap().unwrap();
 }
 
+/// STATEMENT: Transfers fail when the body exceeds the peer's max message size or
+/// the link is detached.
+///
+/// HOW:
+/// - Attach a sender whose peer advertises `max_message_size` 4 and assert a
+///   10-byte transfer fails with `BodyTooLarge`.
+/// - After a peer detach assert a transfer fails with `LinkDetached(None)`.
 #[ntex::test]
 async fn transfer_builder_errors() {
     let (_io, conn, _client) = connection();
@@ -369,6 +433,14 @@ async fn transfer_builder_errors() {
     ));
 }
 
+/// STATEMENT: Transfer builder options for tag, message format and pre-settlement are
+/// applied to the emitted transfer frame.
+///
+/// HOW:
+/// - Send with `tag`, `format(7)` and `settled()`; assert the delivery tag.
+/// - Assert the settled delivery is not tracked as unsettled and `wait` returns
+///   `None`.
+/// - Decode the last written `Transfer` and check format, settled flag and tag.
 #[ntex::test]
 async fn transfer_builder_options() {
     let (_io, conn, client) = connection();
@@ -399,6 +471,14 @@ async fn transfer_builder_options() {
     assert_eq!(tr.delivery_tag(), Some(&Bytes::from_static(b"tag")));
 }
 
+/// STATEMENT: Receiver link accessors, identity-based equality and hashing, and
+/// manual dispositions behave as expected.
+///
+/// HOW:
+/// - Check name, handle, remote handle (equal to local for locally opened links),
+///   credit, closed state and `Debug` output.
+/// - Assert a clone is equal with the same hash while another link differs.
+/// - Call `send_disposition` and assert a `Disposition` frame is written.
 #[ntex::test]
 async fn receiver_link_accessors() {
     let (_io, conn, client) = connection();
@@ -437,6 +517,13 @@ async fn receiver_link_accessors() {
     assert!(frame_names(&client).contains(&"Disposition".to_string()));
 }
 
+/// STATEMENT: The receiver link `Stream` yields transfers and terminates with an
+/// error then `None` when the session ends.
+///
+/// HOW:
+/// - Grant credit, deliver a transfer and poll the link stream for delivery 1.
+/// - Deliver a remote `End` and assert the stream yields `SessionEnded(None)`,
+///   then `None`.
 #[ntex::test]
 async fn receiver_link_stream() {
     let (_io, conn, _client) = connection();
@@ -462,6 +549,14 @@ async fn receiver_link_stream() {
     assert!(matches!(link.poll_next(&mut cx), Poll::Ready(None)));
 }
 
+/// STATEMENT: Delivery accessors report state, local settlement emits dispositions
+/// only once, and `discard` removes the delivery from the unsettled map.
+///
+/// HOW:
+/// - Check id, tag, remote state and remote-settled flag of a sent delivery.
+/// - Assert `update_state(RECEIVED)` emits an unsettled disposition and
+///   `settle(ACCEPTED)` a settled one; later updates emit nothing.
+/// - Send another delivery and assert `discard` drops unsettled count from 2 to 1.
 #[ntex::test]
 async fn delivery_accessors_and_discard() {
     let (_io, conn, client) = connection();
@@ -510,6 +605,14 @@ async fn delivery_accessors_and_discard() {
     assert_eq!(unsettled(&conn).0, 1);
 }
 
+/// STATEMENT: Receiver link builder options are encoded in the attach frame and a zero
+/// attach timeout disables the timeout.
+///
+/// HOW:
+/// - Build with max message size, properties (one removed), capabilities,
+///   `attach_timeout(0)` and `with_frame` setting `rcv_settle_mode`.
+/// - Decode the written `Attach` and check each option and the removed property.
+/// - Assert the attach is still pending after 50ms and succeeds on peer attach.
 #[ntex::test]
 async fn receiver_link_builder_options() {
     let (_io, conn, client) = connection();

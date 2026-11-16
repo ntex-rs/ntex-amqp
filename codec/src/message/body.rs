@@ -102,6 +102,11 @@ mod tests {
         buf
     }
 
+    /// STATEMENT: A default `MessageBody` has no data or value and encodes to nothing.
+    ///
+    /// HOW:
+    /// - Check `data()` and `value()` return `None`.
+    /// - Encode it and check the output is empty and matches `encoded_size()`.
     #[test]
     fn empty_body() {
         let body = MessageBody::default();
@@ -110,6 +115,13 @@ mod tests {
         assert_eq!(encoded(&body).len(), 0);
     }
 
+    /// STATEMENT: `set_data` replaces existing data, and each data section encodes as a
+    /// separate described `binary` section.
+    ///
+    /// HOW:
+    /// - Call `set_data` twice and check only the second value remains.
+    /// - Encode and compare against one `0x75` data section.
+    /// - Push another section, check `data()` returns the first and both are encoded.
     #[test]
     fn data_sections() {
         let mut body = MessageBody::default();
@@ -129,6 +141,11 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A data section over 255 bytes uses the `vbin32` encoding.
+    ///
+    /// HOW:
+    /// - Set 300 bytes of data and encode the body.
+    /// - Check the `0x75` descriptor, the `0xb0` code, a 32 bit length and total size.
     #[test]
     fn long_data_section() {
         let mut body = MessageBody::default();
@@ -139,6 +156,11 @@ mod tests {
         assert_eq!(buf.len(), 3 + 5 + 300);
     }
 
+    /// STATEMENT: A value body encodes as a described `amqp-value` section.
+    ///
+    /// HOW:
+    /// - Build a body with a string value and check `value()` returns it.
+    /// - Encode and compare against the `0x77` descriptor followed by `str8` bytes.
     #[test]
     fn value_section() {
         let body = MessageBody {
@@ -149,6 +171,12 @@ mod tests {
         assert_eq!(encoded(&body).as_ref(), b"\x00\x53\x77\xa1\x01v");
     }
 
+    /// STATEMENT: Each sequence entry encodes as its own described `amqp-sequence`
+    /// section.
+    ///
+    /// HOW:
+    /// - Build a body with two `List` sequences.
+    /// - Encode and compare against two `0x76` sections with their list bytes.
     #[test]
     fn sequence_section() {
         let body = MessageBody {
@@ -164,6 +192,13 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A small nested message encodes as a data section with a `vbin8`
+    /// payload.
+    ///
+    /// HOW:
+    /// - Build an inner message under 256 bytes and add it to `messages`.
+    /// - Check the `0x75` descriptor, `FORMATCODE_BINARY8`, the 1 byte length and total
+    ///   size.
     #[test]
     fn nested_messages() {
         let mut inner = Message::default();
@@ -183,6 +218,11 @@ mod tests {
         assert_eq!(buf.len(), 3 + 2 + inner_size);
     }
 
+    /// STATEMENT: A nested message over 255 bytes encodes with a `vbin32` payload.
+    ///
+    /// HOW:
+    /// - Build an inner message with 300 bytes of data and add it to `messages`.
+    /// - Check `FORMATCODE_BINARY32`, the 32 bit length and total size.
     #[test]
     fn nested_large_message() {
         let mut inner = Message::default();
@@ -200,6 +240,11 @@ mod tests {
         assert_eq!(buf.len(), 3 + 5 + inner_size);
     }
 
+    /// STATEMENT: A body with all section kinds encodes data, then sequence, then value.
+    ///
+    /// HOW:
+    /// - Build a body with data, one sequence and a value.
+    /// - Encode and compare against the exact `0x75`, `0x76`, `0x77` section bytes.
     #[test]
     fn all_sections_combined() {
         let mut body = MessageBody {

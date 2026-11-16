@@ -367,6 +367,14 @@ mod tests {
         }
     }
 
+    /// STATEMENT: The router keeps link services only while their links are attached
+    /// and shuts each one down exactly once.
+    ///
+    /// HOW:
+    /// - Attach three links whose service factory fails and assert no handler is kept.
+    /// - Attach then detach an `ok` link and assert its handler is released.
+    /// - Attach two more links, confirm one shutdown so far, then shut the router down
+    ///   and assert no handlers remain and three shutdowns were recorded.
     #[ntex::test]
     async fn link_service_lifecycle() {
         let (_io, conn, _client) = connection();
@@ -447,6 +455,13 @@ mod tests {
         }
     }
 
+    /// STATEMENT: When a handler pauses its link, in-flight transfers do not restore
+    /// credit, and new credit resumes the router's credit management.
+    ///
+    /// HOW:
+    /// - Attach a link whose `PauseSrv` resets link credit to 0 on the first transfer.
+    /// - Grant 2 credits, send two transfers and assert credit stays 0.
+    /// - Grant 1 credit, send another transfer and assert credit is topped up to 50.
     #[ntex::test]
     async fn paused_link_credit() {
         let (_io, conn, _client) = connection();
@@ -531,6 +546,14 @@ mod tests {
         }
     }
 
+    /// STATEMENT: Attaching to an unknown or missing target address fails with a
+    /// descriptive error and keeps no handler.
+    ///
+    /// HOW:
+    /// - Build a router serving only `ok`.
+    /// - Attach with target `nope` and with no target, and assert the respective
+    ///   "not supported" and "required" error descriptions.
+    /// - Assert the handler map stays empty.
     #[ntex::test]
     async fn unroutable_target_address() {
         let (_io, conn, _client) = connection();
@@ -564,6 +587,13 @@ mod tests {
         assert!(inner.get_ref().handlers.is_empty());
     }
 
+    /// STATEMENT: `Message::DetachedAll` releases and shuts down every known link
+    /// handler while ignoring unknown links.
+    ///
+    /// HOW:
+    /// - Attach two routed `ok` links and assert two handlers are registered.
+    /// - Send `DetachedAll` with both links plus an unrouted link.
+    /// - Assert no handlers remain and both link services were shut down.
     #[ntex::test]
     async fn detached_all_releases_handlers() {
         let (_io, conn, _client) = connection();
@@ -604,6 +634,13 @@ mod tests {
         assert_eq!(shutdowns.load(Ordering::Relaxed), 2);
     }
 
+    /// STATEMENT: A service call error that cannot be mapped to an `Outcome` rejects
+    /// the delivery with the error.
+    ///
+    /// HOW:
+    /// - Attach a link served by `FatalSrv`, whose `call` always fails with `Fatal`.
+    /// - Send one transfer through the router.
+    /// - Assert the last frame sent is a `Rejected` disposition described as `fatal`.
     #[ntex::test]
     async fn service_error_rejects_delivery() {
         let (_io, conn, client) = connection();
@@ -643,6 +680,14 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A link service readiness failure detaches the link instead of
+    /// settling the delivery.
+    ///
+    /// HOW:
+    /// - Attach a link served by `FatalSrv(true)`, whose `ready` fails with `Fatal`.
+    /// - Send one transfer through the router.
+    /// - Assert exactly one closing detach was sent, carrying the formatted
+    ///   `DetachForced`/`fatal` error.
     #[ntex::test]
     async fn readiness_failure_detaches_link() {
         let (_io, conn, client) = connection();
@@ -685,6 +730,13 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A service created by the router factory routes attaches and
+    /// transfers and shuts link services down on detach.
+    ///
+    /// HOW:
+    /// - Build a `Router` with an `ok` service and create it via its factory.
+    /// - Attach an `ok` link, send a transfer and assert an `Accepted` disposition.
+    /// - Send `Detached` for the link and assert its service was shut down once.
     #[ntex::test]
     async fn router_factory_dispatches_messages() {
         let (_io, conn, client) = connection();

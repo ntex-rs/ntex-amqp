@@ -1,5 +1,13 @@
 use super::*;
 
+/// STATEMENT: The receiver's advertised `delivery-count` wraps from `u32::MAX` to 0 on
+/// both single-frame and multi-frame transfers.
+///
+/// HOW:
+/// - Attach a remote sender with `initial_delivery_count` `u32::MAX` and grant credit.
+/// - Receive two deliveries, one of them multi-frame (first or second), and
+///   re-grant credit after each.
+/// - Assert flow delivery counts are `u32::MAX`, 0, 1.
 #[ntex::test]
 async fn receiver_delivery_count_wraps() {
     // overflow on single and on multi-frame transfer
@@ -41,6 +49,16 @@ async fn receiver_delivery_count(multi_first: bool) {
     assert_eq!(counts, [Some(u32::MAX), Some(0), Some(1)]);
 }
 
+/// STATEMENT: Aborted transfers are discarded and implicitly settled, return credit,
+/// count toward `delivery-count`, and a mismatched aborted delivery id detaches.
+///
+/// HOW:
+/// - Abort multi-frame deliveries by a last frame and with `more` set, and
+///   single-frame deliveries with and without a delivery id.
+/// - Assert no deliveries or unsettled entries remain, credit stays 1, and the next
+///   transfer is delivered intact as delivery 3.
+/// - Check flows advance `delivery-count` 0..5 with a disposition for delivery 3.
+/// - Abort an in-progress delivery 4 with delivery id 5 and assert `Detach 0`.
 #[ntex::test]
 async fn receiver_aborted_transfer() {
     let (_io, conn, client) = connection();
@@ -123,6 +141,13 @@ async fn receiver_aborted_transfer() {
     assert_eq!(frame_names(&client), ["Detach 0"]);
 }
 
+/// STATEMENT: A locally opened receiver initializes `delivery-count` from the remote
+/// sender's `initial-delivery-count`.
+///
+/// HOW:
+/// - Attach a local receiver, confirmed by a peer attach with initial count 100.
+/// - Grant 10 credit, receive one transfer, then re-grant credit.
+/// - Assert flows `(100, 10)` and `(101, 10)` are written.
 #[ntex::test]
 async fn local_receiver_delivery_count() {
     let (_io, conn, client) = connection();
@@ -151,6 +176,14 @@ async fn local_receiver_delivery_count() {
     );
 }
 
+/// STATEMENT: A remote detach with an error is exposed via the receiver link error and
+/// its receive stream.
+///
+/// HOW:
+/// - Deliver a peer detach with `InternalError` to a local receiver and assert the
+///   action is `DetachReceiver`.
+/// - Assert `error()` returns it and `poll_recv` yields `LinkDetached(Some(err))`,
+///   then `None`.
 #[ntex::test]
 async fn receiver_remote_detach_error() {
     let err = Error(Box::new(codec::ErrorInner {
@@ -180,6 +213,14 @@ async fn receiver_remote_detach_error() {
     assert!(matches!(link.poll_recv(&mut cx), Poll::Ready(None)));
 }
 
+/// STATEMENT: Locally detaching a receiver link wakes a pending `recv`, which first
+/// drains queued deliveries and then ends.
+///
+/// HOW:
+/// - Spawn a `recv` loop with and without a queued delivery, then call
+///   `detach_receiver_link`.
+/// - Assert the loop finishes with the queued delivery 0 or no items, the link is
+///   closed, and `Detach 0` is written.
 #[ntex::test]
 async fn receiver_link_detach_wakes_recv() {
     for queued in [false, true] {
@@ -216,6 +257,14 @@ async fn receiver_link_detach_wakes_recv() {
     }
 }
 
+/// STATEMENT: Receivers enforce max message size across all transfer frames, with 0
+/// meaning unlimited, for remote and local links.
+///
+/// HOW:
+/// - Use the `receive` helper with 10-byte frames on remotely attached links
+///   (`set_max_message_size`) and locally attached links (builder option).
+/// - Assert deliveries within the limit are delivered and oversized ones are
+///   dropped with a `MessageSizeExceeded` detach.
 #[ntex::test]
 async fn receiver_max_message_size() {
     // remotely attached link, max size is set by `set_max_message_size`
@@ -237,6 +286,15 @@ async fn receiver_max_message_size() {
     assert_eq!(receive(true, 25, &[true, true, false]).await, (false, true));
 }
 
+/// STATEMENT: Partial deliveries stay invisible until complete and are dropped when
+/// the peer detaches the link with an error.
+///
+/// HOW:
+/// - Assert a `more` transfer is not visible via `has_deliveries`, `get_delivery`
+///   or `poll_recv` until its final frame arrives.
+/// - Assert a completed delivery is visible while the next one is partial.
+/// - Deliver a peer detach with `DetachForced`; assert the link is closed, the error
+///   is exposed, no deliveries remain and `poll_recv` yields the error then `None`.
 #[ntex::test]
 async fn receiver_partial_delivery_and_detach() {
     let (_io, conn, _client) = connection();
@@ -297,6 +355,15 @@ async fn receiver_partial_delivery_and_detach() {
     assert!(matches!(link.poll_recv(&mut cx), Poll::Ready(None)));
 }
 
+/// STATEMENT: A receiver applies sender flow frames using only `delivery-count`,
+/// preserving its own delivery limit, and answers echo with its state.
+///
+/// HOW:
+/// - Grant 10 credit, receive one delivery, then deliver sender flows with credit
+///   100 and varying delivery counts; assert the resulting credit each time.
+/// - Assert a multi-frame delivery is counted at its first frame by the sender.
+/// - Assert an echo flow yields credit 2 and written flows are `(0, 10)`,
+///   `(12, 5)` and `(15, 2)`.
 #[ntex::test]
 async fn receiver_applies_sender_flow() {
     let (_io, conn, client) = connection();
@@ -364,6 +431,14 @@ fn assert_limit_exceeded(link: &crate::ReceiverLink, client: &IoTest) {
     assert_eq!(err.condition(), &LinkError::TransferLimitExceeded.into());
 }
 
+/// STATEMENT: `reset_link_credit` lowers credit while accepting in-flight transfers up
+/// to the previous delivery limit and detaches beyond it.
+///
+/// HOW:
+/// - Grant 10 credit, receive one, then reset to 2 and 0; assert credit values.
+/// - Assert transfers 2..9, including a multi-frame one, are still accepted and
+///   flows `(0, 10)`, `(1, 2)`, `(2, 0)` are written.
+/// - Assert transfer 10 detaches the link with `TransferLimitExceeded`.
 #[ntex::test]
 async fn receiver_reset_link_credit() {
     let (_io, conn, client) = connection();
@@ -415,6 +490,13 @@ async fn receiver_reset_link_credit() {
     assert_limit_exceeded(&link, &client);
 }
 
+/// STATEMENT: Credit reset before link confirmation is not advertised early, and later
+/// resets can raise credit up to a new delivery limit.
+///
+/// HOW:
+/// - Set credit 10 and reset to 2 before `confirm_receiver_link`, then reset to 3.
+/// - Assert three transfers are accepted and flows `(0, 2)` and `(0, 3)` are written.
+/// - Assert a fourth transfer detaches the link with `TransferLimitExceeded`.
 #[ntex::test]
 async fn receiver_reset_link_credit_opening() {
     let (_io, conn, client) = connection();
@@ -446,6 +528,14 @@ async fn receiver_reset_link_credit_opening() {
     assert_limit_exceeded(&link, &client);
 }
 
+/// STATEMENT: The previous delivery limit kept by `reset_link_credit` expires once the
+/// sender's `delivery-count` passes it, even across wrap-around.
+///
+/// HOW:
+/// - Set credit 10, reset to 0, and deliver a sender flow draining to count 10.
+/// - Grant `2^31 - 1` credit twice with sender flows that wrap `delivery-count`,
+///   asserting credit stays 0.
+/// - Assert a following transfer detaches with `TransferLimitExceeded`.
 #[ntex::test]
 async fn receiver_reset_link_credit_expires() {
     let (_io, conn, client) = connection();
@@ -481,6 +571,15 @@ async fn receiver_reset_link_credit_expires() {
     assert_limit_exceeded(&link, &client);
 }
 
+/// STATEMENT: Invalid transfers close the receiver link with a detach carrying the
+/// matching error, and later transfers are ignored.
+///
+/// HOW:
+/// - Deliver a transfer without credit, and a first frame without delivery id
+///   (single and multi-frame).
+/// - Assert the link is closed, `poll_recv` returns `None`, and a later transfer is
+///   ignored.
+/// - Assert one closing detach with `TransferLimitExceeded` or `DetachForced`.
 #[ntex::test]
 async fn receiver_transfer_error_detaches_link() {
     let no_id = |more: bool| {

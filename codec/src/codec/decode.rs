@@ -715,6 +715,13 @@ mod tests {
     macro_rules! decode_tests {
         ($($name:ident: $kind:ident, $test:expr, $expected:expr,)*) => {
         $(
+            /// STATEMENT: Each `decode_tests!` case decodes its encoded value back to the
+            /// expected value.
+            ///
+            /// HOW:
+            /// - Encode the case input into `BytePages`.
+            /// - Decode it as the case type with `Decode::decode` and assert it equals the
+            ///   expected value.
             #[test]
             fn $name() {
                 let mut b1 = BytePages::default();
@@ -810,6 +817,12 @@ mod tests {
         res.unwrap()
     }
 
+    /// STATEMENT: Both the `true` constant and the one-byte boolean `0x01` decode as
+    /// `true`.
+    ///
+    /// HOW:
+    /// - Decode `bool` from the single format code `0x41` and assert `true`.
+    /// - Decode `bool` from `0x56 0x01` and assert `true`.
     #[test]
     fn test_bool_true() {
         let mut b1 = BytePages::default();
@@ -822,6 +835,12 @@ mod tests {
         assert!(unwrap_value(bool::decode(&mut b2.freeze())));
     }
 
+    /// STATEMENT: Both the `false` constant and the one-byte boolean `0x00` decode as
+    /// `false`.
+    ///
+    /// HOW:
+    /// - Decode `bool` from the single format code `0x42` and assert `false`.
+    /// - Decode `bool` from `0x56 0x00` and assert `false`.
     #[test]
     fn test_bool_false() {
         let mut b1 = BytePages::default();
@@ -834,8 +853,12 @@ mod tests {
         assert!(!unwrap_value(bool::decode(&mut b2.freeze())));
     }
 
-    /// UTC with a precision of milliseconds. For example, 1311704463521
-    /// represents the moment 2011-07-26T18:21:03.521Z.
+    /// STATEMENT: A millisecond-precision UTC timestamp round-trips through encode and
+    /// decode.
+    ///
+    /// HOW:
+    /// - Encode 2011-07-26T18:21:03.521Z (1311704463521 ms) as a `DateTime<Utc>`.
+    /// - Decode it back and assert the same instant, milliseconds included.
     #[test]
     fn test_timestamp() {
         let mut b1 = BytePages::default();
@@ -851,6 +874,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A UTC timestamp before the Unix epoch round-trips through encode and
+    /// decode.
+    ///
+    /// HOW:
+    /// - Encode 1968-07-26T18:21:03.521Z as a `DateTime<Utc>`.
+    /// - Decode it back and assert the same instant, milliseconds included.
     #[test]
     fn test_timestamp_pre_unix() {
         let mut b1 = BytePages::default();
@@ -866,6 +895,10 @@ mod tests {
         );
     }
 
+    /// STATEMENT: `Variant::Null` round-trips through encode and decode.
+    ///
+    /// HOW:
+    /// - Encode `Variant::Null`, decode it as a `Variant` and assert `Variant::Null`.
     #[test]
     fn variant_null() {
         let mut b = BytePages::default();
@@ -874,6 +907,11 @@ mod tests {
         assert_eq!(Variant::Null, t);
     }
 
+    /// STATEMENT: Both boolean encodings of `true` decode as `Variant::Boolean(true)`.
+    ///
+    /// HOW:
+    /// - Decode a `Variant` from `0x41` and assert `Variant::Boolean(true)`.
+    /// - Decode a `Variant` from `0x56 0x01` and assert `Variant::Boolean(true)`.
     #[test]
     fn variant_bool_true() {
         let mut b1 = BytePages::default();
@@ -892,6 +930,11 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Both boolean encodings of `false` decode as `Variant::Boolean(false)`.
+    ///
+    /// HOW:
+    /// - Decode a `Variant` from `0x42` and assert `Variant::Boolean(false)`.
+    /// - Decode a `Variant` from `0x56 0x00` and assert `Variant::Boolean(false)`.
     #[test]
     fn variant_bool_false() {
         let mut b1 = BytePages::default();
@@ -910,8 +953,12 @@ mod tests {
         );
     }
 
-    /// UTC with a precision of milliseconds. For example, 1311704463521
-    /// represents the moment 2011-07-26T18:21:03.521Z.
+    /// STATEMENT: A millisecond-precision `Variant::Timestamp` round-trips through encode
+    /// and decode.
+    ///
+    /// HOW:
+    /// - Encode `Variant::Timestamp` of 2011-07-26T18:21:03.521Z (1311704463521 ms).
+    /// - Decode it as a `Variant` and assert the same timestamp.
     #[test]
     fn variant_timestamp() {
         let mut b1 = BytePages::default();
@@ -927,6 +974,14 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Negative millisecond timestamps decode and re-encode exactly, and
+    /// `i64::MIN` is rejected.
+    ///
+    /// HOW:
+    /// - For several negative values, decode a timestamp from its big-endian millis and
+    ///   assert `timestamp_millis()` matches.
+    /// - Re-encode each decoded value and assert the payload equals the original millis.
+    /// - Decode `i64::MIN` millis and assert `AmqpParseError::DatetimeParseError`.
     #[test]
     fn timestamp_negative_millis() {
         for millis in [-1, -500, -999, -1000, -1001, -1500, -2000, -86_400_000] {
@@ -952,6 +1007,12 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: A `Variant::Timestamp` before the Unix epoch round-trips through encode
+    /// and decode.
+    ///
+    /// HOW:
+    /// - Encode `Variant::Timestamp` of 1968-07-26T18:21:03.521Z.
+    /// - Decode it as a `Variant` and assert the same timestamp.
     #[test]
     fn variant_timestamp_pre_unix() {
         let mut b1 = BytePages::default();
@@ -967,6 +1028,15 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A described list decodes as a `DescribedCompound` with the right
+    /// descriptor and list fields.
+    ///
+    /// HOW:
+    /// - Decode a `Variant` from raw bytes for symbol and ulong descriptors with list0,
+    ///   list8 and list32 bodies, and assert no input bytes remain.
+    /// - Assert the variant is `Variant::DescribedCompound` with the expected
+    ///   `Descriptor`.
+    /// - Decode the compound as `List` and assert the expected fields.
     #[test_case(
         b"\x00\xa3\x07foo:bar\xc0\x03\x01\x50\x03",
         Descriptor::Symbol("foo:bar".into()),
@@ -998,6 +1068,16 @@ mod tests {
         assert_eq!(decoded_list, expected_list);
     }
 
+    /// STATEMENT: A described map decodes as a `DescribedCompound` with the right
+    /// descriptor and map entries.
+    ///
+    /// HOW:
+    /// - Decode a `Variant` from raw bytes for symbol and ulong descriptors with map8 and
+    ///   map32 bodies, and assert no input bytes remain.
+    /// - Assert the variant is `Variant::DescribedCompound` with the expected
+    ///   `Descriptor`.
+    /// - Decode the compound as `HashMapUtil<Variant, Variant>` and assert the expected
+    ///   pairs.
     #[test_case(
         b"\x00\xa3\x05a:b:c\xc1\x08\x04\x50\x03\x41\x50\xc8\x56\x00",
         Descriptor::Symbol("a:b:c".into()),
@@ -1028,6 +1108,16 @@ mod tests {
         assert_eq!(decoded_map, expected_map);
     }
 
+    /// STATEMENT: A described array decodes as a `DescribedCompound` with the right
+    /// descriptor, element constructor and elements.
+    ///
+    /// HOW:
+    /// - Decode a `Variant` from raw bytes for symbol and ulong descriptors with array8
+    ///   and array32 bodies, and assert no input bytes remain.
+    /// - Assert the variant is `Variant::DescribedCompound` with the expected
+    ///   `Descriptor`.
+    /// - Decode it as `Array`, assert the element constructor, then assert the `Variant`
+    ///   items.
     #[test_case(
         b"\x00\xa3\x07foo:bar\xe0\x05\x03\x50\x01\x02\x03",
         Descriptor::Symbol("foo:bar".into()),
@@ -1095,6 +1185,16 @@ mod tests {
         Bytes::from(buf)
     }
 
+    /// STATEMENT: Nested lists and described values decode up to `MAX_DEPTH` and fail
+    /// beyond it.
+    ///
+    /// HOW:
+    /// - Build list8, list32 or described nesting exactly `MAX_DEPTH` deep and assert
+    ///   `Variant::decode` succeeds and consumes all input.
+    /// - Decode `MAX_DEPTH + 1` and 100000 levels and assert
+    ///   `AmqpParseError::MaxDepthExceeded`.
+    /// - For list formats, also assert `List::decode` of 100000 levels fails the same
+    ///   way.
     #[test_case(codec::FORMATCODE_LIST8; "list8")]
     #[test_case(codec::FORMATCODE_LIST32; "list32")]
     #[test_case(codec::FORMATCODE_DESCRIBED; "described")]
@@ -1127,6 +1227,12 @@ mod tests {
         Bytes::from(buf)
     }
 
+    /// STATEMENT: Nested maps decode up to `MAX_DEPTH` and fail beyond it.
+    ///
+    /// HOW:
+    /// - Build map32 values nested `MAX_DEPTH` deep and assert `Variant::decode` succeeds
+    ///   and consumes all input.
+    /// - Decode `MAX_DEPTH + 1` levels and assert `AmqpParseError::MaxDepthExceeded`.
     #[test]
     fn max_depth_map() {
         let mut buf = nested_map(MAX_DEPTH as usize);
@@ -1137,6 +1243,15 @@ mod tests {
         assert!(matches!(res, Err(AmqpParseError::MaxDepthExceeded)));
     }
 
+    /// STATEMENT: Compound decoding consumes exactly its declared size and never reads
+    /// elements past it.
+    ///
+    /// HOW:
+    /// - Decode list8 `[null]` with one extra byte inside via `Variant` and `List`;
+    ///   assert the value and that only the trailing `false` byte remains.
+    /// - Decode array8 `[true]` with an extra byte as `Vec<bool>` and assert the same.
+    /// - Assert list8 and array8 whose declared size is too small to hold their elements
+    ///   fail.
     #[test]
     fn compound_bounded_by_size() {
         // list8 [null] with an extra byte inside, followed by `false`
@@ -1162,6 +1277,12 @@ mod tests {
         assert!(Vec::<bool>::decode(&mut Bytes::copy_from_slice(&data)).is_err());
     }
 
+    /// STATEMENT: `Multiple<Symbol>` rejects a described value instead of treating it as
+    /// a symbol.
+    ///
+    /// HOW:
+    /// - Decode a symbol wrapped in descriptor ulong `0x10`.
+    /// - Assert `AmqpParseError::InvalidDescriptor` carrying `Descriptor::Ulong(0x10)`.
     #[test]
     fn multiple_described() {
         // described symbol with descriptor ulong 0x10
@@ -1173,6 +1294,14 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: A list or map whose element count cannot fit in its declared size is
+    /// rejected.
+    ///
+    /// HOW:
+    /// - Build list32 and map32 with size 8 and count `0xffffffff` followed by null
+    ///   bytes.
+    /// - Decode via `Variant`, `List`, `HashMap`, `VecSymbolMap` and `VecStringMap`.
+    /// - Assert each returns `AmqpParseError::InvalidSize`.
     #[test]
     fn count_exceeds_size() {
         const HDR: [u8; 8] = [0, 0, 0, 8, 0xff, 0xff, 0xff, 0xff];
@@ -1197,6 +1326,14 @@ mod tests {
         assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
     }
 
+    /// STATEMENT: An array of zero-width elements must not claim more elements than its
+    /// size can carry.
+    ///
+    /// HOW:
+    /// - Build array32 of `true` constants, whose elements take no bytes.
+    /// - With count 1, assert `Vec<bool>` and `Variant` decoding both yield `[true]`.
+    /// - With counts 2, 1000 and `u32::MAX`, assert both fail with
+    ///   `AmqpParseError::InvalidSize`.
     #[test]
     fn zero_width_array() {
         // array32 of `true` values, elements take no bytes
@@ -1224,6 +1361,12 @@ mod tests {
         }
     }
 
+    /// STATEMENT: A compound whose declared size cannot hold its own count field is
+    /// rejected.
+    ///
+    /// HOW:
+    /// - Decode list, map and array values in 8- and 32-bit forms with too-small sizes.
+    /// - Assert `Variant::decode` returns `AmqpParseError::InvalidSize`.
     #[test_case(&[codec::FORMATCODE_LIST8, 0, 0] ; "list8")]
     #[test_case(&[codec::FORMATCODE_MAP8, 0, 0] ; "map8")]
     #[test_case(&[codec::FORMATCODE_ARRAY8, 0, 0, 0x40] ; "array8")]
@@ -1235,6 +1378,11 @@ mod tests {
         assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
     }
 
+    /// STATEMENT: `Option<i8>` round-trips both `Some` and `None`.
+    ///
+    /// HOW:
+    /// - Encode `Some(42i8)`, decode it as `Option<i8>` and assert `Some(42)`.
+    /// - Encode `None`, decode it and assert `None`.
     #[test]
     fn option_i8() {
         let mut b1 = BytePages::default();
@@ -1252,6 +1400,12 @@ mod tests {
         assert_eq!(None, unwrap_value(Option::<i8>::decode(&mut b2.freeze())));
     }
 
+    /// STATEMENT: `Option<ByteString>` round-trips both `Some` and `None`.
+    ///
+    /// HOW:
+    /// - Encode `Some("hello")`, decode it as `Option<ByteString>` and assert the same
+    ///   value.
+    /// - Encode `None`, decode it and assert `None`.
     #[test]
     fn option_string() {
         let mut b1 = BytePages::default();
@@ -1285,6 +1439,14 @@ mod tests {
         }};
     }
 
+    /// STATEMENT: Each decodable type rejects a format code it does not accept.
+    ///
+    /// HOW:
+    /// - Decode primitives, strings, symbols, timestamps, descriptors and compounds from
+    ///   a `ubyte` (or `byte` for `u8`) format code.
+    /// - Assert each returns `AmqpParseError::InvalidFormatCode` with that code.
+    /// - Assert `Variant` rejects undefined `0x3f` and reports `Incomplete(1)` on empty
+    ///   input.
     #[test]
     fn invalid_format_codes() {
         // 0x50 is UBYTE, which none of these types accept
@@ -1347,6 +1509,12 @@ mod tests {
         assert_decode_err!(Variant, b"", AmqpParseError::Incomplete(1));
     }
 
+    /// STATEMENT: Fixed-width values with too few payload bytes fail with `Incomplete`.
+    ///
+    /// HOW:
+    /// - Decode integers, floats, `char`, `DateTime<Utc>` and `Uuid` from truncated
+    ///   input, including small-int forms with no payload.
+    /// - Assert each returns `AmqpParseError::Incomplete`.
     #[test]
     fn truncated_fixed_width() {
         assert_decode_err!(u8, b"\x50", AmqpParseError::Incomplete(1));
@@ -1368,6 +1536,13 @@ mod tests {
         assert_decode_err!(Uuid, b"\x98\x00\x01\x02", AmqpParseError::Incomplete(_));
     }
 
+    /// STATEMENT: Variable-width values with a missing or short length or payload fail
+    /// with `Incomplete`.
+    ///
+    /// HOW:
+    /// - Decode `Bytes`, `ByteString` and `Symbol` in 8- and 32-bit length forms whose
+    ///   length exceeds the remaining input, and `Bytes` with a truncated length field.
+    /// - Assert each returns `AmqpParseError::Incomplete`.
     #[test]
     fn truncated_variable_width() {
         // binary8/binary32 with a length larger than the remaining input
@@ -1393,6 +1568,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Strings and symbols containing invalid UTF-8 are rejected.
+    ///
+    /// HOW:
+    /// - Decode `ByteString`, `Str`, `Symbol` and `Variant` from payloads holding byte
+    ///   `0xff`.
+    /// - Assert each returns `AmqpParseError::Utf8Error`.
     #[test]
     fn invalid_utf8() {
         assert_decode_err!(ByteString, b"\xa1\x01\xff", AmqpParseError::Utf8Error);
@@ -1411,6 +1592,13 @@ mod tests {
         assert_decode_err!(Variant, b"\xa1\x01\xff", AmqpParseError::Utf8Error);
     }
 
+    /// STATEMENT: Code points outside Unicode or in the surrogate range are rejected as
+    /// `char`.
+    ///
+    /// HOW:
+    /// - Decode `char` from `0x110000` and `0xd800`, and `Variant` from `0x110000`.
+    /// - Assert `AmqpParseError::InvalidChar` with the offending value.
+    /// - Assert `0x10ffff` still decodes as `'\u{10ffff}'`.
     #[test]
     fn invalid_char() {
         // 0x110000 is beyond the unicode range, 0xd800 is a surrogate
@@ -1434,6 +1622,11 @@ mod tests {
         assert_eq!(char::decode(&mut buf).unwrap(), '\u{10ffff}');
     }
 
+    /// STATEMENT: A timestamp outside the `chrono` range fails to decode.
+    ///
+    /// HOW:
+    /// - Decode `DateTime<Utc>` from `i64::MAX` milliseconds.
+    /// - Assert `AmqpParseError::DatetimeParseError`.
     #[test]
     fn datetime_out_of_range() {
         let mut input = Bytes::from_static(b"\x83\x7f\xff\xff\xff\xff\xff\xff\xff");
@@ -1443,6 +1636,14 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: Decimal32, decimal64 and decimal128 decode as raw bytes, and truncated
+    /// payloads fail.
+    ///
+    /// HOW:
+    /// - Decode each decimal format as `Variant`, assert the expected byte array and that
+    ///   all input is consumed.
+    /// - Decode each format with a two-byte payload and assert
+    ///   `AmqpParseError::Incomplete`.
     #[test]
     fn decimals() {
         let cases: Vec<(&[u8], Variant)> = vec![
@@ -1471,6 +1672,11 @@ mod tests {
         assert_decode_err!(Variant, b"\x94\x01\x02", AmqpParseError::Incomplete(_));
     }
 
+    /// STATEMENT: The list0 format code decodes as an empty list.
+    ///
+    /// HOW:
+    /// - Decode `0x45` as `List` and assert an empty `List`.
+    /// - Decode `0x45` as `Variant` and assert `Variant::List` of an empty list.
     #[test]
     fn list0_decoding() {
         let mut buf = Bytes::from_static(b"\x45");
@@ -1483,6 +1689,11 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Arrays with a described element constructor are rejected as `Vec<u8>`.
+    ///
+    /// HOW:
+    /// - Decode array8 whose element constructor is described by ulong `0x23`.
+    /// - Assert `AmqpParseError::InvalidDescriptor`.
     #[test]
     fn array_with_described_element_constructor() {
         // array8 holding a described element constructor is not supported
@@ -1493,6 +1704,13 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: Described compounds with sizes near `u32::MAX` report the needed length
+    /// without overflowing.
+    ///
+    /// HOW:
+    /// - Decode described list32, map32 and array32 headers with sizes near `u32::MAX`.
+    /// - Assert `Incomplete` reports `size + 5` bytes, or `InvalidSize` only when that
+    ///   cannot fit in `usize`.
     #[test]
     fn described_variant_size_overflow() {
         for format in [
@@ -1522,6 +1740,12 @@ mod tests {
         }
     }
 
+    /// STATEMENT: Truncated described values fail with `Incomplete`.
+    ///
+    /// HOW:
+    /// - Decode a descriptor with no following format code and assert `Incomplete(1)`.
+    /// - Decode described list8 and list32 values with truncated payloads and assert
+    ///   `Incomplete`.
     #[test]
     fn described_variant_truncated() {
         // descriptor parses, but the described value's format code is missing
@@ -1540,6 +1764,11 @@ mod tests {
         );
     }
 
+    /// STATEMENT: `Descriptor` decodes from sym8, sym32 and ulong encodings.
+    ///
+    /// HOW:
+    /// - Decode `foo` as sym8 and sym32 and assert `Descriptor::Symbol("foo")`.
+    /// - Decode ulong `0x23` and assert `Descriptor::Ulong(0x23)`.
     #[test]
     fn descriptor_symbol_decoding() {
         let mut buf = Bytes::from_static(b"\xa3\x03foo");
@@ -1561,6 +1790,15 @@ mod tests {
         );
     }
 
+    /// STATEMENT: `Constructor` decodes plain and described format codes and rejects
+    /// malformed described constructors.
+    ///
+    /// HOW:
+    /// - Decode `0x50` and assert `Constructor::FormatCode` for ubyte.
+    /// - Decode a ulong `0x23` described list8 constructor, assert
+    ///   `Constructor::Described` and that all input is consumed.
+    /// - Assert a missing format code yields `Incomplete(1)` and a ubyte descriptor
+    ///   yields `InvalidFormatCode(0x50)`.
     #[test]
     fn constructor_decoding() {
         let mut buf = Bytes::from_static(b"\x50");
@@ -1635,6 +1873,13 @@ mod tests {
         ]
     }
 
+    /// STATEMENT: `ListDescribed` decodes a list of described composites and an empty
+    /// list.
+    ///
+    /// HOW:
+    /// - Decode list8 of two `Pair` values described by `0x77` and assert both pairs in
+    ///   order.
+    /// - Decode an empty list8 and assert no elements.
     #[test]
     fn list_described_decoding() {
         let mut payload = described_pair(0x77, 1, 2);
@@ -1653,6 +1898,15 @@ mod tests {
         assert!(decoded.0.is_empty());
     }
 
+    /// STATEMENT: `ListDescribed` rejects wrong descriptors, non-described elements and
+    /// non-list input.
+    ///
+    /// HOW:
+    /// - Decode a list holding a `Pair` with descriptor `0x78` and assert
+    ///   `UnexpectedType("Unexpected descriptor")`.
+    /// - Decode a list holding a plain ubyte and assert
+    ///   `UnexpectedType("Expected compound type")`.
+    /// - Decode a ubyte instead of a list and assert `InvalidFormatCode(0x50)`.
     #[test]
     fn list_described_errors() {
         // wrong descriptor
@@ -1680,6 +1934,15 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Frame header decoding rejects wrong frame types, a too-small data
+    /// offset and truncated headers.
+    ///
+    /// HOW:
+    /// - Decode a SASL header as `AmqpFrame` and an AMQP header as `SaslFrame` and assert
+    ///   `UnexpectedFrameType`.
+    /// - Decode an `AmqpFrame` with doff 1 and assert `InvalidSize`.
+    /// - Decode a truncated header and a header missing its doff extension and assert
+    ///   `Incomplete`.
     #[test]
     fn frame_header_errors() {
         // sasl frame type where an amqp frame is expected

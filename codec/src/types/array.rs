@@ -129,6 +129,14 @@ mod tests {
         assert!(matches!(res, Err(AmqpParseError::InvalidSize)));
     }
 
+    /// STATEMENT: `Array` switches to the `array32` header once its element count no
+    /// longer fits in a `u8`.
+    ///
+    /// HOW:
+    /// - Encode zero-width boolean arrays with counts 255, 256 and 300.
+    /// - Assert `encoded_size` matches the output and the header is `array8` for 255
+    ///   and `array32` above it, with the count stored correctly.
+    /// - Assert decoding rejects each array with `InvalidSize` since count exceeds size.
     #[test]
     fn encode_count_above_u8() {
         for count in [255, 256, 300] {
@@ -155,6 +163,13 @@ mod tests {
         fn array_encode(&self, _: &mut BytePages) {}
     }
 
+    /// STATEMENT: Encoding a `Vec` as an array switches to the `array32` header once its
+    /// length no longer fits in a `u8`.
+    ///
+    /// HOW:
+    /// - Encode vectors of 255, 256 and 300 zero-width `Null` elements.
+    /// - Assert `encoded_size` matches the output and the header format and count.
+    /// - Assert decoding rejects each array with `InvalidSize` since count exceeds size.
     #[test]
     fn encode_vec_count_above_u8() {
         for count in [255, 256, 300] {
@@ -167,6 +182,15 @@ mod tests {
         }
     }
 
+    /// STATEMENT: An `Array` built with `Array::new` encodes a compact `array8` and
+    /// round-trips its elements.
+    ///
+    /// HOW:
+    /// - Build an array from `[1, 2, 300]` `u32` values and check its constructor and
+    ///   decoded elements.
+    /// - Encode it and assert `encoded_size` and the `array8`, size, count, `uint`
+    ///   header bytes.
+    /// - Decode the bytes and assert the array and its elements are unchanged.
     #[test]
     fn array_new_roundtrip() {
         let items: Vec<u32> = vec![1, 2, 300];
@@ -190,6 +214,13 @@ mod tests {
         assert_eq!(decoded.decode::<u32>().unwrap(), items);
     }
 
+    /// STATEMENT: An empty `Vec` converts to an empty `Array` that still records its
+    /// element constructor.
+    ///
+    /// HOW:
+    /// - Convert an empty `Vec<u64>` and assert it decodes to an empty vector.
+    /// - Assert it encodes to exactly `array8`, size 2, count 0, `ulong`.
+    /// - Decode the bytes and assert the array is unchanged.
     #[test]
     fn array_from_vec_empty() {
         let arr = Array::from(Vec::<u64>::new());
@@ -206,6 +237,12 @@ mod tests {
         assert_eq!(<Array as Decode>::decode(&mut buf.clone()).unwrap(), arr);
     }
 
+    /// STATEMENT: Decoding array elements as the wrong type fails with the array's
+    /// element format code.
+    ///
+    /// HOW:
+    /// - Build an array of `u32` values and decode it as `bool`.
+    /// - Assert the error is `InvalidFormatCode(FORMATCODE_UINT)`.
     #[test]
     fn array_decode_wrong_element_type() {
         let arr = Array::from(vec![1u32, 2]);
@@ -216,6 +253,12 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: Decoding an array whose payload is shorter than its count requires
+    /// fails with `Incomplete`.
+    ///
+    /// HOW:
+    /// - Build a `uint` array with count 2 but only one 4-byte element in the payload.
+    /// - Assert `decode::<u32>()` returns `AmqpParseError::Incomplete`.
     #[test]
     fn array_decode_truncated_payload() {
         let arr = Array {

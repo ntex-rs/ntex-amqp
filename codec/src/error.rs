@@ -71,6 +71,12 @@ impl From<()> for Error {
 mod tests {
     use super::*;
 
+    /// STATEMENT: Converting `()` into `Error` yields a bare internal error.
+    ///
+    /// HOW:
+    /// - Build `Error::from(())`.
+    /// - Assert the condition is `AmqpError::InternalError` and there is no description
+    ///   or info.
     #[test]
     fn unit_converts_to_internal_error() {
         let err = Error::from(());
@@ -79,6 +85,12 @@ mod tests {
         assert!(err.info().is_none());
     }
 
+    /// STATEMENT: Error messages interpolate their fields as expected.
+    ///
+    /// HOW:
+    /// - Format `AmqpParseError` variants that carry sizes, codes, descriptors, field
+    ///   names or type names, and an `AmqpCodecError` wrapping a parse error.
+    /// - Assert each `to_string()` equals the expected text.
     #[test]
     fn error_messages_with_fields() {
         assert_eq!(
@@ -119,6 +131,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Field-less error variants render their fixed messages.
+    ///
+    /// HOW:
+    /// - Format field-less `AmqpParseError`, `AmqpCodecError` and `ProtocolIdError`
+    ///   variants, plus `ProtocolIdError::Unexpected`.
+    /// - Assert each `to_string()` equals the expected text.
     #[test]
     fn error_messages() {
         // messages without interpolated fields
@@ -158,6 +176,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: An `AmqpParseError` converts into `AmqpCodecError::ParseError`
+    /// unchanged.
+    ///
+    /// HOW:
+    /// - Convert `AmqpParseError::Incomplete(7)` with `into()`.
+    /// - Assert the result is `AmqpCodecError::ParseError(Incomplete(7))`.
     #[test]
     fn parse_error_is_convertible_to_codec_error() {
         let err: AmqpCodecError = AmqpParseError::Incomplete(7).into();

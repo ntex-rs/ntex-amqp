@@ -1,5 +1,14 @@
 use super::*;
 
+/// STATEMENT: A locally attached sender sends its configured initial delivery-count,
+/// ignores the receiver's value, and computes credit from it and sent transfers.
+///
+/// HOW:
+/// - For default, `Some(5)` and `None` initial counts, attach a sender and check the
+///   sent `Attach` carries the expected `initial_delivery_count`.
+/// - Reply with a receiver attach carrying delivery-count 100 and confirm it is ignored.
+/// - Send flows with credit 10, with and without delivery-count, and assert credit 10.
+/// - Send one transfer, then a flow with delivery-count advanced by one; credit stays 10.
 #[ntex::test]
 async fn local_sender_initial_delivery_count() {
     // (attach initial delivery-count, sent value, flow delivery-count)
@@ -66,6 +75,14 @@ async fn local_sender_initial_delivery_count() {
     }
 }
 
+/// STATEMENT: A sender adopts the peer's max-message-size, treating 0 as unlimited,
+/// clamping to `u32::MAX`, and rejecting larger bodies.
+///
+/// HOW:
+/// - For local and remote attaches, peer size 0 gives `max_message_size()` `None`.
+/// - Peer size 10 gives `Some(10)`; an 11-byte transfer fails with `BodyTooLarge`.
+/// - `set_max_message_size(0)` resets the limit to `None`.
+/// - Peer size `u64::MAX` is reported as `Some(u32::MAX)`.
 #[ntex::test]
 async fn sender_max_message_size() {
     for local in [false, true] {
@@ -87,6 +104,16 @@ async fn sender_max_message_size() {
     }
 }
 
+/// STATEMENT: A drain flow consumes the sender's remaining credit and is answered with
+/// a drain flow, after queued transfers and including drains received before attach.
+///
+/// HOW:
+/// - Drain an idle link; credit becomes 0 and a flow with advanced delivery-count is
+///   sent.
+/// - Drain with two queued transfers; both are sent before the answering drain flow.
+/// - Drop a woken transfer after drain; its credit is drained and a flow is sent.
+/// - Check a non-drain flow only sets credit, and a drain flow handled before the link is
+///   confirmed is answered right after its `Attach`.
 #[ntex::test]
 async fn sender_link_drain() {
     let (_io, conn, client) = connection();
@@ -175,6 +202,17 @@ async fn sender_link_drain() {
     assert_eq!(frames(), ["Attach", "Flow Some(1) Some(3) Some(0) true"]);
 }
 
+/// STATEMENT: Transfers waiting for the session window keep link credit on cancel and
+/// do not delay drain, and fail when the link is detached.
+///
+/// HOW:
+/// - With window 0, start and drop a transfer; link credit stays 2.
+/// - Drain while a transfer waits for the window; credit becomes 0 and the drain flow
+///   is sent at once.
+/// - A woken transfer delays drain until window-blocked, then waits for new credit
+///   before sending.
+/// - Detach the link while a transfer waits for the window; the transfer fails and
+///   only `Detach` is written.
 #[ntex::test]
 async fn sender_link_credit_on_window_wait() {
     let (_io, conn, client) = connection();
@@ -268,6 +306,16 @@ async fn sender_link_credit_on_window_wait() {
     assert_eq!(frames(), ["Detach"]);
 }
 
+/// STATEMENT: Sender flows wake only as many waiting transfers as there is credit and
+/// window, and pass the credit of dropped waiters on to the next waiter.
+///
+/// HOW:
+/// - Poll transfers with counting wakers; credit 1 wakes one, credit 2 wakes two.
+/// - Drop woken credit and window waiters and check the next waiter is woken.
+/// - Check credit is claimed by a window waiter and that a woken transfer is not queued
+///   behind credit waiters.
+/// - With a partially sent multi-frame delivery, the next transfer is not woken until
+///   the delivery completes.
 #[ntex::test]
 async fn sender_link_flow_wakes_by_credit() {
     type Fut = Pin<Box<dyn Future<Output = Result<crate::Delivery, AmqpProtocolError>>>>;
@@ -380,6 +428,14 @@ async fn sender_link_flow_wakes_by_credit() {
     assert_eq!(t2.woken(), 1);
 }
 
+/// STATEMENT: Closing a sender link fails its transfers waiting for credit, session
+/// window or resumption, and no transfers are written after `Detach`.
+///
+/// HOW:
+/// - Close one link with a transfer waiting for credit and one waiting for the window;
+///   both transfers fail.
+/// - Wake a transfer with credit, then close its link before it resumes; it fails.
+/// - Assert only `Detach` and `Attach` frames are written, with no `Transfer`.
 #[ntex::test]
 async fn sender_link_close_fails_waiting_transfers() {
     let (_io, conn, client) = connection();
@@ -439,6 +495,13 @@ async fn sender_link_close_fails_waiting_transfers() {
     assert_eq!(frame_names(&client), ["Detach 2"]);
 }
 
+/// STATEMENT: Detaching a sender link from the session fails its waiting transfers with
+/// `Disconnected` and rejects new transfers.
+///
+/// HOW:
+/// - Wait one transfer for link credit and one for the session window on two links.
+/// - Call `detach_sender_link` for both; both transfers fail with `Disconnected`.
+/// - A new transfer on the detached link fails, and a later flow writes no `Transfer`.
 #[ntex::test]
 async fn sender_link_detach_fails_waiting_transfers() {
     let (_io, conn, client) = connection();
@@ -491,6 +554,13 @@ async fn sender_link_detach_fails_waiting_transfers() {
     assert_eq!(frame_names(&client), ["Detach 0", "Detach 1"]);
 }
 
+/// STATEMENT: Detaching a sender link fails a partially sent delivery and the transfer
+/// queued behind it, and stops sending the remaining frames.
+///
+/// HOW:
+/// - Send a 2048-byte body with small frames; two frames go out before the window ends.
+/// - Detach the link; both transfers fail with `Disconnected`.
+/// - Open the session window and assert only `Detach` is written.
 #[ntex::test]
 async fn sender_link_detach_fails_partial_delivery() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -523,6 +593,13 @@ async fn sender_link_detach_fails_partial_delivery() {
     assert_eq!(transfer_frames(&client), ["Detach"]);
 }
 
+/// STATEMENT: An unsettled delivery stays pending after a local detach until the peer
+/// confirms it, then fails with `LinkDetached`.
+///
+/// HOW:
+/// - Send an unsettled transfer and wait on `Delivery::wait`.
+/// - Detach the link locally; the wait is still pending.
+/// - Handle the peer `Detach`; the wait fails with `LinkDetached(None)`.
 #[ntex::test]
 async fn sender_link_detach_fails_unsettled() {
     let (_io, conn, _client, snd) = small_frames_sender();
@@ -541,6 +618,14 @@ async fn sender_link_detach_fails_unsettled() {
     assert!(matches!(res, Err(AmqpProtocolError::LinkDetached(None))));
 }
 
+/// STATEMENT: Sender credit accounts for transfers the receiver has not yet seen,
+/// including across delivery-count wrap-around.
+///
+/// HOW:
+/// - For initial delivery-count 0 and `u32::MAX - 1`, a flow without delivery-count
+///   uses the initial count; after 3 transfers a repeated flow leaves credit at 7.
+/// - A stale flow with credit 2 gives 0 credit; credit 5 unblocks a transfer, leaving 1.
+/// - A flow with delivery-count ahead of the sender uses its credit 4 as is.
 #[ntex::test]
 async fn sender_link_stale_flow() {
     for initial in [0, u32::MAX - 1] {
@@ -600,6 +685,14 @@ async fn sender_link_stale_flow_with(initial: u32) {
     sleep(Millis(10)).await;
 }
 
+/// STATEMENT: A drain is not delayed by a partial delivery blocked on the session
+/// window, and the queued transfer behind it waits for new credit.
+///
+/// HOW:
+/// - Start a multi-frame delivery that blocks on the window, and queue a second transfer.
+/// - Drain; credit becomes 0 and a drain flow with delivery-count 10 is sent.
+/// - Open the window; the partial delivery completes but the queued one waits.
+/// - Grant credit 1; the queued transfer completes and credit is 0.
 #[ntex::test]
 async fn sender_drain_with_partial_delivery() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -656,6 +749,15 @@ async fn sender_drain_with_partial_delivery() {
     assert_eq!(snd.credit(), 0);
 }
 
+/// STATEMENT: Each frame of a multi-frame delivery consumes session window, frames of
+/// one delivery are not interleaved with the next, and ids are counted separately.
+///
+/// HOW:
+/// - Send a 1200-byte body with window 2; two frames are written and a second transfer
+///   waits.
+/// - Open window 1; the last frame completes delivery 0 while the next transfer waits.
+/// - Open more window; the next delivery gets id 1 and credit is 8.
+/// - An echo flow reports `next-outgoing-id` 5, counting transfer frames.
 #[ntex::test]
 async fn sender_multi_frame_delivery_window() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -715,6 +817,14 @@ async fn sender_multi_frame_delivery_window() {
     );
 }
 
+/// STATEMENT: Cancelling a partially sent delivery removes it from unsettled and sends an
+/// aborted transfer before the next delivery.
+///
+/// HOW:
+/// - Drop a multi-frame delivery waiting for the window; unsettled count drops to 0.
+/// - Open the window; an aborted transfer is sent, then the next delivery gets id 1.
+/// - Drop another blocked delivery while window is available; the abort is sent at once
+///   and link credit is 7.
 #[ntex::test]
 async fn sender_cancelled_delivery_aborted() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -772,6 +882,13 @@ async fn sender_cancelled_delivery_aborted() {
     assert_eq!(snd.credit(), 7);
 }
 
+/// STATEMENT: A new transfer does not take link credit granted to an already woken
+/// transfer.
+///
+/// HOW:
+/// - Start a transfer with no credit, then grant credit 1 and start a second transfer.
+/// - Poll the first; it completes with id 0 while the second stays pending at credit 0.
+/// - Grant more credit; the second completes with id 1 and both frames are written.
 #[ntex::test]
 async fn sender_woken_transfer_keeps_link_credit() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -807,6 +924,14 @@ async fn sender_woken_transfer_keeps_link_credit() {
     );
 }
 
+/// STATEMENT: The abort of a cancelled delivery does not take session window already
+/// claimed by a woken waiter, and is sent before new transfers.
+///
+/// HOW:
+/// - Block a partial delivery on one link and a transfer on another, open window 1,
+///   then drop the partial delivery; the other transfer completes with id 1.
+/// - Start two new transfers; window 1 sends only the abort, window 2 sends both.
+/// - Assert the written frame order and delivery ids 2 and 3.
 #[ntex::test]
 async fn sender_abort_does_not_take_claimed_window() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -856,6 +981,13 @@ async fn sender_abort_does_not_take_claimed_window() {
     );
 }
 
+/// STATEMENT: A new delivery on a link with a queued abort waits until the abort is
+/// sent.
+///
+/// HOW:
+/// - Use `queued_abort_sender` and start a new transfer on the aborted link.
+/// - Window 1 completes the other link's transfer; window 1 then sends only the abort.
+/// - The next window 1 sends the new delivery with id 2.
 #[ntex::test]
 async fn sender_queued_abort_keeps_order() {
     let (_io, conn, client, snd, mut t2) = queued_abort_sender().await;
@@ -896,6 +1028,13 @@ async fn sender_queued_abort_keeps_order() {
     );
 }
 
+/// STATEMENT: Detaching a link drops its queued abort so the session window goes to the
+/// next waiter.
+///
+/// HOW:
+/// - Use `queued_abort_sender`, then close the link locally or handle a peer `Detach`.
+/// - Open the window; the other link's transfer completes with id 1.
+/// - Assert no aborted transfer is written and no session transfers remain pending.
 #[ntex::test]
 async fn sender_detach_drops_queued_abort() {
     for local in [false, true] {
@@ -925,6 +1064,14 @@ async fn sender_detach_drops_queued_abort() {
     }
 }
 
+/// STATEMENT: `SenderLink::ready` waits for both link credit and unclaimed session
+/// window, and resolves `false` when the link is detached.
+///
+/// HOW:
+/// - With credit but no window, `ready` is pending until the window opens.
+/// - Window claimed by a woken transfer keeps `ready` pending until the transfer drops.
+/// - With window but no credit, `ready` is pending until credit is granted.
+/// - A peer `Detach` resolves a pending `ready` with `false`.
 #[ntex::test]
 async fn sender_ready_waits_for_session_window() {
     let (_io, conn, _client) = connection();
@@ -969,6 +1116,13 @@ async fn sender_ready_waits_for_session_window() {
     assert_eq!(poll(&mut ready), Poll::Ready(false));
 }
 
+/// STATEMENT: Cancelled transfers leave the link credit and session window wait queues,
+/// so repeated cancellation does not accumulate waiters.
+///
+/// HOW:
+/// - Drop one of two window waiters and one of two credit waiters; queue sizes drop.
+/// - Drop ten more pending transfers; queue sizes stay `(1, 1)`.
+/// - Grant credit and window; the remaining two transfers complete and are written.
 #[ntex::test]
 async fn sender_cancelled_waiters_leave_queue() {
     let (_io, conn, client) = connection();
@@ -1026,6 +1180,13 @@ async fn sender_cancelled_waiters_leave_queue() {
     );
 }
 
+/// STATEMENT: Dropping a waiter leaves the queued abort of a cancelled delivery in the
+/// session queue, and it is still sent.
+///
+/// HOW:
+/// - Use `queued_abort_sender` and drop the other link's waiting transfer.
+/// - One session transfer remains pending; opening the window clears it.
+/// - Assert the aborted transfer for delivery 0 is written.
 #[ntex::test]
 async fn sender_cancelled_waiter_keeps_queued_abort() {
     let (_io, conn, client, _snd, t2) = queued_abort_sender().await;

@@ -136,6 +136,13 @@ fn amqp_server(cfg: AmqpServiceConfig) -> TestServer {
     .start()
 }
 
+/// STATEMENT: A client connects to an AMQP server, opens a session and sender link,
+/// gets a transfer accepted, and closes cleanly.
+///
+/// HOW:
+/// - Connect to `amqp_server`; the sink is opened, has no error and a non-empty tag.
+/// - Open a session, attach a sender link and send a transfer; it is `Accepted`.
+/// - The session is found by local id 0; after `close` the sink is no longer opened.
 #[ntex::test]
 async fn test_client_connect_session_and_transfer() {
     let srv = amqp_server(AmqpServiceConfig::new());
@@ -172,6 +179,13 @@ async fn test_client_connect_session_and_transfer() {
     assert!(!sink.is_opened());
 }
 
+/// STATEMENT: A client sends keepalive frames before a short remote idle timeout
+/// expires, with both the default and a custom control service.
+///
+/// HOW:
+/// - A raw server advertises a 1s `idle_time_out` in its `Open`.
+/// - Start the client with `start_default` or a custom control service.
+/// - The server receives an `Empty` frame within 900ms and logs `ping`.
 #[ntex::test]
 async fn test_client_short_remote_idle_timeout() {
     for custom_control in [false, true] {
@@ -209,6 +223,13 @@ async fn test_client_short_remote_idle_timeout() {
     }
 }
 
+/// STATEMENT: The server sends keepalive frames before a short client idle timeout
+/// expires.
+///
+/// HOW:
+/// - Negotiate with `amqp_server` over a raw connection, sending an `Open` with a 1s
+///   `idle_time_out`, and receive the server `Open`.
+/// - Assert an `Empty` frame arrives within 900ms.
 #[ntex::test]
 async fn test_server_short_remote_idle_timeout() {
     let srv = amqp_server(AmqpServiceConfig::new());
@@ -240,6 +261,12 @@ async fn test_server_short_remote_idle_timeout() {
     assert!(matches!(frame.performative(), protocol::Frame::Empty));
 }
 
+/// STATEMENT: `close_with_error` closes an open client connection.
+///
+/// HOW:
+/// - Connect to `amqp_server` and open a session.
+/// - Call `close_with_error` with a force-detach error; it succeeds.
+/// - Assert the sink is no longer opened.
 #[ntex::test]
 async fn test_client_close_with_error() {
     let srv = amqp_server(AmqpServiceConfig::new());
@@ -257,7 +284,12 @@ async fn test_client_close_with_error() {
     assert!(!sink.is_opened());
 }
 
-/// Client's open frame is generated out of `AmqpServiceConfig`
+/// STATEMENT: The client's `Open` frame is generated from `AmqpServiceConfig`.
+///
+/// HOW:
+/// - Configure container id, hostname, max frame size, channel max and idle timeout.
+/// - A raw server logs the received `Open` fields; the client connects and is opened.
+/// - Assert each field matches, with the 30s idle timeout sent as 30000ms.
 #[ntex::test]
 async fn test_client_open_frame_from_config() {
     let log = log();
@@ -299,7 +331,14 @@ async fn test_client_open_frame_from_config() {
     assert_eq!(items[4], "Some(30000)");
 }
 
-/// `Connect::hostname()` overrides configured hostname for the open frame
+/// STATEMENT: `Connect::hostname()` overrides the configured hostname in the `Open`
+/// frame.
+///
+/// HOW:
+/// - Configure `cfg-host` and connect with `Connect::hostname("connect-host")`, whose
+///   `Debug` output contains the override.
+/// - A raw server logs the `Open` hostname `connect-host`.
+/// - The unconfigured container id is generated and non-empty.
 #[ntex::test]
 async fn test_client_connect_hostname_override() {
     let log = log();
@@ -333,6 +372,14 @@ async fn test_client_connect_hostname_override() {
     assert!(!items[1].is_empty());
 }
 
+/// STATEMENT: Connecting to a closed port fails with `ConnectError::Connect`, which
+/// delegates its diagnostic signature to the io layer.
+///
+/// HOW:
+/// - Bind and drop a listener to get a closed port, then connect to it.
+/// - Assert `ConnectError::Connect`, the "Amqp connect" message and a non-empty
+///   signature that survives `clone`.
+/// - Assert `ConnectError::Io` also has a non-empty signature.
 #[ntex::test]
 async fn test_client_connect_error() {
     // take an address of a closed port
@@ -359,6 +406,13 @@ async fn test_client_connect_error() {
     );
 }
 
+/// STATEMENT: The client fails with `HandshakeTimeout` when the server does not reply
+/// within the configured handshake timeout.
+///
+/// HOW:
+/// - A raw server reads the protocol header and never replies.
+/// - Connect with a 1s handshake timeout.
+/// - Assert `HandshakeTimeout`, its message and `amqp-client-HandshakeTimeout`.
 #[ntex::test]
 async fn test_client_handshake_timeout() {
     // server does not reply to the protocol header
@@ -375,6 +429,12 @@ async fn test_client_handshake_timeout() {
     assert_eq!(err.signature(), "amqp-client-HandshakeTimeout");
 }
 
+/// STATEMENT: The client fails with `Disconnected` when the server closes during
+/// protocol negotiation.
+///
+/// HOW:
+/// - A raw server reads the protocol header and closes the connection.
+/// - Assert `Disconnected`, "Peer disconnected" and `amqp-client-Disconnected`.
 #[ntex::test]
 async fn test_client_disconnect_during_protocol_negotiation() {
     let srv = raw_server(move |io: Io| async move {
@@ -388,6 +448,13 @@ async fn test_client_disconnect_during_protocol_negotiation() {
     assert_eq!(err.signature(), "amqp-client-Disconnected");
 }
 
+/// STATEMENT: The client fails with `ProtocolNegotiation` when the server replies with
+/// an unexpected protocol id.
+///
+/// HOW:
+/// - A raw server answers the plain AMQP header with `AmqpTls`.
+/// - Assert `ProtocolIdError::Unexpected` with `exp: Amqp` and `got: AmqpTls`.
+/// - Assert the message and `amqp-client-ProtocolNegotiation` signature.
 #[ntex::test]
 async fn test_client_protocol_negotiation_mismatch() {
     let srv = raw_server(move |io: Io| async move {
@@ -413,6 +480,12 @@ async fn test_client_protocol_negotiation_mismatch() {
     assert_eq!(err.signature(), "amqp-client-ProtocolNegotiation");
 }
 
+/// STATEMENT: The client fails with `Disconnected` when the server closes before
+/// sending its `Open` frame.
+///
+/// HOW:
+/// - A raw server completes protocol negotiation, reads the client `Open`, and closes.
+/// - Assert the connect error is `Disconnected`.
 #[ntex::test]
 async fn test_client_disconnect_before_open() {
     let srv = raw_server(move |io: Io| async move {
@@ -426,6 +499,13 @@ async fn test_client_disconnect_before_open() {
     assert!(matches!(*err, ConnectError::Disconnected), "{err:?}");
 }
 
+/// STATEMENT: The client fails with `ExpectOpenFrame` when the server answers its
+/// `Open` with another performative.
+///
+/// HOW:
+/// - A raw server completes protocol negotiation and replies with a `Begin` frame.
+/// - Assert `ExpectOpenFrame`, an "Expect open frame, got:" message prefix and the
+///   `amqp-client-ExpectOpenFrame` signature.
 #[ntex::test]
 async fn test_client_expect_open_frame() {
     let srv = raw_server(move |io: Io| async move {
@@ -463,6 +543,12 @@ async fn test_client_expect_open_frame() {
     assert_eq!(err.signature(), "amqp-client-ExpectOpenFrame");
 }
 
+/// STATEMENT: The client rejects a remote `Open` with a too small max frame size.
+///
+/// HOW:
+/// - A raw server replies with an `Open` advertising `max_frame_size` 100.
+/// - Assert `InvalidMaxFrameSize(100)`, its message and
+///   `amqp-client-InvalidMaxFrameSize` signature.
 #[ntex::test]
 async fn test_client_invalid_max_frame_size() {
     let srv = raw_server(move |io: Io| async move {
@@ -521,6 +607,14 @@ async fn negotiate_sasl(io: &Io, code: protocol::SaslCode, log: &Log) {
     .unwrap();
 }
 
+/// STATEMENT: A client with SASL auth negotiates PLAIN with its credentials and
+/// hostname, then opens the AMQP connection.
+///
+/// HOW:
+/// - A raw server runs SASL with outcome `Ok`, then plain AMQP negotiation.
+/// - Connect with `sasl_auth("authz", "user", "pass")` and a configured hostname.
+/// - Assert the server logged `AmqpSasl`, `PLAIN`, the hostname, the
+///   `authz\0user\0pass` response and the configured container id.
 #[ntex::test]
 async fn test_client_sasl_connect() {
     let log = log();
@@ -561,6 +655,11 @@ async fn test_client_sasl_connect() {
     assert_eq!(items[4], "sasl-client");
 }
 
+/// STATEMENT: A SASL outcome other than `Ok` fails the connect with `ConnectError::Sasl`.
+///
+/// HOW:
+/// - A raw server runs SASL negotiation and returns outcome code `Auth`.
+/// - Assert `Sasl(Auth)`, "Sasl error code Auth" and `amqp-client-Sasl`.
 #[ntex::test]
 async fn test_client_sasl_auth_failure() {
     let log = log();
@@ -594,6 +693,12 @@ async fn sasl_connect(srv: &TestServer) -> Result<client::Client, ntex_error::Er
         .await
 }
 
+/// STATEMENT: A SASL client fails with `ProtocolNegotiation` when the server replies
+/// with the plain AMQP protocol id.
+///
+/// HOW:
+/// - A raw server answers the SASL protocol header with `Amqp`.
+/// - Assert `ProtocolIdError::Unexpected` with `exp: AmqpSasl` and `got: Amqp`.
 #[ntex::test]
 async fn test_client_sasl_protocol_mismatch() {
     let srv = raw_server(move |io: Io| async move {
@@ -615,6 +720,12 @@ async fn test_client_sasl_protocol_mismatch() {
     );
 }
 
+/// STATEMENT: A SASL client fails with `Disconnected` when the server closes during
+/// protocol negotiation.
+///
+/// HOW:
+/// - A raw server reads the SASL protocol header and closes the connection.
+/// - Assert the connect error is `Disconnected`.
 #[ntex::test]
 async fn test_client_sasl_disconnect_after_protocol_id() {
     let srv = raw_server(move |io: Io| async move {
@@ -626,6 +737,12 @@ async fn test_client_sasl_disconnect_after_protocol_id() {
     assert!(matches!(*err, ConnectError::Disconnected), "{err:?}");
 }
 
+/// STATEMENT: A SASL client fails with `Disconnected` when the server closes instead of
+/// sending SASL mechanisms.
+///
+/// HOW:
+/// - A raw server answers with `AmqpSasl` and closes the connection.
+/// - Assert the connect error is `Disconnected`.
 #[ntex::test]
 async fn test_client_sasl_disconnect_instead_of_mechanisms() {
     let srv = raw_server(move |io: Io| async move {
@@ -640,7 +757,13 @@ async fn test_client_sasl_disconnect_instead_of_mechanisms() {
     assert!(matches!(*err, ConnectError::Disconnected), "{err:?}");
 }
 
-/// client expects sasl outcome, anything else is treated as a disconnect
+/// STATEMENT: A SASL client expects a SASL outcome after init, and treats any other
+/// SASL frame as a disconnect.
+///
+/// HOW:
+/// - A raw server sends PLAIN mechanisms, reads the init and replies with a
+///   `SaslChallenge`.
+/// - Assert the connect error is `Disconnected`.
 #[ntex::test]
 async fn test_client_sasl_challenge_instead_of_outcome() {
     let srv = raw_server(move |io: Io| async move {
@@ -674,6 +797,12 @@ async fn test_client_sasl_challenge_instead_of_outcome() {
     assert!(matches!(*err, ConnectError::Disconnected), "{err:?}");
 }
 
+/// STATEMENT: A SASL client fails with `Disconnected` when the server closes after a
+/// successful SASL outcome.
+///
+/// HOW:
+/// - A raw server completes SASL with `Ok`, reads the AMQP protocol header and closes.
+/// - Assert the connect error is `Disconnected`.
 #[ntex::test]
 async fn test_client_sasl_disconnect_after_outcome() {
     let log = log();
@@ -691,7 +820,12 @@ async fn test_client_sasl_disconnect_after_outcome() {
     assert!(matches!(*err, ConnectError::Disconnected), "{err:?}");
 }
 
-/// `Connector::negotiate` / `negotiate_sasl` run over an already connected socket
+/// STATEMENT: `Connector::negotiate` runs plain AMQP negotiation over an already
+/// connected socket, using the given hostname.
+///
+/// HOW:
+/// - Connect a raw socket to a raw server and call `negotiate` with `negotiate-host`.
+/// - Assert the client is opened and the server logged the `Open` hostname.
 #[ntex::test]
 async fn test_client_negotiate_over_existing_io() {
     let log = log();
@@ -728,6 +862,13 @@ async fn test_client_negotiate_over_existing_io() {
     assert_eq!(items[0], "Some(\"negotiate-host\")");
 }
 
+/// STATEMENT: `Connector::negotiate_sasl` runs SASL and AMQP negotiation over an
+/// already connected socket.
+///
+/// HOW:
+/// - Connect a raw socket to a raw server running SASL with outcome `Ok`.
+/// - Call `negotiate_sasl` with `SaslAuth` credentials; the client is opened.
+/// - Assert the server logged the `z\0n\0p` initial response.
 #[ntex::test]
 async fn test_client_negotiate_sasl_over_existing_io() {
     let log = log();
@@ -768,7 +909,14 @@ async fn test_client_negotiate_sasl_over_existing_io() {
     assert_eq!(items[3], "z\0n\0p");
 }
 
-/// `Client::state()` and `Client::start()` with a control service
+/// STATEMENT: A client started with `Client::state()` and a control service reports a
+/// remote `Close` with an error to the control service and as a dispatcher error.
+///
+/// HOW:
+/// - A raw server opens the connection, then sends `Close` with an internal error.
+/// - Start the client with a control service that logs frame kinds.
+/// - Assert `start` fails with an `InternalError`, a `ProtocolError` frame was logged,
+///   and the sink is closed with an error.
 #[ntex::test]
 async fn test_client_control_service() {
     let log = log();
@@ -824,6 +972,15 @@ async fn test_client_control_service() {
     assert!(sink.get_error().is_some());
 }
 
+/// STATEMENT: Codec, protocol id and io errors convert into the matching
+/// `ConnectError` variants, and cloned variants keep their kind and message.
+///
+/// HOW:
+/// - Convert `Either` codec, protocol id and io errors and assert the variants,
+///   messages and `amqp-client-Codec` signature.
+/// - Clone `ExpectOpenFrame`, `Sasl`, `InvalidMaxFrameSize`, `HandshakeTimeout` and
+///   `Disconnected` and assert the variant or message is kept.
+/// - Assert `ConnectError::from(AmqpCodecError)` has the codec signature.
 #[ntex::test]
 async fn test_client_error_conversions() {
     let err: ConnectError =
@@ -882,7 +1039,13 @@ async fn test_client_error_conversions() {
     assert_eq!(err.signature(), "amqp-client-Codec");
 }
 
-/// control frames are delivered for remotely initiated session end
+/// STATEMENT: A remotely initiated session end is delivered to the client's control
+/// service as `RemoteSessionEnded`.
+///
+/// HOW:
+/// - A raw server answers the client `Begin`, then sends `End` for that channel.
+/// - Start the client with a control service that logs `RemoteSessionEnded`.
+/// - Open a session and poll until the log equals `["RemoteSessionEnded"]`.
 #[ntex::test]
 async fn test_client_control_session_ended() {
     let log = log();

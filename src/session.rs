@@ -2289,6 +2289,14 @@ mod tests {
         res
     }
 
+    /// STATEMENT: `for_each_in_range` visits exactly the delivery numbers within an
+    /// inclusive range, including ranges that wrap around `u32::MAX`.
+    ///
+    /// HOW:
+    /// - Populate a map with 0, 1, 2, 5, `u32::MAX - 1` and `u32::MAX`.
+    /// - Collect ranges smaller than the map, including empty and wrapping ranges.
+    /// - Collect ranges larger than the map, including the full `0..=u32::MAX` range,
+    ///   and assert the sorted results.
     #[test]
     fn range() {
         let mut map = HashMap::default();
@@ -2313,6 +2321,13 @@ mod tests {
         assert_eq!(collect(&mut map, 6, 100), Vec::<u32>::new());
     }
 
+    /// STATEMENT: `max_transfer_chunk` leaves room for the frame and transfer overhead,
+    /// never returns zero, and caps unlimited frames at the 32-bit size limit.
+    ///
+    /// HOW:
+    /// - Assert a 512-byte frame with 20 bytes of overhead yields `512 - 28`.
+    /// - Assert overhead larger than the frame still yields 1.
+    /// - Assert `u32::MAX` and unlimited (0) frame sizes both yield `u32::MAX - 28`.
     #[test]
     fn transfer_chunk() {
         assert_eq!(max_transfer_chunk(512, 20), 512 - 28);

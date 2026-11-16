@@ -1,5 +1,14 @@
 use super::*;
 
+/// STATEMENT: A remote `End` or `Close` with an error propagates it to pending
+/// attaches, closing links and established or unconfirmed receivers.
+///
+/// HOW:
+/// - Set up an established receiver, a closing receiver, pending sender and receiver
+///   attaches and an unconfirmed remote receiver.
+/// - Deliver `End` or `Close` with `InternalError`.
+/// - Assert pending attaches and close yield `SessionEnded` or `Closed` with the
+///   error, and receivers have no link error but `poll_recv` yields it then `None`.
 #[ntex::test]
 async fn session_end_error_propagated() {
     let err = Error(Box::new(codec::ErrorInner {
@@ -91,6 +100,15 @@ async fn session_end_error_propagated() {
     }
 }
 
+/// STATEMENT: Ending a session uses its local channel when local and remote channel
+/// ids differ, leaving other sessions untouched.
+///
+/// HOW:
+/// - Begin sessions on remote channels 1 and 0 so local 0 maps to remote 1.
+/// - End local session 0 and assert it is `Closing` while session 1 stays
+///   `Established` and still answers an echo flow.
+/// - Confirm with `End` on channel 1; assert the session is removed and frames are
+///   `End` on channel 0 and `Flow` on channel 1.
 #[ntex::test]
 async fn session_end_uses_local_channel() {
     let (_io, conn, client) = connection();
@@ -143,6 +161,15 @@ async fn session_end_uses_local_channel() {
     assert_eq!(frames, [("end", 0), ("flow", 1)]);
 }
 
+/// STATEMENT: The remote session window accounts for transfers sent after the peer's
+/// `next-incoming-id`, including a missing or ahead value.
+///
+/// HOW:
+/// - Use a window of 2 and assert two transfers drop it to 0.
+/// - Assert a stale flow keeps it 0 so a third transfer stays pending until a flow
+///   with window 3.
+/// - Assert a flow without `next-incoming-id` uses the initial outgoing id
+///   (window 2) and one ahead uses the window as is (3).
 #[ntex::test]
 async fn session_flow_window() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -188,6 +215,12 @@ async fn session_flow_window() {
     assert_eq!(session.remote_window_size(), 3);
 }
 
+/// STATEMENT: The local outgoing window is unlimited and peer windows are not echoed.
+///
+/// HOW:
+/// - Confirm a receiver with credit and deliver a session echo flow with incoming
+///   window 7.
+/// - Assert `Begin` and both `Flow` frames carry `outgoing_window` `u32::MAX`.
 #[ntex::test]
 async fn session_outgoing_window() {
     let (_io, conn, client) = connection();
@@ -225,6 +258,15 @@ async fn session_outgoing_window() {
     );
 }
 
+/// STATEMENT: A connection error completes pending attaches and a closing session,
+/// while a session already ended with an error keeps that error.
+///
+/// HOW:
+/// - With pending sender and receiver attaches and a pending `end`, set
+///   `Disconnected`; assert attaches fail with it and `end` completes.
+/// - End a second session with `HandleInUse` via a duplicate remote handle, then set
+///   `Disconnected`.
+/// - Assert a new attach fails with `SessionEnded` carrying `HandleInUse`.
 #[ntex::test]
 async fn closing_session_connection_error() {
     let (_io, conn, _client) = connection();
@@ -286,6 +328,14 @@ async fn closing_session_connection_error() {
     );
 }
 
+/// STATEMENT: Once a session is ending, new operations fail and links close without
+/// writing frames.
+///
+/// HOW:
+/// - Establish a receiver and a sender with credit, then start `end`.
+/// - Assert transfer and new sender and receiver attaches fail, and credit and link
+///   closes write nothing; only `End` is written.
+/// - Confirm with a remote `End` and assert `end` completes.
 #[ntex::test]
 async fn session_ending_sends_no_frames() {
     let (_io, conn, client) = connection();
@@ -342,6 +392,16 @@ async fn session_ending_sends_no_frames() {
     assert!(end.await.unwrap().is_ok());
 }
 
+/// STATEMENT: Session window opened by a flow is claimed by woken transfers in wait
+/// order and cannot be taken by newly started transfers.
+///
+/// HOW:
+/// - Queue three transfers on two links with no window, then open window 1;
+///   assert one waiter is woken and later waiters stay pending.
+/// - Start two more transfers and assert they stay pending while the woken one
+///   completes as delivery 0.
+/// - Open more window and assert the rest complete in order, the woken count returns
+///   to 0, and transfers 0..5 are written.
 #[ntex::test]
 async fn session_window_claimed_by_woken_transfers() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -405,6 +465,16 @@ async fn session_window_claimed_by_woken_transfers() {
     );
 }
 
+/// STATEMENT: A woken window waiter releases its claim when dropped, lacking link credit,
+/// or when the window disappears before it resumes.
+///
+/// HOW:
+/// - Drop a pending waiter, and a woken one before it resumes; assert the next
+///   waiter gets the window as delivery 0.
+/// - Drain the first link's credit and assert the woken claim passes to the other
+///   link (delivery 1).
+/// - Open and then close the window and assert the claim is released; reopening lets
+///   delivery 2 through and the written frames match.
 #[ntex::test]
 async fn woken_window_waiter_releases_claim() {
     let (_io, conn, client, snd) = small_frames_sender();
@@ -474,6 +544,14 @@ async fn woken_window_waiter_releases_claim() {
     );
 }
 
+/// STATEMENT: A remote session end drops queued transfers, including the abort of a
+/// cancelled partial delivery.
+///
+/// HOW:
+/// - Use `queued_abort_sender` and assert two pending transfers (next transfer and
+///   abort).
+/// - Deliver a remote `End` and assert none remain, the queued transfer fails, and
+///   no `Transfer` frames are written.
 #[ntex::test]
 async fn session_end_drops_queued_abort() {
     let (_io, conn, client, _snd, mut t2) = queued_abort_sender().await;

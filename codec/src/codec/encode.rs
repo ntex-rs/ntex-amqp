@@ -923,18 +923,34 @@ mod tests {
         buf
     }
 
+    /// STATEMENT: Booleans encode as the single-byte `true`/`false` format codes.
+    ///
+    /// HOW:
+    /// - Encode `false` and `true` and compare against `0x42` and `0x41`.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(false, &[0x42]; "false")]
     #[test_case(true, &[0x41]; "true")]
     fn encode_bool(v: bool, expected: &[u8]) {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `u8` values encode as the `ubyte` format code followed by one byte.
+    ///
+    /// HOW:
+    /// - Encode zero and `255` and compare against the expected `0x50` bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(0, &[0x50, 0x00]; "zero")]
     #[test_case(255, &[0x50, 0xff]; "max")]
     fn encode_u8(v: u8, expected: &[u8]) {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `u16` values encode as the `ushort` format code with two big-endian
+    /// bytes.
+    ///
+    /// HOW:
+    /// - Encode zero, `0x1234` and `u16::MAX` and compare against the `0x60` bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(0, &[0x60, 0x00, 0x00]; "zero")]
     #[test_case(0x1234, &[0x60, 0x12, 0x34]; "value")]
     #[test_case(u16::MAX, &[0x60, 0xff, 0xff]; "max")]
@@ -942,6 +958,14 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `u32` values pick the `uint0`, `smalluint` or full `uint` form by
+    /// magnitude.
+    ///
+    /// HOW:
+    /// - Encode zero and expect the single `0x43` byte.
+    /// - Encode `1` and `255` and expect `0x52` with one byte.
+    /// - Encode `256` and `u32::MAX` and expect `0x70` with four bytes, decoding each
+    ///   back.
     #[test_case(0, &[0x43]; "uint0 shortcut")]
     #[test_case(1, &[0x52, 0x01]; "smalluint low")]
     #[test_case(255, &[0x52, 0xff]; "smalluint boundary")]
@@ -951,6 +975,14 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `u64` values pick the `ulong0`, `smallulong` or full `ulong` form by
+    /// magnitude.
+    ///
+    /// HOW:
+    /// - Encode zero and expect the single `0x44` byte.
+    /// - Encode `1` and `255` and expect `0x53` with one byte.
+    /// - Encode `256` and `u64::MAX` and expect `0x80` with eight bytes, decoding each
+    ///   back.
     #[test_case(0, &[0x44]; "ulong0 shortcut")]
     #[test_case(1, &[0x53, 0x01]; "smallulong low")]
     #[test_case(255, &[0x53, 0xff]; "smallulong boundary")]
@@ -960,6 +992,12 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `i8` values encode as the `byte` format code with one two's-complement
+    /// byte.
+    ///
+    /// HOW:
+    /// - Encode zero, `-1` and `i8::MIN` and compare against the expected `0x51` bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(0, &[0x51, 0x00]; "zero")]
     #[test_case(-1, &[0x51, 0xff]; "minus one")]
     #[test_case(i8::MIN, &[0x51, 0x80]; "min")]
@@ -967,6 +1005,12 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `i16` values encode as the `short` format code with two big-endian
+    /// bytes.
+    ///
+    /// HOW:
+    /// - Encode zero, `-2` and `i16::MAX` and compare against the expected `0x61` bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(0, &[0x61, 0x00, 0x00]; "zero")]
     #[test_case(-2, &[0x61, 0xff, 0xfe]; "negative")]
     #[test_case(i16::MAX, &[0x61, 0x7f, 0xff]; "max")]
@@ -974,7 +1018,13 @@ mod tests {
         roundtrip(v, expected);
     }
 
-    // there is no "int0" shortcut, zero still uses the small form
+    /// STATEMENT: `i32` values use `smallint` within `-128..=127` and `int` otherwise,
+    /// with no `int0` shortcut for zero.
+    ///
+    /// HOW:
+    /// - Encode zero, `127` and `-128` and expect `0x54` with one byte.
+    /// - Encode `128`, `-129` and `i32::MIN` and expect `0x71` with four bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(0, &[0x54, 0x00]; "zero is small")]
     #[test_case(127, &[0x54, 0x7f]; "smallint upper boundary")]
     #[test_case(128, &[0x71, 0x00, 0x00, 0x00, 0x80]; "int above upper boundary")]
@@ -985,6 +1035,12 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `i64` values use `smalllong` within `-128..=127` and `long` otherwise.
+    ///
+    /// HOW:
+    /// - Encode zero, `127` and `-128` and expect `0x55` with one byte.
+    /// - Encode `128`, `-129` and `i64::MAX` and expect `0x81` with eight bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case(0, &[0x55, 0x00]; "zero is small")]
     #[test_case(127, &[0x55, 0x7f]; "smalllong upper boundary")]
     #[test_case(128, &[0x81, 0, 0, 0, 0, 0, 0, 0x00, 0x80]; "long above upper boundary")]
@@ -995,6 +1051,12 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: `f32` values encode as the `float` format code with four bytes.
+    ///
+    /// HOW:
+    /// - Encode zero, `-1.5`, `f32::MIN` and `f32::MAX`.
+    /// - Check the leading byte is `FORMATCODE_FLOAT`, the length is 5 and it decodes
+    ///   back to the same value.
     #[test_case(0.0; "zero")]
     #[test_case(-1.5; "negative")]
     #[test_case(f32::MIN; "min")]
@@ -1006,6 +1068,12 @@ mod tests {
         assert_eq!(f32::decode(&mut buf.clone()).unwrap(), v);
     }
 
+    /// STATEMENT: `f64` values encode as the `double` format code with eight bytes.
+    ///
+    /// HOW:
+    /// - Encode zero, `-1.5`, `f64::MIN` and `f64::MAX`.
+    /// - Check the leading byte is `FORMATCODE_DOUBLE`, the length is 9 and it decodes
+    ///   back to the same value.
     #[test_case(0.0; "zero")]
     #[test_case(-1.5; "negative")]
     #[test_case(f64::MIN; "min")]
@@ -1017,6 +1085,13 @@ mod tests {
         assert_eq!(f64::decode(&mut buf.clone()).unwrap(), v);
     }
 
+    /// STATEMENT: `char` values encode as the `char` format code with a four-byte UTF-32
+    /// code point.
+    ///
+    /// HOW:
+    /// - Encode `'a'`, NUL and `'\u{10ffff}'` and compare against the expected `0x73`
+    ///   bytes.
+    /// - Decode each back and check `encoded_size()` matches the output length.
     #[test_case('a', &[0x73, 0x00, 0x00, 0x00, 0x61]; "ascii")]
     #[test_case('\u{0}', &[0x73, 0x00, 0x00, 0x00, 0x00]; "nul")]
     #[test_case('\u{10ffff}', &[0x73, 0x00, 0x10, 0xff, 0xff]; "max codepoint")]
@@ -1024,6 +1099,12 @@ mod tests {
         roundtrip(v, expected);
     }
 
+    /// STATEMENT: Timestamps encode as the `timestamp` format code with signed
+    /// milliseconds since the epoch, including pre-epoch values.
+    ///
+    /// HOW:
+    /// - Round trip a known timestamp and compare against the exact `0x83` bytes.
+    /// - Round trip a `-500` ms timestamp and check the payload is `-500i64` big-endian.
     #[test]
     fn encode_timestamp() {
         let ts = Utc.timestamp_millis_opt(1_539_753_448_735).unwrap();
@@ -1035,6 +1116,11 @@ mod tests {
         assert_eq!(&buf[1..], (-500i64).to_be_bytes());
     }
 
+    /// STATEMENT: UUIDs encode as the `uuid` format code followed by 16 big-endian bytes.
+    ///
+    /// HOW:
+    /// - Build a UUID from a known `u128`.
+    /// - Round trip it and compare against `0x98` plus the `u128` big-endian bytes.
     #[test]
     fn encode_uuid() {
         let uuid = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
@@ -1043,7 +1129,14 @@ mod tests {
         roundtrip(uuid, &expected);
     }
 
-    /// Variable width types switch from the 8 bit to the 32 bit form above 255 bytes.
+    /// STATEMENT: Variable width types switch from the 8 bit to the 32 bit form above
+    /// 255 bytes.
+    ///
+    /// HOW:
+    /// - Round trip `Bytes`, `ByteString`, `Str` and `Symbol` of lengths around 255.
+    /// - Check the format code (`0xa0`/`0xb0`, `0xa1`/`0xb1`, `0xa3`/`0xb3`) and the
+    ///   1 or 4 byte length prefix.
+    /// - Check `str` encodes exactly like `ByteString`.
     #[test_case(0; "empty")]
     #[test_case(1; "single byte")]
     #[test_case(254; "below boundary")]
@@ -1078,6 +1171,13 @@ mod tests {
         assert_eq!(str_buf, encoded(&bstr));
     }
 
+    /// STATEMENT: `StaticSymbol` encodes as a symbol in the short or long form and
+    /// decodes as `Symbol`.
+    ///
+    /// HOW:
+    /// - Encode a short symbol and compare against `sym8` bytes, then decode it.
+    /// - Encode `lorem.txt` (over 255 bytes) and check the `0xb3` code, the length and
+    ///   the decoded text.
     #[test]
     fn encode_static_symbol() {
         // short form
@@ -1096,6 +1196,11 @@ mod tests {
         assert_eq!(Symbol::decode(&mut buf.clone()).unwrap().as_str(), LOREM);
     }
 
+    /// STATEMENT: `Some` encodes as the inner value and `None` as a single null byte.
+    ///
+    /// HOW:
+    /// - Round trip `Some(1u32)`, `None::<u32>` and `Some(Symbol)` with exact bytes.
+    /// - Check `None::<Bytes>` also encodes as `0x40`.
     #[test]
     fn encode_option() {
         roundtrip(Some(1u32), &[0x52, 0x01]);
@@ -1105,6 +1210,13 @@ mod tests {
         assert_eq!(encoded(&None::<Bytes>).as_ref(), &[0x40]);
     }
 
+    /// STATEMENT: `Descriptor` encodes with the `described` constructor byte, which
+    /// `Descriptor::decode` expects to be already consumed.
+    ///
+    /// HOW:
+    /// - Encode `smallulong`, `ulong` and symbol descriptors and compare exact bytes.
+    /// - Check the first byte is `FORMATCODE_DESCRIBED`.
+    /// - Decode the rest and confirm the original descriptor and no leftover input.
     #[test_case(Descriptor::Ulong(0x23), &[0x00, 0x53, 0x23]; "smallulong")]
     #[test_case(Descriptor::Ulong(0x1_0000), &[0x00, 0x80, 0, 0, 0, 0, 0, 0x01, 0x00, 0x00]; "ulong")]
     #[test_case(Descriptor::Symbol(Symbol::from("a:b")), &[0x00, 0xa3, 0x03, b'a', b':', b'b']; "symbol")]
@@ -1120,6 +1232,11 @@ mod tests {
         assert!(input.is_empty());
     }
 
+    /// STATEMENT: A zero `ulong` descriptor uses the `ulong0` shortcut.
+    ///
+    /// HOW:
+    /// - Encode `Descriptor::Ulong(0)` and expect `[0x00, 0x44]`.
+    /// - Decode after the constructor byte and confirm the value and no leftover input.
     #[test]
     fn encode_descriptor_ulong_zero() {
         let buf = encoded(&Descriptor::Ulong(0));
@@ -1132,6 +1249,12 @@ mod tests {
         assert!(input.is_empty());
     }
 
+    /// STATEMENT: `Constructor` encodes as a bare format code or as a descriptor plus
+    /// format code.
+    ///
+    /// HOW:
+    /// - Encode `Constructor::FormatCode(FORMATCODE_BOOLEAN)` and expect `[0x56]`.
+    /// - Encode a `Described` constructor and expect descriptor bytes then `0xc0`.
     #[test]
     fn encode_constructor() {
         let ctor = Constructor::FormatCode(codec::FORMATCODE_BOOLEAN);
@@ -1144,12 +1267,20 @@ mod tests {
         assert_eq!(encoded(&ctor).as_ref(), &[0x00, 0x53, 0x23, 0xc0]);
     }
 
+    /// STATEMENT: An empty `List` encodes with a `list8` header, never the `list0` code.
+    ///
+    /// HOW:
+    /// - Round trip `List(vec![])` and expect `[0xc0, 0x01, 0x00]`.
     #[test]
     fn encode_empty_list() {
         // `List::encode` never emits the `list0` format code, it always writes a list8 header
         roundtrip(List(vec![]), &[0xc0, 0x01, 0x00]);
     }
 
+    /// STATEMENT: A small `List` encodes as `list8` with size, count and its elements.
+    ///
+    /// HOW:
+    /// - Round trip a list of null, `true` and `Ubyte(7)` and compare exact bytes.
     #[test]
     fn encode_small_list() {
         roundtrip(
@@ -1162,6 +1293,11 @@ mod tests {
         );
     }
 
+    /// STATEMENT: A `List` whose payload exceeds 255 bytes switches to the `list32` form.
+    ///
+    /// HOW:
+    /// - Round trip 60 `Ulong(u64::MAX)` items (9 bytes each).
+    /// - Check the `FORMATCODE_LIST32` code, the 32 bit size and the 32 bit count.
     #[test]
     fn encode_large_list() {
         // 60 ulongs of 9 bytes each exceed the 8 bit size limit
@@ -1172,6 +1308,13 @@ mod tests {
         assert_eq!(&buf[5..9], 60u32.to_be_bytes());
     }
 
+    /// STATEMENT: Maps use the `map8` form when small and `map32` when large, and
+    /// `HashMapBase` sizes them identically to `HashMap`.
+    ///
+    /// HOW:
+    /// - Round trip a one-entry map and compare exact `0xc1` bytes.
+    /// - Round trip a 40-entry map and check `FORMATCODE_MAP32` and a count of 80.
+    /// - Check the same entries in a `HashMapBase` report the same `encoded_size()`.
     #[test]
     fn encode_map_boundary() {
         // single entry, 8 bit form
@@ -1198,12 +1341,21 @@ mod tests {
         assert_eq!(base.encoded_size(), buf.len());
     }
 
+    /// STATEMENT: An empty map encodes as a `map8` header with a zero count.
+    ///
+    /// HOW:
+    /// - Round trip an empty `HashMap<Symbol, Variant>` and expect `[0xc1, 0x01, 0x00]`.
     #[test]
     fn encode_empty_map() {
         let map: HashMap<Symbol, Variant> = HashMap::new();
         roundtrip(map, &[0xc1, 0x01, 0x00]);
     }
 
+    /// STATEMENT: `VecSymbolMap` encodes as an ordered AMQP map with symbol keys.
+    ///
+    /// HOW:
+    /// - Round trip a two-entry map and compare exact `map8` bytes with `0xa3` keys.
+    /// - Round trip a 40-entry map and check `FORMATCODE_MAP32` and a count of 80.
     #[test]
     fn encode_vec_symbol_map() {
         let map = VecSymbolMap(vec![
@@ -1227,6 +1379,11 @@ mod tests {
         assert_eq!(&buf[5..9], 80u32.to_be_bytes());
     }
 
+    /// STATEMENT: `VecStringMap` encodes as an ordered AMQP map with string keys.
+    ///
+    /// HOW:
+    /// - Round trip a two-entry map and compare exact `map8` bytes with `0xa1` keys.
+    /// - Round trip a 40-entry map and check `FORMATCODE_MAP32` and a count of 80.
     #[test]
     fn encode_vec_string_map() {
         let map = VecStringMap(vec![
@@ -1250,6 +1407,11 @@ mod tests {
         assert_eq!(&buf[5..9], 80u32.to_be_bytes());
     }
 
+    /// STATEMENT: An empty array still carries its element constructor.
+    ///
+    /// HOW:
+    /// - Round trip empty `Vec<bool>` and `Vec<u64>`.
+    /// - Expect `array8` headers ending in the `0x56` and `0x80` element codes.
     #[test]
     fn encode_empty_array() {
         // an empty array still carries the element constructor
@@ -1257,6 +1419,12 @@ mod tests {
         roundtrip(Vec::<u64>::new(), &[0xe0, 0x02, 0x00, 0x80]);
     }
 
+    /// STATEMENT: Small arrays encode as `array8` with one constructor and packed
+    /// element payloads.
+    ///
+    /// HOW:
+    /// - Round trip `vec![true, false, true]` and `vec![1u8, 2, 3]`.
+    /// - Compare against the exact `0xe0` bytes with `0x56` and `0x50` constructors.
     #[test]
     fn encode_small_array() {
         roundtrip(
@@ -1266,7 +1434,12 @@ mod tests {
         roundtrip(vec![1u8, 2, 3], &[0xe0, 0x05, 0x03, 0x50, 0x01, 0x02, 0x03]);
     }
 
-    /// Arrays switch to the 32 bit form when the payload or the element count exceeds 255.
+    /// STATEMENT: Arrays switch to the 32 bit form when the payload or the element count
+    /// exceeds 255.
+    ///
+    /// HOW:
+    /// - Round trip 40 `u64` values and check `FORMATCODE_ARRAY32`, size and count.
+    /// - Round trip 300 `u8` values and check `FORMATCODE_ARRAY32` and a count of 300.
     #[test]
     fn encode_large_array() {
         let data: Vec<u64> = (0..40).collect();
@@ -1282,7 +1455,16 @@ mod tests {
         assert_eq!(&buf[5..9], 300u32.to_be_bytes());
     }
 
-    /// Every `ArrayEncode` implementation must round trip through `Vec<T>`.
+    /// STATEMENT: Every `ArrayEncode` implementation round trips through `Vec<T>`.
+    ///
+    /// HOW:
+    /// - Round trip vectors of every integer, bool, char, UUID, timestamp and string
+    ///   type.
+    /// - Check float and double arrays use the `FORMATCODE_FLOAT`/`FORMATCODE_DOUBLE`
+    ///   element constructor.
+    /// - Array-encode `str` directly and compare its size, bytes and constructor with
+    ///   `ByteString`.
+    /// - Round trip a vector of maps and check the `FORMATCODE_MAP32` constructor.
     #[test]
     fn encode_array_element_types() {
         roundtrip_value(vec![1u8, 2]);
@@ -1326,6 +1508,12 @@ mod tests {
         assert_eq!(buf[3], codec::FORMATCODE_MAP32);
     }
 
+    /// STATEMENT: `Multiple` encodes a single element bare and zero or several elements
+    /// as an array.
+    ///
+    /// HOW:
+    /// - Round trip one symbol and expect plain `sym8` bytes.
+    /// - Round trip empty and two-symbol values and expect `array8` bytes with `0xb3`.
     #[test]
     fn encode_multiple() {
         // a single element is encoded bare, not as an array
@@ -1338,6 +1526,13 @@ mod tests {
         );
     }
 
+    /// STATEMENT: The `Array` type round trips in both `array8` and `array32` forms and
+    /// decodes back to its elements.
+    ///
+    /// HOW:
+    /// - Round trip an `Array` of three `u32` and check `FORMATCODE_ARRAY8`.
+    /// - Round trip an `Array` of 40 `u64` and check `FORMATCODE_ARRAY32`.
+    /// - Call `Array::decode` on each and compare with the source values.
     #[test]
     fn encode_array_type() {
         let array = Array::from(vec![1u32, 2, 3]);
@@ -1387,6 +1582,13 @@ mod tests {
         }
     }
 
+    /// STATEMENT: `ListDescribed` encodes described elements inside a list and switches
+    /// to `list32` when large.
+    ///
+    /// HOW:
+    /// - Round trip an empty value and expect `[0xc0, 0x01, 0x00]`.
+    /// - Round trip one `Pair` and compare the exact descriptor and list bytes.
+    /// - Round trip 26 pairs and check `FORMATCODE_LIST32`, size and count.
     #[test]
     fn encode_list_described() {
         roundtrip(ListDescribed(Vec::<Pair>::new()), &[0xc0, 0x01, 0x00]);
@@ -1407,6 +1609,11 @@ mod tests {
         assert_eq!(&buf[5..9], 26u32.to_be_bytes());
     }
 
+    /// STATEMENT: Every simple `Variant` kind round trips through encode and decode.
+    ///
+    /// HOW:
+    /// - Build one `Variant` of each scalar, decimal, string, list and array kind.
+    /// - Round trip each, checking `encoded_size()` and the decoded value.
     #[test]
     fn encode_variant_all() {
         let cases = vec![
@@ -1440,6 +1647,11 @@ mod tests {
         }
     }
 
+    /// STATEMENT: Decimal variants encode as their format code followed by raw bytes.
+    ///
+    /// HOW:
+    /// - Encode `Decimal32`, `Decimal64` and `Decimal128`.
+    /// - Compare against `0x74`, `0x84` and `0x94` followed by the payload bytes.
     #[test]
     fn encode_variant_decimals() {
         assert_eq!(
@@ -1455,6 +1667,11 @@ mod tests {
         assert_eq!(encoded(&Variant::Decimal128([7; 16])).as_ref(), expected);
     }
 
+    /// STATEMENT: `Variant::Map` encodes as an AMQP map and round trips.
+    ///
+    /// HOW:
+    /// - Wrap a one-entry map in `VariantMap` and round trip it.
+    /// - Compare against the exact `map8` bytes.
     #[test]
     fn encode_variant_map() {
         let mut map = HashMapBase::default();
@@ -1467,6 +1684,13 @@ mod tests {
         );
     }
 
+    /// STATEMENT: Described simple values stay `Described`, while described compound
+    /// values decode as `DescribedCompound` and re-encode identically.
+    ///
+    /// HOW:
+    /// - Round trip `Described` variants with `ulong` and symbol descriptors.
+    /// - Encode a descriptor followed by a `List` and decode it as a `Variant`.
+    /// - Check the `DescribedCompound` descriptor, inner list, and re-encoded bytes.
     #[test]
     fn encode_variant_described() {
         // a simple (non compound) described value stays a `Described` variant
@@ -1497,6 +1721,13 @@ mod tests {
         assert_eq!(encoded(&decoded), bytes);
     }
 
+    /// STATEMENT: `AmqpFrame` encodes the frame size, header and body, and decodes back
+    /// once the size prefix is stripped.
+    ///
+    /// HOW:
+    /// - Encode a `Begin` frame on channel 7.
+    /// - Check the size prefix, `doff` of 2, `FRAME_TYPE_AMQP` and channel bytes.
+    /// - Decode from byte 4 and confirm the same frame with no leftover input.
     #[test]
     fn encode_amqp_frame() {
         use crate::protocol::{Begin, Frame};
@@ -1521,6 +1752,13 @@ mod tests {
         assert_eq!(decoded, frame);
     }
 
+    /// STATEMENT: `SaslFrame` encodes the frame size, a SASL header and body, and decodes
+    /// back once the size prefix is stripped.
+    ///
+    /// HOW:
+    /// - Encode a `SaslOutcome` frame.
+    /// - Check the size prefix, `doff` of 2, `FRAME_TYPE_SASL` and a zero channel.
+    /// - Decode from byte 4 and confirm the same frame with no leftover input.
     #[test]
     fn encode_sasl_frame() {
         use crate::protocol::{SaslCode, SaslOutcome};

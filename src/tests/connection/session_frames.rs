@@ -1,5 +1,12 @@
 use super::*;
 
+/// STATEMENT: Session accessors expose the tag, channel ids, remote begin frame,
+/// connection and `Debug` output.
+///
+/// HOW:
+/// - Begin a session and check `tag`, local and remote channel ids, incoming window
+///   and offered capabilities of `frame()`, and that the connection is open.
+/// - Assert the `Debug` format.
 #[ntex::test]
 async fn session_accessors() {
     let (_io, conn, _client) = connection();
@@ -18,6 +25,14 @@ async fn session_accessors() {
     );
 }
 
+/// STATEMENT: Transfers for unknown handles, sender links or unconfirmed receivers are
+/// rejected with distinct errors.
+///
+/// HOW:
+/// - Assert a transfer without an attached link fails with `UnknownLink`.
+/// - Assert a transfer to a sender link fails with `Unexpected(Transfer)`.
+/// - Assert a transfer to an unconfirmed receiver fails with
+///   `UnexpectedOpeningState`.
 #[ntex::test]
 async fn transfer_for_invalid_links() {
     let (_io, conn, _client) = connection();
@@ -52,6 +67,12 @@ async fn transfer_for_invalid_links() {
     ));
 }
 
+/// STATEMENT: Transfers for a receiver link that is closing are silently dropped.
+///
+/// HOW:
+/// - Grant credit to a local receiver and start `close`.
+/// - Assert a transfer returns `Action::None`, then complete the close with a peer
+///   detach.
 #[ntex::test]
 async fn transfer_for_closing_receiver() {
     let (_io, conn, _client) = connection();
@@ -75,6 +96,11 @@ async fn transfer_for_closing_receiver() {
     fut.await.unwrap().unwrap();
 }
 
+/// STATEMENT: Frames a session does not handle are dropped without error.
+///
+/// HOW:
+/// - Deliver an `Open` frame on an established session channel and assert
+///   `Action::None`.
 #[ntex::test]
 async fn unexpected_session_frame_ignored() {
     let (_io, conn, _client) = connection();
@@ -87,6 +113,14 @@ async fn unexpected_session_frame_ignored() {
     ));
 }
 
+/// STATEMENT: `Message` and `BytePages` transfer bodies larger than the peer frame
+/// size are split into chunks that respect the session window.
+///
+/// HOW:
+/// - With a 512-byte frame size and session window 2, send 1200-byte bodies.
+/// - Assert two `more` transfer frames are written, then after the window is
+///   replenished the last frame has `more:false`.
+/// - Deliver an accepted disposition and assert the delivery's remote state.
 #[ntex::test]
 async fn large_message_and_pages_bodies_are_chunked() {
     // (body kind, body)
@@ -145,6 +179,14 @@ async fn large_message_and_pages_bodies_are_chunked() {
     }
 }
 
+/// STATEMENT: Repeated remote detaches for an unconfirmed link are deferred and answered
+/// with a single detach on confirmation.
+///
+/// HOW:
+/// - For sender and receiver links, deliver two peer detaches before confirming and
+///   assert both return `Action::None` and nothing is written.
+/// - Confirm the link and assert it is closed.
+/// - Assert one closing detach is echoed with local handle 0.
 #[ntex::test]
 async fn duplicate_detach_for_unconfirmed_links() {
     for sender in [true, false] {

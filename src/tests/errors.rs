@@ -32,6 +32,13 @@ fn fields() -> VecSymbolMap {
     VecSymbolMap(vec![(Symbol::from("k"), Variant::from("v"))])
 }
 
+/// STATEMENT: Every `AmqpProtocolError` variant has a stable display message that
+/// survives cloning, and protocol errors share one diagnostic signature.
+///
+/// HOW:
+/// - Format each variant and compare with its expected message, before and after
+///   `clone`.
+/// - Assert `signature()` is `ntex-amqp-protocol`.
 #[test]
 fn protocol_error_display() {
     let cases: Vec<(AmqpProtocolError, &str)> = vec![
@@ -95,6 +102,12 @@ fn protocol_error_display() {
     );
 }
 
+/// STATEMENT: Parse and codec errors convert into `AmqpProtocolError::Codec`.
+///
+/// HOW:
+/// - Convert `AmqpParseError::InvalidSize` and assert it is wrapped as a codec
+///   `ParseError` with the matching message.
+/// - Convert `AmqpCodecError::UnparsedBytesLeft` and check its message.
 #[test]
 fn protocol_error_from_parse_error() {
     // parse errors are wrapped into codec errors
@@ -109,6 +122,13 @@ fn protocol_error_from_parse_error() {
     assert_eq!(err.to_string(), "Codec error: UnparsedBytesLeft");
 }
 
+/// STATEMENT: `AmqpDispatcherError` variants display correctly and clone without
+/// losing their payload, including non-`Clone` io errors.
+///
+/// HOW:
+/// - Check display and clone of `Service` and of a `Protocol` error built via `From`.
+/// - Clone `Disconnected` with an io error and assert its kind and message survive.
+/// - Check display and clone of `Disconnected(None)`.
 #[test]
 fn dispatcher_error() {
     let err = AmqpDispatcherError::Service;
@@ -142,6 +162,15 @@ fn dispatcher_error() {
     ));
 }
 
+/// STATEMENT: `AmqpError` constructors map to the correct conditions and wire
+/// symbols, carry descriptions, and convert into rejecting outcomes.
+///
+/// HOW:
+/// - Convert each constructor into `Error` and check its condition, `error_code`
+///   symbol and empty description and info.
+/// - Assert `with_error` passes a custom condition through and `text`/`description`
+///   set the description.
+/// - Assert `Outcome::try_from` yields a `Rejected` state carrying the error.
 #[test]
 fn amqp_error_conditions() {
     let cases: Vec<(AmqpError, codec::AmqpError, Symbol)> = vec![
@@ -225,6 +254,10 @@ fn amqp_error_conditions() {
     );
 }
 
+/// STATEMENT: `AmqpError` displays its condition, description and info.
+///
+/// HOW:
+/// - Assert the exact display of `internal_error()` and of `not_found()` with text.
 #[test]
 fn amqp_error_display() {
     assert_eq!(
@@ -237,6 +270,14 @@ fn amqp_error_display() {
     );
 }
 
+/// STATEMENT: `LinkError` constructors map to the correct conditions and wire
+/// symbols, carry description and fields, and convert into rejecting outcomes.
+///
+/// HOW:
+/// - Check condition and symbol for `force_detach()` and `redirect()`.
+/// - Build `LinkError::new` with `Stolen`, text and fields and check all three.
+/// - Assert `description` accepts an owned string.
+/// - Assert `Outcome::try_from` yields a `Rejected` state with `DETACH_FORCED`.
 #[test]
 fn link_error_conditions() {
     let err: Error = LinkError::force_detach().into();
@@ -281,6 +322,11 @@ fn link_error_conditions() {
     assert_eq!(symbol(err.condition()), error_code::DETACH_FORCED);
 }
 
+/// STATEMENT: `LinkError` displays its standard or custom condition and description.
+///
+/// HOW:
+/// - Assert the exact display of `force_detach()`.
+/// - Assert the exact display of a custom-condition error with text.
 #[test]
 fn link_error_display() {
     assert_eq!(
@@ -295,6 +341,11 @@ fn link_error_display() {
     );
 }
 
+/// STATEMENT: Each `Outcome` maps to the matching `DeliveryState`.
+///
+/// HOW:
+/// - Assert `Accept` maps to `Accepted` and `Reject` to `Rejected` without error.
+/// - Assert an outcome built `From` an `Error` maps to `Rejected` carrying it.
 #[test]
 fn outcome_delivery_state() {
     assert_eq!(
@@ -315,6 +366,11 @@ fn outcome_delivery_state() {
     );
 }
 
+/// STATEMENT: `Wrapper` gives mutable access to its value until it is taken.
+///
+/// HOW:
+/// - Read the value with `with`, update it through `with`, then `take` it.
+/// - Assert `take` returns the updated value.
 #[test]
 fn wrapper_takes_value_once() {
     let w = Wrapper::new(1_u8);
@@ -323,6 +379,11 @@ fn wrapper_takes_value_once() {
     assert_eq!(w.take(), 2);
 }
 
+/// STATEMENT: Taking a `Wrapper` value a second time panics.
+///
+/// HOW:
+/// - Call `take` twice on the same `Wrapper`.
+/// - Expect a panic from unwrapping `None`.
 #[test]
 #[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
 fn wrapper_take_twice_panics() {
@@ -331,6 +392,12 @@ fn wrapper_take_twice_panics() {
     w.take();
 }
 
+/// STATEMENT: `State` derefs to its value, and clones share the same allocation.
+///
+/// HOW:
+/// - Check `get_ref` and `len` through `Deref` on a `State` holding `[1, 2]`.
+/// - Assert a clone's `get_ref` points to the same value.
+/// - Assert the `Debug` output starts with `State(`.
 #[test]
 fn state_deref() {
     let state = State::new(vec![1_u8, 2]);
@@ -343,6 +410,15 @@ fn state_deref() {
     assert!(format!("{state:?}").starts_with("State("));
 }
 
+/// STATEMENT: `Link` accessors expose its state, frame, path, session and receiver,
+/// and credit and path changes take effect.
+///
+/// HOW:
+/// - Build a `Link` from an attached receiver and check `state`, `handle`, `frame`,
+///   `path`, `session`, `receiver` and `Debug` output.
+/// - Change the path with `path_mut` and check `receiver_mut` returns the same link.
+/// - Apply `link_credit(5)` and assert the receiver credit is 5.
+/// - Assert a clone keeps the updated path and handle.
 #[ntex::test]
 async fn link_accessors() {
     let (_io, conn, _client) = connection();
@@ -377,6 +453,14 @@ async fn link_accessors() {
     assert_eq!(cloned.handle(), link.handle());
 }
 
+/// STATEMENT: The default publish factory refuses links, while the default publish
+/// and control services accept their requests.
+///
+/// HOW:
+/// - Create `DefaultPublishService` through its factory and assert a
+///   `DETACH_FORCED` error described as `not configured`.
+/// - Call the publish service directly with a link and assert success.
+/// - Create `DefaultControlService` and assert a `Closed` control frame is accepted.
 #[ntex::test]
 async fn default_services() {
     let (_io, conn, _client) = connection();
@@ -420,6 +504,15 @@ async fn default_services() {
     svc.call(frame).await.unwrap();
 }
 
+/// STATEMENT: `AmqpServiceConfig` setters are stored, propagated to the `Open`
+/// performative, and fall back to sensible defaults.
+///
+/// HOW:
+/// - Set every option and assert the stored fields and getters.
+/// - Assert `to_open` carries container id, hostname, frame size, channel max, idle
+///   timeout, capabilities and properties.
+/// - Assert defaults: no capabilities, 16 KiB frames, a 32-char generated container
+///   id, no hostname and a 120 s idle timeout.
 #[test]
 fn service_config_getters() {
     let props: Fields = [(Symbol::from("p"), Variant::from(1_u32))]
@@ -476,6 +569,12 @@ fn service_config_getters() {
     assert_eq!(open.idle_time_out(), Some(120_000));
 }
 
+/// STATEMENT: Zero frame size and idle timeout mean unlimited locally and are
+/// advertised as the maximum frame size and no idle timeout.
+///
+/// HOW:
+/// - Set `max_frame_size` and `idle_time_out` to 0.
+/// - Assert `to_open` advertises `u32::MAX` frames and no idle timeout.
 #[test]
 fn service_config_unlimited() {
     let mut cfg = AmqpServiceConfig::new();
@@ -488,12 +587,24 @@ fn service_config_unlimited() {
     assert_eq!(open.idle_time_out(), None);
 }
 
+/// STATEMENT: `set_max_frame_size` rejects sizes below the 512-byte AMQP minimum.
+///
+/// HOW:
+/// - Call `set_max_frame_size(511)` and expect a panic naming the limit.
 #[test]
 #[should_panic(expected = "max frame size must be at least 512, got 511")]
 fn service_config_min_frame_size() {
     let _ = AmqpServiceConfig::new().set_max_frame_size(511);
 }
 
+/// STATEMENT: `RemoteServiceConfig` captures the peer's `Open` settings and budgets
+/// keep-alive at 75% of the peer idle timeout.
+///
+/// HOW:
+/// - Build the config from a fully populated `Open` and check every captured field.
+/// - Assert an 8 s peer idle timeout yields a 6 s keep-alive budget.
+/// - Build from a default `Open` and assert no idle timeout, hostname or
+///   capabilities and a zero keep-alive budget.
 #[test]
 fn remote_config() {
     let open = OpenInner {
@@ -530,6 +641,12 @@ fn remote_config() {
     assert_eq!(cfg.timeout_remote_millis(), Millis::ZERO);
 }
 
+/// STATEMENT: The remote keep-alive budget is 75% of the peer idle timeout, rounded
+/// down but never zero for a non-zero timeout, and does not overflow.
+///
+/// HOW:
+/// - Build configs for peer timeouts from 0 to `u32::MAX`.
+/// - Assert `timeout_remote_millis` for each, including 1 and 2 ms mapping to 1 ms.
 #[test]
 fn remote_idle_timeout_precision() {
     for (peer, expected) in [
@@ -554,6 +671,11 @@ fn remote_idle_timeout_precision() {
     }
 }
 
+/// STATEMENT: `detach` produces an equal copy of codec values.
+///
+/// HOW:
+/// - Detach a `Symbols` list and assert it equals the original.
+/// - Detach an `Attach` frame and assert name, handle, role and source address match.
 #[test]
 fn detach_copies_value() {
     let caps: Symbols = Multiple(vec![Symbol::from("a-fairly-long-capability-name")]);

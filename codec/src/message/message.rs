@@ -473,6 +473,11 @@ mod tests {
 
     use super::Message;
 
+    /// STATEMENT: Message properties survive an encode/decode round trip.
+    ///
+    /// HOW:
+    /// - Set `message_id` to 1 via `set_properties` and encode the message.
+    /// - Decode it and check `properties().message_id` is still 1.
     #[test]
     fn test_properties() -> Result<(), AmqpCodecError> {
         let mut msg = Message::default();
@@ -487,6 +492,11 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: Application properties survive an encode/decode round trip.
+    ///
+    /// HOW:
+    /// - Set app property `test` to 1 and encode the message.
+    /// - Decode it and check the first app property has the same key and value.
     #[test]
     fn test_app_properties() -> Result<(), AmqpCodecError> {
         let mut msg = Message::default();
@@ -502,6 +512,11 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: The message `Header` survives an encode/decode round trip.
+    ///
+    /// HOW:
+    /// - Set a `Header` with priority and delivery count 1 and encode the message.
+    /// - Decode it and check `header()` equals the original.
     #[test]
     fn test_header() -> Result<(), AmqpCodecError> {
         let hdr = Header {
@@ -522,6 +537,11 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: A data body survives an encode/decode round trip.
+    ///
+    /// HOW:
+    /// - Set the body data to `test data` and encode the message.
+    /// - Decode it and check `body().data()` returns the same bytes.
     #[test]
     fn test_data() -> Result<(), AmqpCodecError> {
         let data = Bytes::from_static(b"test data");
@@ -536,6 +556,11 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: A default message encodes to no bytes and decodes to an empty body.
+    ///
+    /// HOW:
+    /// - Encode `Message::default()` and check the output is empty.
+    /// - Decode the empty output and check `body().data()` is `None`.
     #[test]
     fn test_data_empty() -> Result<(), AmqpCodecError> {
         let msg = Message::default();
@@ -548,6 +573,13 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: Nested messages in the body encode as data sections that decode back to
+    /// the original messages.
+    ///
+    /// HOW:
+    /// - Push two messages with different `message_id`s into `body.messages`.
+    /// - Encode and decode the outer message.
+    /// - Decode each data section and compare its properties with the originals.
     #[test]
     fn test_messages() -> Result<(), AmqpCodecError> {
         let mut msg1 = Message::default();
@@ -572,6 +604,13 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: Every mutating accessor invalidates the cached encoded size.
+    ///
+    /// HOW:
+    /// - Cache the size, then mutate via body, value, app properties, annotations,
+    ///   properties and footer accessors.
+    /// - After each mutation check `encoded_size()` matches the actual encoded length.
+    /// - Decode the result and check it equals the original, with a fresh size cache.
     #[test]
     fn test_size_reset() {
         fn check(msg: &mut Message, f: impl FnOnce(&mut Message)) {
@@ -623,6 +662,11 @@ mod tests {
         assert_eq!(msg2.footer(), msg.footer());
     }
 
+    /// STATEMENT: A UUID `message_id` survives an encode/decode round trip.
+    ///
+    /// HOW:
+    /// - Set a random UUID `message_id` and encode the message.
+    /// - Decode it and check the properties are equal.
     #[test]
     fn test_messages_codec() -> Result<(), AmqpCodecError> {
         let mut msg = Message::default();
@@ -636,6 +680,13 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: The message format is settable, and the cached encoded size is reused
+    /// until the message changes.
+    ///
+    /// HOW:
+    /// - Check `message_format()` is `None`, then `Some(42)` after `set_format(42)`.
+    /// - Check `encoded_size()` is stable, then grows after setting a longer value.
+    /// - Encode and check the output length equals the new size.
     #[test]
     fn message_format_and_cached_size() {
         let mut msg = Message::default();
@@ -656,6 +707,13 @@ mod tests {
         assert_eq!(buf.len(), new_size);
     }
 
+    /// STATEMENT: Application property lookups find set keys, miss absent keys, and
+    /// reflect mutations through `app_properties_mut`.
+    ///
+    /// HOW:
+    /// - Check lookups and accessors return `None` on a fresh message.
+    /// - Set two properties and check both values, a miss, and a length of 2.
+    /// - Clear through `app_properties_mut` and check the lookup misses.
     #[test]
     fn app_properties_lookup() {
         let mut msg = Message::default();
@@ -675,6 +733,13 @@ mod tests {
         assert_eq!(msg.app_property("a"), None);
     }
 
+    /// STATEMENT: Message annotation lookups find set keys, miss absent keys, and reflect
+    /// mutations through `message_annotations_mut`.
+    ///
+    /// HOW:
+    /// - Check lookups and accessors return `None` on a fresh message.
+    /// - Add two annotations and check a hit, a miss, and a length of 2.
+    /// - Clear through `message_annotations_mut` and check the lookup misses.
     #[test]
     fn message_annotations_lookup() {
         let mut msg = Message::default();
@@ -692,6 +757,13 @@ mod tests {
         assert_eq!(msg.message_annotation("a"), None);
     }
 
+    /// STATEMENT: Delivery annotation lookups find set keys, miss absent keys, and
+    /// reflect mutations through `delivery_annotations_mut`.
+    ///
+    /// HOW:
+    /// - Check lookups and accessors return `None` on a fresh message.
+    /// - Add two annotations and check a hit, a miss, and a length of 2.
+    /// - Clear through `delivery_annotations_mut` and check the lookup misses.
     #[test]
     fn delivery_annotations_lookup() {
         let mut msg = Message::default();
@@ -709,6 +781,13 @@ mod tests {
         assert_eq!(msg.delivery_annotation("a"), None);
     }
 
+    /// STATEMENT: `properties_mut` creates properties on first use and reuses them
+    /// afterwards.
+    ///
+    /// HOW:
+    /// - Check `properties()` is `None`, then set `subject` via `properties_mut`.
+    /// - Set `group_id` via a second call and check both fields are kept.
+    /// - Overwrite `subject` via `set_properties` and check the new value.
     #[test]
     fn properties_mut_creates_and_reuses() {
         let mut msg = Message::default();
@@ -734,6 +813,12 @@ mod tests {
         );
     }
 
+    /// STATEMENT: The footer can be set, read and mutated through its accessors.
+    ///
+    /// HOW:
+    /// - Check `footer()` and `footer_mut()` are `None` on a fresh message.
+    /// - Set a one-entry footer and check its length.
+    /// - Clear it through `footer_mut` and check it is empty.
     #[test]
     fn footer_roundtrip() {
         use crate::types::Symbol;
@@ -750,6 +835,13 @@ mod tests {
         assert!(msg.footer().unwrap().is_empty());
     }
 
+    /// STATEMENT: `update` applies its closure, and `if_some` applies its closure only
+    /// for `Some`.
+    ///
+    /// HOW:
+    /// - Set a value through `update` and check it.
+    /// - Call `if_some` with `Some(7)` and check the app property was set.
+    /// - Call `if_some` with `None` and check the message is unchanged.
     #[test]
     fn update_and_if_some() {
         let msg = Message::default().update(|mut m| {
@@ -774,6 +866,13 @@ mod tests {
         assert_eq!(msg2, msg);
     }
 
+    /// STATEMENT: `reply_message` copies the `message_id` into the reply's
+    /// `correlation_id`.
+    ///
+    /// HOW:
+    /// - Check a message without properties produces a reply without properties.
+    /// - Set `message_id` 7 and check the reply has `correlation_id` 7 and no
+    ///   `message_id`.
     #[test]
     fn reply_message_copies_correlation_id() {
         // no properties -> nothing to copy
@@ -787,6 +886,12 @@ mod tests {
         assert_eq!(reply.properties().unwrap().message_id, None);
     }
 
+    /// STATEMENT: `body_mut` and `set_body` modify the message body.
+    ///
+    /// HOW:
+    /// - Check a fresh message has no data and no value.
+    /// - Set data via `body_mut` and check `body().data()` returns it.
+    /// - Push a sequence via `set_body` and check the sequence length is 1.
     #[test]
     fn body_accessors() {
         let mut msg = Message::default();
@@ -800,6 +905,14 @@ mod tests {
         assert_eq!(msg.body().sequence.len(), 1);
     }
 
+    /// STATEMENT: A message with every section populated round trips through encode and
+    /// decode.
+    ///
+    /// HOW:
+    /// - Set header, properties, app property, annotations, footer and a body with
+    ///   data, sequence and value.
+    /// - Encode and check `encoded_size()` matches the output length.
+    /// - Decode and compare every section and the decoded `encoded_size()`.
     #[test]
     fn full_message_roundtrip() {
         use crate::types::Symbol;
@@ -845,6 +958,10 @@ mod tests {
         assert_eq!(msg2.encoded_size(), buf.len());
     }
 
+    /// STATEMENT: Decoding empty input yields a default message.
+    ///
+    /// HOW:
+    /// - Decode `Bytes::new()` and check the result equals `Message::default()`.
     #[test]
     fn decode_empty_input() {
         let msg = Message::decode(&mut Bytes::new()).unwrap();

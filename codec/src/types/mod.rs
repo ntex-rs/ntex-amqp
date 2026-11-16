@@ -239,6 +239,12 @@ mod tests {
         hasher.finish()
     }
 
+    /// STATEMENT: `Constructor` accessors expose the format code and the optional
+    /// descriptor.
+    ///
+    /// HOW:
+    /// - Assert a plain `FormatCode(0xc0)` has format code `0xc0` and no descriptor.
+    /// - Assert a `Described` constructor returns its format code and descriptor.
     #[test]
     fn constructor_accessors() {
         let plain = Constructor::FormatCode(0xc0);
@@ -254,6 +260,14 @@ mod tests {
         assert_eq!(described.descriptor(), Some(&descriptor));
     }
 
+    /// STATEMENT: `Constructor::ensure_described` accepts only a described constructor
+    /// with the expected descriptor.
+    ///
+    /// HOW:
+    /// - Assert a matching descriptor returns `Ok`.
+    /// - Assert a different descriptor returns `InvalidDescriptor` carrying the actual
+    ///   descriptor.
+    /// - Assert a plain format code returns `InvalidFormatCode(0xc0)`.
     #[test]
     fn constructor_ensure_described() {
         let descriptor = Descriptor::Ulong(0x23);
@@ -276,6 +290,13 @@ mod tests {
         }
     }
 
+    /// STATEMENT: `Multiple` behaves as a collection and derefs to its underlying
+    /// vector.
+    ///
+    /// HOW:
+    /// - Assert a default `Multiple` is empty with no items.
+    /// - Build one from `[1, 2, 3]` and check `len`, `is_empty` and the iterated sum.
+    /// - Use `first` and `push` through `Deref`/`DerefMut` and check the contents.
     #[test]
     fn multiple_collection() {
         let empty: Multiple<u32> = Multiple::default();
@@ -295,6 +316,12 @@ mod tests {
         assert_eq!(*multiple, vec![1, 2, 3, 4]);
     }
 
+    /// STATEMENT: `List` reports its length and exposes its variants in order.
+    ///
+    /// HOW:
+    /// - Assert a list built from an empty vector is empty.
+    /// - Build a two-element list and check `len`, `is_empty`, the first iterated item
+    ///   and the second element.
     #[test]
     fn list_collection() {
         let empty = List::from(vec![]);
@@ -308,6 +335,13 @@ mod tests {
         assert_eq!(list.0[1], Variant::Null);
     }
 
+    /// STATEMENT: `ListDescribed` reports its length, iterates its items and is
+    /// constructible from a vector.
+    ///
+    /// HOW:
+    /// - Assert a default `ListDescribed` is empty.
+    /// - Build one with `new(vec![1, 2])` and check `len`, `is_empty` and iteration.
+    /// - Assert `ListDescribed::from` the same vector compares equal.
     #[test]
     fn list_described_collection() {
         let empty: ListDescribed<u32> = ListDescribed::default();
@@ -321,6 +355,13 @@ mod tests {
         assert_eq!(ListDescribed::from(vec![1u32, 2]), list);
     }
 
+    /// STATEMENT: Every `Str` constructor produces the same value, and its accessors
+    /// expose the underlying text.
+    ///
+    /// HOW:
+    /// - Build `Str` from `&str`, `String`, `ByteString` and `&ByteString` and assert
+    ///   each equals `Str::from_static("hello")`.
+    /// - Check `as_str`, `as_bytes`, `to_bytes_str` and `len`.
     #[test]
     fn str_constructors() {
         let expected = Str::from_static("hello");
@@ -337,6 +378,13 @@ mod tests {
         assert_eq!(expected.len(), 5);
     }
 
+    /// STATEMENT: `Str` supports `&str` map lookups, compares with `str`, and hashes and
+    /// orders consistently with its contents.
+    ///
+    /// HOW:
+    /// - Insert a `Str` key into a `HashMap` and look it up by `&str`.
+    /// - Check `==`/`!=` against `str` and `Borrow<str>`.
+    /// - Assert its hash equals the `ByteString` hash and that `"a" < "b"`.
     #[test]
     fn str_lookup_and_compare() {
         // `Borrow<str>` allows `&str` lookups in maps keyed by `Str`
@@ -356,6 +404,11 @@ mod tests {
         assert!(a < b);
     }
 
+    /// STATEMENT: The `Debug` output of `Str` is identical to that of its inner
+    /// `ByteString`.
+    ///
+    /// HOW:
+    /// - Format `Str::from("hi")` and `ByteString::from("hi")` with `{:?}` and compare.
     #[test]
     fn str_debug_delegates_to_inner() {
         assert_eq!(

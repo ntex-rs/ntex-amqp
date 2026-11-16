@@ -220,6 +220,16 @@ async fn accept_all(
 
 // ======================= sasl mechanisms / init =======================
 
+/// STATEMENT: The server advertises the configured sasl mechanisms in order and exposes
+/// the client's `SaslInit` fields to the handshake handler.
+///
+/// HOW:
+/// - Offer `PLAIN`, `ANONYMOUS` and `EXTERNAL` and check the client receives them in that
+///   order.
+/// - Send a `PLAIN` init with an initial response and a hostname and expect an `Ok`
+///   outcome.
+/// - Check the handler logged the mechanism, the response bytes and the hostname.
+/// - Open the amqp connection and check the server's configured `container_id`.
 #[ntex::test]
 async fn test_sasl_mechanisms_advertised() {
     let log = log();
@@ -291,6 +301,13 @@ async fn test_sasl_mechanisms_advertised() {
     io.close();
 }
 
+/// STATEMENT: A sasl init without an initial response or hostname is reported as `None`
+/// to the handshake handler.
+///
+/// HOW:
+/// - Offer only `ANONYMOUS` and send an init with no response and no hostname.
+/// - Expect an `Ok` outcome and check the handler logged `None` for the response and
+///   hostname.
 #[ntex::test]
 async fn test_sasl_anonymous_without_initial_response() {
     let log = log();
@@ -324,6 +341,13 @@ async fn test_sasl_anonymous_without_initial_response() {
     io.close();
 }
 
+/// STATEMENT: Every `SaslCode` passed to `outcome()` is sent to the peer, and the server
+/// proceeds to the amqp open in every case.
+///
+/// HOW:
+/// - For `Ok`, `Auth`, `Sys` and `SysPerm`, start a server that replies with that code.
+/// - Check the client receives the same code in the sasl outcome.
+/// - Negotiate amqp and check the server's `Open` has a `max_frame_size` of at least 512.
 #[ntex::test]
 async fn test_sasl_outcome_codes() {
     for code in [
@@ -355,6 +379,14 @@ async fn test_sasl_outcome_codes() {
     }
 }
 
+/// STATEMENT: The client connector fails with `ConnectError::Sasl` when the server
+/// answers with an `Auth` outcome.
+///
+/// HOW:
+/// - The server replies to the `PLAIN` init with `SaslCode::Auth`.
+/// - Connect with `client::Connector` using `sasl_auth` credentials.
+/// - Check the error is `ConnectError::Sasl(SaslCode::Auth)` and displays as `Sasl error
+///   code Auth`.
 #[ntex::test]
 async fn test_sasl_client_auth_failure() {
     let srv = start_server(AmqpServiceConfig::new(), |conn| async move {
@@ -381,6 +413,14 @@ async fn test_sasl_client_auth_failure() {
     assert_eq!(err.to_string(), "Sasl error code Auth");
 }
 
+/// STATEMENT: A sasl challenge is delivered to the client and the client's response bytes
+/// reach the handshake handler.
+///
+/// HOW:
+/// - The server sends a `nonce-1` challenge after a `CRAM-MD5` init; check the client
+///   receives it.
+/// - The client replies with `digest` and expects an `Ok` outcome.
+/// - Check the handler logged the response bytes and that `outcome()` returned no error.
 #[ntex::test]
 async fn test_sasl_challenge_response() {
     let log = log();
@@ -433,7 +473,15 @@ async fn test_sasl_challenge_response() {
     io.close();
 }
 
-/// Empty challenge, then the amqp connection is opened right after the sasl outcome.
+/// STATEMENT: After an empty challenge and response, the amqp connection opens right
+/// after the sasl outcome.
+///
+/// HOW:
+/// - The server sends an empty challenge with `challenge()` and asserts the response is
+///   empty.
+/// - The client checks the challenge is empty, sends an empty response and expects an
+///   `Ok` outcome.
+/// - Negotiate the amqp protocol header and exchange `Open` frames.
 #[ntex::test]
 async fn test_sasl_challenge_response_then_open() {
     let srv = start_server(AmqpServiceConfig::new(), move |conn| async move {
@@ -471,6 +519,14 @@ async fn test_sasl_challenge_response_then_open() {
 
 // ======================= sasl protocol errors =======================
 
+/// STATEMENT: A sasl frame other than `SaslInit` after the mechanisms fails `init()` with
+/// `UnexpectedSaslBodyFrame` and closes the connection.
+///
+/// HOW:
+/// - The client sends a `SaslOutcome` instead of a `SaslInit`.
+/// - Check the handler logged `UnexpectedSaslBodyFrame(SaslOutcome ..)` and its display
+///   text.
+/// - Check the server drops the connection.
 #[ntex::test]
 async fn test_sasl_unexpected_body_frame() {
     let log = log();
@@ -516,6 +572,13 @@ async fn test_sasl_unexpected_body_frame() {
     expect_eof(&io).await;
 }
 
+/// STATEMENT: A sasl frame other than `SaslResponse` after a challenge fails
+/// `challenge()` with `UnexpectedSaslBodyFrame`.
+///
+/// HOW:
+/// - The client sends a `PLAIN` init and receives the server's challenge.
+/// - The client sends another `SaslInit` instead of a `SaslResponse`.
+/// - Check the handler logged `UnexpectedSaslBodyFrame(SaslInit ..)`.
 #[ntex::test]
 async fn test_sasl_unexpected_frame_instead_of_response() {
     let log = log();
@@ -554,6 +617,12 @@ async fn test_sasl_unexpected_frame_instead_of_response() {
     );
 }
 
+/// STATEMENT: A peer disconnect while the server waits for `SaslInit` fails `init()` with
+/// `Disconnected(None)`.
+///
+/// HOW:
+/// - The client receives the mechanisms and closes the connection.
+/// - Check the handler logged `Disconnected(None)` and its display text.
 #[ntex::test]
 async fn test_sasl_disconnect_after_mechanisms() {
     let log = log();
@@ -583,6 +652,14 @@ async fn test_sasl_disconnect_after_mechanisms() {
     assert_eq!(items[1], "Peer disconnected, with error None");
 }
 
+/// STATEMENT: A non-amqp protocol header after a successful sasl outcome fails `open()`
+/// with a protocol negotiation error.
+///
+/// HOW:
+/// - Complete the `PLAIN` exchange with an `Ok` outcome; the handler checks `st()` and
+///   `io()`.
+/// - The client sends the `AmqpTls` protocol header instead of `Amqp`.
+/// - Check the handler logged `ProtocolNegotiation(Unexpected ..)` and its display text.
 #[ntex::test]
 async fn test_sasl_wrong_protocol_id_after_outcome() {
     let log = log();
@@ -626,6 +703,13 @@ async fn test_sasl_wrong_protocol_id_after_outcome() {
     );
 }
 
+/// STATEMENT: A non-`Open` frame after sasl and amqp header negotiation fails `open()`
+/// with `Unexpected`.
+///
+/// HOW:
+/// - Complete the sasl exchange and negotiate the amqp protocol header.
+/// - The client sends a `Begin` frame instead of `Open`.
+/// - Check the handler logged `Unexpected(Begin ..)`.
 #[ntex::test]
 async fn test_sasl_unexpected_frame_instead_of_open() {
     let log = log();
@@ -665,6 +749,13 @@ async fn test_sasl_unexpected_frame_instead_of_open() {
     assert!(items[0].starts_with("Unexpected(Begin"), "{:?}", items[0]);
 }
 
+/// STATEMENT: After sasl, a remote `Open` with a too small `max_frame_size` fails
+/// `open()` with `InvalidMaxFrameSize`.
+///
+/// HOW:
+/// - Complete the sasl exchange and negotiate the amqp protocol header.
+/// - The client sends an `Open` with a `max_frame_size` of 16.
+/// - Check the handler logged `InvalidMaxFrameSize(16)` and its display text.
 #[ntex::test]
 async fn test_sasl_invalid_max_frame_size() {
     let log = log();
@@ -708,6 +799,12 @@ async fn test_sasl_invalid_max_frame_size() {
     assert_eq!(items[1], "Invalid remote max frame size: 16");
 }
 
+/// STATEMENT: A peer disconnect after the sasl outcome fails `open()` with
+/// `Disconnected(None)`.
+///
+/// HOW:
+/// - Complete the sasl exchange with an `Ok` outcome, then close the client connection.
+/// - Check the handler logged `Disconnected(None)`.
 #[ntex::test]
 async fn test_sasl_disconnect_before_open() {
     let log = log();
@@ -746,6 +843,15 @@ async fn test_sasl_disconnect_before_open() {
 
 // ======================= plain handshake =======================
 
+/// STATEMENT: A plain amqp handshake replies with an `Open` built from the server config
+/// and exposes the client's `Open` through the handshake accessors.
+///
+/// HOW:
+/// - Configure the container id, hostname, `channel_max` and idle timeout on the server.
+/// - Check the server's `Open` carries those values and the default 16 KiB
+///   `max_frame_size`.
+/// - Check the handler logged the client's `Open` fields, the remote and local config
+///   values and an opened sink.
 #[ntex::test]
 async fn test_handshake_open_accessors() {
     let log = log();
@@ -817,6 +923,13 @@ async fn test_handshake_open_accessors() {
     io.close();
 }
 
+/// STATEMENT: When the handshake service fails after `open()`, the server sends no `Open`
+/// and drops the connection.
+///
+/// HOW:
+/// - The handler calls `open()` and then returns `HandshakeError::Timeout`.
+/// - The client negotiates the amqp header and sends an `Open`.
+/// - Check the server closes the connection without replying.
 #[ntex::test]
 async fn test_handshake_rejected_by_service() {
     let srv = start_server(AmqpServiceConfig::new(), |conn| async move {
@@ -839,6 +952,13 @@ async fn test_handshake_rejected_by_service() {
     expect_eof(&io).await;
 }
 
+/// STATEMENT: A non-`Open` first frame on a plain amqp connection fails `open()` with
+/// `Unexpected` and closes the connection.
+///
+/// HOW:
+/// - The client negotiates the amqp header and sends a `Begin` frame.
+/// - Check the handler logged `Unexpected(Begin ..)` and its display text.
+/// - Check the server drops the connection.
 #[ntex::test]
 async fn test_handshake_unexpected_first_frame() {
     let log = log();
@@ -875,6 +995,13 @@ async fn test_handshake_unexpected_first_frame() {
     expect_eof(&io).await;
 }
 
+/// STATEMENT: A remote `Open` with a `max_frame_size` of 511 fails a plain `open()` with
+/// `InvalidMaxFrameSize`.
+///
+/// HOW:
+/// - The client negotiates the amqp header and sends an `Open` with a `max_frame_size` of
+///   511.
+/// - Check the handler logged `InvalidMaxFrameSize(511)` and its display text.
 #[ntex::test]
 async fn test_handshake_invalid_max_frame_size() {
     let log = log();
@@ -907,6 +1034,12 @@ async fn test_handshake_invalid_max_frame_size() {
     assert_eq!(items[1], "Invalid remote max frame size: 511");
 }
 
+/// STATEMENT: A peer disconnect after the amqp header but before `Open` fails `open()`
+/// with `Disconnected(None)`.
+///
+/// HOW:
+/// - The client negotiates the amqp protocol header, then closes the connection.
+/// - Check the handler logged `Disconnected(None)`.
 #[ntex::test]
 async fn test_handshake_disconnect_before_open() {
     let log = log();
@@ -934,6 +1067,12 @@ async fn test_handshake_disconnect_before_open() {
     assert_eq!(items[0], "Disconnected(None)");
 }
 
+/// STATEMENT: The server drops connections that send an unsupported or malformed protocol
+/// header.
+///
+/// HOW:
+/// - Send the unsupported `AmqpTls` protocol header and check the connection is closed.
+/// - On a new connection send an HTTP request line and check the connection is closed.
 #[ntex::test]
 async fn test_handshake_wrong_protocol_header() {
     let srv = start_server(AmqpServiceConfig::new(), accept_all);
@@ -957,6 +1096,14 @@ async fn test_handshake_wrong_protocol_header() {
     assert!(matches!(res, Ok(None) | Err(_)), "{res:?}");
 }
 
+/// STATEMENT: The handshake timeout drops connections that stall before the protocol
+/// header or during the sasl exchange.
+///
+/// HOW:
+/// - Start a server with a one second `handshake_timeout`.
+/// - Connect without sending anything and check the connection is closed.
+/// - Negotiate sasl, read the mechanisms, send nothing and check the connection is
+///   closed.
 #[ntex::test]
 async fn test_handshake_timeout() {
     let srv = start_server(
@@ -980,6 +1127,13 @@ async fn test_handshake_timeout() {
 
 // ======================= server control service =======================
 
+/// STATEMENT: The server control service receives a `ProtocolError` frame when the peer
+/// closes an open connection.
+///
+/// HOW:
+/// - Build a server whose `control` service logs every `ControlFrame` kind.
+/// - Open a raw amqp connection and send a `Close` frame.
+/// - Check that a `ProtocolError` kind was logged.
 #[ntex::test]
 async fn test_server_control_service() {
     let log = log();
@@ -1023,6 +1177,16 @@ async fn test_server_control_service() {
     io.close();
 }
 
+/// STATEMENT: Handshake and server errors convert from codec, protocol id and io errors
+/// and format with the expected `Debug` and `Display` text.
+///
+/// HOW:
+/// - Convert `Either` codec, protocol id and io errors into `HandshakeError` and check
+///   `Debug`.
+/// - Convert codec, protocol, handshake and dispatcher errors into `ServerError` and
+///   check `Display`.
+/// - Check `Display` for sasl, unsupported mechanism, service and protocol negotiation
+///   errors.
 #[ntex::test]
 async fn test_server_error_display() {
     use ntex::util::Either;
@@ -1080,7 +1244,13 @@ async fn test_server_error_display() {
     assert_eq!(err.to_string(), "Protocol negotiation error: Incompatible");
 }
 
-/// Peer connects and disconnects without sending any protocol header
+/// STATEMENT: A peer that disconnects without sending any protocol header does not affect
+/// later connections.
+///
+/// HOW:
+/// - Connect and close immediately without sending a protocol header.
+/// - Open a new amqp connection and check the server replies with an `Open` with a
+///   container id.
 #[ntex::test]
 async fn test_server_disconnect_before_protocol_header() {
     let srv = start_server(AmqpServiceConfig::new(), move |con| async move {

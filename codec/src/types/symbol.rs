@@ -96,6 +96,13 @@ mod tests {
 
     use super::*;
 
+    /// STATEMENT: Every `Symbol` constructor produces the same value, and its accessors
+    /// expose the underlying text.
+    ///
+    /// HOW:
+    /// - Build `Symbol` from a slice, `&str`, `String`, `ByteString` and `Str` and
+    ///   assert each equals `Symbol::from_static("sym")`.
+    /// - Check `as_str`, `as_bytes`, `to_bytes_str` and `len`.
     #[test]
     fn symbol_constructors() {
         let expected = Symbol::from_static("sym");
@@ -112,6 +119,11 @@ mod tests {
         assert_eq!(expected.len(), 3);
     }
 
+    /// STATEMENT: The default `Symbol` is the empty symbol.
+    ///
+    /// HOW:
+    /// - Assert `Symbol::default()` has length 0, an empty `as_str`, and equals
+    ///   `Symbol::from("")`.
     #[test]
     fn symbol_default_is_empty() {
         let def = Symbol::default();
@@ -120,6 +132,11 @@ mod tests {
         assert_eq!(def, Symbol::from(""));
     }
 
+    /// STATEMENT: `Symbol` supports `&str` map lookups and compares with `str`.
+    ///
+    /// HOW:
+    /// - Insert a `Symbol` key into a `HashMap` and look it up by `&str`.
+    /// - Check `==`/`!=` against `str` and the `Borrow<str>` result.
     #[test]
     fn symbol_lookup_and_compare() {
         // `Borrow<str>` allows `&str` lookups in maps keyed by `Symbol`
@@ -134,6 +151,11 @@ mod tests {
         assert_eq!(borrow::Borrow::<str>::borrow(&sym), "a");
     }
 
+    /// STATEMENT: `StaticSymbol` constructors wrap the given string and compare by value.
+    ///
+    /// HOW:
+    /// - Assert `StaticSymbol::new` and `From<&str>` equal a direct `StaticSymbol("s")`.
+    /// - Assert different strings compare unequal and `.0` returns the inner string.
     #[test]
     fn static_symbol() {
         assert_eq!(StaticSymbol::new("s"), StaticSymbol("s"));

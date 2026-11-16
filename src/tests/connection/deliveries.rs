@@ -19,6 +19,15 @@ fn disposition(
     handle_frame(conn, disp.into()).unwrap();
 }
 
+/// STATEMENT: A sender delivery settled by the remote is released without sending a
+/// disposition, and keeps its remote-settled state after the session ends.
+///
+/// HOW:
+/// - After a settled `Accepted` disposition, `wait`, drop, `settle` or `update_state`
+///   the delivery.
+/// - Confirm no unsettled deliveries remain and only the `Transfer` frame was written.
+/// - Settle another delivery remotely, end the session, and confirm the session has no
+///   unsettled sender deliveries and `is_remote_settled` is true.
 #[ntex::test]
 async fn sender_delivery_remote_settled() {
     // 0 - wait() after disposition, 1 - drop without wait(), 2 - settle(), 3 - update_state()
@@ -78,6 +87,14 @@ fn dispositions(client: &IoTest) -> Vec<String> {
         .collect()
 }
 
+/// STATEMENT: Dropping an unsettled sender delivery settles it with the remote terminal
+/// outcome, or with no state when there is none.
+///
+/// HOW:
+/// - Send a delivery and optionally apply an unsettled disposition with no state,
+///   `Accepted`, `Rejected` or the non-terminal `Received`.
+/// - Drop the delivery and confirm no unsettled deliveries remain.
+/// - Confirm one settled `Sender` disposition with the expected state is written.
 #[ntex::test]
 async fn sender_delivery_drop_settles_with_remote_outcome() {
     let rejected = DeliveryState::Rejected(Rejected { error: None });
@@ -109,6 +126,14 @@ async fn sender_delivery_drop_settles_with_remote_outcome() {
     }
 }
 
+/// STATEMENT: Receiver deliveries settled by the remote send no disposition, while
+/// others are settled with the local state or `Rejected` on drop.
+///
+/// HOW:
+/// - Receive four deliveries and remotely settle deliveries 0 and 1.
+/// - `settle` delivery 0, drop 0 and 1, and confirm no frames are written.
+/// - `settle` delivery 2 with `Accepted`, drop 3, and confirm settled `Receiver`
+///   dispositions with `Accepted` and `Rejected` and no unsettled deliveries.
 #[ntex::test]
 async fn receiver_delivery_remote_settled() {
     let (_io, conn, client) = connection();
@@ -152,6 +177,14 @@ async fn receiver_delivery_remote_settled() {
     assert!(disp[1].starts_with("Receiver 3 true Some(Rejected("));
 }
 
+/// STATEMENT: Pending and later `wait` calls fail with the session error when the
+/// session ends or the connection fails.
+///
+/// HOW:
+/// - Send two deliveries and leave `wait` pending on the first.
+/// - Handle a remote `End` with an error, or set a `Disconnected` connection error.
+/// - Confirm both waits fail with `SessionEnded(err)` or `Disconnected`.
+/// - Confirm a receiver delivery `wait` fails with `SessionEnded(err)` after `End`.
 #[ntex::test]
 async fn delivery_wait_returns_session_error() {
     let err = Error(Box::new(codec::ErrorInner {
@@ -209,6 +242,16 @@ async fn delivery_wait_returns_session_error() {
     assert_eq!(format!("{:?}", delivery.wait().await.unwrap_err()), ended);
 }
 
+/// STATEMENT: `wait` resolves only on a terminal outcome or remote settlement, and
+/// supports repeated, concurrent and dropped waiters.
+///
+/// HOW:
+/// - Dispositions with no state or `Received` keep `wait` pending; a settled one without
+///   state resolves `None`, an unsettled `Accepted` resolves `Accepted`.
+/// - `Modified` is returned by two `wait` calls, and dropping the delivery writes one
+///   settled `Modified` disposition.
+/// - Two concurrent waiters both get `Accepted` and the polled waker is woken once.
+/// - Dropped waiters are not counted, and do not block notification of live waiters.
 #[ntex::test]
 async fn delivery_wait_outcome() {
     use ntex_amqp_codec::protocol::Modified;
@@ -337,6 +380,14 @@ async fn delivery_wait_outcome() {
     }
 }
 
+/// STATEMENT: Settling, updating or dropping a delivery of a detached link sends no
+/// disposition.
+///
+/// HOW:
+/// - Detach a sender link remotely, or locally with remote confirmation, and detach a
+///   receiver link remotely, each with an unsettled delivery.
+/// - `settle`, `update_state` or drop the delivery.
+/// - Confirm no dispositions are written and no unsettled deliveries remain.
 #[ntex::test]
 async fn delivery_no_disposition_after_link_detach() {
     let rejected = || DeliveryState::Rejected(Rejected { error: None });
@@ -421,6 +472,14 @@ fn new_link_handle(conn: &Connection, sender: bool, remote: u32) -> u32 {
     }
 }
 
+/// STATEMENT: An unanswered link detach fails the close and pending deliveries after the
+/// link attach timeout, and keeps the handle reserved until the remote detaches.
+///
+/// HOW:
+/// - Close a sender or receiver link with an unsettled delivery; confirm `Detach 0`.
+/// - With a zero timeout, confirm close and `wait` stay pending after one second.
+/// - With a one second timeout, confirm both fail with `LinkDetached(None)`.
+/// - Confirm a new link gets handle 1, and handle 0 after the peer `Detach`.
 #[ntex::test]
 async fn link_detach_timeout() {
     for sender in [true, false] {
@@ -469,6 +528,14 @@ async fn link_detach_timeout() {
     }
 }
 
+/// STATEMENT: A peer `Detach` confirming a local close completes the close and fails
+/// pending delivery waits with the peer error.
+///
+/// HOW:
+/// - Close a sender or receiver link with an unsettled delivery and wait on it.
+/// - Handle a peer `Detach` with no error or with `DetachForced`.
+/// - Confirm close succeeds only without error and `wait` fails with
+///   `LinkDetached` carrying the peer error.
 #[ntex::test]
 async fn link_detach_confirmation_fails_deliveries() {
     for sender in [true, false] {
@@ -509,6 +576,14 @@ async fn link_detach_confirmation_fails_deliveries() {
     }
 }
 
+/// STATEMENT: A detach confirmed before the timeout succeeds, and its timer does not
+/// expire a new link reusing the same handle.
+///
+/// HOW:
+/// - With a one second timeout, close a sender and confirm it is pending after 900ms.
+/// - Handle the peer `Detach` and confirm close succeeds.
+/// - Attach a new sender on handle 0, close it, and confirm it is still pending after
+///   600ms and succeeds after the peer `Detach`.
 #[ntex::test]
 async fn link_detach_confirmed_before_timeout() {
     let (_io, conn, _client) =
@@ -529,6 +604,14 @@ async fn link_detach_confirmed_before_timeout() {
     sleep(Millis(10)).await;
 }
 
+/// STATEMENT: A transfer reusing an unsettled delivery id detaches the link and keeps
+/// the original delivery.
+///
+/// HOW:
+/// - Receive delivery 5, then a single or first-of-many transfer with delivery id 5.
+/// - Confirm a closing `Detach` with `DetachForced` and `"duplicate delivery_id"`.
+/// - Confirm only the original delivery is queued and unsettled, and settling it writes a
+///   settled `Accepted` disposition.
 #[ntex::test]
 async fn duplicate_delivery_id_detaches_link() {
     // second transfer is single frame or first frame of multi-frame delivery
@@ -563,6 +646,13 @@ async fn duplicate_delivery_id_detaches_link() {
     }
 }
 
+/// STATEMENT: A `settled` flag on a continuation transfer frame marks the delivery as
+/// remote settled.
+///
+/// HOW:
+/// - Receive a three-frame delivery with `settled` set only on frame 1 or frame 2.
+/// - Confirm `is_remote_settled` is true.
+/// - `settle` and drop it, and confirm no unsettled deliveries and no dispositions.
 #[ntex::test]
 async fn continuation_transfer_settles_delivery() {
     // index of the continuation frame with `settled` flag
@@ -594,6 +684,15 @@ async fn continuation_transfer_settles_delivery() {
     }
 }
 
+/// STATEMENT: A receiver disposition during a multi-frame transfer aborts the remaining
+/// frames if settled, otherwise the transfer completes, and the link stays usable.
+///
+/// HOW:
+/// - Send a 1200 byte delivery that blocks after two frames on the session window.
+/// - Apply a settled or unsettled `Accepted` disposition and open the window.
+/// - Confirm the last frame is aborted or a normal continuation, `is_remote_settled`
+///   matches, and `wait` returns `Accepted`.
+/// - Confirm the next delivery is sent with id 1.
 #[ntex::test]
 async fn sender_delivery_settled_mid_transfer() {
     // (receiver settles delivery, last frame)

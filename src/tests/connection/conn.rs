@@ -14,6 +14,14 @@ fn remote_begin(remote_channel: Option<u16>) -> Frame {
     begin.into()
 }
 
+/// STATEMENT: Connection accessors report state, and `force_close` marks the connection
+/// failed, wakes `on_close` waiters and drops sessions.
+///
+/// HOW:
+/// - Check `tag`, `config`, `is_opened`, `get_error` and `Debug` on a fresh connection.
+/// - Handle a remote `Begin` and confirm session 0 is found by local id.
+/// - Poll `on_close` (pending), call `force_close`, then confirm it is ready, the error
+///   is `ConnectionDropped` and session 0 is gone.
 #[ntex::test]
 async fn connection_accessors() {
     let (_io, conn, _client) = connection();
@@ -43,6 +51,13 @@ async fn connection_accessors() {
     assert!(conn.get_session_by_local_id(0).is_none());
 }
 
+/// STATEMENT: Local `close` and `close_with_error` write a `Close` frame without and
+/// with the given error.
+///
+/// HOW:
+/// - Call `close` and confirm a single `Close` frame with no error is written.
+/// - On a new connection call `close_with_error` with description `"bye"` and confirm
+///   the written `Close` carries that description.
 #[ntex::test]
 async fn close_frames() {
     // local close without and with an error
@@ -73,6 +88,14 @@ async fn close_frames() {
     );
 }
 
+/// STATEMENT: A remote `Close` is reported with its error, answered with an error-free
+/// `Close`, and later frames are ignored.
+///
+/// HOW:
+/// - Handle a remote `Close` with description `"remote"` and confirm
+///   `Action::RemoteClose(Closed(Some(_)))` carries it.
+/// - Confirm a single `Close` without error is written back.
+/// - Confirm a following `Begin` yields `Action::None`.
 #[ntex::test]
 async fn remote_close_responds_and_reports() {
     let (_io, conn, client) = connection();
@@ -102,6 +125,13 @@ async fn remote_close_responds_and_reports() {
     assert!(matches!(handle_frame(&conn, begin()), Ok(Action::None)));
 }
 
+/// STATEMENT: A peer `Close` after a local close confirms it without a reply and leaves
+/// the connection `Disconnected`.
+///
+/// HOW:
+/// - Call `close`, confirm `is_opened` is false and a `Close` without error is written.
+/// - Handle the peer `Close` and confirm `Action::None` and a `Disconnected` error.
+/// - Confirm no further frames are written.
 #[ntex::test]
 async fn close_confirmation() {
     let (_io, conn, client) = connection();
@@ -126,6 +156,14 @@ async fn close_confirmation() {
     assert_eq!(read_frames(&client), Vec::<Frame>::new());
 }
 
+/// STATEMENT: A remote `Begin` is rejected when its channel is in use or the channel
+/// limit is exceeded.
+///
+/// HOW:
+/// - Handle `Begin` twice on channel 0 and confirm the second is
+///   `Unexpected(Frame::Begin)`.
+/// - With `channel_max(1)`, begin channels 0 and 1, then confirm channel 2 fails with
+///   `TooManyChannels`.
 #[ntex::test]
 async fn begin_errors() {
     let (_io, conn, _client) = connection();
@@ -147,6 +185,13 @@ async fn begin_errors() {
     ));
 }
 
+/// STATEMENT: A `Begin` response that names an unknown or already established local
+/// channel is ignored.
+///
+/// HOW:
+/// - Handle a `Begin` with `remote_channel` 3; confirm `Action::None` and no session 3.
+/// - Establish session 0, handle a `Begin` with `remote_channel` 0 on channel 2 and
+///   confirm `Action::None` with session 0 unchanged.
 #[ntex::test]
 async fn begin_response_for_unexpected_channel() {
     let (_io, conn, _client) = connection();
@@ -167,6 +212,14 @@ async fn begin_response_for_unexpected_channel() {
     assert_eq!(conn.get_session_by_local_id(0).unwrap().inner.id(), 0);
 }
 
+/// STATEMENT: Frames for a channel without an established session are reported as
+/// `UnknownSession`, and are dropped once the connection has failed.
+///
+/// HOW:
+/// - Handle `Attach` with no session and confirm `UnknownSession`.
+/// - Start a local `open_session` and confirm `Attach` is still `UnknownSession`.
+/// - Call `force_close`, confirm the pending open fails with `Disconnected` and a later
+///   `Attach` yields `Action::None`.
 #[ntex::test]
 async fn frames_for_unknown_and_opening_sessions() {
     let (_io, conn, _client) = connection();
@@ -199,6 +252,13 @@ async fn frames_for_unknown_and_opening_sessions() {
     assert!(matches!(handle_frame(&conn, attach()), Ok(Action::None)));
 }
 
+/// STATEMENT: Frames for a closing session are dropped, the peer `End` completes the
+/// close, and the session is then removed.
+///
+/// HOW:
+/// - Establish a session and start `end` on it.
+/// - Confirm `Attach` and `End` both yield `Action::None` and the `end` future succeeds.
+/// - Confirm a later `Attach` fails with `UnknownSession`.
 #[ntex::test]
 async fn frames_for_closing_session() {
     let (_io, conn, _client) = connection();
@@ -222,6 +282,14 @@ async fn frames_for_closing_session() {
     ));
 }
 
+/// STATEMENT: A remote `Attach` with a handle above `handle_max` or already in use ends
+/// the session with the matching error condition.
+///
+/// HOW:
+/// - With `handle_max(10)`, attach link `"a"` on handle 0.
+/// - Attach link `"b"` on handle 11 and on handle 0 and confirm `Action::SessionEnded`.
+/// - Confirm the last written `End` carries `ResourceLimitExceeded` or `HandleInUse`, and
+///   a further `Attach` yields `Action::None`.
 #[ntex::test]
 async fn attach_handle_limits() {
     // (handle, expected error condition)
@@ -259,6 +327,14 @@ async fn attach_handle_limits() {
     }
 }
 
+/// STATEMENT: `open_session` sends a `Begin` with the configured capabilities and
+/// properties and resolves when the peer responds.
+///
+/// HOW:
+/// - Open a session with offered/desired capabilities and two properties.
+/// - Confirm the `Begin` on channel 0 has no `remote_channel` and carries those values.
+/// - Respond with a `Begin` on channel 5 and confirm the session has local id 0 and
+///   remote channel 5.
 #[ntex::test]
 async fn open_session_builder() {
     let (_io, conn, client) = connection();
@@ -290,6 +366,14 @@ async fn open_session_builder() {
     assert_eq!(session.remote_channel_id(), 5);
 }
 
+/// STATEMENT: `open_session` fails with `ConnectionDropped` on a failed connection and
+/// with `TooManyChannels` when the local channel limit is reached.
+///
+/// HOW:
+/// - Call `force_close` and confirm `open_session` fails with `ConnectionDropped`.
+/// - With `channel_max(0)`, start one `open_session`, then confirm a second fails with
+///   `TooManyChannels`.
+/// - Call `force_close` and confirm the first open fails.
 #[ntex::test]
 async fn open_session_errors() {
     // connection in error state

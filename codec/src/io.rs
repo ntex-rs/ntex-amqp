@@ -187,6 +187,11 @@ mod tests {
 
     use crate::AmqpFrame;
 
+    /// STATEMENT: Decoding a frame whose declared size is below the header length fails.
+    ///
+    /// HOW:
+    /// - Feed bytes starting with a zero 32 bit frame size to `AmqpCodec::decode`.
+    /// - Assert it returns `AmqpCodecError::InvalidFrameSize`.
     #[test]
     fn test_decode() -> Result<(), AmqpCodecError> {
         let mut data = BytesMut::from(b"\0\0\0\0\0\0\0\0\0\x06AC@A\0S$\xc0\x01\0B".as_ref());
@@ -198,6 +203,14 @@ mod tests {
         Ok(())
     }
 
+    /// STATEMENT: The encoder rejects frames larger than `max_encode_size` without
+    /// writing any bytes, and accepts frames at or below the limit.
+    ///
+    /// HOW:
+    /// - Encode an `Open` frame with the limit one byte below its size and expect
+    ///   `MaxOutboundSizeExceeded` with an empty buffer.
+    /// - Set the limit to the exact size via `set_max_encode_size` and expect success.
+    /// - Encode without a limit and check the output length equals the frame size.
     #[test]
     fn test_max_encode_size() {
         use crate::protocol::{Frame, Open, OpenInner};
@@ -253,6 +266,13 @@ mod tests {
         BytesMut::from(&buf.freeze()[..])
     }
 
+    /// STATEMENT: `AmqpCodec` decodes an encoded frame back and stays reusable
+    /// afterwards.
+    ///
+    /// HOW:
+    /// - Encode a `Begin` frame and check the length equals `encoded_size()`.
+    /// - Decode it, confirm the same frame and an empty buffer.
+    /// - Decode again on the empty buffer and expect `None`.
     #[test]
     fn amqp_codec_roundtrip() {
         let frame = amqp_frame();
@@ -266,6 +286,13 @@ mod tests {
         assert_eq!(codec.decode(&mut data).unwrap(), None);
     }
 
+    /// STATEMENT: `AmqpCodec` waits for more data on partial input and keeps the parsed
+    /// header state between calls.
+    ///
+    /// HOW:
+    /// - Decode only 4 bytes and expect `None`.
+    /// - Decode exactly `HEADER_LEN` bytes twice and expect `None` both times.
+    /// - Append the rest of the frame and expect the full frame to decode.
     #[test]
     fn amqp_codec_partial_frames() {
         let frame = amqp_frame();
@@ -286,6 +313,13 @@ mod tests {
         assert_eq!(codec.decode(&mut buf).unwrap(), Some(frame));
     }
 
+    /// STATEMENT: The decoder rejects frames larger than `max_size` and accepts frames at
+    /// the limit.
+    ///
+    /// HOW:
+    /// - Decode a frame with `max_size` one byte below its length and expect
+    ///   `MaxSizeExceeded`.
+    /// - Set the limit to the exact length via `set_max_size` and expect a frame.
     #[test]
     fn amqp_codec_max_size() {
         let data = encode_frame(&amqp_frame());
@@ -303,6 +337,12 @@ mod tests {
         assert!(codec.decode(&mut buf).unwrap().is_some());
     }
 
+    /// STATEMENT: Trailing bytes inside a frame that the body decoder does not consume
+    /// are an error.
+    ///
+    /// HOW:
+    /// - Append one extra byte to an encoded frame and update the size prefix.
+    /// - Decode and expect `AmqpCodecError::UnparsedBytesLeft`.
     #[test]
     fn amqp_codec_unparsed_bytes_left() {
         let frame = amqp_frame();
@@ -319,6 +359,13 @@ mod tests {
         ));
     }
 
+    /// STATEMENT: `ProtocolIdCodec` encodes each protocol id as its 8-byte header and
+    /// decodes it back.
+    ///
+    /// HOW:
+    /// - Encode `Amqp`, `AmqpTls` and `AmqpSasl` and compare against `AMQP` with ids
+    ///   0, 2 and 3 and version `1.0.0`.
+    /// - Decode each header back to the same id and check the input is consumed.
     #[test]
     fn protocol_id_roundtrip() {
         let codec = ProtocolIdCodec;
@@ -338,6 +385,13 @@ mod tests {
         }
     }
 
+    /// STATEMENT: `ProtocolIdCodec` waits on short input and reports invalid,
+    /// incompatible and unknown headers after consuming them.
+    ///
+    /// HOW:
+    /// - Decode 7 bytes and expect `None` with nothing consumed.
+    /// - Decode a bad magic, a wrong version and unknown ids 1 and 4.
+    /// - Check each error variant matches and the 8-byte header is consumed.
     #[test]
     fn protocol_id_decode_errors() {
         let codec = ProtocolIdCodec;
