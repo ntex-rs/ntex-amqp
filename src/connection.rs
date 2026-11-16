@@ -224,7 +224,12 @@ impl ConnectionRef {
 
     pub(crate) fn handle_frame(&self, frame: AmqpFrame) -> Result<Action, AmqpProtocolError> {
         let result = self.0.get_mut().handle_frame(frame, &self.0);
-        if self.0.get_ref().error.is_some() {
+        let inner = self.0.get_mut();
+        if let Some(err) = inner.error.clone() {
+            // a failed write leaves session state for teardown outside of session borrows
+            if !inner.sessions.is_empty() {
+                inner.set_error(err);
+            }
             self.clear_control_queue();
         }
         result
@@ -239,6 +244,8 @@ impl ConnectionRef {
 
 impl ConnectionInner {
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
+        // keep first error, a failed write sets it before session state is dropped
+        let err = self.error.get_or_insert(err).clone();
         log::trace!("{}: Set connection error: {:?}", self.io.tag(), err);
         self.control_queue.close();
         for (_, channel) in &mut self.sessions {
@@ -252,10 +259,6 @@ impl ConnectionInner {
         }
         self.sessions.clear();
         self.sessions_map.clear();
-
-        if self.error.is_none() {
-            self.error = Some(err);
-        }
         self.on_close.notify_and_lock(());
     }
 
@@ -263,8 +266,14 @@ impl ConnectionInner {
         #[cfg(feature = "frame-trace")]
         log::trace!("{}: outgoing: {:#?}", self.io.tag(), frame);
 
-        if let Err(e) = self.encode_frame(frame) {
-            self.set_error(e);
+        if let Err(err) = self.encode_frame(frame) {
+            log::trace!("{}: Cannot encode frame: {err:?}", self.io.tag());
+
+            // Callers may hold session or link state, dropping it here is a use-after-free.
+            // Session state is dropped after frame handling or on dispatcher shutdown.
+            self.error.get_or_insert(err);
+            self.control_queue.close();
+            self.io.close();
         }
     }
 

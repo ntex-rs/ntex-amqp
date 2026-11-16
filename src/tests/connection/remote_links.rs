@@ -638,3 +638,58 @@ fn link_frames(client: &IoTest) -> Vec<String> {
         })
         .collect()
 }
+
+#[ntex::test]
+async fn remote_sender_detach_reply_exceeds_frame_size() {
+    // remote accepts frames up to 512 bytes
+    let open = OpenInner {
+        max_frame_size: 512,
+        ..Default::default()
+    };
+    let remote = RemoteServiceConfig::new(&Open(Box::new(open)));
+    let (server, _client) = IoTest::create();
+    let cfg = SharedCfg::new("T").add(AmqpServiceConfig::new()).build();
+    let io = Io::new(server, cfg.clone());
+    let conn = Connection::new(io.get_ref(), &cfg.get(), &remote);
+
+    handle_frame(&conn, begin()).unwrap();
+    let Ok(Action::AttachSender(link, attach, response)) =
+        handle_frame(&conn, named_attach(Role::Receiver, "n", "a", 3))
+    else {
+        panic!()
+    };
+    session(&conn)
+        .inner
+        .get_mut()
+        .attach_remote_sender_link(&attach, response, link.inner.clone());
+    // session slab holds the only link reference
+    drop(link);
+
+    // detach reply echoes the remote error and fails to encode,
+    // link and session state must outlive detach handling
+    let detach: Frame = Detach(Box::new(DetachInner {
+        handle: 3,
+        closed: true,
+        error: Some(Error(Box::new(codec::ErrorInner {
+            condition: AmqpError::InternalError.into(),
+            description: Some("x".repeat(1024).into()),
+            info: None,
+        }))),
+    }))
+    .into();
+    let Ok(Action::DetachSender(link, _)) = handle_frame(&conn, detach) else {
+        panic!()
+    };
+    assert!(link.is_closed());
+
+    // connection is failed and session state is dropped after frame handling
+    assert!(matches!(
+        conn.get_error(),
+        Some(AmqpProtocolError::Codec(
+            AmqpCodecError::MaxOutboundSizeExceeded
+        ))
+    ));
+    assert!(!conn.is_opened());
+    assert!(conn.get_ref().0.get_ref().sessions.is_empty());
+    assert!(conn.get_session_by_local_id(0).is_none());
+}

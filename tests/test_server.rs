@@ -10,7 +10,7 @@ use ntex_amqp::{
     AmqpServiceConfig, ControlFrame, ControlFrameKind, client, codec::protocol, error::LinkError,
     server, types,
 };
-use rand::{Rng, distr::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 use urly::Url;
 
 async fn server(
@@ -36,7 +36,7 @@ async fn test_simple() -> std::io::Result<()> {
     let count = Arc::new(AtomicUsize::new(0));
 
     let count2 = count.clone();
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let count = count2.clone();
         server::Server::builder(|con: server::Handshake| async move {
             match con {
@@ -106,7 +106,7 @@ async fn test_large_transfer() -> std::io::Result<()> {
 
     let count = Arc::new(AtomicUsize::new(0));
     let count2 = count.clone();
-    let srv = TestServerBuilder::new(async move || {
+    let srv = TestServerBuilder::new(async move |_| {
         let count = count2.clone();
         server::Server::builder(|con: server::Handshake| async move {
             match con {
@@ -205,7 +205,7 @@ async fn sasl_auth(auth: server::Sasl) -> Result<server::HandshakeAck<()>, serve
 
 #[ntex::test]
 async fn test_sasl() -> std::io::Result<()> {
-    let srv = test_server(async || {
+    let srv = test_server(async |_| {
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
                 let conn = conn.open().await.unwrap();
@@ -231,7 +231,7 @@ async fn test_sasl() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_handshake_max_frame_size() -> std::io::Result<()> {
-    let srv = TestServerBuilder::new(async || {
+    let srv = TestServerBuilder::new(async |_| {
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
                 let conn = conn.open().await.map_err(|_| ())?;
@@ -287,7 +287,7 @@ fn max_frame_size_server(
     cfg: AmqpServiceConfig,
     errors: Arc<Mutex<Vec<bool>>>,
 ) -> ntex::server::TestServer {
-    TestServerBuilder::new(async move || {
+    TestServerBuilder::new(async move |_| {
         let errors = errors.clone();
         server::Server::builder(async move |conn: server::Handshake| {
             let res = match conn {
@@ -430,7 +430,7 @@ async fn raw_begin(io: &ntex::io::Io, channels: &[u16]) -> usize {
 
 #[ntex::test]
 async fn test_remote_begin_channels() -> std::io::Result<()> {
-    let srv = TestServerBuilder::new(async || {
+    let srv = TestServerBuilder::new(async |_| {
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
                 let conn = conn.open().await.map_err(|_| ())?;
@@ -556,7 +556,7 @@ async fn raw_end(io: &ntex::io::Io) -> protocol::ErrorCondition {
 
 #[ntex::test]
 async fn test_remote_attach_handles() -> std::io::Result<()> {
-    let srv = TestServerBuilder::new(async || {
+    let srv = TestServerBuilder::new(async |_| {
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
                 let conn = conn.open().await.map_err(|_| ())?;
@@ -618,7 +618,7 @@ async fn test_remote_receiver_detach_before_confirm() -> std::io::Result<()> {
     let released2 = released.clone();
     let detached2 = detached.clone();
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let released = released2.clone();
         let detached = detached2.clone();
         server::Server::builder(async move |conn: server::Handshake| match conn {
@@ -691,7 +691,7 @@ async fn test_remote_receiver_end_before_confirm() -> std::io::Result<()> {
         let (created2, released2, ended2) = (created.clone(), released.clone(), ended.clone());
         let (blocked2, gate2) = (blocked.clone(), gate.clone());
 
-        let srv = test_server(async move || {
+        let srv = test_server(async move |_| {
             let (created, released, ended) = (created2.clone(), released2.clone(), ended2.clone());
             let (blocked, gate) = (blocked2.clone(), gate2.clone());
             let (blocked_ctl, gate_ctl) = (blocked.clone(), gate.clone());
@@ -783,7 +783,7 @@ async fn test_remote_receiver_attach_disconnect() -> std::io::Result<()> {
     let dropped = Arc::new(AtomicUsize::new(0));
     let (created2, dropped2) = (created.clone(), dropped.clone());
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let (created, dropped) = (created2.clone(), dropped2.clone());
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
@@ -832,7 +832,7 @@ async fn test_remote_receiver_detached_disconnect() -> std::io::Result<()> {
         let dropped = Arc::new(AtomicUsize::new(0));
         let (started2, dropped2) = (started.clone(), dropped.clone());
 
-        let srv = test_server(async move || {
+        let srv = test_server(async move |_| {
             let (started, dropped) = (started2.clone(), dropped2.clone());
             server::Server::builder(async move |conn: server::Handshake| match conn {
                 server::Handshake::Amqp(conn) => {
@@ -908,7 +908,7 @@ async fn test_router_link_service_shutdown_on_disconnect() -> std::io::Result<()
     let shutdowns = Arc::new(AtomicUsize::new(0));
     let shutdowns2 = shutdowns.clone();
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let shutdowns = shutdowns2.clone();
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
@@ -979,7 +979,7 @@ async fn test_router_link_service_shutdown_on_local_detach() -> std::io::Result<
         let calls = Arc::new(AtomicUsize::new(0));
         let (shutdowns2, calls2) = (shutdowns.clone(), calls.clone());
 
-        let srv = test_server(async move || {
+        let srv = test_server(async move |_| {
             let (shutdowns, calls) = (shutdowns2.clone(), calls2.clone());
             server::Server::builder(async move |conn: server::Handshake| match conn {
                 server::Handshake::Amqp(conn) => {
@@ -1058,7 +1058,7 @@ fn raw_detach(handle: u32) -> protocol::Frame {
 
 #[ntex::test]
 async fn test_remote_disposition_range() -> std::io::Result<()> {
-    let srv = TestServerBuilder::new(async || {
+    let srv = TestServerBuilder::new(async |_| {
         server::Server::builder(async move |conn: server::Handshake| match conn {
             server::Handshake::Amqp(conn) => {
                 let conn = conn.open().await.map_err(|_| ())?;
@@ -1100,7 +1100,7 @@ async fn test_session_end() -> std::io::Result<()> {
     let link_names = Arc::new(Mutex::new(Vec::new()));
     let link_names2 = link_names.clone();
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let srv = server::Server::builder(async move |con: server::Handshake| match con {
             server::Handshake::Amqp(con) => {
                 let con = con.open().await.unwrap();
@@ -1162,7 +1162,7 @@ async fn test_session_end() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach() -> std::io::Result<()> {
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         server::Server::builder(async move |con: server::Handshake| match con {
             server::Handshake::Amqp(con) => {
                 let con = con.open().await.unwrap();
@@ -1233,7 +1233,7 @@ async fn test_link_detach() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach_on_session_end() -> std::io::Result<()> {
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -1287,7 +1287,7 @@ async fn test_link_detach_on_session_end() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -1341,7 +1341,7 @@ async fn test_link_detach_on_disconnect() -> std::io::Result<()> {
 
 #[ntex::test]
 async fn test_drop_delivery_on_link_detach() -> std::io::Result<()> {
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {
@@ -1433,7 +1433,7 @@ impl Service<server::State<()>, types::Message> for GatedPublish {
 
 #[ntex::test]
 async fn test_control_frames_while_publish_not_ready() -> std::io::Result<()> {
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         // publish service is not ready while the control service is processing a frame
         let blocked = Rc::new(Cell::new(false));
         let blocked2 = blocked.clone();
@@ -1491,7 +1491,7 @@ async fn test_control_flow_order() -> std::io::Result<()> {
     let credits2 = credits.clone();
     let credit2 = credit.clone();
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let credits = credits2.clone();
         let credit = credit2.clone();
         server::Server::builder(async move |con: server::Handshake| match con {
@@ -1566,7 +1566,7 @@ async fn test_control_call_cancelled_on_disconnect() -> std::io::Result<()> {
     let started2 = started.clone();
     let dropped2 = dropped.clone();
 
-    let srv = test_server(async move || {
+    let srv = test_server(async move |_| {
         let started = started2.clone();
         let dropped = dropped2.clone();
         server::Server::builder(async move |con: server::Handshake| match con {

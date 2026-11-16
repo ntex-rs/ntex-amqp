@@ -40,7 +40,7 @@ where
     F: Fn(Io) -> Fut + Send + Clone + 'static,
     Fut: Future<Output = ()> + 'static,
 {
-    test_server(async move || {
+    test_server(async move |_| {
         let f = f.clone();
         fn_service(async move |io: Io| {
             f(io).await;
@@ -114,7 +114,7 @@ fn link_service() -> BoxService<types::Link<()>, types::Transfer, types::Outcome
 
 /// Start a real amqp test server
 fn amqp_server(cfg: AmqpServiceConfig) -> TestServer {
-    TestServerBuilder::new(async move || {
+    TestServerBuilder::new(async move |_| {
         server::Server::builder(|con: server::Handshake| async move {
             match con {
                 server::Handshake::Amqp(con) => {

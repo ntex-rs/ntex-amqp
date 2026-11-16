@@ -105,7 +105,7 @@ where
 
     #[inline]
     fn bind(&self, ctx: BindCtx<'_>) {
-        ctx.bind::<_, SharedCfg, _>(&self.connector);
+        ctx.bind(&self.connector);
     }
 
     #[inline]
