@@ -67,7 +67,13 @@ async fn sender_delivery_remote_settled() {
     ));
     let s = session(&conn);
     let _ = handle_frame(&conn, End { error: None }.into());
-    assert!(s.inner.get_ref().unsettled_snd_deliveries.is_empty());
+    assert!(
+        s.inner
+            .get_ref()
+            .unsettled_snd_deliveries
+            .borrow()
+            .is_empty()
+    );
     assert!(d.is_remote_settled());
 }
 
@@ -346,7 +352,7 @@ async fn delivery_wait_outcome() {
     }
     let inner = session(&conn).inner;
     assert_eq!(
-        inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
+        inner.get_ref().unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
         0
     );
     let mut live = Box::pin(d.wait());
@@ -356,7 +362,7 @@ async fn delivery_wait_outcome() {
         assert!(pending(w.as_mut()).await);
     }
     assert_eq!(
-        inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
+        inner.get_ref().unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
         1
     );
     drop(live);

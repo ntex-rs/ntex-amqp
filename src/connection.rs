@@ -253,7 +253,7 @@ impl ConnectionInner {
                 SessionState::Opening(_, _) => (),
                 // closing session waits for remote end, links and `end()` wait as well
                 SessionState::Established(ses) | SessionState::Closing(ses) => {
-                    ses.get_mut().set_error(err.clone());
+                    ses.get_ref().set_error(err.clone());
                 }
             }
         }
@@ -465,7 +465,7 @@ impl ConnectionInner {
                             let attach = detach(&attach);
                             if condition.is_none() {
                                 let cell = session.clone();
-                                if session.get_mut().handle_attach(&attach, cell) {
+                                if session.get_ref().handle_attach(&attach, cell) {
                                     return Ok(Action::None);
                                 }
                                 // remotely opened link, local handle must be within remote handle-max
@@ -488,7 +488,7 @@ impl ConnectionInner {
                                 }));
                                 let id = session.get_ref().id();
                                 let action = session
-                                    .get_mut()
+                                    .get_ref()
                                     .end(AmqpProtocolError::SessionEnded(Some(err.clone())));
                                 self.sessions[token] = SessionState::Closing(session.clone());
                                 self.post_frame(AmqpFrame::new(
@@ -502,14 +502,14 @@ impl ConnectionInner {
                                 Role::Receiver => {
                                     // remotly opened sender link
                                     let (link, response) = session
-                                        .get_mut()
+                                        .get_ref()
                                         .new_remote_sender(session.clone(), &attach);
                                     Ok(Action::AttachSender(link, attach, response))
                                 }
                                 Role::Sender => {
                                     // receiver link
                                     let (response, link) = session
-                                        .get_mut()
+                                        .get_ref()
                                         .attach_remote_receiver_link(session.clone(), &attach);
                                     Ok(Action::AttachReceiver(link, attach, response))
                                 }
@@ -517,9 +517,9 @@ impl ConnectionInner {
                         }
                         Frame::End(remote_end) => {
                             log::trace!("{}: Remote session end: {}", self.io.tag(), channel_id);
-                            let id = session.get_mut().id();
+                            let id = session.get_ref().id();
                             let action = session
-                                .get_mut()
+                                .get_ref()
                                 .end(AmqpProtocolError::SessionEnded(remote_end.error));
                             if let Some(token) = self.sessions_map.remove(&channel_id) {
                                 self.sessions.remove(token);
@@ -527,13 +527,13 @@ impl ConnectionInner {
                             self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
                             Ok(action)
                         }
-                        _ => session.get_mut().handle_frame(frame),
+                        _ => session.get_ref().handle_frame(frame),
                     },
                     Some(SessionState::Closing(session)) => match frame {
                         Frame::End(frm) => {
                             log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
                             let _ = session
-                                .get_mut()
+                                .get_ref()
                                 .end(AmqpProtocolError::SessionEnded(frm.error));
                             if let Some(token) = self.sessions_map.remove(&channel_id) {
                                 self.sessions.remove(token);

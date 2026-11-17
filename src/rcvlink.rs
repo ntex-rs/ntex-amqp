@@ -133,7 +133,7 @@ impl ReceiverLink {
         inner
             .session
             .inner
-            .get_mut()
+            .get_ref()
             .confirm_receiver_link(&self.inner, response, size)
     }
 
@@ -194,7 +194,7 @@ impl ReceiverLink {
             .get_ref()
             .session
             .inner
-            .get_mut()
+            .get_ref()
             .post_frame(disp.into());
     }
 
@@ -420,7 +420,7 @@ impl ReceiverLinkInner {
         let detach = (!self.closed.get()).then(|| {
             self.session
                 .inner
-                .get_mut()
+                .get_ref()
                 .detach_receiver_link(self.handle, true, error)
         });
         self.local_detached();
@@ -448,6 +448,7 @@ impl ReceiverLinkInner {
             .inner
             .get_ref()
             .unsettled_rcv_deliveries
+            .borrow()
             .contains_key(&id)
     }
 
@@ -516,7 +517,7 @@ impl ReceiverLinkInner {
 
         // credit is sent after link confirmation
         if !self.opening.get() {
-            self.session.inner.get_mut().rcv_link_flow(
+            self.session.inner.get_ref().rcv_link_flow(
                 self.handle,
                 self.delivery_count.get(),
                 self.credit.get(),
@@ -595,8 +596,9 @@ impl ReceiverLinkInner {
                     && let Some(inner) = self
                         .session
                         .inner
-                        .get_mut()
+                        .get_ref()
                         .unsettled_rcv_deliveries
+                        .borrow_mut()
                         .get_mut(&id)
                 {
                     inner.handle_disposition(true, None);
@@ -858,7 +860,7 @@ impl ReceiverLinkBuilder {
         let cell = self.session.clone();
         let rx = self
             .session
-            .get_mut()
+            .get_ref()
             .attach_local_receiver_link(cell, self.frame);
         timeout_checked(self.timeout, rx.recv())
             .await

@@ -138,7 +138,7 @@ async fn sender_link_drain() {
     let snd =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone());
     sleep(Millis(50)).await;
     assert_eq!(frames(), ["Begin", "Attach"]);
@@ -195,7 +195,7 @@ async fn sender_link_drain() {
     let lnk =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, lnk.inner.clone());
     assert_eq!(lnk.credit(), 0);
     sleep(Millis(50)).await;
@@ -238,7 +238,7 @@ async fn sender_link_credit_on_window_wait() {
     let snd =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone());
     sleep(Millis(50)).await;
     assert_eq!(frames(), ["Begin", "Attach"]);
@@ -352,7 +352,7 @@ async fn sender_link_flow_wakes_by_credit() {
     let snd =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let transfer = || {
         let mut tr = Tr(
@@ -457,7 +457,7 @@ async fn sender_link_close_fails_waiting_transfers() {
         };
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone())
     };
     let send = |snd: &SenderLink, body: &'static [u8]| {
@@ -523,7 +523,7 @@ async fn sender_link_detach_fails_waiting_transfers() {
         };
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone())
     };
     let send = |snd: &SenderLink, body: &'static [u8]| {
@@ -656,7 +656,7 @@ async fn sender_link_stale_flow_with(initial: u32) {
     let snd =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone());
 
     // receiver has not received attach yet, initial delivery count is used

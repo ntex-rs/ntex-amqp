@@ -357,7 +357,7 @@ async fn session_ending_sends_no_frames() {
     let snd =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
         panic!()

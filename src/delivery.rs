@@ -49,8 +49,9 @@ impl Delivery {
         if !settled {
             session
                 .inner
-                .get_mut()
+                .get_ref()
                 .unsettled_rcv_deliveries
+                .borrow_mut()
                 .insert(id, DeliveryInner::new(link_handle));
         }
 
@@ -68,11 +69,14 @@ impl Delivery {
 
     /// Drop delivery without sending disposition
     pub(crate) fn discard(self) {
-        self.session
+        let delivery = self
+            .session
             .inner
-            .get_mut()
+            .get_ref()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .borrow_mut()
             .remove(&self.id);
+        drop(delivery);
     }
 
     pub fn id(&self) -> DeliveryNumber {
@@ -84,17 +88,13 @@ impl Delivery {
     }
 
     pub fn remote_state(&self) -> Option<DeliveryState> {
-        if let Some(inner) = self
-            .session
+        self.session
             .inner
-            .get_mut()
+            .get_ref()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
-            .get_mut(&self.id)
-        {
-            inner.state.clone()
-        } else {
-            None
-        }
+            .borrow()
+            .get(&self.id)
+            .and_then(|inner| inner.state.clone())
     }
 
     pub fn is_remote_settled(&self) -> bool {
@@ -125,7 +125,7 @@ impl Delivery {
                 state: Some(state),
                 batchable: false,
             }));
-            self.session.inner.get_mut().post_frame(disp.into());
+            self.session.inner.get_ref().post_frame(disp.into());
         }
     }
 
@@ -147,7 +147,7 @@ impl Delivery {
             state: Some(state),
             batchable: false,
         }));
-        self.session.inner.get_mut().post_frame(disp.into());
+        self.session.inner.get_ref().post_frame(disp.into());
     }
 
     fn is_set(&self, flag: Flags) -> bool {
@@ -164,8 +164,9 @@ impl Delivery {
     fn is_detached(&self) -> bool {
         self.session
             .inner
-            .get_mut()
+            .get_ref()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .borrow()
             .get(&self.id)
             .is_none_or(|inner| inner.error.is_some())
     }
@@ -176,8 +177,9 @@ impl Delivery {
             && self
                 .session
                 .inner
-                .get_mut()
+                .get_ref()
                 .unsettled_deliveries(self.is_set(Flags::SENDER))
+                .borrow()
                 .get(&self.id)
                 .is_some_and(|inner| inner.settled)
         {
@@ -198,24 +200,26 @@ impl Delivery {
         }
 
         loop {
-            let Some(inner) = self
-                .session
-                .inner
-                .get_mut()
-                .unsettled_deliveries(self.is_set(Flags::SENDER))
-                .get_mut(&self.id)
-            else {
-                return Err(self.session_error());
-            };
-            if inner.settled {
-                self.set_flag(Flags::REMOTE_SETTLED);
-            }
-            if let Some(res) = inner.outcome() {
-                return res;
-            }
+            // deliveries must not be borrowed across await point
+            let rx = {
+                let session = self.session.inner.get_ref();
+                let mut deliveries = session
+                    .unsettled_deliveries(self.is_set(Flags::SENDER))
+                    .borrow_mut();
+                let Some(inner) = deliveries.get_mut(&self.id) else {
+                    return Err(self.session_error());
+                };
+                if inner.settled {
+                    self.set_flag(Flags::REMOTE_SETTLED);
+                }
+                if let Some(res) = inner.outcome() {
+                    return res;
+                }
 
-            let (tx, rx) = self.session.inner.get_ref().pool_notify.channel();
-            inner.add_waiter(tx);
+                let (tx, rx) = session.pool_notify.channel();
+                inner.add_waiter(tx);
+                rx
+            };
             let _ = rx.await;
         }
     }
@@ -232,10 +236,13 @@ impl Delivery {
 
 impl Drop for Delivery {
     fn drop(&mut self) {
-        let inner = self.session.inner.get_mut();
-        let deliveries = inner.unsettled_deliveries(self.is_set(Flags::SENDER));
+        let inner = self.session.inner.get_ref();
+        let delivery = inner
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .borrow_mut()
+            .remove(&self.id);
 
-        if let Some(delivery) = deliveries.remove(&self.id)
+        if let Some(delivery) = delivery
             && !delivery.settled
             && delivery.error.is_none()
             && !self.is_set(Flags::REMOTE_SETTLED)

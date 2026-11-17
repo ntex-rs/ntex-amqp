@@ -81,8 +81,9 @@ async fn frames_detached_from_read_buffer() {
         panic!()
     };
     session
-        .get_mut()
+        .get_ref()
         .unsettled_snd_deliveries
+        .borrow_mut()
         .insert(0, DeliveryInner::new(0));
     let disp = Disposition(Box::new(DispositionInner {
         role: Role::Receiver,

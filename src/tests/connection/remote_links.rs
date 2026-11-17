@@ -25,7 +25,7 @@ async fn detach_unconfirmed_remote_sender_link() {
 
     // link is confirmed
     s.inner
-        .get_mut()
+        .get_ref()
         .attach_remote_sender_link(&attach, response, link.inner.clone());
     assert!(s.get_sender_link("n").is_some());
     sleep(Millis(10)).await;
@@ -64,7 +64,7 @@ async fn remote_sender_flow_before_confirm() {
     let link =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, link.inner.clone());
     assert_eq!(link.credit(), 10);
     assert!(link.ready().await);
@@ -92,7 +92,7 @@ async fn remote_sender_link_names() {
         };
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, link.inner.clone())
     };
 
@@ -130,7 +130,7 @@ async fn remote_sender_link_names() {
         panic!()
     };
     let inner = session.inner.get_ref();
-    assert!(inner.sender_names.is_empty() && inner.link_names.is_empty());
+    assert!(inner.sender_names.borrow().is_empty() && inner.link_names.borrow().is_empty());
 }
 
 /// STATEMENT: Session and link state from flow frames is applied in frame order before
@@ -157,7 +157,7 @@ async fn remote_sender_flow_order() {
     let link =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, link.inner.clone());
 
     let flow = |credit, window| {
@@ -219,7 +219,7 @@ async fn remote_sender_detach_before_confirm() {
         };
 
         if accept {
-            let link = session.inner.get_mut().attach_remote_sender_link(
+            let link = session.inner.get_ref().attach_remote_sender_link(
                 &attach,
                 response,
                 link.inner.clone(),
@@ -238,7 +238,7 @@ async fn remote_sender_detach_before_confirm() {
         } else {
             session
                 .inner
-                .get_mut()
+                .get_ref()
                 .detach_unconfirmed_sender_link(&attach, &link.inner, None);
             assert!(link.is_closed());
         }
@@ -339,7 +339,7 @@ async fn flow_echo_link_state() {
     };
     session
         .inner
-        .get_mut()
+        .get_ref()
         .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let Ok(Action::AttachSender(..)) =
         handle_frame(&conn, named_attach(Role::Receiver, "o", "o", 5))
@@ -404,7 +404,7 @@ async fn remote_receiver_stale_confirm() {
     assert_eq!(link_a.handle(), link_b.handle());
 
     // stale confirmation and credit are ignored
-    assert!(!session.inner.get_mut().confirm_receiver_link(
+    assert!(!session.inner.get_ref().confirm_receiver_link(
         &link_a.inner,
         response_a.clone(),
         None
@@ -493,7 +493,7 @@ async fn remote_sender_reject_detach() {
     };
     session
         .inner
-        .get_mut()
+        .get_ref()
         .detach_unconfirmed_sender_link(&attach, &link.inner, None);
     assert!(session.inner.get_ref().is_remote_handle_used(1));
 
@@ -506,7 +506,7 @@ async fn remote_sender_reject_detach() {
     let link2 =
         session
             .inner
-            .get_mut()
+            .get_ref()
             .attach_remote_sender_link(&attach, response, link2.inner.clone());
     assert_eq!(link2.id(), 1);
 
@@ -637,7 +637,7 @@ async fn remote_sender_end_before_confirm() {
 
         // confirmation after end does not send frames
         if accept {
-            session.inner.get_mut().attach_remote_sender_link(
+            session.inner.get_ref().attach_remote_sender_link(
                 &attach,
                 response,
                 link.inner.clone(),
@@ -645,7 +645,7 @@ async fn remote_sender_end_before_confirm() {
         } else {
             session
                 .inner
-                .get_mut()
+                .get_ref()
                 .detach_unconfirmed_sender_link(&attach, &link.inner, None);
         }
 
@@ -770,7 +770,7 @@ async fn remote_sender_detach_reply_exceeds_frame_size() {
     };
     session(&conn)
         .inner
-        .get_mut()
+        .get_ref()
         .attach_remote_sender_link(&attach, response, link.inner.clone());
     // session slab holds the only link reference
     drop(link);
@@ -823,7 +823,7 @@ async fn remote_link_attach_reply_exceeds_frame_size() {
         let name = "n".repeat(1024);
         match handle_frame(&conn, named_attach(role, &name, "a", 3)) {
             Ok(Action::AttachSender(link, attach, response)) => {
-                let link = session(&conn).inner.get_mut().attach_remote_sender_link(
+                let link = session(&conn).inner.get_ref().attach_remote_sender_link(
                     &attach,
                     response,
                     link.inner.clone(),

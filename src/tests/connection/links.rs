@@ -21,7 +21,7 @@ fn remote_sender(conn: &Connection, name: &str, handle: u32) -> SenderLink {
     };
     session(conn)
         .inner
-        .get_mut()
+        .get_ref()
         .attach_remote_sender_link(&attach, response, snd.inner.clone())
 }
 
@@ -411,7 +411,7 @@ async fn transfer_builder_errors() {
     let Ok(Action::AttachSender(snd, attach, response)) = handle_frame(&conn, attach.into()) else {
         panic!()
     };
-    let link = session(&conn).inner.get_mut().attach_remote_sender_link(
+    let link = session(&conn).inner.get_ref().attach_remote_sender_link(
         &attach,
         response,
         snd.inner.clone(),

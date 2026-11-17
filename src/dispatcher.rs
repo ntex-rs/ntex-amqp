@@ -364,7 +364,7 @@ impl ControlState {
                 ControlFrameKind::AttachSender(frm, _, link) => {
                     frame
                         .session_cell()
-                        .get_mut()
+                        .get_ref()
                         .detach_unconfirmed_sender_link(frm, &link.inner, Some(err));
                 }
                 ControlFrameKind::Flow(_, link) | ControlFrameKind::RemoteDetachSender(_, link) => {
@@ -412,7 +412,7 @@ impl ControlState {
                     });
                 }
                 ControlFrameKind::AttachSender(ref frm, ref mut pfrm, ref link) => {
-                    frame.session_cell().get_mut().attach_remote_sender_link(
+                    frame.session_cell().get_ref().attach_remote_sender_link(
                         frm,
                         pfrm.take(),
                         link.inner.clone(),

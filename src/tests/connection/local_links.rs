@@ -688,7 +688,14 @@ async fn local_link_names() {
     handle(peer_detach(1)).unwrap();
     fut.await.unwrap().unwrap();
     assert!(session.get_sender_link("x").is_none());
-    assert!(!session.inner.get_ref().sender_names.contains_key("x"));
+    assert!(
+        !session
+            .inner
+            .get_ref()
+            .sender_names
+            .borrow()
+            .contains_key("x")
+    );
 
     // remote attach with the name of removed link
     let Ok(Action::AttachSender(..)) = handle(named_attach(Role::Receiver, "x", "x", 2)) else {

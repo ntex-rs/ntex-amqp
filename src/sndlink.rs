@@ -322,7 +322,7 @@ impl SenderLinkInner {
             // fail transfers waiting for link credit or session window
             let err = AmqpProtocolError::Disconnected;
             self.local_detached(&err);
-            let session = self.session.inner.get_mut();
+            let session = self.session.inner.get_ref();
             session.drop_link_transfers(self.id as Handle, &err);
             session.detach_sender_link(self.id as Handle, true, error)
         });
@@ -450,7 +450,7 @@ impl SenderLinkInner {
     fn drain_and_post(&self) {
         if self.drain_credit() {
             let state = self.flow_state();
-            self.session.inner.get_mut().post_flow(Some(state));
+            self.session.inner.get_ref().post_flow(Some(state));
         }
     }
 
@@ -508,7 +508,7 @@ impl SenderLinkInner {
 
             // waiting transfer claims link credit, but it does not delay credit drain
             let handle = inner.id as Handle;
-            let session = inner.session.inner.get_mut();
+            let session = inner.session.inner.get_ref();
             if let Some(rx) = session.window_waiter(handle, claim.is_some())? {
                 drop(claim.take());
                 inner.active.set(inner.active.get() + 1);
@@ -530,7 +530,7 @@ impl SenderLinkInner {
         let (id, chunks) = inner
             .session
             .inner
-            .get_mut()
+            .get_ref()
             .send_transfer(handle, &tag, body, settled, format)?;
         if let Some(claim) = claim.take() {
             claim.consume();
@@ -552,12 +552,13 @@ impl SenderLinkInner {
                 } else if inner.closed.get() {
                     return Err(AmqpProtocolError::Disconnected);
                 }
-                let session = inner.session.inner.get_mut();
+                let session = inner.session.inner.get_ref();
                 if let Some(rx) = session.window_waiter(handle, claim.is_some())? {
                     drop(claim.take());
                     claim = Some(WindowWaiter::new(rx, inner.session.inner.clone()).await?);
                 } else if session
                     .unsettled_snd_deliveries
+                    .borrow()
                     .get(&id)
                     .is_some_and(DeliveryInner::is_settled)
                 {
@@ -588,8 +589,8 @@ impl SenderLinkInner {
         self.partial.set(false);
         if let Some(id) = aborted {
             let handle = self.id as Handle;
-            let session = self.session.inner.get_mut();
-            session.unsettled_snd_deliveries.remove(&id);
+            let session = self.session.inner.get_ref();
+            session.unsettled_snd_deliveries.borrow_mut().remove(&id);
             if !self.closed.get() {
                 session.abort_transfer(handle, id);
             }
@@ -814,7 +815,7 @@ impl SenderLinkBuilder {
 
     /// Initiate attach sender process
     pub async fn attach(self) -> Result<SenderLink, AmqpProtocolError> {
-        let rx = self.session.get_mut().attach_local_sender_link(self.frame);
+        let rx = self.session.get_ref().attach_local_sender_link(self.frame);
         let inner = timeout_checked(self.timeout, rx.recv())
             .await
             .map_err(|()| AmqpProtocolError::LinkAttachTimeout)??;

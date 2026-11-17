@@ -358,8 +358,8 @@ fn unsettled(conn: &Connection) -> (usize, usize) {
     let s = session(conn);
     let inner = s.inner.get_ref();
     (
-        inner.unsettled_snd_deliveries.len(),
-        inner.unsettled_rcv_deliveries.len(),
+        inner.unsettled_snd_deliveries.borrow().len(),
+        inner.unsettled_rcv_deliveries.borrow().len(),
     )
 }
 
@@ -420,7 +420,7 @@ fn small_frames_sender() -> (Io, Connection, IoTest, SenderLink) {
     else {
         panic!()
     };
-    let snd = session(&conn).inner.get_mut().attach_remote_sender_link(
+    let snd = session(&conn).inner.get_ref().attach_remote_sender_link(
         &attach,
         response,
         snd.inner.clone(),
@@ -467,7 +467,7 @@ fn add_sender(conn: &Connection, name: &str, handle: u32, window: u32) -> Sender
     else {
         panic!()
     };
-    let snd = session(conn).inner.get_mut().attach_remote_sender_link(
+    let snd = session(conn).inner.get_ref().attach_remote_sender_link(
         &attach,
         response,
         snd.inner.clone(),
