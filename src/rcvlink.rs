@@ -1,6 +1,6 @@
 use std::{
-    cell, collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context,
-    task::Poll,
+    cell, cell::RefCell, collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin,
+    task::Context, task::Poll,
 };
 
 use ntex_amqp_codec::protocol::{
@@ -32,7 +32,7 @@ pub(crate) struct ReceiverLinkInner {
     // remote link is not confirmed yet
     opening: cell::Cell<bool>,
     reader_task: LocalWaker,
-    queue: VecDeque<(Delivery, Transfer)>,
+    queue: RefCell<VecDeque<(Delivery, Transfer)>>,
     credit: cell::Cell<u32>,
     delivery_count: cell::Cell<SequenceNo>,
     // delivery-limit advertised before credit was reduced, transfers
@@ -41,7 +41,7 @@ pub(crate) struct ReceiverLinkInner {
     // credit is reset to `0` by application, router does not add credit
     paused: cell::Cell<bool>,
     error: ErrorCell,
-    partial_body: Option<BytePages>,
+    partial_body: RefCell<Option<BytePages>>,
     max_message_size: cell::Cell<u64>,
 }
 
@@ -145,7 +145,7 @@ impl ReceiverLink {
     /// Each queued, not yet received delivery may keep its read buffer
     /// alive, credit bounds the memory retained by the link.
     pub fn set_link_credit(&self, credit: u32) {
-        self.inner.get_mut().set_link_credit(credit);
+        self.inner.get_ref().set_link_credit(credit);
     }
 
     /// Set available link credit, `0` stops the remote sender.
@@ -156,7 +156,7 @@ impl ReceiverLink {
     /// Router does not add credit to the link reset to `0`, non-zero
     /// credit resumes the link.
     pub fn reset_link_credit(&self, credit: u32) {
-        self.inner.get_mut().reset_link_credit(credit);
+        self.inner.get_ref().reset_link_credit(credit);
     }
 
     /// Link credit is used up, and link is not paused by application
@@ -180,9 +180,9 @@ impl ReceiverLink {
 
     /// Get completely received delivery
     pub fn get_delivery(&self) -> Option<(Delivery, Transfer)> {
-        let inner = self.inner.get_mut();
+        let inner = self.inner.get_ref();
         if inner.ready_deliveries() > 0 {
-            inner.queue.pop_front()
+            inner.queue.borrow_mut().pop_front()
         } else {
             None
         }
@@ -200,7 +200,7 @@ impl ReceiverLink {
 
     /// Close receiver link
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.inner.get_mut().close(None)
+        self.inner.get_ref().close(None)
     }
 
     /// Close receiver link with error
@@ -211,7 +211,7 @@ impl ReceiverLink {
     where
         Error: From<E>,
     {
-        self.inner.get_mut().close(Some(error.into()))
+        self.inner.get_ref().close(Some(error.into()))
     }
 
     /// Attempt to pull out the next value of this receiver, registering
@@ -278,12 +278,12 @@ impl ReceiverLinkInner {
             session: Session::new(session),
             closed: cell::Cell::new(false),
             opening: cell::Cell::new(opening),
-            queue: VecDeque::with_capacity(4),
+            queue: RefCell::new(VecDeque::with_capacity(4)),
             credit: cell::Cell::new(0),
             in_flight_limit: cell::Cell::new(None),
             paused: cell::Cell::new(false),
             error: ErrorCell::default(),
-            partial_body: None,
+            partial_body: RefCell::new(None),
             delivery_count: cell::Cell::new(frame.initial_delivery_count().unwrap_or(0)),
             max_message_size: cell::Cell::new(max_message_size),
             reader_task: LocalWaker::new(),
@@ -297,12 +297,13 @@ impl ReceiverLinkInner {
     /// Number of completely received deliveries
     fn ready_deliveries(&self) -> usize {
         self.queue
+            .borrow()
             .len()
-            .saturating_sub(usize::from(self.partial_body.is_some()))
+            .saturating_sub(usize::from(self.partial_body.borrow().is_some()))
     }
 
     /// Link is detached by peer
-    pub(crate) fn remote_detached(&mut self, error: Option<Error>) {
+    pub(crate) fn remote_detached(&self, error: Option<Error>) {
         if let Some(ref error) = error {
             log::warn!(
                 "{}: Receiver link has been closed remotely handle: {:?} name: {:?} error: {:?}",
@@ -323,7 +324,7 @@ impl ReceiverLinkInner {
     }
 
     /// Session is ended or connection is closed
-    pub(crate) fn session_ended(&mut self, err: AmqpProtocolError) {
+    pub(crate) fn session_ended(&self, err: AmqpProtocolError) {
         log::trace!(
             "{}: Receiver link is closed by session error handle: {:?} name: {:?} error: {err:?}",
             self.session.tag(),
@@ -333,7 +334,7 @@ impl ReceiverLinkInner {
         self.set_closed(Some(err));
     }
 
-    fn set_closed(&mut self, error: Option<AmqpProtocolError>) {
+    fn set_closed(&self, error: Option<AmqpProtocolError>) {
         self.closed.set(true);
         self.error.set(error);
         self.wake();
@@ -353,14 +354,14 @@ impl ReceiverLinkInner {
         self.handle
     }
 
-    pub(crate) fn set_delivery_count(&mut self, delivery_count: SequenceNo) {
+    pub(crate) fn set_delivery_count(&self, delivery_count: SequenceNo) {
         self.delivery_count.set(delivery_count);
     }
 
     /// Apply sender's delivery-count, delivery-limit is preserved (#2.6.7)
-    pub(crate) fn apply_flow(&mut self, flow: &Flow) {
+    pub(crate) fn apply_flow(&self, flow: &Flow) {
         // sender counts multi-frame delivery at first frame, receiver at last frame
-        if self.partial_body.is_some() {
+        if self.partial_body.borrow().is_some() {
             return;
         }
         if let Some(snd_delivery_count) = flow.delivery_count() {
@@ -400,20 +401,20 @@ impl ReceiverLinkInner {
         &self.name
     }
 
-    pub(crate) fn detached(&mut self) {
-        // drop pending transfers
-        self.queue.clear();
+    pub(crate) fn detached(&self) {
+        // drop pending transfers, deliveries are dropped after queue is released
+        drop(self.queue.take());
         self.closed.set(true);
     }
 
     /// Link is detached locally, wake up reader
-    pub(crate) fn local_detached(&mut self) {
+    pub(crate) fn local_detached(&self) {
         self.closed.set(true);
         self.wake();
     }
 
     pub(crate) fn close(
-        &mut self,
+        &self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
         let detach = (!self.closed.get()).then(|| {
@@ -463,13 +464,13 @@ impl ReceiverLinkInner {
     ///
     /// Application never sees aborted delivery, so its credit is returned
     /// to the sender, otherwise the link could stall without credit.
-    fn delivery_aborted(&mut self) -> TransferResult {
+    fn delivery_aborted(&self) -> TransferResult {
         self.delivery_count
             .set(self.delivery_count.get().wrapping_add(1));
         TransferResult::Flow
     }
 
-    pub(crate) fn set_link_credit(&mut self, credit: u32) {
+    pub(crate) fn set_link_credit(&self, credit: u32) {
         // link handle could be reused by another link
         if self.closed.get() {
             return;
@@ -480,7 +481,7 @@ impl ReceiverLinkInner {
         self.update_credit(self.credit.get().saturating_add(credit));
     }
 
-    pub(crate) fn reset_link_credit(&mut self, credit: u32) {
+    pub(crate) fn reset_link_credit(&self, credit: u32) {
         // link handle could be reused by another link
         if self.closed.get() {
             return;
@@ -500,7 +501,7 @@ impl ReceiverLinkInner {
         self.update_credit(credit);
     }
 
-    fn update_credit(&mut self, credit: u32) {
+    fn update_credit(&self, credit: u32) {
         self.credit.set(credit);
 
         // previous delivery-limit is covered by new one
@@ -524,7 +525,7 @@ impl ReceiverLinkInner {
     }
 
     /// Mark remote link as confirmed, returns pending link credit
-    pub(crate) fn confirmed(&mut self) -> Option<(SequenceNo, u32)> {
+    pub(crate) fn confirmed(&self) -> Option<(SequenceNo, u32)> {
         self.opening.set(false);
         if self.credit.get() > 0 {
             Some((self.delivery_count.get(), self.credit.get()))
@@ -533,9 +534,8 @@ impl ReceiverLinkInner {
         }
     }
 
-    #[allow(clippy::unnecessary_unwrap)]
     pub(crate) fn handle_transfer(
-        &mut self,
+        &self,
         mut transfer: Transfer,
         inner: &Cell<ReceiverLinkInner>,
     ) -> TransferResult {
@@ -556,11 +556,13 @@ impl ReceiverLinkInner {
             }
 
             // handle batched transfer
-            if let Some(ref mut body) = self.partial_body {
+            let has_partial = self.partial_body.borrow().is_some();
+            if has_partial {
                 if transfer.0.delivery_id.is_some() {
                     // if delivery_id is set, then it should be equal to first transfer
                     if self
                         .queue
+                        .borrow()
                         .back()
                         .is_none_or(|back| Some(back.0.id()) != transfer.0.delivery_id)
                     {
@@ -574,28 +576,36 @@ impl ReceiverLinkInner {
                 }
 
                 if aborted {
-                    self.partial_body = None;
-                    if let Some((delivery, _)) = self.queue.pop_back() {
+                    self.partial_body.take();
+                    let delivery = self.queue.borrow_mut().pop_back();
+                    if let Some((delivery, _)) = delivery {
                         delivery.discard();
                     }
                     return self.delivery_aborted();
                 }
 
                 // sender could settle delivery on any continuation transfer
+                let id = self
+                    .queue
+                    .borrow()
+                    .back()
+                    .map(|(delivery, _)| delivery.id());
                 if transfer.settled() == Some(true)
-                    && let Some((delivery, _)) = self.queue.back()
+                    && let Some(id) = id
                     && let Some(inner) = self
                         .session
                         .inner
                         .get_mut()
                         .unsettled_rcv_deliveries
-                        .get_mut(&delivery.id())
+                        .get_mut(&id)
                 {
                     inner.handle_disposition(true, None);
                 }
 
                 // merge transfer data and check size
-                if let Some(transfer_body) = transfer.0.body.take() {
+                if let Some(transfer_body) = transfer.0.body.take()
+                    && let Some(body) = self.partial_body.borrow_mut().as_mut()
+                {
                     if size_exceeded(
                         self.max_message_size.get(),
                         body.len() + transfer_body.len(),
@@ -614,10 +624,13 @@ impl ReceiverLinkInner {
                     self.delivery_count
                         .set(self.delivery_count.get().wrapping_add(1));
                     let partial_body = self.partial_body.take();
-                    if partial_body.is_some() && !self.queue.is_empty() {
-                        self.queue.back_mut().unwrap().1.0.body =
-                            Some(TransferBody::Data(partial_body.unwrap().freeze()));
-                        if self.queue.len() == 1 {
+                    let first = partial_body.and_then(|mut body| {
+                        let mut queue = self.queue.borrow_mut();
+                        queue.back_mut()?.1.0.body = Some(TransferBody::Data(body.freeze()));
+                        Some(queue.len() == 1)
+                    });
+                    if let Some(first) = first {
+                        if first {
                             self.wake();
                         }
                         TransferResult::Action(Action::Transfer(ReceiverLink {
@@ -649,7 +662,7 @@ impl ReceiverLinkInner {
                     if let Some(data) = transfer.0.body.take() {
                         append_body(&mut body, data);
                     }
-                    self.partial_body = Some(body);
+                    *self.partial_body.borrow_mut() = Some(body);
 
                     // transfer is stored until the last partial transfer
                     if let Some(tag) = transfer.0.delivery_tag.as_mut() {
@@ -666,7 +679,7 @@ impl ReceiverLinkInner {
                         transfer.settled().unwrap_or_default(),
                         self.session.clone(),
                     );
-                    self.queue.push_back((delivery, transfer));
+                    self.queue.borrow_mut().push_back((delivery, transfer));
                     TransferResult::Action(Action::None)
                 } else {
                     let err = Error(Box::new(codec::ErrorInner {
@@ -693,8 +706,12 @@ impl ReceiverLinkInner {
                     transfer.settled().unwrap_or_default(),
                     self.session.clone(),
                 );
-                self.queue.push_back((delivery, transfer));
-                if self.queue.len() == 1 {
+                let first = {
+                    let mut queue = self.queue.borrow_mut();
+                    queue.push_back((delivery, transfer));
+                    queue.len() == 1
+                };
+                if first {
                     self.wake();
                 }
                 TransferResult::Action(Action::Transfer(ReceiverLink {
@@ -731,7 +748,7 @@ impl std::ops::Deref for EstablishedReceiverLink {
 
 impl Drop for EstablishedReceiverLink {
     fn drop(&mut self) {
-        self.0.inner.get_mut().local_detached();
+        self.0.inner.get_ref().local_detached();
     }
 }
 

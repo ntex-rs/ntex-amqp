@@ -141,7 +141,7 @@ async fn pending_controls_release_connection() {
                 assert!(matches!(
                     receiver
                         .inner
-                        .get_mut()
+                        .get_ref()
                         .handle_transfer(frame, &receiver.inner),
                     crate::rcvlink::TransferResult::Action(Action::Transfer(_))
                 ));

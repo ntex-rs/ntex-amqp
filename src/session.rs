@@ -648,10 +648,10 @@ impl SessionInner {
         for (_, st) in &mut self.links {
             match st {
                 Either::Left(SenderLinkState::Established(link)) => {
-                    link.inner.get_mut().remote_detached(err.clone());
+                    link.inner.get_ref().remote_detached(err.clone());
                 }
                 Either::Left(SenderLinkState::OpeningRemote { link, .. }) => {
-                    link.get_mut().remote_detached(err.clone());
+                    link.get_ref().remote_detached(err.clone());
                 }
                 Either::Left(SenderLinkState::Opening(tx, _)) => {
                     if let Some(tx) = tx.take() {
@@ -665,16 +665,16 @@ impl SessionInner {
                     }
                 }
                 Either::Right(ReceiverLinkState::Established(link)) => {
-                    link.inner.get_mut().session_ended(err.clone());
+                    link.inner.get_ref().session_ended(err.clone());
                 }
                 Either::Right(ReceiverLinkState::Opening(link, _)) => {
                     if let Some((link, _)) = link.as_ref() {
-                        link.get_mut().session_ended(err.clone());
+                        link.get_ref().session_ended(err.clone());
                     }
                 }
                 Either::Right(ReceiverLinkState::OpeningLocal(item)) => {
                     if let Some((link, tx)) = item.take() {
-                        link.get_mut().detached();
+                        link.get_ref().detached();
                         let _ = tx.send(Err(err.clone()));
                     }
                 }
@@ -928,7 +928,7 @@ impl SessionInner {
 
             let link = SenderLink::new(link);
             link.inner
-                .get_mut()
+                .get_ref()
                 .remote_detached(AmqpProtocolError::LinkDetached(detach.0.error.clone()));
             self.sink
                 .get_control_queue()
@@ -945,7 +945,7 @@ impl SessionInner {
 
         // link flow received before confirmation
         if let Some(flow) = flow
-            && link.get_mut().apply_flow(&flow)
+            && link.get_ref().apply_flow(&flow)
         {
             self.post_flow(Some(link.get_ref().flow_state()));
         }
@@ -1047,7 +1047,7 @@ impl SessionInner {
                     // fail transfers waiting for link credit or session window
                     let err = AmqpProtocolError::Disconnected;
                     drop_pending_transfers(&mut self.pending_transfers, id, &err);
-                    sender_link.inner.get_mut().local_detached(&err);
+                    sender_link.inner.get_ref().local_detached(&err);
 
                     let sender_link = sender_link.clone();
                     let detach = Detach(Box::new(codec::DetachInner {
@@ -1094,7 +1094,7 @@ impl SessionInner {
     ) {
         let token = link.id;
         if !link.get_ref().closed.get() {
-            link.get_mut()
+            link.get_ref()
                 .remote_detached(AmqpProtocolError::LinkDetached(error.clone()));
         }
 
@@ -1314,7 +1314,7 @@ impl SessionInner {
                 .into(),
             );
 
-            link.get_mut().remote_detached(detach.0.error.clone());
+            link.get_ref().remote_detached(detach.0.error.clone());
             let link = ReceiverLink::new(link);
             self.sink
                 .get_control_queue()
@@ -1325,7 +1325,7 @@ impl SessionInner {
             return false;
         }
 
-        let credit = link.get_mut().confirmed();
+        let credit = link.get_ref().confirmed();
         self.links[token as usize] = Either::Right(ReceiverLinkState::Established(
             EstablishedReceiverLink::new(link),
         ));
@@ -1405,7 +1405,7 @@ impl SessionInner {
                     }
                 }
                 ReceiverLinkState::Established(receiver_link) => {
-                    receiver_link.inner.get_mut().local_detached();
+                    receiver_link.inner.get_ref().local_detached();
                     let receiver_link = receiver_link.clone();
                     let detach = Detach(Box::new(codec::DetachInner {
                         handle: id,
@@ -1432,7 +1432,7 @@ impl SessionInner {
                 // refused link, waiting for remote detach
                 ReceiverLinkState::OpeningLocal(item) => {
                     if let Some((inner, attach_tx)) = item.take() {
-                        inner.get_mut().detached();
+                        inner.get_ref().detached();
                         let _ = attach_tx.send(Err(AmqpProtocolError::LinkDetached(error.clone())));
                     }
                     let detach = Detach(Box::new(codec::DetachInner {
@@ -1512,7 +1512,7 @@ impl SessionInner {
                         }
                         // sender's delivery-count is authoritative
                         Some(Either::Right(ReceiverLinkState::Established(link))) => {
-                            let inner = link.inner.get_mut();
+                            let inner = link.inner.get_ref();
                             inner.apply_flow(&flow);
                             receiver = Some(inner.flow_state());
                         }
@@ -1522,7 +1522,7 @@ impl SessionInner {
                     self.handle_flow(&flow);
                     let mut drained = false;
                     let state = if let Some(ref link) = established {
-                        let inner = link.inner.get_mut();
+                        let inner = link.inner.get_ref();
                         drained = inner.apply_flow(&flow);
                         Some(inner.flow_state())
                     } else {
@@ -1584,7 +1584,7 @@ impl SessionInner {
                                     // link must not be borrowed while session updates its state
                                     let link = link.clone();
                                     let result =
-                                        link.inner.get_mut().handle_transfer(transfer, &link.inner);
+                                        link.inner.get_ref().handle_transfer(transfer, &link.inner);
                                     Ok(self.apply_transfer_result(&link, result))
                                 }
                                 ReceiverLinkState::Closing(_) => Ok(Action::None),
@@ -1699,7 +1699,7 @@ impl SessionInner {
                     if let Some((link, tx)) = opt_item.take() {
                         self.remote_handles.insert(attach.handle(), index);
                         // delivery-count is initialized by the sender
-                        link.get_mut()
+                        link.get_ref()
                             .set_delivery_count(attach.initial_delivery_count().unwrap_or(0));
 
                         *item = ReceiverLinkState::Established(EstablishedReceiverLink::new(
@@ -1768,7 +1768,7 @@ impl SessionInner {
                         }
 
                         // detach snd link
-                        link.inner.get_mut().remote_detached(err);
+                        link.inner.get_ref().remote_detached(err);
                         self.sink
                             .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
                         action = Action::DetachSender(link.clone(), frame);
@@ -1828,7 +1828,7 @@ impl SessionInner {
                     ReceiverLinkState::OpeningLocal(item) => {
                         // refused link
                         if let Some((inner, tx)) = item.take() {
-                            inner.get_mut().detached();
+                            inner.get_ref().detached();
                             if let Some(err) = frame.0.error.clone() {
                                 let _ = tx.send(Err(AmqpProtocolError::LinkDetached(Some(err))));
                             } else {
@@ -1863,7 +1863,7 @@ impl SessionInner {
                             .post_frame(AmqpFrame::new(self.id as u16, detach.into()));
 
                         // detach rcv link
-                        link.inner.get_mut().remote_detached(error);
+                        link.inner.get_ref().remote_detached(error);
                         action = Action::DetachReceiver(link.clone(), frame);
                         true
                     }

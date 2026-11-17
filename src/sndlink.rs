@@ -1,5 +1,5 @@
 use std::task::{Context, Poll, Waker, ready};
-use std::{cell, collections::VecDeque, future::Future, future::poll_fn, pin::Pin};
+use std::{cell, cell::RefCell, collections::VecDeque, future::Future, future::poll_fn, pin::Pin};
 
 use ntex_amqp_codec::protocol::{
     self as codec, Attach, DeliveryNumber, Error, Flow, MessageFormat, ReceiverSettleMode, Role,
@@ -29,7 +29,7 @@ pub(crate) struct SenderLinkInner {
     initial_delivery_count: SequenceNo,
     delivery_tag: cell::Cell<u32>,
     link_credit: cell::Cell<u32>,
-    pending_transfers: VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>,
+    pending_transfers: RefCell<VecDeque<pool::Sender<Result<(), AmqpProtocolError>>>>,
     // woken credit waiters and in-flight transfers
     active: cell::Cell<u32>,
     // active transfers waiting for session window
@@ -169,7 +169,7 @@ impl SenderLink {
     ///
     /// Link is detached immediately, returned future resolves on remote detach.
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.inner.get_mut().close(None)
+        self.inner.get_ref().close(None)
     }
 
     /// Close sender link with error
@@ -182,7 +182,7 @@ impl SenderLink {
     where
         Error: From<E>,
     {
-        self.inner.get_mut().close(Some(error.into()))
+        self.inner.get_ref().close(Some(error.into()))
     }
 
     /// Notify when link is closed
@@ -235,7 +235,7 @@ impl SenderLinkInner {
             session: Session::new(session),
             remote_handle: handle,
             link_credit: cell::Cell::new(0),
-            pending_transfers: VecDeque::new(),
+            pending_transfers: RefCell::default(),
             active: cell::Cell::new(0),
             window_waiters: cell::Cell::new(0),
             partial: cell::Cell::new(false),
@@ -277,10 +277,10 @@ impl SenderLinkInner {
 
     #[cfg(test)]
     pub(crate) fn pending_transfers(&self) -> usize {
-        self.pending_transfers.len()
+        self.pending_transfers.borrow().len()
     }
 
-    pub(crate) fn remote_detached(&mut self, err: AmqpProtocolError) {
+    pub(crate) fn remote_detached(&self, err: AmqpProtocolError) {
         log::trace!(
             "{}: Detaching sender link {:?} with error {:?}",
             self.session.tag(),
@@ -288,11 +288,7 @@ impl SenderLinkInner {
             err
         );
 
-        // drop pending transfers
-        for tx in self.pending_transfers.drain(..) {
-            let _ = tx.send(Err(err.clone()));
-        }
-
+        self.fail_pending(&err);
         self.closed.set(true);
         self.error.set(Some(err));
         self.on_close.notify_and_lock(());
@@ -300,10 +296,8 @@ impl SenderLinkInner {
     }
 
     /// Link is detached locally, fail transfers waiting for link credit
-    pub(crate) fn local_detached(&mut self, err: &AmqpProtocolError) {
-        for tx in self.pending_transfers.drain(..) {
-            let _ = tx.send(Err(err.clone()));
-        }
+    pub(crate) fn local_detached(&self, err: &AmqpProtocolError) {
+        self.fail_pending(err);
         if !self.closed.get() {
             self.closed.set(true);
             self.on_close.notify_and_lock(());
@@ -311,9 +305,17 @@ impl SenderLinkInner {
         }
     }
 
+    /// Fail transfers waiting for link credit
+    fn fail_pending(&self, err: &AmqpProtocolError) {
+        // senders wake their transfers, queue must not be borrowed
+        for tx in self.pending_transfers.take() {
+            let _ = tx.send(Err(err.clone()));
+        }
+    }
+
     /// Link is detached immediately, returned future waits for remote detach
     pub(crate) fn close(
-        &mut self,
+        &self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
         let detach = (!self.closed.get()).then(|| {
@@ -344,7 +346,7 @@ impl SenderLinkInner {
     }
 
     /// Apply remote flow, returns `true` if link credit is drained
-    pub(crate) fn apply_flow(&mut self, flow: &Flow) -> bool {
+    pub(crate) fn apply_flow(&self, flow: &Flow) -> bool {
         // #2.7.6
         if let Some(credit) = flow.link_credit() {
             // delivery-count is null if receiver has not received attach yet
@@ -372,7 +374,7 @@ impl SenderLinkInner {
                 new_credit,
                 rcv_delivery_count,
                 self.delivery_count.get(),
-                self.pending_transfers.len(),
+                self.pending_transfers.borrow().len(),
                 self.link_credit.get()
             );
 
@@ -395,14 +397,16 @@ impl SenderLinkInner {
     /// Wake up transfers waiting for link credit
     ///
     /// Number of woken transfers is limited by credit not claimed by active transfers
-    fn wake_pending(&mut self) {
+    fn wake_pending(&self) {
         if self.partial.get() {
             return;
         }
         let mut available = self.link_credit.get().saturating_sub(self.active.get());
-        while available > 0
-            && let Some(tx) = self.pending_transfers.pop_front()
-        {
+        while available > 0 {
+            // sender wakes its transfer, queue must not be borrowed
+            let Some(tx) = self.pending_transfers.borrow_mut().pop_front() else {
+                break;
+            };
             if tx.send(Ok(())).is_ok() {
                 self.active.set(self.active.get() + 1);
                 available -= 1;
@@ -418,7 +422,7 @@ impl SenderLinkInner {
     /// transfers or by partial delivery, which waits for session window as well.
     ///
     /// AMQP 1.0 2.6.7, returns `true` if link credit is drained
-    fn drain_credit(&mut self) -> bool {
+    fn drain_credit(&self) -> bool {
         if self.drain.get()
             && self.link_credit.get() > 0
             && self.active.get() == self.window_waiters.get()
@@ -443,7 +447,7 @@ impl SenderLinkInner {
     }
 
     /// Drain link credit and send link state to the receiver
-    fn drain_and_post(&mut self) {
+    fn drain_and_post(&self) {
         if self.drain_credit() {
             let state = self.flow_state();
             self.session.inner.get_mut().post_flow(Some(state));
@@ -457,7 +461,7 @@ impl SenderLinkInner {
         settled: bool,
         format: Option<MessageFormat>,
     ) -> Result<(DeliveryNumber, Bytes), AmqpProtocolError> {
-        let inner = link.get_mut();
+        let inner = link.get_ref();
         if let Some(err) = inner.error.get() {
             return Err(err);
         }
@@ -469,7 +473,7 @@ impl SenderLinkInner {
         // woken transfer claims session window ahead of queued transfers
         let mut claim: Option<WindowClaim> = None;
         loop {
-            let inner = link.get_mut();
+            let inner = link.get_ref();
             if let Some(err) = inner.error.get() {
                 return Err(err);
             } else if inner.closed.get() {
@@ -478,7 +482,7 @@ impl SenderLinkInner {
             // credit claimed by woken transfers is not available
             if inner.link_credit.get() <= inner.active.get()
                 || inner.partial.get()
-                || (!woken && !inner.pending_transfers.is_empty())
+                || (!woken && !inner.pending_transfers.borrow().is_empty())
             {
                 // claimed window is released for other transfers
                 drop(claim.take());
@@ -489,10 +493,10 @@ impl SenderLinkInner {
                     inner.name,
                     inner.id,
                     inner.remote_handle,
-                    inner.pending_transfers.len()
+                    inner.pending_transfers.borrow().len()
                 );
                 let (tx, rx) = inner.session.inner.get_ref().pool_credit.channel();
-                inner.pending_transfers.push_back(tx);
+                inner.pending_transfers.borrow_mut().push_back(tx);
                 CreditWaiter {
                     rx: Some(rx),
                     link: link.clone(),
@@ -521,7 +525,7 @@ impl SenderLinkInner {
         }
 
         // transfer is sent and link credit is consumed together
-        let inner = link.get_mut();
+        let inner = link.get_ref();
         let handle = inner.id as Handle;
         let (id, chunks) = inner
             .session
@@ -580,7 +584,7 @@ impl SenderLinkInner {
     }
 
     /// Delivery is sent or cancelled
-    fn end_delivery(&mut self, aborted: Option<DeliveryNumber>) {
+    fn end_delivery(&self, aborted: Option<DeliveryNumber>) {
         self.partial.set(false);
         if let Some(id) = aborted {
             let handle = self.id as Handle;
@@ -594,7 +598,7 @@ impl SenderLinkInner {
         self.drain_and_post();
     }
 
-    fn get_tag(&mut self, tag: Option<Bytes>) -> Bytes {
+    fn get_tag(&self, tag: Option<Bytes>) -> Bytes {
         tag.unwrap_or_else(|| {
             let delivery_tag = self.delivery_tag.get();
             self.delivery_tag.set(delivery_tag.wrapping_add(1));
@@ -638,7 +642,7 @@ impl Future for CreditWaiter {
 impl Drop for CreditWaiter {
     fn drop(&mut self) {
         if let Some(rx) = self.rx.take() {
-            let link = self.link.get_mut();
+            let link = self.link.get_ref();
             match rx.poll_recv(&mut Context::from_waker(Waker::noop())) {
                 // waiter is dropped after wake up
                 Poll::Ready(Ok(Ok(()))) => {
@@ -649,7 +653,10 @@ impl Drop for CreditWaiter {
                 // waiter is still queued
                 Poll::Pending => {
                     drop(rx);
-                    link.pending_transfers.retain(|tx| !tx.is_canceled());
+                    // cancelled senders are dropped without wake up
+                    link.pending_transfers
+                        .borrow_mut()
+                        .retain(|tx| !tx.is_canceled());
                 }
                 Poll::Ready(_) => (),
             }
@@ -674,7 +681,7 @@ impl ActiveTransfer {
 impl Drop for ActiveTransfer {
     fn drop(&mut self) {
         if let Some(link) = self.0.take() {
-            let link = link.get_mut();
+            let link = link.get_ref();
             link.active.set(link.active.get() - 1);
             link.window_waiters.set(link.window_waiters.get() - 1);
             link.wake_pending();
@@ -689,7 +696,7 @@ struct PartialDelivery(Option<(Cell<SenderLinkInner>, DeliveryNumber)>);
 impl PartialDelivery {
     fn complete(mut self) {
         if let Some((link, _)) = self.0.take() {
-            link.get_mut().end_delivery(None);
+            link.get_ref().end_delivery(None);
         }
     }
 }
@@ -697,7 +704,7 @@ impl PartialDelivery {
 impl Drop for PartialDelivery {
     fn drop(&mut self) {
         if let Some((link, id)) = self.0.take() {
-            link.get_mut().end_delivery(Some(id));
+            link.get_ref().end_delivery(Some(id));
         }
     }
 }
@@ -731,7 +738,7 @@ impl Drop for EstablishedSenderLink {
     fn drop(&mut self) {
         self.0
             .inner
-            .get_mut()
+            .get_ref()
             .local_detached(&AmqpProtocolError::Disconnected);
     }
 }
