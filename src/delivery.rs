@@ -295,6 +295,13 @@ impl DeliveryInner {
         }
     }
 
+    /// Same as `outcome().is_some()`
+    fn is_complete(&self) -> bool {
+        self.settled
+            || self.error.is_some()
+            || !matches!(self.state, None | Some(DeliveryState::Received(_)))
+    }
+
     fn add_waiter(&mut self, tx: pool::Sender<()>) {
         if self.tx.as_ref().is_none_or(pool::Sender::is_canceled) {
             self.tx = Some(tx);
@@ -338,7 +345,10 @@ impl DeliveryInner {
         if let Some(state) = state {
             self.state = Some(state.clone());
         }
-        self.notify();
+        // waiters stay registered until outcome is available
+        if self.is_complete() {
+            self.notify();
+        }
     }
 }
 

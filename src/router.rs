@@ -3,6 +3,7 @@ use std::{cell::RefCell, marker, rc::Rc};
 use ntex_router::{IntoPattern, Router as PatternRouter};
 use ntex_service::{
     BindCtx, Ctx, IntoServiceFactory, Pipeline, Service, ServiceFactory, boxed, factory,
+    pipeline::PipelineBinding,
 };
 use ntex_util::{HashMap, future::join_all};
 
@@ -107,12 +108,12 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                         match hnd.create(&link).await {
                             Ok(srv) => {
                                 log::trace!("Handler service is created for {}", rcv_link.name());
-                                let _prev = inner
-                                    .handlers
-                                    .borrow_mut()
-                                    .insert(rcv_link.clone(), Pipeline::new(link.clone(), srv));
+                                let srv = Pipeline::new(link.clone(), srv);
+                                let binding = srv.bind();
+                                let _prev =
+                                    inner.handlers.borrow_mut().insert(rcv_link.clone(), srv);
                                 if let Some((delivery, tr)) = rcv_link.get_delivery() {
-                                    service_call(rcv_link, delivery, tr, &self.0).await
+                                    service_call(rcv_link, delivery, tr, binding).await
                                 } else {
                                     Ok(())
                                 }
@@ -188,9 +189,11 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 Ok(())
             }
             Message::Transfer(link) => {
-                let registered = self.0.handlers.borrow().contains_key(&link);
-                if registered && let Some((delivery, tr)) = link.get_delivery() {
-                    service_call(link, delivery, tr, &self.0).await?;
+                let srv = self.0.handlers.borrow().get(&link).map(Pipeline::bind);
+                if let Some(srv) = srv
+                    && let Some((delivery, tr)) = link.get_delivery()
+                {
+                    service_call(link, delivery, tr, srv).await?;
                 }
                 Ok(())
             }
@@ -198,36 +201,31 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
     }
 }
 
-async fn service_call<S>(
+async fn service_call(
     link: ReceiverLink,
     mut delivery: Delivery,
     tr: Transfer,
-    inner: &Rc<RouterServiceInner<S>>,
+    srv: PipelineBinding<Transfer, Outcome, Error>,
 ) -> Result<(), Error> {
-    // handler could be removed while call is in progress
-    let srv = inner.handlers.borrow().get(&link).map(Pipeline::bind);
-    if let Some(srv) = srv {
-        // check readiness
-        if let Err(e) = srv.ready().await {
-            log::trace!("Service readiness check failed: {e:?}");
-            let _ =
-                link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
-            return Ok(());
-        }
+    // check readiness
+    if let Err(e) = srv.ready().await {
+        log::trace!("Service readiness check failed: {e:?}");
+        let _ = link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
+        return Ok(());
+    }
 
-        if link.needs_credit() {
-            link.set_link_credit(50);
-        }
+    if link.needs_credit() {
+        link.set_link_credit(50);
+    }
 
-        match srv.call(tr).await {
-            Ok(outcome) => {
-                log::trace!("Outcome is ready {outcome:?} for {}", link.name());
-                delivery.settle(outcome.into_delivery_state());
-            }
-            Err(e) => {
-                log::trace!("Service response error: {e:?}");
-                delivery.settle(DeliveryState::Rejected(Rejected { error: Some(e) }));
-            }
+    match srv.call(tr).await {
+        Ok(outcome) => {
+            log::trace!("Outcome is ready {outcome:?} for {}", link.name());
+            delivery.settle(outcome.into_delivery_state());
+        }
+        Err(e) => {
+            log::trace!("Service response error: {e:?}");
+            delivery.settle(DeliveryState::Rejected(Rejected { error: Some(e) }));
         }
     }
     Ok(())

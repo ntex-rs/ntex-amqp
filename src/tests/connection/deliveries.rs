@@ -243,8 +243,9 @@ async fn delivery_wait_returns_session_error() {
 /// supports repeated, concurrent and dropped waiters.
 ///
 /// HOW:
-/// - Dispositions with no state or `Received` keep `wait` pending; a settled one without
-///   state resolves `None`, an unsettled `Accepted` resolves `Accepted`.
+/// - Dispositions with no state or `Received` keep `wait` pending and do not wake its
+///   waker; a settled one without state resolves `None`, an unsettled `Accepted`
+///   resolves `Accepted`.
 /// - `Modified` is returned by two `wait` calls, and dropping the delivery writes one
 ///   settled `Modified` disposition.
 /// - Two concurrent waiters both get `Accepted` and the polled waker is woken once.
@@ -271,12 +272,15 @@ async fn delivery_wait_outcome() {
     for settled in [false, true] {
         let (_io, conn, _client, snd) = small_frames_sender();
         let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        let woken = WakeCounter::new();
+        let waker = Waker::from(woken.clone());
+        let mut cx = Context::from_waker(&waker);
         let mut wait = Box::pin(d.wait());
-        assert!(pending(wait.as_mut()).await);
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
         disposition(&conn, Role::Receiver, d.id(), false, None);
-        assert!(pending(wait.as_mut()).await);
         disposition(&conn, Role::Receiver, d.id(), false, received());
-        assert!(pending(wait.as_mut()).await);
+        assert_eq!(woken.count(), 0);
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
 
         if settled {
             // settled without outcome
