@@ -12,14 +12,14 @@ use crate::codec::{AmqpCodec, AmqpFrame, types};
 use crate::control::ControlQueue;
 use crate::session::{INITIAL_NEXT_OUTGOING_ID, Session, SessionInner};
 use crate::{
-    AmqpServiceConfig, RemoteServiceConfig, cell::Cell, cell::ErrorCell, detach,
-    error::AmqpProtocolError, types::Action,
+    AmqpServiceConfig, RemoteServiceConfig, cell::ErrorCell, detach, error::AmqpProtocolError,
+    types::Action,
 };
 
 pub struct Connection(ConnectionRef);
 
 #[derive(Clone)]
-pub struct ConnectionRef(pub(crate) Cell<ConnectionInner>);
+pub struct ConnectionRef(pub(crate) Rc<ConnectionInner>);
 
 #[derive(Debug)]
 pub(crate) struct ConnectionInner {
@@ -54,9 +54,9 @@ impl Sessions {
 
 #[derive(Debug)]
 pub(crate) enum SessionState {
-    Opening(Option<oneshot::Sender<Session>>, Cell<ConnectionInner>),
-    Established(Cell<SessionInner>),
-    Closing(Cell<SessionInner>),
+    Opening(Option<oneshot::Sender<Session>>, Rc<ConnectionInner>),
+    Established(Rc<SessionInner>),
+    Closing(Rc<SessionInner>),
 }
 
 impl SessionState {
@@ -79,7 +79,7 @@ impl Connection {
         local_config: &Cfg<AmqpServiceConfig>,
         remote_config: &RemoteServiceConfig,
     ) -> Connection {
-        Connection(ConnectionRef(Cell::new(ConnectionInner {
+        Connection(ConnectionRef(Rc::new(ConnectionInner {
             io,
             codec: AmqpCodec::new().max_encode_size(remote_config.max_frame_size as usize),
             write_activity: cell::Cell::new(false),
@@ -129,19 +129,19 @@ impl ConnectionRef {
     #[inline]
     /// Get io tag for current connection
     pub fn tag(&self) -> &'static str {
-        self.0.get_ref().io.tag()
+        self.0.io.tag()
     }
 
     #[inline]
     /// Get io configuration for current connection
     pub fn config(&self) -> &IoConfig {
-        self.0.get_ref().io.cfg()
+        self.0.io.cfg()
     }
 
     #[inline]
     /// Force close connection
     pub fn force_close(&self) {
-        let inner = self.0.get_ref();
+        let inner = &*self.0;
         inner.state.set(ConnectionState::Drop);
         inner.io.terminate();
         inner.set_error(AmqpProtocolError::ConnectionDropped);
@@ -151,7 +151,7 @@ impl ConnectionRef {
     #[inline]
     /// Check connection state
     pub fn is_opened(&self) -> bool {
-        let inner = self.0.get_ref();
+        let inner = &*self.0;
         if inner.state.get() != ConnectionState::Normal {
             return false;
         }
@@ -160,23 +160,18 @@ impl ConnectionRef {
 
     /// Get waiter for `on_close` event
     pub fn on_close(&self) -> Waiter {
-        self.0.get_ref().on_close.wait()
+        self.0.on_close.wait()
     }
 
     /// Get connection error
     pub fn get_error(&self) -> Option<AmqpProtocolError> {
-        self.0.get_ref().error.get()
+        self.0.error.get()
     }
 
     /// Get existing session by local channel id
     pub fn get_session_by_local_id(&self, channel: u16) -> Option<Session> {
-        if let Some(SessionState::Established(inner)) = self
-            .0
-            .get_ref()
-            .sessions
-            .borrow()
-            .slab
-            .get(channel as usize)
+        if let Some(SessionState::Established(inner)) =
+            self.0.sessions.borrow().slab.get(channel as usize)
         {
             Some(Session::new(inner.clone()))
         } else {
@@ -204,7 +199,7 @@ impl ConnectionRef {
     }
 
     fn post_close(&self, error: Option<Error>) {
-        let inner = self.0.get_ref();
+        let inner = &*self.0;
         if inner.state.get() == ConnectionState::Normal {
             inner.state.set(ConnectionState::Closing);
         }
@@ -219,13 +214,7 @@ impl ConnectionRef {
 
     /// Mark session as closing, `local_id` is local channel id
     pub(crate) fn close_session(&self, local_id: usize) {
-        if let Some(state) = self
-            .0
-            .get_ref()
-            .sessions
-            .borrow_mut()
-            .slab
-            .get_mut(local_id)
+        if let Some(state) = self.0.sessions.borrow_mut().slab.get_mut(local_id)
             && let SessionState::Established(inner) = state
         {
             *state = SessionState::Closing(inner.clone());
@@ -233,24 +222,24 @@ impl ConnectionRef {
     }
 
     pub(crate) fn post_frame(&self, frame: AmqpFrame) {
-        self.0.get_ref().post_frame(frame);
+        self.0.post_frame(frame);
     }
 
     pub(crate) fn take_write_activity(&self) -> bool {
-        self.0.get_ref().write_activity.take()
+        self.0.write_activity.take()
     }
 
     pub(crate) fn set_error(&self, err: AmqpProtocolError) {
-        self.0.get_ref().set_error(err);
+        self.0.set_error(err);
         self.clear_control_queue();
     }
 
     pub(crate) fn get_control_queue(&self) -> &Rc<ControlQueue> {
-        &self.0.get_ref().control_queue
+        &self.0.control_queue
     }
 
     pub(crate) fn handle_frame(&self, frame: AmqpFrame) -> Result<Action, AmqpProtocolError> {
-        let inner = self.0.get_ref();
+        let inner = &*self.0;
         let result = inner.handle_frame(frame, &self.0);
         if let Some(err) = inner.error.get() {
             // a failed write leaves session state for teardown outside of session borrows
@@ -264,7 +253,7 @@ impl ConnectionRef {
 
     fn clear_control_queue(&self) {
         // Frame destructors may access session state; release them outside state borrows.
-        let queue = self.0.get_ref().control_queue.clone();
+        let queue = self.0.control_queue.clone();
         queue.clear();
     }
 }
@@ -283,7 +272,7 @@ impl ConnectionInner {
                 SessionState::Opening(_, _) => (),
                 // closing session waits for remote end, links and `end()` wait as well
                 SessionState::Established(ses) | SessionState::Closing(ses) => {
-                    ses.get_ref().set_error(err.clone());
+                    ses.set_error(err.clone());
                 }
             }
         }
@@ -316,7 +305,7 @@ impl ConnectionInner {
         &self,
         remote_channel_id: u16,
         begin: Begin,
-        cell: &Cell<ConnectionInner>,
+        cell: &Rc<ConnectionInner>,
     ) -> Result<(), AmqpProtocolError> {
         log::trace!(
             "{}: Remote session opened: {:?}",
@@ -335,7 +324,7 @@ impl ConnectionInner {
             );
             return Err(AmqpProtocolError::TooManyChannels);
         }
-        let session = Cell::new(SessionInner::new(
+        let session = Rc::new(SessionInner::new(
             local_token,
             false,
             ConnectionRef(cell.clone()),
@@ -380,7 +369,7 @@ impl ConnectionInner {
         if let Some(channel) = sessions.slab.get_mut(local_token) {
             if channel.is_opening() {
                 if let SessionState::Opening(tx, cell) = channel {
-                    let session = Cell::new(SessionInner::new(
+                    let session = Rc::new(SessionInner::new(
                         local_token,
                         true,
                         ConnectionRef(cell.clone()),
@@ -425,7 +414,7 @@ impl ConnectionInner {
     fn handle_frame(
         &self,
         frame: AmqpFrame,
-        inner: &Cell<ConnectionInner>,
+        inner: &Rc<ConnectionInner>,
     ) -> Result<Action, AmqpProtocolError> {
         let (channel_id, frame) = frame.into_parts();
 
@@ -494,7 +483,7 @@ impl ConnectionInner {
                             let handle = attach.handle();
                             let mut condition = if handle > self.handle_max {
                                 Some(ErrorCondition::AmqpError(AmqpError::ResourceLimitExceeded))
-                            } else if session.get_ref().is_remote_handle_used(handle) {
+                            } else if session.is_remote_handle_used(handle) {
                                 Some(ErrorCondition::SessionError(SessionError::HandleInUse))
                             } else {
                                 None
@@ -504,11 +493,11 @@ impl ConnectionInner {
                             let attach = detach(&attach);
                             if condition.is_none() {
                                 let cell = session.clone();
-                                if session.get_ref().handle_attach(&attach, cell) {
+                                if session.handle_attach(&attach, cell) {
                                     return Ok(Action::None);
                                 }
                                 // remotely opened link, local handle must be within remote handle-max
-                                if !session.get_ref().check_handle() {
+                                if !session.check_handle() {
                                     condition = Some(ErrorCondition::AmqpError(
                                         AmqpError::ResourceLimitExceeded,
                                     ));
@@ -525,10 +514,9 @@ impl ConnectionInner {
                                     description: None,
                                     info: None,
                                 }));
-                                let id = session.get_ref().id();
-                                let action = session
-                                    .get_ref()
-                                    .end(AmqpProtocolError::SessionEnded(Some(err.clone())));
+                                let id = session.id();
+                                let action =
+                                    session.end(AmqpProtocolError::SessionEnded(Some(err.clone())));
                                 let closing = SessionState::Closing(session.clone());
                                 drop(sessions);
                                 let _prev = mem::replace(
@@ -545,15 +533,13 @@ impl ConnectionInner {
                             match attach.0.role {
                                 Role::Receiver => {
                                     // remotly opened sender link
-                                    let (link, response) = session
-                                        .get_ref()
-                                        .new_remote_sender(session.clone(), &attach);
+                                    let (link, response) =
+                                        session.new_remote_sender(session.clone(), &attach);
                                     Ok(Action::AttachSender(link, attach, response))
                                 }
                                 Role::Sender => {
                                     // receiver link
                                     let (response, link) = session
-                                        .get_ref()
                                         .attach_remote_receiver_link(session.clone(), &attach);
                                     Ok(Action::AttachReceiver(link, attach, response))
                                 }
@@ -561,23 +547,20 @@ impl ConnectionInner {
                         }
                         Frame::End(remote_end) => {
                             log::trace!("{}: Remote session end: {}", self.io.tag(), channel_id);
-                            let id = session.get_ref().id();
-                            let action = session
-                                .get_ref()
-                                .end(AmqpProtocolError::SessionEnded(remote_end.error));
+                            let id = session.id();
+                            let action =
+                                session.end(AmqpProtocolError::SessionEnded(remote_end.error));
                             drop(sessions);
                             let _removed = self.sessions.borrow_mut().remove(channel_id);
                             self.post_frame(AmqpFrame::new(id, End { error: None }.into()));
                             Ok(action)
                         }
-                        _ => session.get_ref().handle_frame(frame),
+                        _ => session.handle_frame(frame),
                     },
                     Some(SessionState::Closing(session)) => match frame {
                         Frame::End(frm) => {
                             log::trace!("{}: Session end is confirmed: {:?}", self.io.tag(), frm);
-                            let _ = session
-                                .get_ref()
-                                .end(AmqpProtocolError::SessionEnded(frm.error));
+                            let _ = session.end(AmqpProtocolError::SessionEnded(frm.error));
                             drop(sessions);
                             let _removed = self.sessions.borrow_mut().remove(channel_id);
                             Ok(Action::None)
@@ -605,7 +588,7 @@ impl fmt::Debug for ConnectionRef {
 
 /// Open new session
 pub struct OpenSession {
-    con: Cell<ConnectionInner>,
+    con: Rc<ConnectionInner>,
     fut: Option<Pin<Box<dyn Future<Output = Result<Session, AmqpProtocolError>>>>>,
     props: Option<HashMap<types::Symbol, types::Variant>>,
     offered_capabilities: Option<codec::Symbols>,
@@ -613,7 +596,7 @@ pub struct OpenSession {
 }
 
 impl OpenSession {
-    pub(crate) fn new(con: Cell<ConnectionInner>) -> Self {
+    pub(crate) fn new(con: Rc<ConnectionInner>) -> Self {
         Self {
             con,
             fut: None,
@@ -687,12 +670,12 @@ impl Future for OpenSession {
 }
 
 async fn open_session(
-    con: Cell<ConnectionInner>,
+    con: Rc<ConnectionInner>,
     offered_capabilities: Option<codec::Symbols>,
     desired_capabilities: Option<codec::Symbols>,
     properties: Option<HashMap<types::Symbol, types::Variant>>,
 ) -> Result<Session, AmqpProtocolError> {
-    let inner = con.get_ref();
+    let inner = &*con;
 
     if let Some(e) = inner.error.get() {
         log::error!("{}: Connection is in error state: {:?}", inner.io.tag(), e);

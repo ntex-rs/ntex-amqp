@@ -650,11 +650,7 @@ async fn idle_timeout_outgoing_activity() {
             let last_write = std::time::Instant::now();
             match path {
                 0 => h.conn.post_frame(AmqpFrame::new(0, peer_flow(None))),
-                1 => h
-                    .conn
-                    .0
-                    .get_ref()
-                    .post_frame(AmqpFrame::new(0, peer_flow(None))),
+                1 => h.conn.0.post_frame(AmqpFrame::new(0, peer_flow(None))),
                 _ => {
                     // The Begin reply uses the fallible encoding path.
                     h.conn
@@ -851,8 +847,8 @@ async fn pending_controls_release_on_dispatcher_stop() {
 
         let session = session_ref(&h.conn);
         let receiver = session.get_receiver_link_by_remote_handle(0).unwrap();
-        let weak = h.conn.0.downgrade();
-        let receiver_weak = receiver.inner.downgrade();
+        let weak = Rc::downgrade(&h.conn.0);
+        let receiver_weak = Rc::downgrade(&receiver.inner);
         let queue = h.conn.get_control_queue().clone();
         drop(session.detach_receiver_link(receiver.handle(), None));
         assert_eq!(queue.pending.borrow().len(), 1);

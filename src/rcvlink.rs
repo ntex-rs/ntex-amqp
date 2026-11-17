@@ -1,6 +1,6 @@
 use std::{
     cell, cell::RefCell, collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin,
-    task::Context, task::Poll,
+    rc::Rc, task::Context, task::Poll,
 };
 
 use ntex_amqp_codec::protocol::{
@@ -14,13 +14,11 @@ use ntex_util::time::{Seconds, timeout_checked};
 use ntex_util::{Stream, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
-use crate::{
-    Delivery, cell::Cell, cell::ErrorCell, detach, error::AmqpProtocolError, types::Action,
-};
+use crate::{Delivery, cell::ErrorCell, detach, error::AmqpProtocolError, types::Action};
 
 #[derive(Clone)]
 pub struct ReceiverLink {
-    pub(crate) inner: Cell<ReceiverLinkInner>,
+    pub(crate) inner: Rc<ReceiverLinkInner>,
 }
 
 pub(crate) struct ReceiverLinkInner {
@@ -48,7 +46,7 @@ pub(crate) struct ReceiverLinkInner {
 impl std::fmt::Debug for ReceiverLink {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_tuple("ReceiverLink")
-            .field(&self.inner.get_ref().name)
+            .field(&self.inner.name)
             .finish()
     }
 }
@@ -65,60 +63,60 @@ impl Eq for ReceiverLink {}
 
 impl PartialEq<ReceiverLink> for ReceiverLink {
     fn eq(&self, other: &ReceiverLink) -> bool {
-        std::ptr::eq(self.inner.get_ref(), other.inner.get_ref())
+        Rc::ptr_eq(&self.inner, &other.inner)
     }
 }
 
 impl hash::Hash for ReceiverLink {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        (std::ptr::from_ref(self.inner.get_ref()) as usize).hash(state);
+        (Rc::as_ptr(&self.inner) as usize).hash(state);
     }
 }
 
 impl ReceiverLink {
-    pub(crate) fn new(inner: Cell<ReceiverLinkInner>) -> ReceiverLink {
+    pub(crate) fn new(inner: Rc<ReceiverLinkInner>) -> ReceiverLink {
         ReceiverLink { inner }
     }
 
     /// Name of the receiver link
     #[inline]
     pub fn name(&self) -> &ByteString {
-        &self.inner.get_ref().name
+        &self.inner.name
     }
 
     /// Local handle
     #[inline]
     pub fn handle(&self) -> Handle {
-        self.inner.get_ref().handle
+        self.inner.handle
     }
 
     /// Remote handle
     #[inline]
     pub fn remote_handle(&self) -> Handle {
-        self.inner.get_ref().remote_handle
+        self.inner.remote_handle
     }
 
     /// Returns available link credit
     #[inline]
     pub fn credit(&self) -> u32 {
-        self.inner.get_ref().credit.get()
+        self.inner.credit.get()
     }
 
     /// Reference to session
     #[inline]
     pub fn session(&self) -> &Session {
-        &self.inner.get_ref().session
+        &self.inner.session
     }
 
     /// Check if link is closed
     #[inline]
     pub fn is_closed(&self) -> bool {
-        self.inner.get_ref().closed.get()
+        self.inner.closed.get()
     }
 
     /// Remote detach error
     pub fn error(&self) -> Option<Error> {
-        if let Some(AmqpProtocolError::LinkDetached(Some(err))) = self.inner.get_ref().error.get() {
+        if let Some(AmqpProtocolError::LinkDetached(Some(err))) = self.inner.error.get() {
             Some(err)
         } else {
             None
@@ -127,13 +125,12 @@ impl ReceiverLink {
 
     /// Confirm remote link, returns `false` if link is not established
     pub(crate) fn confirm_receiver_link(&self, response: Attach) -> bool {
-        let inner = self.inner.get_ref();
+        let inner = &*self.inner;
         let size = inner.max_message_size.get();
         let size = if size != 0 { Some(size) } else { None };
         inner
             .session
             .inner
-            .get_ref()
             .confirm_receiver_link(&self.inner, response, size)
     }
 
@@ -145,7 +142,7 @@ impl ReceiverLink {
     /// Each queued, not yet received delivery may keep its read buffer
     /// alive, credit bounds the memory retained by the link.
     pub fn set_link_credit(&self, credit: u32) {
-        self.inner.get_ref().set_link_credit(credit);
+        self.inner.set_link_credit(credit);
     }
 
     /// Set available link credit, `0` stops the remote sender.
@@ -156,12 +153,12 @@ impl ReceiverLink {
     /// Router does not add credit to the link reset to `0`, non-zero
     /// credit resumes the link.
     pub fn reset_link_credit(&self, credit: u32) {
-        self.inner.get_ref().reset_link_credit(credit);
+        self.inner.reset_link_credit(credit);
     }
 
     /// Link credit is used up, and link is not paused by application
     pub(crate) fn needs_credit(&self) -> bool {
-        let inner = self.inner.get_ref();
+        let inner = &*self.inner;
         inner.credit.get() == 0 && !inner.paused.get()
     }
 
@@ -170,17 +167,17 @@ impl ReceiverLink {
     /// Larger messages detach the link with `message-size-exceeded` error.
     /// If max size is set to `0`, size is unlimited.
     pub fn set_max_message_size(&self, size: u64) {
-        self.inner.get_ref().max_message_size.set(size);
+        self.inner.max_message_size.set(size);
     }
 
     /// Check if link has completely received deliveries
     pub fn has_deliveries(&self) -> bool {
-        self.inner.get_ref().ready_deliveries() > 0
+        self.inner.ready_deliveries() > 0
     }
 
     /// Get completely received delivery
     pub fn get_delivery(&self) -> Option<(Delivery, Transfer)> {
-        let inner = self.inner.get_ref();
+        let inner = &*self.inner;
         if inner.ready_deliveries() > 0 {
             inner.queue.borrow_mut().pop_front()
         } else {
@@ -190,17 +187,12 @@ impl ReceiverLink {
 
     /// Send disposition frame
     pub fn send_disposition(&self, disp: Disposition) {
-        self.inner
-            .get_ref()
-            .session
-            .inner
-            .get_ref()
-            .post_frame(disp.into());
+        self.inner.session.inner.post_frame(disp.into());
     }
 
     /// Close receiver link
     pub fn close(&self) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        self.inner.get_ref().close(None)
+        self.inner.close(None)
     }
 
     /// Close receiver link with error
@@ -211,7 +203,7 @@ impl ReceiverLink {
     where
         Error: From<E>,
     {
-        self.inner.get_ref().close(Some(error.into()))
+        self.inner.close(Some(error.into()))
     }
 
     /// Attempt to pull out the next value of this receiver, registering
@@ -232,7 +224,7 @@ impl ReceiverLink {
             return Poll::Ready(Some(Ok(tr)));
         }
 
-        let inner = self.inner.get_ref();
+        let inner = &*self.inner;
         if inner.closed.get() {
             Poll::Ready(inner.error.take().map(Err))
         } else {
@@ -261,7 +253,7 @@ pub(crate) enum TransferResult {
 
 impl ReceiverLinkInner {
     pub(crate) fn new(
-        session: Cell<SessionInner>,
+        session: Rc<SessionInner>,
         handle: Handle,
         remote_handle: Handle,
         frame: &Attach,
@@ -420,7 +412,6 @@ impl ReceiverLinkInner {
         let detach = (!self.closed.get()).then(|| {
             self.session
                 .inner
-                .get_ref()
                 .detach_receiver_link(self.handle, true, error)
         });
         self.local_detached();
@@ -446,7 +437,6 @@ impl ReceiverLinkInner {
     fn is_duplicate(&self, id: DeliveryNumber) -> bool {
         self.session
             .inner
-            .get_ref()
             .unsettled_rcv_deliveries
             .borrow()
             .contains_key(&id)
@@ -517,7 +507,7 @@ impl ReceiverLinkInner {
 
         // credit is sent after link confirmation
         if !self.opening.get() {
-            self.session.inner.get_ref().rcv_link_flow(
+            self.session.inner.rcv_link_flow(
                 self.handle,
                 self.delivery_count.get(),
                 self.credit.get(),
@@ -538,7 +528,7 @@ impl ReceiverLinkInner {
     pub(crate) fn handle_transfer(
         &self,
         mut transfer: Transfer,
-        inner: &Cell<ReceiverLinkInner>,
+        inner: &Rc<ReceiverLinkInner>,
     ) -> TransferResult {
         if self.credit.get() == 0 && !self.is_in_flight() {
             // check link credit
@@ -596,7 +586,6 @@ impl ReceiverLinkInner {
                     && let Some(inner) = self
                         .session
                         .inner
-                        .get_ref()
                         .unsettled_rcv_deliveries
                         .borrow_mut()
                         .get_mut(&id)
@@ -735,7 +724,7 @@ impl ReceiverLinkInner {
 pub(crate) struct EstablishedReceiverLink(ReceiverLink);
 
 impl EstablishedReceiverLink {
-    pub(crate) fn new(inner: Cell<ReceiverLinkInner>) -> EstablishedReceiverLink {
+    pub(crate) fn new(inner: Rc<ReceiverLinkInner>) -> EstablishedReceiverLink {
         EstablishedReceiverLink(ReceiverLink::new(inner))
     }
 }
@@ -750,18 +739,18 @@ impl std::ops::Deref for EstablishedReceiverLink {
 
 impl Drop for EstablishedReceiverLink {
     fn drop(&mut self) {
-        self.0.inner.get_ref().local_detached();
+        self.0.inner.local_detached();
     }
 }
 
 pub struct ReceiverLinkBuilder {
     frame: Attach,
-    session: Cell<SessionInner>,
+    session: Rc<SessionInner>,
     timeout: Seconds,
 }
 
 impl ReceiverLinkBuilder {
-    pub(crate) fn new(name: ByteString, address: ByteString, session: Cell<SessionInner>) -> Self {
+    pub(crate) fn new(name: ByteString, address: ByteString, session: Rc<SessionInner>) -> Self {
         let source = Source {
             address: Some(address),
             durable: TerminusDurability::None,
@@ -792,7 +781,7 @@ impl ReceiverLinkBuilder {
             properties: None,
         }));
 
-        let timeout = session.get_ref().link_attach_timeout();
+        let timeout = session.link_attach_timeout();
         ReceiverLinkBuilder {
             frame,
             session,
@@ -858,10 +847,7 @@ impl ReceiverLinkBuilder {
     /// Attach receiver link
     pub async fn attach(self) -> Result<ReceiverLink, AmqpProtocolError> {
         let cell = self.session.clone();
-        let rx = self
-            .session
-            .get_ref()
-            .attach_local_receiver_link(cell, self.frame);
+        let rx = self.session.attach_local_receiver_link(cell, self.frame);
         timeout_checked(self.timeout, rx.recv())
             .await
             .map_err(|()| AmqpProtocolError::LinkAttachTimeout)?

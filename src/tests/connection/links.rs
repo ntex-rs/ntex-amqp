@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 use ntex_bytes::ByteString;
 use ntex_util::Stream;
@@ -21,7 +22,6 @@ fn remote_sender(conn: &Connection, name: &str, handle: u32) -> SenderLink {
     };
     session(conn)
         .inner
-        .get_ref()
         .attach_remote_sender_link(&attach, response, snd.inner.clone())
 }
 
@@ -125,10 +125,10 @@ async fn pending_controls_release_connection() {
             };
             assert!(receiver.confirm_receiver_link(response));
             let session = session(&conn);
-            let connection_weak = conn.0.downgrade();
-            let session_weak = session.inner.downgrade();
-            let sender_weak = sender.inner.downgrade();
-            let receiver_weak = receiver.inner.downgrade();
+            let connection_weak = Rc::downgrade(&conn.0);
+            let session_weak = Rc::downgrade(&session.inner);
+            let sender_weak = Rc::downgrade(&sender.inner);
+            let receiver_weak = Rc::downgrade(&receiver.inner);
             let queue = conn.get_control_queue().clone();
 
             if notification != "sender" {
@@ -139,10 +139,7 @@ async fn pending_controls_release_connection() {
                 frame.0.handle = receiver.handle();
                 // Isolate cleanup from the connection/session frame-dispatch borrows.
                 assert!(matches!(
-                    receiver
-                        .inner
-                        .get_ref()
-                        .handle_transfer(frame, &receiver.inner),
+                    receiver.inner.handle_transfer(frame, &receiver.inner),
                     crate::rcvlink::TransferResult::Action(Action::Transfer(_))
                 ));
                 assert!(receiver.has_deliveries());
@@ -221,7 +218,7 @@ async fn closed_control_queue_rejects_retaining_frames() {
     let frame = ControlFrame::new_kind(ControlFrameKind::LocalSessionEnded(vec![
         ntex_util::future::Either::Left(sender),
     ]));
-    let weak = conn.0.downgrade();
+    let weak = Rc::downgrade(&conn.0);
     let queue = conn.get_control_queue().clone();
     conn.force_close();
     drop(conn);
@@ -341,10 +338,7 @@ async fn sender_link_accessors() {
     assert!(!link.is_closed());
     assert!(!link.is_closed());
     assert_eq!(format!("{link:?}"), "SenderLink(\"s\")");
-    assert_eq!(
-        format!("{:?}", link.inner.get_ref()),
-        "SenderLinkInner(\"s\")"
-    );
+    assert_eq!(format!("{:?}", link.inner), "SenderLinkInner(\"s\")");
 
     // `ready()` resolves once the peer grants credit
     {
@@ -411,11 +405,9 @@ async fn transfer_builder_errors() {
     let Ok(Action::AttachSender(snd, attach, response)) = handle_frame(&conn, attach.into()) else {
         panic!()
     };
-    let link = session(&conn).inner.get_ref().attach_remote_sender_link(
-        &attach,
-        response,
-        snd.inner.clone(),
-    );
+    let link = session(&conn)
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     assert_eq!(link.max_message_size(), Some(4));
 
     assert!(matches!(
@@ -492,10 +484,7 @@ async fn receiver_link_accessors() {
     assert_eq!(link.credit(), 0);
     assert!(!link.is_closed());
     assert_eq!(format!("{link:?}"), "ReceiverLink(\"r\")");
-    assert_eq!(
-        format!("{:?}", link.inner.get_ref()),
-        "ReceiverLinkInner(\"r\")"
-    );
+    assert_eq!(format!("{:?}", link.inner), "ReceiverLinkInner(\"r\")");
 
     // equality and hashing are identity based
     let other = named_local_receiver(&conn, "r2", 4).await;

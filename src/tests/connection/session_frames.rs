@@ -212,7 +212,7 @@ async fn duplicate_detach_for_unconfirmed_links() {
 
         match action {
             Action::AttachSender(link, attach, response) => {
-                session(&conn).inner.get_ref().attach_remote_sender_link(
+                session(&conn).inner.attach_remote_sender_link(
                     &attach,
                     response,
                     link.inner.clone(),

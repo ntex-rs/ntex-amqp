@@ -124,11 +124,11 @@ async fn session_end_uses_local_channel() {
     let fut = ntex::rt::spawn(async move { session.end().await });
     sleep(Millis(10)).await;
     assert!(matches!(
-        inner.0.get_ref().sessions.borrow().slab[0],
+        inner.0.sessions.borrow().slab[0],
         SessionState::Closing(_)
     ));
     assert!(matches!(
-        inner.0.get_ref().sessions.borrow().slab[1],
+        inner.0.sessions.borrow().slab[1],
         SessionState::Established(_)
     ));
 
@@ -146,8 +146,8 @@ async fn session_end_uses_local_channel() {
     // remote confirms session end
     handle(1, End { error: None }.into()).unwrap();
     assert!(fut.await.unwrap().is_ok());
-    assert!(!inner.0.get_ref().sessions.borrow().slab.contains(0));
-    assert!(inner.0.get_ref().sessions.borrow().slab.contains(1));
+    assert!(!inner.0.sessions.borrow().slab.contains(0));
+    assert!(inner.0.sessions.borrow().slab.contains(1));
 
     sleep(Millis(50)).await;
     let frames: Vec<_> = read_channel_frames(&client)
@@ -286,10 +286,7 @@ async fn closing_session_connection_error() {
     sleep(Millis(10)).await;
     assert!(!end.is_finished());
 
-    conn.get_ref()
-        .0
-        .get_ref()
-        .set_error(AmqpProtocolError::Disconnected);
+    conn.get_ref().0.set_error(AmqpProtocolError::Disconnected);
     assert!(matches!(
         timeout(Millis(100), rcv).await.unwrap().unwrap(),
         Err(AmqpProtocolError::Disconnected)
@@ -313,10 +310,7 @@ async fn closing_session_connection_error() {
     else {
         panic!()
     };
-    conn.get_ref()
-        .0
-        .get_ref()
-        .set_error(AmqpProtocolError::Disconnected);
+    conn.get_ref().0.set_error(AmqpProtocolError::Disconnected);
     let err = session
         .build_receiver_link("c", "c")
         .attach()
@@ -354,11 +348,9 @@ async fn session_ending_sends_no_frames() {
     else {
         panic!()
     };
-    let snd =
-        session
-            .inner
-            .get_ref()
-            .attach_remote_sender_link(&attach, response, snd.inner.clone());
+    let snd = session
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
         panic!()
     };
@@ -407,7 +399,7 @@ async fn session_window_claimed_by_woken_transfers() {
     let (_io, conn, client, snd) = small_frames_sender();
     let snd2 = add_sender(&conn, "s2", 5, 0);
     let session = session(&conn);
-    let woken = || session.inner.get_ref().window_woken.get();
+    let woken = || session.inner.window_woken.get();
     sleep(Millis(50)).await;
     transfer_frames(&client);
 
@@ -480,7 +472,7 @@ async fn woken_window_waiter_releases_claim() {
     let (_io, conn, client, snd) = small_frames_sender();
     let snd2 = add_sender(&conn, "s2", 5, 0);
     let session = session(&conn);
-    let woken = || session.inner.get_ref().window_woken.get();
+    let woken = || session.inner.window_woken.get();
     sleep(Millis(50)).await;
     transfer_frames(&client);
 
@@ -557,9 +549,9 @@ async fn session_end_drops_queued_abort() {
     let (_io, conn, client, _snd, mut t2) = queued_abort_sender().await;
     let s = session(&conn);
     // next transfer and abort of cancelled delivery
-    assert_eq!(s.inner.get_ref().pending_transfers(), 2);
+    assert_eq!(s.inner.pending_transfers(), 2);
     handle_frame(&conn, End { error: None }.into()).unwrap();
-    assert_eq!(s.inner.get_ref().pending_transfers(), 0);
+    assert_eq!(s.inner.pending_transfers(), 0);
     let Poll::Ready(Err(_)) = poll_fn(|cx| Poll::Ready(t2.as_mut().poll(cx))).await else {
         panic!()
     };

@@ -67,13 +67,7 @@ async fn sender_delivery_remote_settled() {
     ));
     let s = session(&conn);
     let _ = handle_frame(&conn, End { error: None }.into());
-    assert!(
-        s.inner
-            .get_ref()
-            .unsettled_snd_deliveries
-            .borrow()
-            .is_empty()
-    );
+    assert!(s.inner.unsettled_snd_deliveries.borrow().is_empty());
     assert!(d.is_remote_settled());
 }
 
@@ -221,10 +215,7 @@ async fn delivery_wait_returns_session_error() {
             )
             .unwrap();
         } else {
-            conn.get_ref()
-                .0
-                .get_ref()
-                .set_error(AmqpProtocolError::Disconnected);
+            conn.get_ref().0.set_error(AmqpProtocolError::Disconnected);
         }
 
         // pending and late `wait()` return session error
@@ -352,7 +343,7 @@ async fn delivery_wait_outcome() {
     }
     let inner = session(&conn).inner;
     assert_eq!(
-        inner.get_ref().unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
+        inner.unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
         0
     );
     let mut live = Box::pin(d.wait());
@@ -362,7 +353,7 @@ async fn delivery_wait_outcome() {
         assert!(pending(w.as_mut()).await);
     }
     assert_eq!(
-        inner.get_ref().unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
+        inner.unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
         1
     );
     drop(live);
@@ -405,7 +396,7 @@ async fn delivery_no_disposition_after_link_detach() {
             let (_io, conn, client, snd) = small_frames_sender();
             let mut d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
             let s = session(&conn);
-            let _d = local.then(|| s.detach_sender_link(snd.inner.get_ref().id(), None));
+            let _d = local.then(|| s.detach_sender_link(snd.inner.id(), None));
             handle_frame(&conn, peer_detach(4)).unwrap();
             sleep(Millis(50)).await;
             let _ = dispositions(&client);

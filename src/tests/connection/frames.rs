@@ -77,14 +77,13 @@ async fn frames_detached_from_read_buffer() {
 
     // disposition with state
     let session = {
-        let sessions = inner.0.get_ref().sessions.borrow();
+        let sessions = inner.0.sessions.borrow();
         let SessionState::Established(session) = &sessions.slab[sessions.map[&0]] else {
             panic!()
         };
         session.clone()
     };
     session
-        .get_ref()
         .unsettled_snd_deliveries
         .borrow_mut()
         .insert(0, DeliveryInner::new(0));

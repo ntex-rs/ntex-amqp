@@ -25,7 +25,6 @@ async fn detach_unconfirmed_remote_sender_link() {
 
     // link is confirmed
     s.inner
-        .get_ref()
         .attach_remote_sender_link(&attach, response, link.inner.clone());
     assert!(s.get_sender_link("n").is_some());
     sleep(Millis(10)).await;
@@ -61,11 +60,9 @@ async fn remote_sender_flow_before_confirm() {
     }
     assert_eq!(link.credit(), 0);
 
-    let link =
-        session
-            .inner
-            .get_ref()
-            .attach_remote_sender_link(&attach, response, link.inner.clone());
+    let link = session
+        .inner
+        .attach_remote_sender_link(&attach, response, link.inner.clone());
     assert_eq!(link.credit(), 10);
     assert!(link.ready().await);
 }
@@ -92,7 +89,6 @@ async fn remote_sender_link_names() {
         };
         session
             .inner
-            .get_ref()
             .attach_remote_sender_link(&attach, response, link.inner.clone())
     };
 
@@ -129,7 +125,7 @@ async fn remote_sender_link_names() {
     let Ok(Action::DetachSender(..)) = handle(peer_detach(2)) else {
         panic!()
     };
-    let inner = session.inner.get_ref();
+    let inner = &*session.inner;
     assert!(inner.sender_names.borrow().is_empty() && inner.link_names.borrow().is_empty());
 }
 
@@ -154,11 +150,9 @@ async fn remote_sender_flow_order() {
     else {
         panic!()
     };
-    let link =
-        session
-            .inner
-            .get_ref()
-            .attach_remote_sender_link(&attach, response, link.inner.clone());
+    let link = session
+        .inner
+        .attach_remote_sender_link(&attach, response, link.inner.clone());
 
     let flow = |credit, window| {
         let Frame::Flow(mut flow) = peer_flow(Some(credit)) else {
@@ -219,11 +213,10 @@ async fn remote_sender_detach_before_confirm() {
         };
 
         if accept {
-            let link = session.inner.get_ref().attach_remote_sender_link(
-                &attach,
-                response,
-                link.inner.clone(),
-            );
+            let link =
+                session
+                    .inner
+                    .attach_remote_sender_link(&attach, response, link.inner.clone());
             assert!(link.is_closed());
             assert_eq!(link.credit(), 0);
             assert!(!link.ready().await);
@@ -238,7 +231,6 @@ async fn remote_sender_detach_before_confirm() {
         } else {
             session
                 .inner
-                .get_ref()
                 .detach_unconfirmed_sender_link(&attach, &link.inner, None);
             assert!(link.is_closed());
         }
@@ -276,7 +268,7 @@ async fn remote_receiver_reject_detach() {
         panic!()
     };
     let closed = link.close_with_error(crate::error::LinkError::force_detach());
-    assert!(session.inner.get_ref().is_remote_handle_used(5));
+    assert!(session.inner.is_remote_handle_used(5));
 
     let Ok(Action::AttachReceiver(link2, _, response)) =
         handle(named_attach(Role::Sender, "r2", "b", 6))
@@ -292,7 +284,7 @@ async fn remote_receiver_reject_detach() {
     };
     closed.await.unwrap();
     assert!(!link2.is_closed());
-    assert!(!session.inner.get_ref().is_remote_handle_used(5));
+    assert!(!session.inner.is_remote_handle_used(5));
 
     let Ok(Action::AttachReceiver(link3, _, _)) = handle(named_attach(Role::Sender, "r3", "c", 5))
     else {
@@ -339,7 +331,6 @@ async fn flow_echo_link_state() {
     };
     session
         .inner
-        .get_ref()
         .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let Ok(Action::AttachSender(..)) =
         handle_frame(&conn, named_attach(Role::Receiver, "o", "o", 5))
@@ -404,11 +395,11 @@ async fn remote_receiver_stale_confirm() {
     assert_eq!(link_a.handle(), link_b.handle());
 
     // stale confirmation and credit are ignored
-    assert!(!session.inner.get_ref().confirm_receiver_link(
-        &link_a.inner,
-        response_a.clone(),
-        None
-    ));
+    assert!(
+        !session
+            .inner
+            .confirm_receiver_link(&link_a.inner, response_a.clone(), None)
+    );
     assert!(!link_a.confirm_receiver_link(response_a));
     link_a.set_link_credit(10);
     assert_eq!(link_a.credit(), 0);
@@ -493,9 +484,8 @@ async fn remote_sender_reject_detach() {
     };
     session
         .inner
-        .get_ref()
         .detach_unconfirmed_sender_link(&attach, &link.inner, None);
-    assert!(session.inner.get_ref().is_remote_handle_used(1));
+    assert!(session.inner.is_remote_handle_used(1));
 
     // local handle of established link is equal to remote handle of rejected link
     let Ok(Action::AttachSender(link2, attach, response)) =
@@ -503,11 +493,9 @@ async fn remote_sender_reject_detach() {
     else {
         panic!()
     };
-    let link2 =
-        session
-            .inner
-            .get_ref()
-            .attach_remote_sender_link(&attach, response, link2.inner.clone());
+    let link2 = session
+        .inner
+        .attach_remote_sender_link(&attach, response, link2.inner.clone());
     assert_eq!(link2.id(), 1);
 
     // remote detach releases rejected link only
@@ -515,7 +503,7 @@ async fn remote_sender_reject_detach() {
         panic!()
     };
     assert!(!link2.is_closed());
-    assert!(!session.inner.get_ref().is_remote_handle_used(1));
+    assert!(!session.inner.is_remote_handle_used(1));
 
     // detach of unknown remote handle is ignored
     let Ok(Action::None) = handle(peer_detach(1)) else {
@@ -576,7 +564,7 @@ async fn remote_receiver_detach_before_confirm() {
         }
 
         // remote handle and link are released
-        assert!(!session.inner.get_ref().is_remote_handle_used(5));
+        assert!(!session.inner.is_remote_handle_used(5));
         let Ok(Action::AttachReceiver(link2, ..)) = handle(named_attach(Role::Sender, "r", "a", 5))
         else {
             panic!()
@@ -637,15 +625,12 @@ async fn remote_sender_end_before_confirm() {
 
         // confirmation after end does not send frames
         if accept {
-            session.inner.get_ref().attach_remote_sender_link(
-                &attach,
-                response,
-                link.inner.clone(),
-            );
+            session
+                .inner
+                .attach_remote_sender_link(&attach, response, link.inner.clone());
         } else {
             session
                 .inner
-                .get_ref()
                 .detach_unconfirmed_sender_link(&attach, &link.inner, None);
         }
 
@@ -770,7 +755,6 @@ async fn remote_sender_detach_reply_exceeds_frame_size() {
     };
     session(&conn)
         .inner
-        .get_ref()
         .attach_remote_sender_link(&attach, response, link.inner.clone());
     // session slab holds the only link reference
     drop(link);
@@ -800,7 +784,7 @@ async fn remote_sender_detach_reply_exceeds_frame_size() {
         ))
     ));
     assert!(!conn.is_opened());
-    assert!(conn.get_ref().0.get_ref().sessions.borrow().slab.is_empty());
+    assert!(conn.get_ref().0.sessions.borrow().slab.is_empty());
     assert!(conn.get_session_by_local_id(0).is_none());
 }
 
@@ -823,7 +807,7 @@ async fn remote_link_attach_reply_exceeds_frame_size() {
         let name = "n".repeat(1024);
         match handle_frame(&conn, named_attach(role, &name, "a", 3)) {
             Ok(Action::AttachSender(link, attach, response)) => {
-                let link = session(&conn).inner.get_ref().attach_remote_sender_link(
+                let link = session(&conn).inner.attach_remote_sender_link(
                     &attach,
                     response,
                     link.inner.clone(),

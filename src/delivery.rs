@@ -1,4 +1,4 @@
-use std::cell::Cell as StdCell;
+use std::{cell::Cell as StdCell, rc::Rc};
 
 use ntex_amqp_codec::protocol::{
     DeliveryNumber, DeliveryState, Disposition, DispositionInner, Error, ErrorCondition, Handle,
@@ -8,7 +8,7 @@ use ntex_amqp_codec::types::{Str, Symbol};
 use ntex_bytes::Bytes;
 use ntex_util::channel::pool;
 
-use crate::{cell::Cell, error::AmqpProtocolError, session::Session, sndlink::SenderLinkInner};
+use crate::{error::AmqpProtocolError, session::Session, sndlink::SenderLinkInner};
 
 bitflags::bitflags! {
     #[derive(Copy, Clone, Debug)]
@@ -49,7 +49,6 @@ impl Delivery {
         if !settled {
             session
                 .inner
-                .get_ref()
                 .unsettled_rcv_deliveries
                 .borrow_mut()
                 .insert(id, DeliveryInner::new(link_handle));
@@ -72,7 +71,6 @@ impl Delivery {
         let delivery = self
             .session
             .inner
-            .get_ref()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
             .borrow_mut()
             .remove(&self.id);
@@ -90,7 +88,6 @@ impl Delivery {
     pub fn remote_state(&self) -> Option<DeliveryState> {
         self.session
             .inner
-            .get_ref()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
             .borrow()
             .get(&self.id)
@@ -125,7 +122,7 @@ impl Delivery {
                 state: Some(state),
                 batchable: false,
             }));
-            self.session.inner.get_ref().post_frame(disp.into());
+            self.session.inner.post_frame(disp.into());
         }
     }
 
@@ -147,7 +144,7 @@ impl Delivery {
             state: Some(state),
             batchable: false,
         }));
-        self.session.inner.get_ref().post_frame(disp.into());
+        self.session.inner.post_frame(disp.into());
     }
 
     fn is_set(&self, flag: Flags) -> bool {
@@ -164,7 +161,6 @@ impl Delivery {
     fn is_detached(&self) -> bool {
         self.session
             .inner
-            .get_ref()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
             .borrow()
             .get(&self.id)
@@ -177,7 +173,6 @@ impl Delivery {
             && self
                 .session
                 .inner
-                .get_ref()
                 .unsettled_deliveries(self.is_set(Flags::SENDER))
                 .borrow()
                 .get(&self.id)
@@ -202,7 +197,7 @@ impl Delivery {
         loop {
             // deliveries must not be borrowed across await point
             let rx = {
-                let session = self.session.inner.get_ref();
+                let session = &*self.session.inner;
                 let mut deliveries = session
                     .unsettled_deliveries(self.is_set(Flags::SENDER))
                     .borrow_mut();
@@ -228,7 +223,6 @@ impl Delivery {
     fn session_error(&self) -> AmqpProtocolError {
         self.session
             .inner
-            .get_ref()
             .error()
             .unwrap_or(AmqpProtocolError::LinkDetached(None))
     }
@@ -236,7 +230,7 @@ impl Delivery {
 
 impl Drop for Delivery {
     fn drop(&mut self) {
-        let inner = self.session.inner.get_ref();
+        let inner = &*self.session.inner;
         let delivery = inner
             .unsettled_deliveries(self.is_set(Flags::SENDER))
             .borrow_mut()
@@ -359,11 +353,11 @@ pub struct TransferBuilder {
     settled: bool,
     data: TransferBody,
     format: Option<MessageFormat>,
-    sender: Cell<SenderLinkInner>,
+    sender: Rc<SenderLinkInner>,
 }
 
 impl TransferBuilder {
-    pub(crate) fn new(data: TransferBody, sender: Cell<SenderLinkInner>) -> Self {
+    pub(crate) fn new(data: TransferBody, sender: Rc<SenderLinkInner>) -> Self {
         Self {
             tag: None,
             settled: false,
@@ -393,7 +387,7 @@ impl TransferBuilder {
 
     /// Send delivery to the peer
     pub async fn send(self) -> Result<Delivery, AmqpProtocolError> {
-        let inner = self.sender.get_ref();
+        let inner = &*self.sender;
 
         if let Some(err) = inner.error.get() {
             Err(err)
@@ -413,7 +407,7 @@ impl TransferBuilder {
             Ok(Delivery {
                 id,
                 tag,
-                session: self.sender.get_ref().session.clone(),
+                session: self.sender.session.clone(),
                 flags: StdCell::new(if self.settled {
                     Flags::SENDER | Flags::LOCAL_SETTLED
                 } else {

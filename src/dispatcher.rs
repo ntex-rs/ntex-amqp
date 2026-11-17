@@ -356,16 +356,17 @@ impl ControlState {
         err: Option<Error>,
     ) -> Result<(), AmqpDispatcherError> {
         if let Some(err) = err {
-            match &frame.0.get_mut().kind {
+            match &frame.0.kind {
                 ControlFrameKind::AttachReceiver(_, _, link)
                 | ControlFrameKind::RemoteDetachReceiver(_, link) => {
                     let _ = link.close_with_error(err);
                 }
                 ControlFrameKind::AttachSender(frm, _, link) => {
-                    frame
-                        .session_cell()
-                        .get_ref()
-                        .detach_unconfirmed_sender_link(frm, &link.inner, Some(err));
+                    frame.session_cell().detach_unconfirmed_sender_link(
+                        frm,
+                        &link.inner,
+                        Some(err),
+                    );
                 }
                 ControlFrameKind::Flow(_, link) | ControlFrameKind::RemoteDetachSender(_, link) => {
                     let _ = link.close_with_error(err);
@@ -383,10 +384,10 @@ impl ControlState {
                 | ControlFrameKind::RemoteSessionEnded(_) => (),
             }
         } else {
-            match frame.0.get_mut().kind {
+            match frame.0.kind {
                 // session is ended or link is closed by control service
                 ControlFrameKind::AttachReceiver(_, _, ref link) if link.is_closed() => {}
-                ControlFrameKind::AttachReceiver(ref frm, ref mut pfrm, ref link) => {
+                ControlFrameKind::AttachReceiver(ref frm, ref pfrm, ref link) => {
                     let link = link.clone();
                     let fut = self
                         .service
@@ -411,8 +412,8 @@ impl ControlState {
                         .await;
                     });
                 }
-                ControlFrameKind::AttachSender(ref frm, ref mut pfrm, ref link) => {
-                    frame.session_cell().get_ref().attach_remote_sender_link(
+                ControlFrameKind::AttachSender(ref frm, ref pfrm, ref link) => {
+                    frame.session_cell().attach_remote_sender_link(
                         frm,
                         pfrm.take(),
                         link.inner.clone(),

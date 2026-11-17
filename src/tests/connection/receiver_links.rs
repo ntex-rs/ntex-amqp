@@ -281,7 +281,7 @@ async fn receiver_link_detach_wakes_recv() {
         sleep(Millis(50)).await;
         frame_names(&client);
 
-        let _d = session(&conn).detach_receiver_link(link.inner.get_ref().id(), None);
+        let _d = session(&conn).detach_receiver_link(link.inner.id(), None);
         let items = timeout(Millis(500), rx).await.unwrap().unwrap();
         if queued {
             assert!(matches!(items[..], [Ok(Some(0))]));
