@@ -108,8 +108,8 @@ impl SenderLink {
 
     /// Get notification when packet could be send to the peer.
     ///
-    /// Packet could be sent if link has credit and remote session
-    /// incoming window is available. Result indicates if link is alive
+    /// Packet could be sent if link has credit not claimed by other transfers
+    /// and remote session incoming window is available. Result indicates if link is alive
     pub async fn ready(&self) -> bool {
         loop {
             let (credit, window) = {
@@ -119,14 +119,14 @@ impl SenderLink {
                 }
                 // closed link notifies credit waiters
                 let credit = inner.on_credit.wait();
-                if inner.link_credit.get() == 0 {
-                    (credit, None)
-                } else {
+                if inner.has_credit() {
                     let session = &*inner.session.inner;
                     if session.has_window() {
                         return true;
                     }
                     (credit, Some(session.on_window.wait()))
+                } else {
+                    (credit, None)
                 }
             };
             poll_fn(|cx| {
@@ -395,6 +395,27 @@ impl SenderLinkInner {
         }
     }
 
+    /// New transfer could be sent without waiting for link credit
+    ///
+    /// Credit claimed by active transfers is not available, partial delivery
+    /// blocks new transfers
+    fn has_credit(&self) -> bool {
+        !self.partial.get() && self.link_credit.get() > self.active.get()
+    }
+
+    /// Credit claimed by a transfer is released without being consumed,
+    /// or partial delivery is completed
+    ///
+    /// Credit is passed to queued transfers first, remaining credit wakes
+    /// `ready()` waiters
+    fn release_credit(&self) {
+        self.wake_pending();
+        self.drain_and_post();
+        if self.has_credit() {
+            self.on_credit.notify(());
+        }
+    }
+
     /// Wake up transfers waiting for link credit
     ///
     /// Number of woken transfers is limited by credit not claimed by active transfers
@@ -481,10 +502,7 @@ impl SenderLinkInner {
                 return Err(AmqpProtocolError::Disconnected);
             }
             // credit claimed by woken transfers is not available
-            if inner.link_credit.get() <= inner.active.get()
-                || inner.partial.get()
-                || (!woken && !inner.pending_transfers.borrow().is_empty())
-            {
+            if !inner.has_credit() || (!woken && !inner.pending_transfers.borrow().is_empty()) {
                 // claimed window is released for other transfers
                 drop(claim.take());
                 log::trace!(
@@ -595,8 +613,7 @@ impl SenderLinkInner {
                 session.abort_transfer(handle, id);
             }
         }
-        self.wake_pending();
-        self.drain_and_post();
+        self.release_credit();
     }
 
     fn get_tag(&self, tag: Option<Bytes>) -> Bytes {
@@ -648,8 +665,7 @@ impl Drop for CreditWaiter {
                 // waiter is dropped after wake up
                 Poll::Ready(Ok(Ok(()))) => {
                     link.active.set(link.active.get() - 1);
-                    link.wake_pending();
-                    link.drain_and_post();
+                    link.release_credit();
                 }
                 // waiter is still queued
                 Poll::Pending => {
@@ -685,8 +701,7 @@ impl Drop for ActiveTransfer {
             let link = &*link;
             link.active.set(link.active.get() - 1);
             link.window_waiters.set(link.window_waiters.get() - 1);
-            link.wake_pending();
-            link.drain_and_post();
+            link.release_credit();
         }
     }
 }

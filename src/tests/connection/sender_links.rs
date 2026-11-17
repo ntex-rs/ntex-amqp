@@ -912,6 +912,60 @@ async fn sender_woken_transfer_keeps_link_credit() {
     );
 }
 
+/// STATEMENT: `ready()` does not report link credit claimed by a woken transfer, and
+/// resolves once the claim is released.
+///
+/// HOW:
+/// - Start a transfer with no credit, then grant credit 1 so the queued transfer is
+///   woken and claims it.
+/// - Assert `ready()` stays pending while the session window is open.
+/// - Drop the woken transfer without polling it; `ready()` resolves `true` and a new
+///   transfer takes the released credit with id 0.
+#[ntex::test]
+async fn sender_ready_skips_claimed_credit() {
+    let (_io, conn, _client, snd) = small_frames_sender();
+    link_flow(&conn, 4, (0, 0, false), 1, 10);
+    let mut t1 = Box::pin(snd.transfer(Bytes::from_static(b"1")).send());
+    assert!(pending(t1.as_mut()).await);
+
+    link_flow(&conn, 4, (0, 1, false), 1, 10);
+    let mut ready = Box::pin(snd.ready());
+    assert!(pending(ready.as_mut()).await);
+
+    // released credit wakes readiness waiter
+    drop(t1);
+    assert!(timeout(Millis(1000), ready).await.unwrap());
+    let d2 = snd.transfer(Bytes::from_static(b"2")).send().await.unwrap();
+    assert_eq!(d2.id(), 0);
+}
+
+/// STATEMENT: `ready()` stays pending while a partial delivery is in progress, and
+/// resolves once the delivery completes.
+///
+/// HOW:
+/// - Send a 3-frame delivery with session window 1, so it waits after the first frame.
+/// - Open window 3; the delivery is woken and claims 1, leaving window for new
+///   transfers, and assert `ready()` is still pending.
+/// - Poll the delivery to completion and assert `ready()` resolves `true`.
+#[ntex::test]
+async fn sender_ready_waits_for_partial_delivery() {
+    let (_io, conn, _client, snd) = small_frames_sender();
+    link_flow(&conn, 4, (0, 10, false), 1, 1);
+    let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
+    assert!(pending(t1.as_mut()).await);
+
+    session_window(&conn, 2, 3);
+    let mut ready = Box::pin(snd.ready());
+    assert!(pending(ready.as_mut()).await);
+
+    // completed delivery wakes readiness waiter
+    let Poll::Ready(Ok(d1)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
+        panic!()
+    };
+    assert_eq!(d1.id(), 0);
+    assert!(timeout(Millis(1000), ready).await.unwrap());
+}
+
 /// STATEMENT: The abort of a cancelled delivery does not take session window already
 /// claimed by a woken waiter, and is sent before new transfers.
 ///
