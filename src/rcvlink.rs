@@ -160,10 +160,10 @@ impl ReceiverLink {
         self.inner.reset_link_credit(credit);
     }
 
-    /// Link credit is used up, and link is not paused by application
-    pub(crate) fn needs_credit(&self) -> bool {
+    /// Link credit is below `low`, and link is not paused by application
+    pub(crate) fn needs_credit(&self, low: u32) -> bool {
         let inner = &*self.inner;
-        inner.credit.get() == 0 && !inner.paused.get()
+        inner.credit.get() < low && !inner.paused.get()
     }
 
     /// Set max message size.

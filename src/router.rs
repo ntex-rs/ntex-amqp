@@ -201,6 +201,11 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
     }
 }
 
+/// Link credit maintained by the router
+const LINK_CREDIT: u32 = 50;
+/// Credit is topped up below this level, before the sender runs out
+const LINK_CREDIT_LOW: u32 = LINK_CREDIT / 2;
+
 async fn service_call(
     link: ReceiverLink,
     mut delivery: Delivery,
@@ -214,8 +219,8 @@ async fn service_call(
         return Ok(());
     }
 
-    if link.needs_credit() {
-        link.set_link_credit(50);
+    if link.needs_credit(LINK_CREDIT_LOW) {
+        link.set_link_credit(LINK_CREDIT - link.credit());
     }
 
     match srv.call(tr).await {
@@ -507,6 +512,60 @@ mod tests {
         link.set_link_credit(1);
         transfer(2).await;
         assert_eq!(link.credit(), 50);
+    }
+
+    /// STATEMENT: The router tops up link credit to `LINK_CREDIT` once it drops below
+    /// `LINK_CREDIT_LOW`, before the sender runs out of credit.
+    ///
+    /// HOW:
+    /// - Attach an `ok` link, grant `LINK_CREDIT_LOW + 1` credits and drain written frames.
+    /// - Send one transfer and assert credit is `LINK_CREDIT_LOW` and no flow is sent.
+    /// - Send another transfer and assert credit is `LINK_CREDIT` and a single flow
+    ///   advertising `LINK_CREDIT` is sent.
+    #[ntex::test]
+    async fn link_credit_low_water_top_up() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, frm, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "ok", "ok", 0))
+        else {
+            panic!()
+        };
+        let (_inner, srv) =
+            router_service(Router::<()>::builder().service("ok", async |_: &Link<()>| {
+                Ok::<_, LinkError>(Srv(Rc::default()))
+            }));
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(LINK_CREDIT_LOW + 1);
+        sleep(Millis(25)).await;
+        read_frames(&client);
+
+        let transfer = async |id| {
+            let Ok(Action::Transfer(link)) = handle_frame(&conn, transfer(id, false, None, 1))
+            else {
+                panic!()
+            };
+            srv.call(Message::Transfer(link)).await.unwrap();
+            sleep(Millis(25)).await;
+            read_frames(&client)
+                .into_iter()
+                .filter_map(|frame| match frame {
+                    Frame::Flow(flow) => Some(flow.link_credit()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // credit at low-water mark is not topped up
+        assert_eq!(transfer(0).await, []);
+        assert_eq!(link.credit(), LINK_CREDIT_LOW);
+
+        // credit below low-water mark is topped up before it is used up
+        assert_eq!(transfer(1).await, [Some(LINK_CREDIT)]);
+        assert_eq!(link.credit(), LINK_CREDIT);
     }
 
     /// Error that cannot be converted into an `Outcome`
