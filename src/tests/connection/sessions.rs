@@ -407,7 +407,7 @@ async fn session_window_claimed_by_woken_transfers() {
     let (_io, conn, client, snd) = small_frames_sender();
     let snd2 = add_sender(&conn, "s2", 5, 0);
     let session = session(&conn);
-    let woken = || session.inner.get_ref().window_woken;
+    let woken = || session.inner.get_ref().window_woken.get();
     sleep(Millis(50)).await;
     transfer_frames(&client);
 
@@ -480,7 +480,7 @@ async fn woken_window_waiter_releases_claim() {
     let (_io, conn, client, snd) = small_frames_sender();
     let snd2 = add_sender(&conn, "s2", 5, 0);
     let session = session(&conn);
-    let woken = || session.inner.get_ref().window_woken;
+    let woken = || session.inner.get_ref().window_woken.get();
     sleep(Millis(50)).await;
     transfer_frames(&client);
 

@@ -226,7 +226,6 @@ impl Delivery {
             .inner
             .get_ref()
             .error()
-            .cloned()
             .unwrap_or(AmqpProtocolError::LinkDetached(None))
     }
 }
@@ -389,12 +388,12 @@ impl TransferBuilder {
     pub async fn send(self) -> Result<Delivery, AmqpProtocolError> {
         let inner = self.sender.get_ref();
 
-        if let Some(ref err) = inner.error {
-            Err(err.clone())
-        } else if inner.closed {
+        if let Some(err) = inner.error.get() {
+            Err(err)
+        } else if inner.closed.get() {
             Err(AmqpProtocolError::Disconnected)
         } else {
-            if let Some(limit) = inner.max_message_size
+            if let Some(limit) = inner.max_message_size.get()
                 && self.data.len() > limit as usize
             {
                 return Err(AmqpProtocolError::BodyTooLarge);

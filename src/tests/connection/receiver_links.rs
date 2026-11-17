@@ -203,7 +203,7 @@ async fn receiver_remote_detach_error() {
     let Ok(Action::DetachReceiver(..)) = handle_frame(&conn, detach.into()) else {
         panic!()
     };
-    assert_eq!(link.error(), Some(&err));
+    assert_eq!(link.error().as_ref(), Some(&err));
     let mut cx = Context::from_waker(Waker::noop());
     let Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(e))))) = link.poll_recv(&mut cx)
     else {
@@ -211,6 +211,43 @@ async fn receiver_remote_detach_error() {
     };
     assert_eq!(e, err);
     assert!(matches!(link.poll_recv(&mut cx), Poll::Ready(None)));
+}
+
+/// STATEMENT: An error returned by `ReceiverLink::error()` stays valid after
+/// `poll_recv` takes the link error.
+///
+/// HOW:
+/// - Detach a local receiver remotely with `InternalError` and keep the value
+///   returned by `error()`.
+/// - Take the error with `poll_recv` and drop the result.
+/// - Assert the kept value still equals the detach error and `error()` now
+///   returns `None`.
+#[ntex::test]
+async fn receiver_error_outlives_poll_recv() {
+    let err = Error(Box::new(codec::ErrorInner {
+        condition: AmqpError::InternalError.into(),
+        description: None,
+        info: None,
+    }));
+    let (_io, conn, _client) = connection();
+    handle_frame(&conn, begin()).unwrap();
+    let link = local_receiver(&conn, 1).await;
+
+    let detach = Detach(Box::new(DetachInner {
+        handle: 1,
+        closed: true,
+        error: Some(err.clone()),
+    }));
+    handle_frame(&conn, detach.into()).unwrap();
+    let held = link.error();
+
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(
+        link.poll_recv(&mut cx),
+        Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(_)))))
+    ));
+    assert_eq!(held, Some(err));
+    assert!(link.error().is_none());
 }
 
 /// STATEMENT: Locally detaching a receiver link wakes a pending `recv`, which first
@@ -344,7 +381,7 @@ async fn receiver_partial_delivery_and_detach() {
     }));
     handle_frame(&conn, detach.into()).unwrap();
     assert!(link.is_closed());
-    assert_eq!(link.error(), Some(&error));
+    assert_eq!(link.error().as_ref(), Some(&error));
     assert!(!link.has_deliveries());
     let Poll::Ready(Some(Err(AmqpProtocolError::LinkDetached(Some(err))))) =
         link.poll_recv(&mut cx)

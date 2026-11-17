@@ -1,5 +1,5 @@
 use std::task::{Context, Poll, Waker, ready};
-use std::{cmp, collections::VecDeque, fmt, future::Future, mem, pin::Pin, ptr};
+use std::{cell, cmp, collections::VecDeque, fmt, future::Future, mem, pin::Pin, ptr};
 
 use ntex_bytes::{BytePages, ByteString, Bytes};
 use ntex_util::channel::{condition, oneshot, pool};
@@ -23,7 +23,7 @@ use crate::rcvlink::{
 use crate::sndlink::{
     EstablishedSenderLink, SenderLink, SenderLinkBuilder, SenderLinkInner, remote_max_message_size,
 };
-use crate::{ConnectionRef, ControlFrame, cell::Cell, detach, types::Action};
+use crate::{ConnectionRef, ControlFrame, cell::Cell, cell::ErrorCell, detach, types::Action};
 
 const FRAME_HEADER_LEN: usize = 8;
 
@@ -39,17 +39,17 @@ pub(crate) struct SessionInner {
     id: usize,
     sink: ConnectionRef,
     // transfer frame id, AMQP 1.0 2.5.6
-    next_outgoing_id: TransferNumber,
-    next_delivery_id: DeliveryNumber,
-    flags: Flags,
+    next_outgoing_id: cell::Cell<TransferNumber>,
+    next_delivery_id: cell::Cell<DeliveryNumber>,
+    flags: cell::Cell<Flags>,
     begin: Begin,
 
     remote_channel_id: u16,
-    next_incoming_id: TransferNumber,
-    remote_outgoing_window: u32,
-    remote_incoming_window: u32,
+    next_incoming_id: cell::Cell<TransferNumber>,
+    remote_outgoing_window: cell::Cell<u32>,
+    remote_incoming_window: cell::Cell<u32>,
     // window claimed by woken transfers that have not sent their frame yet
-    pub(crate) window_woken: u32,
+    pub(crate) window_woken: cell::Cell<u32>,
     // notified if remote incoming window becomes available
     pub(crate) on_window: condition::Condition,
 
@@ -59,7 +59,7 @@ pub(crate) struct SessionInner {
     receiver_names: HashMap<ByteString, usize>,
     pub(crate) link_names: HashMap<usize, ByteString>,
     remote_handles: HashMap<Handle, usize>,
-    error: Option<AmqpProtocolError>,
+    error: ErrorCell,
     closed: condition::Condition,
 
     pending_transfers: VecDeque<PendingTransfer>,
@@ -118,7 +118,7 @@ impl Session {
     /// Get remote incoming window size
     #[inline]
     pub fn remote_window_size(&self) -> u32 {
-        self.inner.get_ref().remote_incoming_window
+        self.inner.get_ref().remote_incoming_window.get()
     }
 
     /// End session
@@ -127,14 +127,14 @@ impl Session {
     /// peer ended session with an error.
     pub async fn end(&self) -> Result<(), AmqpProtocolError> {
         let inner = self.inner.get_mut();
-        if inner.flags.contains(Flags::ENDED) {
+        if inner.flags.get().contains(Flags::ENDED) {
             return Ok(());
         }
 
-        if !inner.flags.contains(Flags::ENDING) {
+        if !inner.flags.get().contains(Flags::ENDING) {
             inner.sink.close_session(inner.id);
             inner.post_frame(Frame::End(End { error: None }));
-            inner.flags.insert(Flags::ENDING);
+            inner.flags.set(inner.flags.get() | Flags::ENDING);
             inner
                 .sink
                 .get_control_queue()
@@ -144,7 +144,7 @@ impl Session {
         }
 
         self.inner.closed.wait().await;
-        match self.inner.error.clone() {
+        match self.inner.error.get() {
             Some(err @ AmqpProtocolError::SessionEnded(Some(_))) => Err(err),
             _ => Ok(()),
         }
@@ -460,7 +460,8 @@ impl WindowClaim {
     /// Transfer frame is sent
     pub(crate) fn consume(mut self) {
         if let Some(session) = self.0.take() {
-            session.get_mut().window_woken -= 1;
+            let session = session.get_ref();
+            session.window_woken.set(session.window_woken.get() - 1);
         }
     }
 }
@@ -469,7 +470,7 @@ impl Drop for WindowClaim {
     fn drop(&mut self) {
         if let Some(session) = self.0.take() {
             let session = session.get_mut();
-            session.window_woken -= 1;
+            session.window_woken.set(session.window_woken.get() - 1);
             session.wake_window_waiters();
         }
     }
@@ -569,14 +570,14 @@ impl SessionInner {
         begin: Begin,
     ) -> SessionInner {
         SessionInner {
-            next_incoming_id: begin.next_outgoing_id(),
-            remote_incoming_window: begin.incoming_window(),
-            window_woken: 0,
+            next_incoming_id: cell::Cell::new(begin.next_outgoing_id()),
+            remote_incoming_window: cell::Cell::new(begin.incoming_window()),
+            window_woken: cell::Cell::new(0),
             on_window: condition::Condition::new(),
-            remote_outgoing_window: begin.outgoing_window(),
-            flags: if local { Flags::LOCAL } else { Flags::empty() },
-            next_outgoing_id: INITIAL_NEXT_OUTGOING_ID,
-            next_delivery_id: 0,
+            remote_outgoing_window: cell::Cell::new(begin.outgoing_window()),
+            flags: cell::Cell::new(if local { Flags::LOCAL } else { Flags::empty() }),
+            next_outgoing_id: cell::Cell::new(INITIAL_NEXT_OUTGOING_ID),
+            next_delivery_id: cell::Cell::new(0),
             unsettled_snd_deliveries: HashMap::default(),
             unsettled_rcv_deliveries: HashMap::default(),
             links: Slab::new(),
@@ -585,7 +586,7 @@ impl SessionInner {
             link_names: HashMap::default(),
             remote_handles: HashMap::default(),
             pending_transfers: VecDeque::new(),
-            error: None,
+            error: ErrorCell::default(),
             pool_notify: pool::new(),
             pool_credit: pool::new(),
             closed: condition::Condition::new(),
@@ -619,7 +620,7 @@ impl SessionInner {
     /// Set error. New operations will return error.
     pub(crate) fn set_error(&mut self, err: AmqpProtocolError) {
         // session state is dropped already, keep first error
-        if self.flags.contains(Flags::ENDED) {
+        if self.flags.get().contains(Flags::ENDED) {
             return;
         }
         log::trace!(
@@ -681,8 +682,8 @@ impl SessionInner {
         }
         self.links.clear();
 
-        self.error = Some(err);
-        self.flags.insert(Flags::ENDED);
+        self.error.set(Some(err));
+        self.flags.set(self.flags.get() | Flags::ENDED);
         self.closed.notify_and_lock(());
     }
 
@@ -821,7 +822,7 @@ impl SessionInner {
 
     /// Check if remote sender link waits for confirmation and session is not ending
     fn is_opening_remote(&self, token: usize) -> bool {
-        !self.flags.intersects(Flags::ENDING | Flags::ENDED)
+        !self.flags.get().intersects(Flags::ENDING | Flags::ENDED)
             && matches!(
                 self.links.get(token),
                 Some(Either::Left(SenderLinkState::OpeningRemote { .. }))
@@ -888,7 +889,7 @@ impl SessionInner {
 
         // session could be ended while link was waiting for confirmation,
         // link is closed by session error
-        let state = if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+        let state = if self.flags.get().intersects(Flags::ENDING | Flags::ENDED) {
             None
         } else {
             self.links.get_mut(token)
@@ -904,7 +905,7 @@ impl SessionInner {
         let (flow, detach) = (flow.take(), detach.take());
 
         *response.handle_mut() = token as Handle;
-        *response.max_message_size_mut() = link.max_message_size.map(u64::from);
+        *response.max_message_size_mut() = link.max_message_size.get().map(u64::from);
         self.post_frame(response.into());
 
         // remote detached link before confirmation
@@ -960,7 +961,7 @@ impl SessionInner {
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
         let (tx, rx) = oneshot::channel();
         // session is ending, links are removed on session end
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+        if self.flags.get().intersects(Flags::ENDING | Flags::ENDED) {
             let _ = tx.send(Ok(()));
         } else {
             self.detach_sender_link_inner(id, closed, error, tx);
@@ -1092,7 +1093,7 @@ impl SessionInner {
         error: Option<Error>,
     ) {
         let token = link.id;
-        if !link.get_ref().closed {
+        if !link.get_ref().closed.get() {
             link.get_mut()
                 .remote_detached(AmqpProtocolError::LinkDetached(error.clone()));
         }
@@ -1270,7 +1271,7 @@ impl SessionInner {
     ) -> bool {
         let token = inner.get_ref().id();
         // session could be ended while link was waiting for confirmation
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+        if self.flags.get().intersects(Flags::ENDING | Flags::ENDED) {
             log::debug!("{}: Session is ending, receiver link: {token}", self.tag());
             return false;
         }
@@ -1343,7 +1344,7 @@ impl SessionInner {
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> + use<> {
         let (tx, rx) = oneshot::channel();
         // session is ending, links are removed on session end
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+        if self.flags.get().intersects(Flags::ENDING | Flags::ENDED) {
             let _ = tx.send(Ok(()));
         } else {
             self.detach_receiver_link_inner(id, closed, error, tx);
@@ -1544,7 +1545,8 @@ impl SessionInner {
                 Frame::Transfer(transfer) => {
                     // incoming window is not limited (u32::MAX), memory is bounded
                     // by link credit, max message size and handle-max
-                    self.next_incoming_id = self.next_incoming_id.wrapping_add(1);
+                    self.next_incoming_id
+                        .set(self.next_incoming_id.get().wrapping_add(1));
 
                     let idx = if let Some(idx) = self.remote_handles.get(&transfer.handle()) {
                         *idx
@@ -1931,31 +1933,32 @@ impl SessionInner {
 
     pub(crate) fn handle_flow(&mut self, flow: &Flow) {
         // # AMQP1.0 2.5.6
-        self.next_incoming_id = flow.next_outgoing_id();
-        self.remote_outgoing_window = flow.outgoing_window();
+        self.next_incoming_id.set(flow.next_outgoing_id());
+        self.remote_outgoing_window.set(flow.outgoing_window());
 
         // next-incoming-id is null if remote has not received begin yet
         let next_incoming_id = flow.next_incoming_id().unwrap_or(INITIAL_NEXT_OUTGOING_ID);
 
         // transfers sent after flow was issued consume its window
-        let in_flight = self.next_outgoing_id.wrapping_sub(next_incoming_id);
-        self.remote_incoming_window = if in_flight > i32::MAX as u32 {
+        let in_flight = self.next_outgoing_id.get().wrapping_sub(next_incoming_id);
+        let window = if in_flight > i32::MAX as u32 {
             log::warn!(
                 "{}: Session flow next-incoming-id {:?} is ahead of next-outgoing-id {:?}",
                 self.tag(),
                 next_incoming_id,
-                self.next_outgoing_id
+                self.next_outgoing_id.get()
             );
             flow.incoming_window()
         } else {
             flow.incoming_window().saturating_sub(in_flight)
         };
+        self.remote_incoming_window.set(window);
 
         log::trace!(
             "{}: Session received credit {:?}. window: {}, pending: {}",
             self.tag(),
             flow.link_credit(),
-            self.remote_incoming_window,
+            self.remote_incoming_window.get(),
             self.pending_transfers.len(),
         );
 
@@ -1972,7 +1975,7 @@ impl SessionInner {
             match tr.kind {
                 Pending::Wake(tx) => {
                     if tx.send(Ok(())).is_ok() {
-                        self.window_woken += 1;
+                        self.window_woken.set(self.window_woken.get() + 1);
                     }
                 }
                 Pending::Abort(id) => self.post_abort(tr.link_handle, id),
@@ -1987,7 +1990,7 @@ impl SessionInner {
     ///
     /// Queued transfers and aborts leave no window
     pub(crate) fn has_window(&self) -> bool {
-        self.remote_incoming_window > self.window_woken
+        self.remote_incoming_window.get() > self.window_woken.get()
     }
 
     pub(crate) fn rcv_link_flow(&mut self, handle: u32, delivery_count: u32, credit: u32) {
@@ -1997,9 +2000,9 @@ impl SessionInner {
     /// Send session flow, with link state `(handle, delivery-count, link-credit, drain)`
     pub(crate) fn post_flow(&mut self, link: Option<(Handle, codec::SequenceNo, u32, bool)>) {
         let flow = Flow(Box::new(codec::FlowInner {
-            next_incoming_id: Some(self.next_incoming_id),
+            next_incoming_id: Some(self.next_incoming_id.get()),
             incoming_window: u32::MAX,
-            next_outgoing_id: self.next_outgoing_id,
+            next_outgoing_id: self.next_outgoing_id.get(),
             // outgoing transfers are limited by remote incoming window only
             outgoing_window: u32::MAX,
             handle: link.map(|l| l.0),
@@ -2032,10 +2035,10 @@ impl SessionInner {
         link_handle: Handle,
         claimed: bool,
     ) -> Result<Option<pool::Receiver<Result<(), AmqpProtocolError>>>, AmqpProtocolError> {
-        let claimed_by_others = self.window_woken - u32::from(claimed);
+        let claimed_by_others = self.window_woken.get() - u32::from(claimed);
         if let Some(err) = self.ending_error() {
             Err(err)
-        } else if self.remote_incoming_window <= claimed_by_others {
+        } else if self.remote_incoming_window.get() <= claimed_by_others {
             log::trace!(
                 "{}: Remote window is 0, push to pending queue, hnd:{link_handle:?}",
                 self.sink.tag()
@@ -2066,8 +2069,8 @@ impl SessionInner {
             return Err(err);
         }
 
-        let delivery_id = self.next_delivery_id;
-        self.next_delivery_id = self.next_delivery_id.wrapping_add(1);
+        let delivery_id = self.next_delivery_id.get();
+        self.next_delivery_id.set(delivery_id.wrapping_add(1));
 
         let tr_settled = if settled {
             Some(DeliveryState::Accepted(Accepted {}))
@@ -2116,7 +2119,7 @@ impl SessionInner {
             log::trace!(
                 "{}: Sending transfer over handle {link_handle}. window: {} delivery_id: {:?} delivery_tag: {:?}, more: {:?}, batchable: {:?}, settled: {:?}",
                 self.sink.tag(),
-                self.remote_incoming_window,
+                self.remote_incoming_window.get(),
                 transfer.delivery_id(),
                 transfer.delivery_tag(),
                 transfer.more(),
@@ -2201,15 +2204,17 @@ impl SessionInner {
 
     /// Each transfer frame consumes remote incoming window, AMQP 1.0 2.5.6
     fn post_transfer(&mut self, transfer: Transfer) {
-        debug_assert!(self.remote_incoming_window > 0);
-        self.remote_incoming_window = self.remote_incoming_window.saturating_sub(1);
-        self.next_outgoing_id = self.next_outgoing_id.wrapping_add(1);
+        debug_assert!(self.remote_incoming_window.get() > 0);
+        self.remote_incoming_window
+            .set(self.remote_incoming_window.get().saturating_sub(1));
+        self.next_outgoing_id
+            .set(self.next_outgoing_id.get().wrapping_add(1));
         self.post_frame(Frame::Transfer(transfer));
     }
 
     pub(crate) fn post_frame(&mut self, frame: Frame) {
         // no frames are sent after session end, AMQP 1.0 2.5.5
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+        if self.flags.get().intersects(Flags::ENDING | Flags::ENDED) {
             log::trace!(
                 "{}: Session is ending, drop frame {}",
                 self.tag(),
@@ -2221,16 +2226,16 @@ impl SessionInner {
     }
 
     /// Session error, set when session is ended
-    pub(crate) fn error(&self) -> Option<&AmqpProtocolError> {
-        self.error.as_ref()
+    pub(crate) fn error(&self) -> Option<AmqpProtocolError> {
+        self.error.get()
     }
 
     /// Session end error, if session is ending or ended
     fn ending_error(&self) -> Option<AmqpProtocolError> {
-        if self.flags.intersects(Flags::ENDING | Flags::ENDED) {
+        if self.flags.get().intersects(Flags::ENDING | Flags::ENDED) {
             Some(
                 self.error
-                    .clone()
+                    .get()
                     .unwrap_or(AmqpProtocolError::SessionEnded(None)),
             )
         } else {

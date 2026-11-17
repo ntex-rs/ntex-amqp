@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context,
+    cell, collections::VecDeque, future::Future, future::poll_fn, hash, pin::Pin, task::Context,
     task::Poll,
 };
 
@@ -14,7 +14,9 @@ use ntex_util::time::{Seconds, timeout_checked};
 use ntex_util::{Stream, task::LocalWaker};
 
 use crate::session::{Session, SessionInner};
-use crate::{Delivery, cell::Cell, detach, error::AmqpProtocolError, types::Action};
+use crate::{
+    Delivery, cell::Cell, cell::ErrorCell, detach, error::AmqpProtocolError, types::Action,
+};
 
 #[derive(Clone)]
 pub struct ReceiverLink {
@@ -26,21 +28,21 @@ pub(crate) struct ReceiverLinkInner {
     handle: Handle,
     remote_handle: Handle,
     session: Session,
-    closed: bool,
+    closed: cell::Cell<bool>,
     // remote link is not confirmed yet
-    opening: bool,
+    opening: cell::Cell<bool>,
     reader_task: LocalWaker,
     queue: VecDeque<(Delivery, Transfer)>,
-    credit: u32,
-    delivery_count: SequenceNo,
+    credit: cell::Cell<u32>,
+    delivery_count: cell::Cell<SequenceNo>,
     // delivery-limit advertised before credit was reduced, transfers
     // sent by peer before it received reduced credit are accepted (#2.6.7)
-    in_flight_limit: Option<SequenceNo>,
+    in_flight_limit: cell::Cell<Option<SequenceNo>>,
     // credit is reset to `0` by application, router does not add credit
-    paused: bool,
-    error: Option<AmqpProtocolError>,
+    paused: cell::Cell<bool>,
+    error: ErrorCell,
     partial_body: Option<BytePages>,
-    max_message_size: u64,
+    max_message_size: cell::Cell<u64>,
 }
 
 impl std::fmt::Debug for ReceiverLink {
@@ -99,7 +101,7 @@ impl ReceiverLink {
     /// Returns available link credit
     #[inline]
     pub fn credit(&self) -> u32 {
-        self.inner.get_ref().credit
+        self.inner.get_ref().credit.get()
     }
 
     /// Reference to session
@@ -111,12 +113,12 @@ impl ReceiverLink {
     /// Check if link is closed
     #[inline]
     pub fn is_closed(&self) -> bool {
-        self.inner.get_ref().closed
+        self.inner.get_ref().closed.get()
     }
 
     /// Remote detach error
-    pub fn error(&self) -> Option<&Error> {
-        if let Some(AmqpProtocolError::LinkDetached(Some(err))) = &self.inner.get_ref().error {
+    pub fn error(&self) -> Option<Error> {
+        if let Some(AmqpProtocolError::LinkDetached(Some(err))) = self.inner.get_ref().error.get() {
             Some(err)
         } else {
             None
@@ -126,7 +128,7 @@ impl ReceiverLink {
     /// Confirm remote link, returns `false` if link is not established
     pub(crate) fn confirm_receiver_link(&self, response: Attach) -> bool {
         let inner = self.inner.get_ref();
-        let size = inner.max_message_size;
+        let size = inner.max_message_size.get();
         let size = if size != 0 { Some(size) } else { None };
         inner
             .session
@@ -160,7 +162,7 @@ impl ReceiverLink {
     /// Link credit is used up, and link is not paused by application
     pub(crate) fn needs_credit(&self) -> bool {
         let inner = self.inner.get_ref();
-        inner.credit == 0 && !inner.paused
+        inner.credit.get() == 0 && !inner.paused.get()
     }
 
     /// Set max message size.
@@ -168,7 +170,7 @@ impl ReceiverLink {
     /// Larger messages detach the link with `message-size-exceeded` error.
     /// If max size is set to `0`, size is unlimited.
     pub fn set_max_message_size(&self, size: u64) {
-        self.inner.get_mut().max_message_size = size;
+        self.inner.get_ref().max_message_size.set(size);
     }
 
     /// Check if link has completely received deliveries
@@ -230,8 +232,8 @@ impl ReceiverLink {
             return Poll::Ready(Some(Ok(tr)));
         }
 
-        let inner = self.inner.get_mut();
-        if inner.closed {
+        let inner = self.inner.get_ref();
+        if inner.closed.get() {
             Poll::Ready(inner.error.take().map(Err))
         } else {
             inner.reader_task.register(cx.waker());
@@ -274,16 +276,16 @@ impl ReceiverLinkInner {
             handle,
             remote_handle,
             session: Session::new(session),
-            closed: false,
-            opening,
+            closed: cell::Cell::new(false),
+            opening: cell::Cell::new(opening),
             queue: VecDeque::with_capacity(4),
-            credit: 0,
-            in_flight_limit: None,
-            paused: false,
-            error: None,
+            credit: cell::Cell::new(0),
+            in_flight_limit: cell::Cell::new(None),
+            paused: cell::Cell::new(false),
+            error: ErrorCell::default(),
             partial_body: None,
-            delivery_count: frame.initial_delivery_count().unwrap_or(0),
-            max_message_size,
+            delivery_count: cell::Cell::new(frame.initial_delivery_count().unwrap_or(0)),
+            max_message_size: cell::Cell::new(max_message_size),
             reader_task: LocalWaker::new(),
         }
     }
@@ -332,14 +334,19 @@ impl ReceiverLinkInner {
     }
 
     fn set_closed(&mut self, error: Option<AmqpProtocolError>) {
-        self.closed = true;
-        self.error = error;
+        self.closed.set(true);
+        self.error.set(error);
         self.wake();
     }
 
     /// Link flow state `(handle, delivery-count, link-credit, drain)`
     pub(crate) fn flow_state(&self) -> (Handle, SequenceNo, u32, bool) {
-        (self.handle, self.delivery_count, self.credit, false)
+        (
+            self.handle,
+            self.delivery_count.get(),
+            self.credit.get(),
+            false,
+        )
     }
 
     pub(crate) fn id(&self) -> Handle {
@@ -347,7 +354,7 @@ impl ReceiverLinkInner {
     }
 
     pub(crate) fn set_delivery_count(&mut self, delivery_count: SequenceNo) {
-        self.delivery_count = delivery_count;
+        self.delivery_count.set(delivery_count);
     }
 
     /// Apply sender's delivery-count, delivery-limit is preserved (#2.6.7)
@@ -357,12 +364,13 @@ impl ReceiverLinkInner {
             return;
         }
         if let Some(snd_delivery_count) = flow.delivery_count() {
-            let limit = self.delivery_count.wrapping_add(self.credit);
+            let limit = self.delivery_count.get().wrapping_add(self.credit.get());
             let credit = limit.wrapping_sub(snd_delivery_count);
             if credit > i32::MAX as u32 {
                 // sender could use credit advertised before credit reduction
                 if self
                     .in_flight_limit
+                    .get()
                     .is_none_or(|l| serial_lt(l, snd_delivery_count))
                 {
                     log::warn!(
@@ -373,18 +381,19 @@ impl ReceiverLinkInner {
                         limit
                     );
                 }
-                self.credit = 0;
+                self.credit.set(0);
             } else {
-                self.credit = credit;
+                self.credit.set(credit);
             }
-            self.delivery_count = snd_delivery_count;
+            self.delivery_count.set(snd_delivery_count);
         }
     }
 
     /// Check if next delivery was sent with credit advertised before credit reduction
     fn is_in_flight(&self) -> bool {
         self.in_flight_limit
-            .is_some_and(|l| serial_lt(self.delivery_count, l))
+            .get()
+            .is_some_and(|l| serial_lt(self.delivery_count.get(), l))
     }
 
     pub(crate) fn name(&self) -> &ByteString {
@@ -394,12 +403,12 @@ impl ReceiverLinkInner {
     pub(crate) fn detached(&mut self) {
         // drop pending transfers
         self.queue.clear();
-        self.closed = true;
+        self.closed.set(true);
     }
 
     /// Link is detached locally, wake up reader
     pub(crate) fn local_detached(&mut self) {
-        self.closed = true;
+        self.closed.set(true);
         self.wake();
     }
 
@@ -407,7 +416,7 @@ impl ReceiverLinkInner {
         &mut self,
         error: Option<Error>,
     ) -> impl Future<Output = Result<(), AmqpProtocolError>> {
-        let detach = (!self.closed).then(|| {
+        let detach = (!self.closed.get()).then(|| {
             self.session
                 .inner
                 .get_mut()
@@ -455,61 +464,70 @@ impl ReceiverLinkInner {
     /// Application never sees aborted delivery, so its credit is returned
     /// to the sender, otherwise the link could stall without credit.
     fn delivery_aborted(&mut self) -> TransferResult {
-        self.delivery_count = self.delivery_count.wrapping_add(1);
+        self.delivery_count
+            .set(self.delivery_count.get().wrapping_add(1));
         TransferResult::Flow
     }
 
     pub(crate) fn set_link_credit(&mut self, credit: u32) {
         // link handle could be reused by another link
-        if self.closed {
+        if self.closed.get() {
             return;
         }
         if credit > 0 {
-            self.paused = false;
+            self.paused.set(false);
         }
-        self.update_credit(self.credit.saturating_add(credit));
+        self.update_credit(self.credit.get().saturating_add(credit));
     }
 
     pub(crate) fn reset_link_credit(&mut self, credit: u32) {
         // link handle could be reused by another link
-        if self.closed {
+        if self.closed.get() {
             return;
         }
         // remote sender knows credit only after link confirmation
-        if !self.opening {
-            let limit = self.delivery_count.wrapping_add(self.credit);
-            if self.in_flight_limit.is_none_or(|l| serial_lt(l, limit)) {
-                self.in_flight_limit = Some(limit);
+        if !self.opening.get() {
+            let limit = self.delivery_count.get().wrapping_add(self.credit.get());
+            if self
+                .in_flight_limit
+                .get()
+                .is_none_or(|l| serial_lt(l, limit))
+            {
+                self.in_flight_limit.set(Some(limit));
             }
         }
-        self.paused = credit == 0;
+        self.paused.set(credit == 0);
         self.update_credit(credit);
     }
 
     fn update_credit(&mut self, credit: u32) {
-        self.credit = credit;
+        self.credit.set(credit);
 
         // previous delivery-limit is covered by new one
-        let limit = self.delivery_count.wrapping_add(credit);
-        if self.in_flight_limit.is_some_and(|l| !serial_lt(limit, l)) {
-            self.in_flight_limit = None;
+        let limit = self.delivery_count.get().wrapping_add(credit);
+        if self
+            .in_flight_limit
+            .get()
+            .is_some_and(|l| !serial_lt(limit, l))
+        {
+            self.in_flight_limit.set(None);
         }
 
         // credit is sent after link confirmation
-        if !self.opening {
+        if !self.opening.get() {
             self.session.inner.get_mut().rcv_link_flow(
                 self.handle,
-                self.delivery_count,
-                self.credit,
+                self.delivery_count.get(),
+                self.credit.get(),
             );
         }
     }
 
     /// Mark remote link as confirmed, returns pending link credit
     pub(crate) fn confirmed(&mut self) -> Option<(SequenceNo, u32)> {
-        self.opening = false;
-        if self.credit > 0 {
-            Some((self.delivery_count, self.credit))
+        self.opening.set(false);
+        if self.credit.get() > 0 {
+            Some((self.delivery_count.get(), self.credit.get()))
         } else {
             None
         }
@@ -521,7 +539,7 @@ impl ReceiverLinkInner {
         mut transfer: Transfer,
         inner: &Cell<ReceiverLinkInner>,
     ) -> TransferResult {
-        if self.credit == 0 && !self.is_in_flight() {
+        if self.credit.get() == 0 && !self.is_in_flight() {
             // check link credit
             let err = Error(Box::new(codec::ErrorInner {
                 condition: LinkError::TransferLimitExceeded.into(),
@@ -534,7 +552,7 @@ impl ReceiverLinkInner {
             // credit used by aborted delivery is returned to the sender
             let aborted = transfer.0.aborted;
             if !transfer.0.more && !aborted {
-                self.credit = self.credit.saturating_sub(1);
+                self.credit.set(self.credit.get().saturating_sub(1));
             }
 
             // handle batched transfer
@@ -578,7 +596,10 @@ impl ReceiverLinkInner {
 
                 // merge transfer data and check size
                 if let Some(transfer_body) = transfer.0.body.take() {
-                    if size_exceeded(self.max_message_size, body.len() + transfer_body.len()) {
+                    if size_exceeded(
+                        self.max_message_size.get(),
+                        body.len() + transfer_body.len(),
+                    ) {
                         return Self::close_size_exceeded();
                     }
 
@@ -590,7 +611,8 @@ impl ReceiverLinkInner {
                     TransferResult::Action(Action::None)
                 } else {
                     // received last partial transfer
-                    self.delivery_count = self.delivery_count.wrapping_add(1);
+                    self.delivery_count
+                        .set(self.delivery_count.get().wrapping_add(1));
                     let partial_body = self.partial_body.take();
                     if partial_body.is_some() && !self.queue.is_empty() {
                         self.queue.back_mut().unwrap().1.0.body =
@@ -619,7 +641,7 @@ impl ReceiverLinkInner {
                     if self.is_duplicate(id) {
                         return Self::close_duplicate();
                     }
-                    if size_exceeded(self.max_message_size, body_len(&transfer)) {
+                    if size_exceeded(self.max_message_size.get(), body_len(&transfer)) {
                         return Self::close_size_exceeded();
                     }
 
@@ -658,11 +680,12 @@ impl ReceiverLinkInner {
                 if self.is_duplicate(id) {
                     return Self::close_duplicate();
                 }
-                if size_exceeded(self.max_message_size, body_len(&transfer)) {
+                if size_exceeded(self.max_message_size.get(), body_len(&transfer)) {
                     return Self::close_size_exceeded();
                 }
 
-                self.delivery_count = self.delivery_count.wrapping_add(1);
+                self.delivery_count
+                    .set(self.delivery_count.get().wrapping_add(1));
                 let delivery = Delivery::new_rcv(
                     id,
                     self.handle,

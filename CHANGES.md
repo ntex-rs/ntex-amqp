@@ -1,5 +1,11 @@
 # Changes
 
+## [6.5.0] - Unreleased
+
+* `ReceiverLink::error()` and `SenderLink::error()` return owned errors instead
+  of references. Previously the returned reference could dangle once
+  `poll_recv` took the link error or a remote detach replaced it.
+
 ## [6.4.0] - 2026-11-16
 
 * Fix use-after-free when an outgoing frame fails to encode, for example a
