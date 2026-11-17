@@ -1,4 +1,4 @@
-use std::cell::Cell as StdCell;
+use std::{cell::Cell as StdCell, rc::Rc};
 
 use ntex_amqp_codec::protocol::{
     DeliveryNumber, DeliveryState, Disposition, DispositionInner, Error, ErrorCondition, Handle,
@@ -8,7 +8,7 @@ use ntex_amqp_codec::types::{Str, Symbol};
 use ntex_bytes::Bytes;
 use ntex_util::channel::pool;
 
-use crate::{cell::Cell, error::AmqpProtocolError, session::Session, sndlink::SenderLinkInner};
+use crate::{error::AmqpProtocolError, session::Session, sndlink::SenderLinkInner};
 
 bitflags::bitflags! {
     #[derive(Copy, Clone, Debug)]
@@ -49,8 +49,8 @@ impl Delivery {
         if !settled {
             session
                 .inner
-                .get_mut()
                 .unsettled_rcv_deliveries
+                .borrow_mut()
                 .insert(id, DeliveryInner::new(link_handle));
         }
 
@@ -68,11 +68,13 @@ impl Delivery {
 
     /// Drop delivery without sending disposition
     pub(crate) fn discard(self) {
-        self.session
+        let delivery = self
+            .session
             .inner
-            .get_mut()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .borrow_mut()
             .remove(&self.id);
+        drop(delivery);
     }
 
     pub fn id(&self) -> DeliveryNumber {
@@ -84,17 +86,12 @@ impl Delivery {
     }
 
     pub fn remote_state(&self) -> Option<DeliveryState> {
-        if let Some(inner) = self
-            .session
+        self.session
             .inner
-            .get_mut()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
-            .get_mut(&self.id)
-        {
-            inner.state.clone()
-        } else {
-            None
-        }
+            .borrow()
+            .get(&self.id)
+            .and_then(|inner| inner.state.clone())
     }
 
     pub fn is_remote_settled(&self) -> bool {
@@ -125,7 +122,7 @@ impl Delivery {
                 state: Some(state),
                 batchable: false,
             }));
-            self.session.inner.get_mut().post_frame(disp.into());
+            self.session.inner.post_frame(disp.into());
         }
     }
 
@@ -147,7 +144,7 @@ impl Delivery {
             state: Some(state),
             batchable: false,
         }));
-        self.session.inner.get_mut().post_frame(disp.into());
+        self.session.inner.post_frame(disp.into());
     }
 
     fn is_set(&self, flag: Flags) -> bool {
@@ -164,8 +161,8 @@ impl Delivery {
     fn is_detached(&self) -> bool {
         self.session
             .inner
-            .get_mut()
             .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .borrow()
             .get(&self.id)
             .is_none_or(|inner| inner.error.is_some())
     }
@@ -176,8 +173,8 @@ impl Delivery {
             && self
                 .session
                 .inner
-                .get_mut()
                 .unsettled_deliveries(self.is_set(Flags::SENDER))
+                .borrow()
                 .get(&self.id)
                 .is_some_and(|inner| inner.settled)
         {
@@ -198,24 +195,26 @@ impl Delivery {
         }
 
         loop {
-            let Some(inner) = self
-                .session
-                .inner
-                .get_mut()
-                .unsettled_deliveries(self.is_set(Flags::SENDER))
-                .get_mut(&self.id)
-            else {
-                return Err(self.session_error());
-            };
-            if inner.settled {
-                self.set_flag(Flags::REMOTE_SETTLED);
-            }
-            if let Some(res) = inner.outcome() {
-                return res;
-            }
+            // deliveries must not be borrowed across await point
+            let rx = {
+                let session = &*self.session.inner;
+                let mut deliveries = session
+                    .unsettled_deliveries(self.is_set(Flags::SENDER))
+                    .borrow_mut();
+                let Some(inner) = deliveries.get_mut(&self.id) else {
+                    return Err(self.session_error());
+                };
+                if inner.settled {
+                    self.set_flag(Flags::REMOTE_SETTLED);
+                }
+                if let Some(res) = inner.outcome() {
+                    return res;
+                }
 
-            let (tx, rx) = self.session.inner.get_ref().pool_notify.channel();
-            inner.add_waiter(tx);
+                let (tx, rx) = session.pool_notify.channel();
+                inner.add_waiter(tx);
+                rx
+            };
             let _ = rx.await;
         }
     }
@@ -224,19 +223,20 @@ impl Delivery {
     fn session_error(&self) -> AmqpProtocolError {
         self.session
             .inner
-            .get_ref()
             .error()
-            .cloned()
             .unwrap_or(AmqpProtocolError::LinkDetached(None))
     }
 }
 
 impl Drop for Delivery {
     fn drop(&mut self) {
-        let inner = self.session.inner.get_mut();
-        let deliveries = inner.unsettled_deliveries(self.is_set(Flags::SENDER));
+        let inner = &*self.session.inner;
+        let delivery = inner
+            .unsettled_deliveries(self.is_set(Flags::SENDER))
+            .borrow_mut()
+            .remove(&self.id);
 
-        if let Some(delivery) = deliveries.remove(&self.id)
+        if let Some(delivery) = delivery
             && !delivery.settled
             && delivery.error.is_none()
             && !self.is_set(Flags::REMOTE_SETTLED)
@@ -295,6 +295,13 @@ impl DeliveryInner {
         }
     }
 
+    /// Same as `outcome().is_some()`
+    fn is_complete(&self) -> bool {
+        self.settled
+            || self.error.is_some()
+            || !matches!(self.state, None | Some(DeliveryState::Received(_)))
+    }
+
     fn add_waiter(&mut self, tx: pool::Sender<()>) {
         if self.tx.as_ref().is_none_or(pool::Sender::is_canceled) {
             self.tx = Some(tx);
@@ -338,7 +345,10 @@ impl DeliveryInner {
         if let Some(state) = state {
             self.state = Some(state.clone());
         }
-        self.notify();
+        // waiters stay registered until outcome is available
+        if self.is_complete() {
+            self.notify();
+        }
     }
 }
 
@@ -353,11 +363,11 @@ pub struct TransferBuilder {
     settled: bool,
     data: TransferBody,
     format: Option<MessageFormat>,
-    sender: Cell<SenderLinkInner>,
+    sender: Rc<SenderLinkInner>,
 }
 
 impl TransferBuilder {
-    pub(crate) fn new(data: TransferBody, sender: Cell<SenderLinkInner>) -> Self {
+    pub(crate) fn new(data: TransferBody, sender: Rc<SenderLinkInner>) -> Self {
         Self {
             tag: None,
             settled: false,
@@ -387,14 +397,14 @@ impl TransferBuilder {
 
     /// Send delivery to the peer
     pub async fn send(self) -> Result<Delivery, AmqpProtocolError> {
-        let inner = self.sender.get_ref();
+        let inner = &*self.sender;
 
-        if let Some(ref err) = inner.error {
-            Err(err.clone())
-        } else if inner.closed {
+        if let Some(err) = inner.error.get() {
+            Err(err)
+        } else if inner.closed.get() {
             Err(AmqpProtocolError::Disconnected)
         } else {
-            if let Some(limit) = inner.max_message_size
+            if let Some(limit) = inner.max_message_size.get()
                 && self.data.len() > limit as usize
             {
                 return Err(AmqpProtocolError::BodyTooLarge);
@@ -407,7 +417,7 @@ impl TransferBuilder {
             Ok(Delivery {
                 id,
                 tag,
-                session: self.sender.get_ref().session.clone(),
+                session: self.sender.session.clone(),
                 flags: StdCell::new(if self.settled {
                     Flags::SENDER | Flags::LOCAL_SETTLED
                 } else {

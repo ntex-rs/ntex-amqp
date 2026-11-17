@@ -1,27 +1,26 @@
-use std::{cell::Cell as StdCell, cell::RefCell, collections::VecDeque, fmt, io};
+use std::{cell::Cell as StdCell, cell::RefCell, collections::VecDeque, fmt, io, rc::Rc};
 
 use ntex_amqp_codec::protocol;
 use ntex_service::ReadyNotifier;
 use ntex_util::future::Either;
 
-use crate::cell::Cell;
 use crate::error::AmqpProtocolError;
 use crate::rcvlink::ReceiverLink;
 use crate::session::{Session, SessionInner};
 use crate::sndlink::SenderLink;
 use crate::types::Wrapper;
 
-pub struct ControlFrame(pub(super) Cell<FrameInner>);
+pub struct ControlFrame(pub(super) Rc<FrameInner>);
 
 pub(super) struct FrameInner {
     pub(super) kind: ControlFrameKind,
-    pub(super) session: Option<Cell<SessionInner>>,
+    pub(super) session: Option<Rc<SessionInner>>,
 }
 
 impl fmt::Debug for ControlFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlFrame")
-            .field("kind", &self.0.get_ref().kind)
+            .field("kind", &self.0.kind)
             .finish()
     }
 }
@@ -44,15 +43,15 @@ pub enum ControlFrameKind {
 }
 
 impl ControlFrame {
-    pub(crate) fn new(session: Cell<SessionInner>, kind: ControlFrameKind) -> Self {
-        ControlFrame(Cell::new(FrameInner {
+    pub(crate) fn new(session: Rc<SessionInner>, kind: ControlFrameKind) -> Self {
+        ControlFrame(Rc::new(FrameInner {
             session: Some(session),
             kind,
         }))
     }
 
     pub(crate) fn new_kind(kind: ControlFrameKind) -> Self {
-        ControlFrame(Cell::new(FrameInner {
+        ControlFrame(Rc::new(FrameInner {
             session: None,
             kind,
         }))
@@ -62,8 +61,8 @@ impl ControlFrame {
         ControlFrame(self.0.clone())
     }
 
-    pub(crate) fn session_cell(&self) -> &Cell<SessionInner> {
-        self.0.get_ref().session.as_ref().unwrap()
+    pub(crate) fn session_cell(&self) -> &Rc<SessionInner> {
+        self.0.session.as_ref().unwrap()
     }
 
     #[inline]
@@ -72,7 +71,7 @@ impl ControlFrame {
     }
 
     pub fn session(&self) -> Option<Session> {
-        self.0.get_ref().session.clone().map(Session::new)
+        self.0.session.clone().map(Session::new)
     }
 }
 

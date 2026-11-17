@@ -1,14 +1,15 @@
-use std::{marker, rc::Rc};
+use std::{cell::RefCell, marker, rc::Rc};
 
 use ntex_router::{IntoPattern, Router as PatternRouter};
 use ntex_service::{
     BindCtx, Ctx, IntoServiceFactory, Pipeline, Service, ServiceFactory, boxed, factory,
+    pipeline::PipelineBinding,
 };
 use ntex_util::{HashMap, future::join_all};
 
 use crate::codec::protocol::{DeliveryState, Error, Rejected, Transfer};
 use crate::types::{Link, Message, Outcome};
-use crate::{Delivery, State, cell::Cell, error::LinkError, rcvlink::ReceiverLink};
+use crate::{Delivery, State, error::LinkError, rcvlink::ReceiverLink};
 
 type Handle<S> = boxed::BoxServiceFactory<Link<S>, Transfer, Outcome, Error, Error>;
 
@@ -59,21 +60,21 @@ impl<S: 'static> Router<S> {
         let router = Rc::new(router.build());
 
         factory(async move |state: &State<S>| {
-            Ok(RouterService(Cell::new(RouterServiceInner {
+            Ok(RouterService(Rc::new(RouterServiceInner {
                 state: state.clone(),
                 router: router.clone(),
-                handlers: HashMap::default(),
+                handlers: RefCell::default(),
             })))
         })
     }
 }
 
-struct RouterService<S>(Cell<RouterServiceInner<S>>);
+struct RouterService<S>(Rc<RouterServiceInner<S>>);
 
 struct RouterServiceInner<S> {
     state: State<S>,
     router: Rc<PatternRouter<Handle<S>>>,
-    handlers: HashMap<ReceiverLink, Pipeline<Transfer, Outcome, Error>>,
+    handlers: RefCell<HashMap<ReceiverLink, Pipeline<Transfer, Outcome, Error>>>,
 }
 
 impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
@@ -83,8 +84,8 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
     async fn shutdown(&self, _: Ctx<'_, Self, State<S>>) {
         let handlers: Vec<_> = self
             .0
-            .get_mut()
             .handlers
+            .borrow_mut()
             .drain()
             .map(|(_, srv)| srv)
             .collect();
@@ -98,7 +99,7 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 let path = frm.target().and_then(|target| target.address.clone());
 
                 if let Some(path) = path {
-                    let inner = self.0.get_mut();
+                    let inner = &*self.0;
                     let mut link = Link::new(frm, link, inner.state.clone(), path);
                     if let Some((hnd, _info)) = inner.router.recognize(link.path_mut()) {
                         log::trace!("Create handler service for {}", link.path().get_ref());
@@ -107,12 +108,12 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                         match hnd.create(&link).await {
                             Ok(srv) => {
                                 log::trace!("Handler service is created for {}", rcv_link.name());
-                                self.0
-                                    .get_mut()
-                                    .handlers
-                                    .insert(rcv_link.clone(), Pipeline::new(link.clone(), srv));
+                                let srv = Pipeline::new(link.clone(), srv);
+                                let binding = srv.bind();
+                                let _prev =
+                                    inner.handlers.borrow_mut().insert(rcv_link.clone(), srv);
                                 if let Some((delivery, tr)) = rcv_link.get_delivery() {
-                                    service_call(rcv_link, delivery, tr, &self.0).await
+                                    service_call(rcv_link, delivery, tr, binding).await
                                 } else {
                                     Ok(())
                                 }
@@ -144,7 +145,8 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 }
             }
             Message::Detached(link) => {
-                if let Some(srv) = self.0.get_mut().handlers.remove(&link) {
+                let srv = self.0.handlers.borrow_mut().remove(&link);
+                if let Some(srv) = srv {
                     log::trace!("Releasing handler service for {}", link.name());
                     let name = link.name().clone();
                     ntex_rt::spawn(async move {
@@ -155,16 +157,13 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 Ok(())
             }
             Message::DetachedAll(links) => {
-                let links: Vec<_> = links
-                    .into_iter()
-                    .filter_map(|link| {
-                        self.0
-                            .get_mut()
-                            .handlers
-                            .remove(&link)
-                            .map(move |srv| (link, srv))
-                    })
-                    .collect();
+                let links: Vec<_> = {
+                    let mut handlers = self.0.handlers.borrow_mut();
+                    links
+                        .into_iter()
+                        .filter_map(|link| handlers.remove(&link).map(move |srv| (link, srv)))
+                        .collect()
+                };
 
                 log::trace!(
                     "Shutting down {} handler services (session ended)",
@@ -190,10 +189,11 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
                 Ok(())
             }
             Message::Transfer(link) => {
-                if self.0.get_ref().handlers.contains_key(&link)
+                let srv = self.0.handlers.borrow().get(&link).map(Pipeline::bind);
+                if let Some(srv) = srv
                     && let Some((delivery, tr)) = link.get_delivery()
                 {
-                    service_call(link, delivery, tr, &self.0).await?;
+                    service_call(link, delivery, tr, srv).await?;
                 }
                 Ok(())
             }
@@ -201,35 +201,36 @@ impl<S: 'static> Service<State<S>, Message> for RouterService<S> {
     }
 }
 
-async fn service_call<S>(
+/// Link credit maintained by the router
+const LINK_CREDIT: u32 = 50;
+/// Credit is topped up below this level, before the sender runs out
+const LINK_CREDIT_LOW: u32 = LINK_CREDIT / 2;
+
+async fn service_call(
     link: ReceiverLink,
     mut delivery: Delivery,
     tr: Transfer,
-    inner: &Cell<RouterServiceInner<S>>,
+    srv: PipelineBinding<Transfer, Outcome, Error>,
 ) -> Result<(), Error> {
-    // handler could be removed while call is in progress
-    if let Some(srv) = inner.handlers.get(&link).map(Pipeline::bind) {
-        // check readiness
-        if let Err(e) = srv.ready().await {
-            log::trace!("Service readiness check failed: {e:?}");
-            let _ =
-                link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
-            return Ok(());
-        }
+    // check readiness
+    if let Err(e) = srv.ready().await {
+        log::trace!("Service readiness check failed: {e:?}");
+        let _ = link.close_with_error(LinkError::force_detach().description(format!("error: {e}")));
+        return Ok(());
+    }
 
-        if link.needs_credit() {
-            link.set_link_credit(50);
-        }
+    if link.needs_credit(LINK_CREDIT_LOW) {
+        link.set_link_credit(LINK_CREDIT - link.credit());
+    }
 
-        match srv.call(tr).await {
-            Ok(outcome) => {
-                log::trace!("Outcome is ready {outcome:?} for {}", link.name());
-                delivery.settle(outcome.into_delivery_state());
-            }
-            Err(e) => {
-                log::trace!("Service response error: {e:?}");
-                delivery.settle(DeliveryState::Rejected(Rejected { error: Some(e) }));
-            }
+    match srv.call(tr).await {
+        Ok(outcome) => {
+            log::trace!("Outcome is ready {outcome:?} for {}", link.name());
+            delivery.settle(outcome.into_delivery_state());
+        }
+        Err(e) => {
+            log::trace!("Service response error: {e:?}");
+            delivery.settle(DeliveryState::Rejected(Rejected { error: Some(e) }));
         }
     }
     Ok(())
@@ -334,15 +335,15 @@ mod tests {
 
     fn router_service(
         router: Router<()>,
-    ) -> (Cell<RouterServiceInner<()>>, Pipeline<Message, (), Error>) {
+    ) -> (Rc<RouterServiceInner<()>>, Pipeline<Message, (), Error>) {
         let mut patterns = PatternRouter::builder();
         for (addr, hnd) in router.0 {
             patterns.path(addr, hnd);
         }
-        let inner = Cell::new(RouterServiceInner {
+        let inner = Rc::new(RouterServiceInner {
             state: State::new(()),
             router: Rc::new(patterns.build()),
-            handlers: HashMap::default(),
+            handlers: RefCell::default(),
         });
         let srv = Pipeline::new(State::new(()), RouterService(inner.clone()));
         (inner, srv)
@@ -401,10 +402,10 @@ mod tests {
         for (addr, hnd) in router.0 {
             patterns.path(addr, hnd);
         }
-        let inner = Cell::new(RouterServiceInner {
+        let inner = Rc::new(RouterServiceInner {
             state: State::new(()),
             router: Rc::new(patterns.build()),
-            handlers: HashMap::default(),
+            handlers: RefCell::default(),
         });
         let srv = Pipeline::new(State::new(()), RouterService(inner.clone()));
 
@@ -412,7 +413,7 @@ mod tests {
         for handle in 0..3 {
             assert!(srv.call(attach("fail", handle)).await.is_err());
         }
-        assert!(inner.get_ref().handlers.is_empty());
+        assert!(inner.handlers.borrow().is_empty());
 
         // detached link service is released
         let Message::Attached(frm, link) = attach("ok", 3) else {
@@ -421,18 +422,18 @@ mod tests {
         srv.call(Message::Attached(frm, link.clone()))
             .await
             .unwrap();
-        assert_eq!(inner.get_ref().handlers.len(), 1);
+        assert_eq!(inner.handlers.borrow().len(), 1);
         srv.call(Message::Detached(link)).await.unwrap();
-        assert!(inner.get_ref().handlers.is_empty());
+        assert!(inner.handlers.borrow().is_empty());
 
         // link services are shutdown with router
         srv.call(attach("ok", 4)).await.unwrap();
         srv.call(attach("ok", 5)).await.unwrap();
-        assert_eq!(inner.get_ref().handlers.len(), 2);
+        assert_eq!(inner.handlers.borrow().len(), 2);
         ntex::time::sleep(ntex::time::Millis(50)).await;
         assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
         srv.shutdown().await;
-        assert!(inner.get_ref().handlers.is_empty());
+        assert!(inner.handlers.borrow().is_empty());
         assert_eq!(shutdowns.load(Ordering::Relaxed), 3);
     }
 
@@ -482,10 +483,10 @@ mod tests {
         for (addr, hnd) in router.0 {
             patterns.path(addr, hnd);
         }
-        let inner = Cell::new(RouterServiceInner {
+        let inner = Rc::new(RouterServiceInner {
             state: State::new(()),
             router: Rc::new(patterns.build()),
-            handlers: HashMap::default(),
+            handlers: RefCell::default(),
         });
         let srv = Pipeline::new(State::new(()), RouterService(inner.clone()));
         srv.call(Message::Attached(frm, link.clone()))
@@ -511,6 +512,60 @@ mod tests {
         link.set_link_credit(1);
         transfer(2).await;
         assert_eq!(link.credit(), 50);
+    }
+
+    /// STATEMENT: The router tops up link credit to `LINK_CREDIT` once it drops below
+    /// `LINK_CREDIT_LOW`, before the sender runs out of credit.
+    ///
+    /// HOW:
+    /// - Attach an `ok` link, grant `LINK_CREDIT_LOW + 1` credits and drain written frames.
+    /// - Send one transfer and assert credit is `LINK_CREDIT_LOW` and no flow is sent.
+    /// - Send another transfer and assert credit is `LINK_CREDIT` and a single flow
+    ///   advertising `LINK_CREDIT` is sent.
+    #[ntex::test]
+    async fn link_credit_low_water_top_up() {
+        let (_io, conn, client) = connection();
+        handle_frame(&conn, begin()).unwrap();
+        let Ok(Action::AttachReceiver(link, frm, response)) =
+            handle_frame(&conn, named_attach(Role::Sender, "ok", "ok", 0))
+        else {
+            panic!()
+        };
+        let (_inner, srv) =
+            router_service(Router::<()>::builder().service("ok", async |_: &Link<()>| {
+                Ok::<_, LinkError>(Srv(Rc::default()))
+            }));
+        srv.call(Message::Attached(frm, link.clone()))
+            .await
+            .unwrap();
+        assert!(link.confirm_receiver_link(response));
+        link.set_link_credit(LINK_CREDIT_LOW + 1);
+        sleep(Millis(25)).await;
+        read_frames(&client);
+
+        let transfer = async |id| {
+            let Ok(Action::Transfer(link)) = handle_frame(&conn, transfer(id, false, None, 1))
+            else {
+                panic!()
+            };
+            srv.call(Message::Transfer(link)).await.unwrap();
+            sleep(Millis(25)).await;
+            read_frames(&client)
+                .into_iter()
+                .filter_map(|frame| match frame {
+                    Frame::Flow(flow) => Some(flow.link_credit()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // credit at low-water mark is not topped up
+        assert_eq!(transfer(0).await, []);
+        assert_eq!(link.credit(), LINK_CREDIT_LOW);
+
+        // credit below low-water mark is topped up before it is used up
+        assert_eq!(transfer(1).await, [Some(LINK_CREDIT)]);
+        assert_eq!(link.credit(), LINK_CREDIT);
     }
 
     /// Error that cannot be converted into an `Outcome`
@@ -584,7 +639,7 @@ mod tests {
                 Some(expected)
             );
         }
-        assert!(inner.get_ref().handlers.is_empty());
+        assert!(inner.handlers.borrow().is_empty());
     }
 
     /// STATEMENT: `Message::DetachedAll` releases and shuts down every known link
@@ -619,7 +674,7 @@ mod tests {
                 .unwrap();
             links.push(link);
         }
-        assert_eq!(inner.get_ref().handlers.len(), 2);
+        assert_eq!(inner.handlers.borrow().len(), 2);
 
         // unknown links are ignored, known links are released and shut down
         let Ok(Action::AttachReceiver(unknown, ..)) =
@@ -629,7 +684,7 @@ mod tests {
         };
         links.push(unknown);
         srv.call(Message::DetachedAll(links)).await.unwrap();
-        assert!(inner.get_ref().handlers.is_empty());
+        assert!(inner.handlers.borrow().is_empty());
         ntex::time::sleep(ntex::time::Millis(50)).await;
         assert_eq!(shutdowns.load(Ordering::Relaxed), 2);
     }

@@ -67,7 +67,7 @@ async fn sender_delivery_remote_settled() {
     ));
     let s = session(&conn);
     let _ = handle_frame(&conn, End { error: None }.into());
-    assert!(s.inner.get_ref().unsettled_snd_deliveries.is_empty());
+    assert!(s.inner.unsettled_snd_deliveries.borrow().is_empty());
     assert!(d.is_remote_settled());
 }
 
@@ -215,10 +215,7 @@ async fn delivery_wait_returns_session_error() {
             )
             .unwrap();
         } else {
-            conn.get_ref()
-                .0
-                .get_mut()
-                .set_error(AmqpProtocolError::Disconnected);
+            conn.get_ref().0.set_error(AmqpProtocolError::Disconnected);
         }
 
         // pending and late `wait()` return session error
@@ -246,8 +243,9 @@ async fn delivery_wait_returns_session_error() {
 /// supports repeated, concurrent and dropped waiters.
 ///
 /// HOW:
-/// - Dispositions with no state or `Received` keep `wait` pending; a settled one without
-///   state resolves `None`, an unsettled `Accepted` resolves `Accepted`.
+/// - Dispositions with no state or `Received` keep `wait` pending and do not wake its
+///   waker; a settled one without state resolves `None`, an unsettled `Accepted`
+///   resolves `Accepted`.
 /// - `Modified` is returned by two `wait` calls, and dropping the delivery writes one
 ///   settled `Modified` disposition.
 /// - Two concurrent waiters both get `Accepted` and the polled waker is woken once.
@@ -274,12 +272,15 @@ async fn delivery_wait_outcome() {
     for settled in [false, true] {
         let (_io, conn, _client, snd) = small_frames_sender();
         let d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
+        let woken = WakeCounter::new();
+        let waker = Waker::from(woken.clone());
+        let mut cx = Context::from_waker(&waker);
         let mut wait = Box::pin(d.wait());
-        assert!(pending(wait.as_mut()).await);
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
         disposition(&conn, Role::Receiver, d.id(), false, None);
-        assert!(pending(wait.as_mut()).await);
         disposition(&conn, Role::Receiver, d.id(), false, received());
-        assert!(pending(wait.as_mut()).await);
+        assert_eq!(woken.count(), 0);
+        assert!(wait.as_mut().poll(&mut cx).is_pending());
 
         if settled {
             // settled without outcome
@@ -346,7 +347,7 @@ async fn delivery_wait_outcome() {
     }
     let inner = session(&conn).inner;
     assert_eq!(
-        inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
+        inner.unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
         0
     );
     let mut live = Box::pin(d.wait());
@@ -356,7 +357,7 @@ async fn delivery_wait_outcome() {
         assert!(pending(w.as_mut()).await);
     }
     assert_eq!(
-        inner.get_ref().unsettled_snd_deliveries[&d.id()].waiters(),
+        inner.unsettled_snd_deliveries.borrow()[&d.id()].waiters(),
         1
     );
     drop(live);
@@ -399,7 +400,7 @@ async fn delivery_no_disposition_after_link_detach() {
             let (_io, conn, client, snd) = small_frames_sender();
             let mut d = snd.transfer(Bytes::from_static(b"x")).send().await.unwrap();
             let s = session(&conn);
-            let _d = local.then(|| s.detach_sender_link(snd.inner.get_ref().id(), None));
+            let _d = local.then(|| s.detach_sender_link(snd.inner.id(), None));
             handle_frame(&conn, peer_detach(4)).unwrap();
             sleep(Millis(50)).await;
             let _ = dispositions(&client);

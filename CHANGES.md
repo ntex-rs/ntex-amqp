@@ -1,5 +1,20 @@
 # Changes
 
+## [6.5.0] - Unreleased
+
+* `ReceiverLink::error()` and `SenderLink::error()` return owned errors instead
+  of references. Previously the returned reference could dangle once
+  `poll_recv` took the link error or a remote detach replaced it.
+
+* `Delivery::wait()` is woken only by a terminal outcome, remote settlement or
+  error. Dispositions with no state or a non-terminal `Received` state no longer
+  wake waiters.
+
+* Router looks up the link handler once per transfer.
+
+* Router tops up link credit to 50 once it drops below 25, instead of waiting
+  until it is used up, so the remote sender no longer stalls every 50 messages.
+
 ## [6.4.0] - 2026-11-16
 
 * Fix use-after-free when an outgoing frame fails to encode, for example a

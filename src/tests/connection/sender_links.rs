@@ -135,11 +135,9 @@ async fn sender_link_drain() {
     else {
         panic!()
     };
-    let snd =
-        session
-            .inner
-            .get_mut()
-            .attach_remote_sender_link(&attach, response, snd.inner.clone());
+    let snd = session
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     sleep(Millis(50)).await;
     assert_eq!(frames(), ["Begin", "Attach"]);
 
@@ -192,11 +190,9 @@ async fn sender_link_drain() {
     pending.0.handle = Some(6);
     pending.0.drain = true;
     handle_frame(&conn, pending.into()).unwrap();
-    let lnk =
-        session
-            .inner
-            .get_mut()
-            .attach_remote_sender_link(&attach, response, lnk.inner.clone());
+    let lnk = session
+        .inner
+        .attach_remote_sender_link(&attach, response, lnk.inner.clone());
     assert_eq!(lnk.credit(), 0);
     sleep(Millis(50)).await;
     assert_eq!(frames(), ["Attach", "Flow Some(1) Some(3) Some(0) true"]);
@@ -235,11 +231,9 @@ async fn sender_link_credit_on_window_wait() {
     else {
         panic!()
     };
-    let snd =
-        session
-            .inner
-            .get_mut()
-            .attach_remote_sender_link(&attach, response, snd.inner.clone());
+    let snd = session
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     sleep(Millis(50)).await;
     assert_eq!(frames(), ["Begin", "Attach"]);
 
@@ -349,11 +343,9 @@ async fn sender_link_flow_wakes_by_credit() {
     else {
         panic!()
     };
-    let snd =
-        session
-            .inner
-            .get_mut()
-            .attach_remote_sender_link(&attach, response, snd.inner.clone());
+    let snd = session
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let transfer = || {
         let mut tr = Tr(
             Box::pin(snd.transfer(Bytes::from_static(b"1")).settled().send()),
@@ -457,7 +449,6 @@ async fn sender_link_close_fails_waiting_transfers() {
         };
         session
             .inner
-            .get_mut()
             .attach_remote_sender_link(&attach, response, snd.inner.clone())
     };
     let send = |snd: &SenderLink, body: &'static [u8]| {
@@ -523,7 +514,6 @@ async fn sender_link_detach_fails_waiting_transfers() {
         };
         session
             .inner
-            .get_mut()
             .attach_remote_sender_link(&attach, response, snd.inner.clone())
     };
     let send = |snd: &SenderLink, body: &'static [u8]| {
@@ -540,8 +530,8 @@ async fn sender_link_detach_fails_waiting_transfers() {
     sleep(Millis(50)).await;
     frame_names(&client);
 
-    let _d1 = session.detach_sender_link(a.inner.get_ref().id(), None);
-    let _d2 = session.detach_sender_link(b.inner.get_ref().id(), None);
+    let _d1 = session.detach_sender_link(a.inner.id(), None);
+    let _d2 = session.detach_sender_link(b.inner.id(), None);
     let res = timeout(Millis(500), t1).await.unwrap().unwrap();
     assert!(matches!(res, Err(AmqpProtocolError::Disconnected)));
     let res = timeout(Millis(500), t2).await.unwrap().unwrap();
@@ -581,7 +571,7 @@ async fn sender_link_detach_fails_partial_delivery() {
         ]
     );
 
-    let _d = session.detach_sender_link(snd.inner.get_ref().id(), None);
+    let _d = session.detach_sender_link(snd.inner.id(), None);
     let res = timeout(Millis(500), t1).await.unwrap().unwrap();
     assert!(matches!(res, Err(AmqpProtocolError::Disconnected)));
     let res = timeout(Millis(500), t2).await.unwrap().unwrap();
@@ -609,7 +599,7 @@ async fn sender_link_detach_fails_unsettled() {
     assert!(pending(wait.as_mut()).await);
 
     // disposition could be received before detach confirmation
-    let _d = session.detach_sender_link(snd.inner.get_ref().id(), None);
+    let _d = session.detach_sender_link(snd.inner.id(), None);
     sleep(Millis(50)).await;
     assert!(pending(wait.as_mut()).await);
 
@@ -653,11 +643,9 @@ async fn sender_link_stale_flow_with(initial: u32) {
     let Ok(Action::AttachSender(snd, attach, response)) = handle_frame(&conn, attach.into()) else {
         panic!()
     };
-    let snd =
-        session
-            .inner
-            .get_mut()
-            .attach_remote_sender_link(&attach, response, snd.inner.clone());
+    let snd = session
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
 
     // receiver has not received attach yet, initial delivery count is used
     flow(None, 10);
@@ -924,6 +912,60 @@ async fn sender_woken_transfer_keeps_link_credit() {
     );
 }
 
+/// STATEMENT: `ready()` does not report link credit claimed by a woken transfer, and
+/// resolves once the claim is released.
+///
+/// HOW:
+/// - Start a transfer with no credit, then grant credit 1 so the queued transfer is
+///   woken and claims it.
+/// - Assert `ready()` stays pending while the session window is open.
+/// - Drop the woken transfer without polling it; `ready()` resolves `true` and a new
+///   transfer takes the released credit with id 0.
+#[ntex::test]
+async fn sender_ready_skips_claimed_credit() {
+    let (_io, conn, _client, snd) = small_frames_sender();
+    link_flow(&conn, 4, (0, 0, false), 1, 10);
+    let mut t1 = Box::pin(snd.transfer(Bytes::from_static(b"1")).send());
+    assert!(pending(t1.as_mut()).await);
+
+    link_flow(&conn, 4, (0, 1, false), 1, 10);
+    let mut ready = Box::pin(snd.ready());
+    assert!(pending(ready.as_mut()).await);
+
+    // released credit wakes readiness waiter
+    drop(t1);
+    assert!(timeout(Millis(1000), ready).await.unwrap());
+    let d2 = snd.transfer(Bytes::from_static(b"2")).send().await.unwrap();
+    assert_eq!(d2.id(), 0);
+}
+
+/// STATEMENT: `ready()` stays pending while a partial delivery is in progress, and
+/// resolves once the delivery completes.
+///
+/// HOW:
+/// - Send a 3-frame delivery with session window 1, so it waits after the first frame.
+/// - Open window 3; the delivery is woken and claims 1, leaving window for new
+///   transfers, and assert `ready()` is still pending.
+/// - Poll the delivery to completion and assert `ready()` resolves `true`.
+#[ntex::test]
+async fn sender_ready_waits_for_partial_delivery() {
+    let (_io, conn, _client, snd) = small_frames_sender();
+    link_flow(&conn, 4, (0, 10, false), 1, 1);
+    let mut t1 = Box::pin(snd.transfer(Bytes::from(vec![b'a'; 1200])).send());
+    assert!(pending(t1.as_mut()).await);
+
+    session_window(&conn, 2, 3);
+    let mut ready = Box::pin(snd.ready());
+    assert!(pending(ready.as_mut()).await);
+
+    // completed delivery wakes readiness waiter
+    let Poll::Ready(Ok(d1)) = poll_fn(|cx| Poll::Ready(t1.as_mut().poll(cx))).await else {
+        panic!()
+    };
+    assert_eq!(d1.id(), 0);
+    assert!(timeout(Millis(1000), ready).await.unwrap());
+}
+
 /// STATEMENT: The abort of a cancelled delivery does not take session window already
 /// claimed by a woken waiter, and is sent before new transfers.
 ///
@@ -1060,7 +1102,7 @@ async fn sender_detach_drops_queued_abort() {
                 .collect::<Vec<_>>(),
             ["Transfer Some(1) more:false aborted:false"]
         );
-        assert_eq!(session(&conn).inner.get_ref().pending_transfers(), 0);
+        assert_eq!(session(&conn).inner.pending_transfers(), 0);
     }
 }
 
@@ -1136,8 +1178,8 @@ async fn sender_cancelled_waiters_leave_queue() {
     // (link credit waiters, session window waiters)
     let pending = || {
         (
-            snd.inner.get_ref().pending_transfers(),
-            session(&conn).inner.get_ref().pending_transfers(),
+            snd.inner.pending_transfers(),
+            session(&conn).inner.pending_transfers(),
         )
     };
 
@@ -1194,9 +1236,9 @@ async fn sender_cancelled_waiter_keeps_queued_abort() {
 
     // waiter leaves the queue, abort of cancelled delivery stays
     drop(t2);
-    assert_eq!(s.inner.get_ref().pending_transfers(), 1);
+    assert_eq!(s.inner.pending_transfers(), 1);
     session_window(&conn, 2, 1);
-    assert_eq!(s.inner.get_ref().pending_transfers(), 0);
+    assert_eq!(s.inner.pending_transfers(), 0);
     sleep(Millis(50)).await;
     assert_eq!(
         transfer_frames(&client),

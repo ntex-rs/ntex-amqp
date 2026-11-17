@@ -172,9 +172,8 @@ pub(crate) fn session(conn: &Connection) -> Session {
 }
 
 fn session_ref(inner: &ConnectionRef) -> Session {
-    let SessionState::Established(session) =
-        &inner.0.get_ref().sessions[inner.0.get_ref().sessions_map[&0]]
-    else {
+    let sessions = inner.0.sessions.borrow();
+    let SessionState::Established(session) = &sessions.slab[sessions.map[&0]] else {
         panic!()
     };
     Session::new(session.clone())
@@ -356,10 +355,10 @@ fn frame_names(client: &IoTest) -> Vec<String> {
 /// Number of unsettled (sender, receiver) deliveries in session
 fn unsettled(conn: &Connection) -> (usize, usize) {
     let s = session(conn);
-    let inner = s.inner.get_ref();
+    let inner = &*s.inner;
     (
-        inner.unsettled_snd_deliveries.len(),
-        inner.unsettled_rcv_deliveries.len(),
+        inner.unsettled_snd_deliveries.borrow().len(),
+        inner.unsettled_rcv_deliveries.borrow().len(),
     )
 }
 
@@ -420,11 +419,9 @@ fn small_frames_sender() -> (Io, Connection, IoTest, SenderLink) {
     else {
         panic!()
     };
-    let snd = session(&conn).inner.get_mut().attach_remote_sender_link(
-        &attach,
-        response,
-        snd.inner.clone(),
-    );
+    let snd = session(&conn)
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     let Frame::Flow(mut flow) = peer_flow(Some(10)) else {
         panic!()
     };
@@ -467,11 +464,9 @@ fn add_sender(conn: &Connection, name: &str, handle: u32, window: u32) -> Sender
     else {
         panic!()
     };
-    let snd = session(conn).inner.get_mut().attach_remote_sender_link(
-        &attach,
-        response,
-        snd.inner.clone(),
-    );
+    let snd = session(conn)
+        .inner
+        .attach_remote_sender_link(&attach, response, snd.inner.clone());
     link_flow(conn, handle, (0, 10, false), 1, window);
     snd
 }
