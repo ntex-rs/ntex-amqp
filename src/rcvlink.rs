@@ -16,6 +16,10 @@ use ntex_util::{Stream, task::LocalWaker};
 use crate::session::{Session, SessionInner};
 use crate::{Delivery, cell::ErrorCell, detach, error::AmqpProtocolError, types::Action};
 
+/// Receiving side of an AMQP link.
+///
+/// Clones share the same link. Use clones to close the link or manage
+/// credit from other tasks, but receive deliveries from a single task.
 #[derive(Clone)]
 pub struct ReceiverLink {
     pub(crate) inner: Rc<ReceiverLinkInner>,
@@ -209,6 +213,10 @@ impl ReceiverLink {
     /// Attempt to pull out the next value of this receiver, registering
     /// the current task for wakeup if the value is not yet available,
     /// and returning None if the stream is exhausted.
+    ///
+    /// Only one task may wait for deliveries at a time. Clones share a
+    /// single waker, so a later waiter replaces an earlier one and the
+    /// earlier task is not woken for new deliveries or link close.
     pub async fn recv(&self) -> Option<Result<(Delivery, Transfer), AmqpProtocolError>> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
@@ -216,6 +224,10 @@ impl ReceiverLink {
     /// Attempt to pull out the next value of this receiver, registering
     /// the current task for wakeup if the value is not yet available,
     /// and returning None if the stream is exhausted.
+    ///
+    /// Only one task may wait for deliveries at a time. Clones share a
+    /// single waker, so a later waiter replaces an earlier one and the
+    /// earlier task is not woken for new deliveries or link close.
     pub fn poll_recv(
         &self,
         cx: &mut Context<'_>,
@@ -234,6 +246,7 @@ impl ReceiverLink {
     }
 }
 
+/// Same single-reader rule as [`ReceiverLink::recv()`].
 impl Stream for ReceiverLink {
     type Item = Result<(Delivery, Transfer), AmqpProtocolError>;
 
