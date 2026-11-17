@@ -172,9 +172,8 @@ pub(crate) fn session(conn: &Connection) -> Session {
 }
 
 fn session_ref(inner: &ConnectionRef) -> Session {
-    let SessionState::Established(session) =
-        &inner.0.get_ref().sessions[inner.0.get_ref().sessions_map[&0]]
-    else {
+    let sessions = inner.0.get_ref().sessions.borrow();
+    let SessionState::Established(session) = &sessions.slab[sessions.map[&0]] else {
         panic!()
     };
     Session::new(session.clone())

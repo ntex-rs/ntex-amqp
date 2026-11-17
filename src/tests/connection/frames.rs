@@ -76,9 +76,12 @@ async fn frames_detached_from_read_buffer() {
     assert_eq!(body, &[[0; 10], [1; 10], [2; 10]].concat());
 
     // disposition with state
-    let session = inner.0.get_ref().sessions_map[&0];
-    let SessionState::Established(session) = &inner.0.get_ref().sessions[session] else {
-        panic!()
+    let session = {
+        let sessions = inner.0.get_ref().sessions.borrow();
+        let SessionState::Established(session) = &sessions.slab[sessions.map[&0]] else {
+            panic!()
+        };
+        session.clone()
     };
     session
         .get_ref()

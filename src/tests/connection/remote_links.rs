@@ -800,7 +800,7 @@ async fn remote_sender_detach_reply_exceeds_frame_size() {
         ))
     ));
     assert!(!conn.is_opened());
-    assert!(conn.get_ref().0.get_ref().sessions.is_empty());
+    assert!(conn.get_ref().0.get_ref().sessions.borrow().slab.is_empty());
     assert!(conn.get_session_by_local_id(0).is_none());
 }
 

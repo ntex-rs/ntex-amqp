@@ -223,7 +223,7 @@ async fn delivery_wait_returns_session_error() {
         } else {
             conn.get_ref()
                 .0
-                .get_mut()
+                .get_ref()
                 .set_error(AmqpProtocolError::Disconnected);
         }
 

@@ -653,7 +653,7 @@ async fn idle_timeout_outgoing_activity() {
                 1 => h
                     .conn
                     .0
-                    .get_mut()
+                    .get_ref()
                     .post_frame(AmqpFrame::new(0, peer_flow(None))),
                 _ => {
                     // The Begin reply uses the fallible encoding path.

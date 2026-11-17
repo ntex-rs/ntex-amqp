@@ -124,11 +124,11 @@ async fn session_end_uses_local_channel() {
     let fut = ntex::rt::spawn(async move { session.end().await });
     sleep(Millis(10)).await;
     assert!(matches!(
-        inner.0.get_ref().sessions[0],
+        inner.0.get_ref().sessions.borrow().slab[0],
         SessionState::Closing(_)
     ));
     assert!(matches!(
-        inner.0.get_ref().sessions[1],
+        inner.0.get_ref().sessions.borrow().slab[1],
         SessionState::Established(_)
     ));
 
@@ -146,8 +146,8 @@ async fn session_end_uses_local_channel() {
     // remote confirms session end
     handle(1, End { error: None }.into()).unwrap();
     assert!(fut.await.unwrap().is_ok());
-    assert!(!inner.0.get_ref().sessions.contains(0));
-    assert!(inner.0.get_ref().sessions.contains(1));
+    assert!(!inner.0.get_ref().sessions.borrow().slab.contains(0));
+    assert!(inner.0.get_ref().sessions.borrow().slab.contains(1));
 
     sleep(Millis(50)).await;
     let frames: Vec<_> = read_channel_frames(&client)
@@ -288,7 +288,7 @@ async fn closing_session_connection_error() {
 
     conn.get_ref()
         .0
-        .get_mut()
+        .get_ref()
         .set_error(AmqpProtocolError::Disconnected);
     assert!(matches!(
         timeout(Millis(100), rcv).await.unwrap().unwrap(),
@@ -315,7 +315,7 @@ async fn closing_session_connection_error() {
     };
     conn.get_ref()
         .0
-        .get_mut()
+        .get_ref()
         .set_error(AmqpProtocolError::Disconnected);
     let err = session
         .build_receiver_link("c", "c")
